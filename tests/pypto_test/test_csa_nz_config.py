@@ -144,6 +144,17 @@ assert nz_mode.root_weight_shapes(root) == {
     "wkv": (4096, 512), "cmp_wkv": (1024, 4096), "cmp_wgate": (1024, 4096),
 }
 
+# 新JIT对象的通用__call__不能作为根声明；真实TND的布局及几何必须被读取。
+for package, entry_name in (("deepseek_v4_flash_csa_spmd_tnd", "decode_csa_spmd"),
+                            ("deepseek_v4_flash_csa_tnd", "decode_csa_tnd")):
+    entry = importlib.import_module("vllm_ascend.ops.pypto." + package + ".entry")
+    decorated = getattr(entry, entry_name)
+    assert nz_mode.root_weight_layouts(decorated) == nz_mode.root_weight_layouts(decorated._func)
+    assert nz_mode.root_weight_shapes(decorated) == nz_mode.root_weight_shapes(decorated._func)
+    for name in ("wq_a", "wq_b", "wo_a", "wo_b"):
+        assert nz_mode.root_weight_layouts(decorated)[name] == ("NZ" if name in expected_nz else "ND")
+    assert nz_mode.root_weight_shapes(decorated)["wq_a"] == (1024, 4096)
+
 try:
     nz_mode.validate_weight_nz_mode((mode + 1) % 3)
 except ValueError as exc:

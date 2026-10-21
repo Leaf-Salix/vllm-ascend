@@ -21720,3 +21720,22 @@ RoPE和BF16舍入保留，scale/RoPE重读代价由本MPMD完整对照判断。
 
 这是独立功能场景，未采性能、不修改八档输入，也不代替实际服务和16卡验收。
 另把冻结B1/S2、S3、S4的缺口提交为三个单卡任务；已测S1/S5/S6不重复采集。
+
+### 735.47：真实MPMD服务准备暴露JIT根签名读取缺口，先修复再重跑
+
+新增独立服务检查，使用正式prepare_csa_model钩子、真实Torch custom-op和
+ACLGraphWrapper，并检查空调用及短历史Native回退；不模拟算子提交，也不采性能。
+冻结参考的BSH数学依赖放在私有父命名空间，实际服务使用当前框架公共代码。
+首次任务`task_20261022_074351_29841905719` completed(exit=1)，在模型权重准备
+阶段报`KeyError: wq_a`，尚未执行待测服务核。
+
+根因是nz_mode.root_weight_layouts读取`inspect.signature(JITFunction)`，当前
+SDK的包装对象只暴露通用args/kwargs，原Python声明保存在`_func`，所以布局
+字典为空。原直接算子测试借用原始Python根准备权重，没有覆盖该实际服务路径。
+共同布局/几何读取器现在先取原Python声明，原始函数保持原行为；没有写死NZ
+名单或回退到另一份BSH声明，也没有修改公共SDK。
+
+CPU回归使用真实TND单SPMD及MPMD根，检查模式0/1/2的布局和几何与原声明一致，
+保留原BSH形状/模式冲突检查：3 passed，7 deselected。日志为
+`csa_mpmd_tnd_20261021/runs/jit_root_layout_regression.log`。服务设备验证须重新
+完成，CPU通过不代替真实调用、图重放及16卡结果。

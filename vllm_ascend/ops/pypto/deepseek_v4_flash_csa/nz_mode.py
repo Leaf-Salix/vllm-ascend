@@ -93,9 +93,14 @@ def validate_weight_nz_mode(effective_mode: int) -> None:
 B_OPERAND_WEIGHTS = ("wq_a", "wq_b", "wo_a", "wo_b", "wkv", "cmp_wkv", "cmp_wgate")
 
 
+def _root_signature(root_function):
+    """JITFunction把声明保存在_func；其__call__签名只有通用args/kwargs。"""
+    return inspect.signature(getattr(root_function, "_func", root_function))
+
+
 def root_weight_layouts(root_function) -> dict[str, str]:
     """读取本仓根函数的实际注解；日志与存储绑定共用，避免另维护一份 NZ 名单。"""
-    params = inspect.signature(root_function).parameters
+    params = _root_signature(root_function).parameters
     result = {}
     for name in B_OPERAND_WEIGHTS:
         if name not in params:
@@ -112,5 +117,5 @@ def root_weight_layouts(root_function) -> dict[str, str]:
 
 def root_weight_shapes(root_function) -> dict[str, tuple[int, ...]]:
     """从根签名读取 Native 矩阵几何，回放按显式来源迁移旧转置权重。"""
-    params = inspect.signature(root_function).parameters
+    params = _root_signature(root_function).parameters
     return {name: tuple(params[name].annotation.shape) for name in root_weight_layouts(root_function)}
