@@ -1,5 +1,5 @@
 {
-  "goal": "active; latest authoritative target is GOAL_UPDATES.md, including BSH150 and 8-case geometric mean <=0.90",
+  "goal": "paused by explicit user control; this pull/environment request does not resume optimization; original GOAL_UPDATES.md target retained",
   "vllm_worktree": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020",
   "production_tnd_performance_changes_adopted": [
     "Inherited a241fa61 B1 mathematics + native150 wait alignment only; not counted as relative BSH speedup",
@@ -21,13 +21,7 @@
       "regression_log": "runs/pypto_native_wait_regression.log"
     }
   },
-  "live_device_tasks": [
-    {
-      "task_id": "task_20261021_172027_32968638376",
-      "case": "prefix_two_b1_s6_and_s1_s6_v112",
-      "status": "running"
-    }
-  ],
+  "live_device_tasks": [],
   "latest_completed": {
     "b1_capacity6_s1_s6": "task_20261021_022330_182138327918; six cases pass; wait150 actual CCEC audit pass",
     "cube_publication_trial": "Both B1/B16 numerical/protocol pass but no benefit: B1 400.04->404.72us, B16 778.62->786.24us; not adopted",
@@ -104,31 +98,50 @@
     "short_half_matrix_v98": "exit0;8metadata+4continuous steps PASS,exact/guards. NoL1. No extra score_arena readback inside genericmatrix; initialgraph andv95L1poisonchecks remain separate.",
     "topk_prefix_b28_v99": "exit0,exact/graph/guards/L1PASS but currentTND1151.84->1152.62us(+0.0677%),3/5faster. Noadoption. FivefullCPUcompiles/B28B8active/B4B1short16offpass; offCPP/hostexact.",
     "borrowed_combined_v107": "BothformalBSHjobs exit0 strictPASS; B8 622.28->617.16us,shortB16 641.12->640.38us. DeviceCPPmatchesCPU. Full8GM0.988089028 FAIL0.90. OriginalNative diffs retained. Otherthreads latestidlelaunch/TaskId changes inspected; no direct newSPMDport.",
-    "qb_wide_v113": "B1initialS6exact/L1 PASS366.50->355.42us(-3.0232%,4/5); overalltaskFAILmissingtable_history, fixed separate6case matrixPASS. B8exit0 613.56->609.60us(-0.6454%,3/5),T41/R12matrix12PASS. B4exit0 487.38->489.72us(+0.4801%,2/5),excludeitsG6smallM16domain."
+    "qb_wide_v113": "B1initialS6exact/L1 PASS366.50->355.42us(-3.0232%,4/5); overalltaskFAILmissingtable_history, fixed separate6case matrixPASS. B8exit0 613.56->609.60us(-0.6454%,3/5),T41/R12matrix12PASS. B4exit0 487.38->489.72us(+0.4801%,2/5),excludeitsG6smallM16domain.",
+    "prefix_two_v112": "Historical task completed exit0, S1-S6 passed; QB-wide reference 363.94 -> combined 359.02 us; not formal BSH acceptance",
+    "formal_qb_prefix_v114": "Historical two tasks completed exit0: B1 BSH352.66 -> TND359.14us negative; B8 BSH612.82 -> TND603.08us positive. Preserve all windows; full eight-case report unresolved."
   },
   "critical_next_steps": [
-    "Collect task_20261021_172027_32968638376, prefix2 B1 vsQBwide reference (notadopted,labelsexplicit). KeepfixedS6 andS1-S6result;do notduplicate.",
-    "CollectCPU56810 B4guardoff andprovewholeCPP/hostequalcurrentproduction. WideB1/B8mathfilesidentical andallconstexprvaluessame asmeasuredcandidate.",
-    "Choose finalcandidate afterprefix2result; retainQB B1/B8gainsandexcludeB4QAparallelregion. Then adoption CPUcontracts+formalBSHchangedcases andcertifiedunchangedcases.",
-    "Do not repeat v109S6L1: failurewasmissingtable_history only; v110 sixcasecorrectnesscompleted separately. Newpreflight9tests prevent recurrence.",
-    "Productionv106 andfull8GM0.988089028 remainofficial; goalactive <=0.90 unmet. Stage localcommits,no push."
+    "Remain paused until an explicit resume instruction; no NPU work authorized by the current pull-only request.",
+    "Preserve uncommitted v114 candidate and v115 diagnostic. v112 and v114 tasks are complete; do not resubmit them as collection work.",
+    "On an explicit future resume, use the canonical shared-toolchain manifest for every new test. Existing frozen harnesses/results retain their historical SDK provenance and cannot be mixed into new-version performance gains.",
+    "Resolve the existing v114 B1 negative comparison and unfinished v115 CPU diagnostic before claiming an optimization outcome; full eight-case 10% goal remains unmet.",
+    "Keep local stage commits; do not push without a new explicit user request."
   ],
-  "native_toolchain_manifest": "native_toolchain_manifest.json;1473 source/binary files frozen;do not edit/rebuild these tools while tasks run",
+  "native_toolchain_manifest": "Historical only: native_toolchain_manifest.json; old sources/results preserved, no longer selected for new tests",
   "current_bsh_baseline": "a241fa6178ddad24ced30e5a93d109dfb17f5b53 + local static inactive-B1 shape fix; bsh_baseline_a241fa61_short_typefix_manifest.json; original snapshots/FAIL preserved",
   "cpu_tasks": {
     "qb_wide_guard_b4_v113": {
-      "exec_session": 56810,
-      "output": "runs/qb_wide_guard_b4_cpu_v113",
-      "state": "running_or_completed_not_collected"
+      "state": "completed_passed",
+      "output": "runs/qb_wide_guard_b4_cpu_v113"
+    },
+    "qb_prefix_contracts_v114": {
+      "state": "completed_passed",
+      "passed": 106,
+      "log": "runs/qb_prefix_cpu_contracts_v114.log"
+    },
+    "three_way_v115": {
+      "state": "completed_failed",
+      "passed": 1,
+      "failed": 1,
+      "log": "runs/three_way_cpu_v115.log",
+      "note": "AST test selected service_cost loop instead of profile loop; no NPU task submitted; not fixed during pause"
+    },
+    "shared_environment_sync": {
+      "state": "completed_passed",
+      "passed": 115,
+      "log": "runs/shared_toolchain_sync_20261021/cpu.log"
     }
   },
-  "updated_at": "2026-10-21T09:24:59.236363+00:00",
+  "updated_at": "2026-10-21T11:41:15.388699+00:00",
   "latest_complete_cohort": {
     "report": "cohort_borrowed_combined_v106_result.json",
     "geometric_mean_ratio": 0.9880890281086612,
     "threshold": 0.9,
     "passed": false,
-    "note": "Two changed cases freshly paired; six byte-equivalent executable/Host cases retain whole original paired windows."
+    "note": "Two changed cases freshly paired; six byte-equivalent executable/Host cases retain whole original paired windows.",
+    "scope_after_environment_sync": "Historical private-toolchain cohort only; not acceptance under shared release"
   },
   "next_device_task": null,
   "evidence": {
@@ -139,20 +152,39 @@
     {
       "task_id": "task_20261021_172027_32968638376",
       "case": "prefix_two_b1_s6_and_s1_s6_v112",
-      "status": "running"
+      "status": "completed",
+      "result_passed": true,
+      "result": "runs/prefix_two_b1_s6_and_s1_s6_v112/result.json",
+      "toolchain": "historical private toolchain; not shared release"
+    },
+    {
+      "task_id": "task_20261021_172852_366004875",
+      "case": "cohort_qb_prefix_h131072_b1_s6_v114",
+      "status": "completed",
+      "result_passed": true,
+      "result": "runs/cohort_qb_prefix_h131072_b1_s6_v114/result.json",
+      "toolchain": "historical private toolchain; not shared release"
+    },
+    {
+      "task_id": "task_20261021_172852_3699317933",
+      "case": "cohort_qb_prefix_h131072_b8_s6_v114",
+      "status": "completed",
+      "result_passed": true,
+      "result": "runs/cohort_qb_prefix_h131072_b8_s6_v114/result.json",
+      "toolchain": "historical private toolchain; not shared release"
     }
   ],
   "next_actions": [
-    "Collect task_20261021_172027_32968638376, prefix2 B1 vsQBwide reference (notadopted,labelsexplicit). KeepfixedS6 andS1-S6result;do notduplicate.",
-    "CollectCPU56810 B4guardoff andprovewholeCPP/hostequalcurrentproduction. WideB1/B8mathfilesidentical andallconstexprvaluessame asmeasuredcandidate.",
-    "Choose finalcandidate afterprefix2result; retainQB B1/B8gainsandexcludeB4QAparallelregion. Then adoption CPUcontracts+formalBSHchangedcases andcertifiedunchangedcases.",
-    "Do not repeat v109S6L1: failurewasmissingtable_history only; v110 sixcasecorrectnesscompleted separately. Newpreflight9tests prevent recurrence.",
-    "Productionv106 andfull8GM0.988089028 remainofficial; goalactive <=0.90 unmet. Stage localcommits,no push."
+    "Remain paused until an explicit resume instruction; no NPU work authorized by the current pull-only request.",
+    "Preserve uncommitted v114 candidate and v115 diagnostic. v112 and v114 tasks are complete; do not resubmit them as collection work.",
+    "On an explicit future resume, use the canonical shared-toolchain manifest for every new test. Existing frozen harnesses/results retain their historical SDK provenance and cannot be mixed into new-version performance gains.",
+    "Resolve the existing v114 B1 negative comparison and unfinished v115 CPU diagnostic before claiming an optimization outcome; full eight-case 10% goal remains unmet.",
+    "Keep local stage commits; do not push without a new explicit user request."
   ],
   "live_cpu_jobs": [],
   "pending_cleanup": null,
-  "current_work": "QBwide narrowedv113 longhistory&&!parallel_small_qa&&T<64; B1/B8gain plusmatricesPASS, B4negativeexcluded. Prefix2+wide candidatev111 CPUactiveB1/offB8PASS; comparesagainst validated experimentalQBwidev108b ondevice. Production remainscombinedv106.",
-  "integration_base": "65f5117511efd1369aef6f052f3adf51c014fc0a",
+  "current_work": "Paused optimization; upstream and shared test environment synchronized. v114 QB-wide/prefix2 implementation remains uncommitted and preserved; formal B1 negative, B8 positive, unresolved. v115 diagnostic not device-submitted.",
+  "integration_base": "3c92ca84a9e69b3dfa09414e0e7fa7034cc80c08",
   "stage_commits": [
     {
       "commit": "af991f59",
@@ -225,9 +257,13 @@
     {
       "commit": "3610c04a",
       "scope": "Q_BwideN CPUcandidate and incrementalcombinedv106harness;localonly"
+    },
+    {
+      "commit": "6a86e5e6",
+      "scope": "Merge upstream shared test environment while preserving paused local work; local only"
     }
   ],
-  "previous_goal_turn_classification": "progress: two borrowed optimizations adopted; all new tasks completed, formal eight-case gate updated; originalgoalactive, no blocking condition.",
+  "previous_goal_turn_classification": "paused; current user request handled code/environment sync only",
   "git_delivery": {
     "local_branch": "feat/csa-spmd-tnd-20261020",
     "upstream": "origin/dsv4-flash-pto-v0.25.1rc1",
@@ -239,7 +275,13 @@
   },
   "resumed_at": "2026-10-21T06:08:34.951195+00:00",
   "consecutive_blocked_turns_since_resume": 0,
-  "resume_note": "用户确认卡已可用并恢复原goal；原两项QA任务已运行，保留原任务号，未重复提交。后续只本地commit，不push。",
-  "next_device_actions": "Collect task_20261021_172027_32968638376, prefix2 B1 vsQBwide reference (notadopted,labelsexplicit). KeepfixedS6 andS1-S6result;do notduplicate.",
-  "adopted_candidate": "runs/borrowed_combined_candidate_v106"
+  "resume_note": "Earlier resume superseded by explicit pause. Current request only pulls latest code/test environment; original goal remains paused.",
+  "next_device_actions": "None while goal paused",
+  "adopted_candidate": "runs/borrowed_combined_candidate_v106",
+  "shared_toolchain": {
+    "manifest": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_shared_toolchain/manifest.json",
+    "release": "csa-shared-20261021-upstream-fixes",
+    "status": "validated",
+    "sync_report": "shared_toolchain_sync_20261021.json"
+  }
 }
