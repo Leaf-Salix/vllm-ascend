@@ -1,5 +1,9 @@
 # 三个CSA session共用的本地工具链
 
+新环境从源码复现（包括 vLLM-Ascend 自身、Native 自定义算子及四个 PTO 依赖）请使用
+[2026-10-21 复现说明](../DSV4_CSA_REPRODUCTION_20261021.md)。
+其中固定 Git SHA，并提供浅拉取、构建、单卡检查和 v25 实验包的重建命令。
+
 CSA-SPMD、CSA-SPMD-TND、CSA-MPMD-TND共用本目录的`manifest.json`。
 当前发布`csa-shared-20261021-upstream-fixes`已完成构建、定向回归及长短两档单卡验证。
 其中路径同时指定源码和实际构建产物；目录名保留开发时名称，三个session不再各选一套SDK。
