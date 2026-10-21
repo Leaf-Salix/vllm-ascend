@@ -20661,3 +20661,27 @@ B16 guard启用/关闭IR都与相应已测版本等价；B28关闭仅一处Scala
 最终组合仍普通赋值版本，未为逐字一致复制大段调用。正式源码仍a241fa61。
 用户中途要求分析DeepInfer布局，已只读核对774ce244：主体TH/TND，decode
 适配可加单例轴成为[T,1,N,D]，第一轴仍是total_q；原优化目标继续保留。
+
+
+### 2026-10-21：单独补充 Native 128K/B1/S6 对照
+
+用户要求为后续比较补齐 Native B1；仅运行原五口径脚本的 native 阶段，
+任务 task_20261021_114120_30644583266 completed/exit0，分配 device1。
+仍使用正式第4层 W8A8、NZ2、TP1、S6/T6、seed1024 合成 hidden/历史KV，
+范围 HC_pre→input RMSNorm→Native CSA→HC_post，没有测试 MoE/整模型。
+
+30次 PyTorch Profiler 全设备流整层跨度中位632.75μs，范围624.75～680.50；
+20次无 profiler 图外 Event 中位614.91μs，范围600.48～624.70，另列不混用。
+复用原 summarize.outer 核验静态编译成功并安装、SuperKernel成功返回及
+真实sk_*static_kernel、MatmulWeightNz、唯一ACLGraph、四主投影NZ29和
+Native多流；同初态重放输出/Top-K/cache/state及保护区检查通过。
+
+证据入口 tests/pypto_test/csa_native_b1_20261021/README.md、PERFORMANCE.json，
+保存全部样本、命令、脚本快照及原始1.86MB trace路径。原七档历史表不覆盖；
+后续表格 Native B1 使用632.75μs。原始OPP/静态包仅本地保留，列路径与字节，
+不做hash。本次没有修改算子、恢复优化、提交commit或push。
+
+随后用户明确要求将本次测试文件与结果详细中文commit并push。归档包含汇总
+脚本、实测脚本快照、完整报告与全部样本、1.86MB原始trace、kernel等CSV和
+运行日志；权重、OPP/静态二进制及profiler数据库不入Git。补充仓库相对路径，
+支持在其它checkout离线重算同一份报告；不重跑设备、不改变原性能口径。
