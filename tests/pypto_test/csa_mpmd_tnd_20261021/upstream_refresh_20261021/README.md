@@ -4,8 +4,8 @@
 GitHub状态以本目录`remote_status.json`的实时API查询为准，浏览器缓存不作为合入证据。
 来源清单：`tests/pypto_test/csa_three_session_issue_status_20261021/STATUS.json`。
 
-当前状态：**源码已整合，三个session的公共入口已切换；验证仍在进行，PTOAS尚在构建**。
-PyPTO及torch_npu桥接构建通过，核心回归891项、代码生成152项通过；当前尚未完成新PTOAS与设备验收。
+当前状态：**公共工具链已验证，三个session的日常入口统一使用同一套实际源码与构建产物**。
+PyPTO及torch_npu桥接、PTOAS 0.69均已独立构建；公共父子进程的实际模块加载路径一致。
 新环境继续以kernel调试分支为基线，针对已合入main的修复按依赖移植。
 用户明确要求三个session统一使用本地版本，并已停止另外两个session以便切换；
 公共选择改由`tests/pypto_test/csa_shared_toolchain/manifest.json`提供，不再各选私有SDK。
@@ -41,6 +41,33 @@ PTOAS使用现有LLVM19构建；CANN CMake依赖只复用已固定的master-055�
 新PyPTO/PTOAS在各自目录构建，使用testing工作流默认的2个构建/测试进程。
 PyPTO使用RelWithDebInfo的g1（保留栈回溯），PTOAS Release，不开启Python binding。
 
-待完成：定向官方回归、冻结CSA的CPU编译、单卡SPMD/MPMD数值与图重放及同轮L1。
+已完成的检查分别记录，存在重叠，不把计数相加：
+
+- 初始核心回归891项、内存规划/共享存储代码生成152项、算术及tensor.dim代码生成19项通过。
+- 实际兼容修复后，5个受影响测试文件373 passed、6 skipped；5项为分支缺失的packed-FP4，
+  1项为尚未具备的完整Buffer IR lowering，保留原断言，不计为通过。
+- 新PTOAS定向12项及算术/动态形状联编14项通过。
+- 冻结MPMD的128K/B16和BSH单SPMD完整CPU后端编译通过。
+
+兼容适配提交`e891351`消除新旧目标视图重复生成，并保留上游全零replay sentinel规则。
+新分支的Scalar常量填充优化会把原本全Scalar的metadata生产者变成DMA/Scalar混写，
+现改为在产生混写时放弃该优化，复用既有别名分析，源程序的混写拒绝仍保留。
+
+GM列分片免同步不属于本轮采用内容：旧工具链提交`e5c1c432`已经明确撤回它，
+历史文档和候选测试仍留在源码中。初次定向检查误纳入该历史测试，已据提交纠正范围；
+保留现行GM同步，不能把这项未采用候选写成新版性能回退。
+
+128K/B16与8K/B16单卡均完成eager、图重放、采样后检查；SPMD与MPMD输出、
+Top-K、scores、cache/state逐bit一致，保护区和只读metadata检查通过。
+完整五窗L1（μs，min/mean/max）：
+
+| 场景 | 冻结TND SPMD | 当前TND MPMD |
+| --- | --- | --- |
+| 128K/B16 | 727.78 / 732.328 / 737.90 | 888.46 / 897.936 / 905.96 |
+| 8K/B16 | 564.64 / 569.728 / 573.74 | 737.76 / 747.536 / 759.86 |
+
+全部窗口及阶段检查见[device_validation.json](device_validation.json)。
+本轮验证环境兼容，不把跨版本差异算作优化收益，也不代表八档10%目标或16卡整模型已完成。
+`loaded_versions.json`与作业记录保留采集时的validating状态；正式发布状态以公共manifest为准。
 公共入口在PTOAS产物缺失时拒绝启动，避免悄悄回退旧版本。升级后的数据不能与旧版本拼成性能收益。
 完整版本与状态见[manifest.json](manifest.json)。

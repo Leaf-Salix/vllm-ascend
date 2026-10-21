@@ -1,9 +1,11 @@
 # 三个CSA session共用的本地工具链
 
 CSA-SPMD、CSA-SPMD-TND、CSA-MPMD-TND共用本目录的`manifest.json`。
+当前发布`csa-shared-20261021-upstream-fixes`已完成构建、定向回归及长短两档单卡验证。
 其中路径同时指定源码和实际构建产物；目录名保留开发时名称，三个session不再各选一套SDK。
 
 ```bash
+cd /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1
 source /data/pyptouser/qinchuanyu/pto-eager/env-dsv4-0251rc1.sh
 source /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_shared_toolchain/env.sh
 python tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py \
@@ -27,3 +29,7 @@ SDK源码修改、重建和下一次升级由公共清单统一发布，不在�
 
 本轮修复明细与验证状态：
 [`upstream_refresh_20261021`](../csa_mpmd_tnd_20261021/upstream_refresh_20261021/README.md)。
+
+一次性实际加载来源检查可通过公共bootstrap运行`show_versions.py`；它同时核对父进程和子进程。
+`compile_entry.py`只做CPU编译；`run_ptoas_regressions.py`验证本轮采用的官方修复与配套补丁。
+这些辅助检查不在每次性能测试前重复执行。

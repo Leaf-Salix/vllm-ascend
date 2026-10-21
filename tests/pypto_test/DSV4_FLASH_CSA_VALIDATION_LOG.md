@@ -20574,3 +20574,44 @@ PTOAS采用master 2a2bad22，包含#1620动态地址同步和#1622 CFG并行赋�
 
 PTOAS完整构建仍在进行。尚未开始新工具链的NPU计时，未将旧版本的性能数据用作新版收益。
 历史冻结实验和源码目录保留，后续正式实验统一从公共入口生成；不反复扫描文件hash。
+
+
+### 735.10：公共工具链通过构建、回归和长短单卡验证，三个session统一启用
+
+正式版本：PyPTO `e891351`、PTOAS `914863e`（0.69）、Simpler `57e49923`。
+公共manifest已标为validated，CSA-SPMD、CSA-SPMD-TND、CSA-MPMD-TND的日常入口
+及Python子进程均读取同一份实际源码和构建产物。父子进程加载检查通过，结果保存在
+[loaded_versions.json](csa_mpmd_tnd_20261021/upstream_refresh_20261021/loaded_versions.json)。
+该记录及作业清单保留采集时的validating标签，正式状态以公共manifest为准。
+
+升级过程中补齐两处实际兼容问题：官方共享目标视图与旧move特例叠加导致重复reshape，
+现由PrepareTileDestination统一处理，并保留上游全零replay sentinel规则；新分支的
+常量Scalar填充转换会对原本纯Scalar的metadata产生MTE3/Scalar混写，现只在不会
+制造混写时采用DMA转换，失败则保留原Scalar循环。复用既有别名分析，不关闭真实混写拒绝，
+不修改冻结算子源码、场景或精度门槛。详细中文Signed-off-by提交为PyPTO `e891351`。
+
+定向结果分别列出，存在覆盖重叠，不能相加冒充唯一用例数量：
+
+- 初始核心回归891项、代码生成152项、算术/形状代码生成19项通过。
+- 实际兼容修复后，5个受影响文件373 passed、6 skipped：5项为packed-FP4缺失类型，
+  1项为主线完整Buffer IR lowering尚未进入调试分支；保留原断言，不算通过。
+- PTOAS定向12项、PyPTO算术/形状与PTOAS联编14项通过。
+- 冻结MPMD的128K/B16完整CPU后端编译通过；当前BSH单SPMD的完整动态入口CPU编译通过。
+- 长短两档设备任务均通过eager、图重放和采样后检查；每阶段9项输出/Top-K/scores/cache-state
+  逐bit一致，SPMD的101项、MPMD的100项保护/只读检查通过。只覆盖本轮场景，不外推到全部八档。
+
+更正迁移范围：初次PTOAS回归纳入了历史GM列分片候选测试，但旧工具链`e5c1c432`
+已明确撤回该优化，源码中的说明/测试未同步清理。该测试不属于现行能力，
+本轮不恢复它、不将其失败算作新版本回退；保留现行GM屏障。Acc/L1精确范围仍通过。
+
+同一场景内同卡、同进程、同工具链，固定混合S1～S6与padding，五窗纯L1：
+
+| 场景 | 冻结TND SPMD min/mean/max | 当前TND MPMD min/mean/max | MPMD/SPMD mean |
+| --- | --- | --- | --- |
+| 128K/B16 | 727.78 / 732.328 / 737.90 | 888.46 / 897.936 / 905.96 | 1.226139 |
+| 8K/B16 | 564.64 / 569.728 / 573.74 | 737.76 / 747.536 / 759.86 | 1.312093 |
+
+单位μs。完整采样、任务路径及逐阶段结果见
+[device_validation.json](csa_mpmd_tnd_20261021/upstream_refresh_20261021/device_validation.json)。
+这轮完成工具链统一和兼容验证，不能跨版本计算性能收益。八档G≤0.90目标、B1边界/连续状态
+及真实16卡整模型验证仍未完成。后续在公共版本上继续检查v15/v16组合，保留多task架构。
