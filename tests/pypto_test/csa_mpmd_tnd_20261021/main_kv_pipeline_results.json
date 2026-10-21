@@ -1,0 +1,1364 @@
+{
+  "candidate": "v34_main_kv_pipeline",
+  "control": "v32_front_ready_dispatch",
+  "adopted_in_production": false,
+  "decision": "长短B16完整mean与max均降低，保留候选；仍须补充较大容量和全八档，不能宣称目标已完成。",
+  "toolchain": {
+    "release": "csa-shared-20261021-upstream-fixes",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-mpmd-upstream-20261021",
+      "commit": "e891351e305e1b8ac70ffb9ffe60a243fc0420dc"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_mpmd_tnd_20261021/upstream_refresh_20261021/manifest.json",
+    "validated_at": "2026-10-21T18:47:25+08:00"
+  },
+  "cases": {
+    "h131072_b16": {
+      "task_id": "task_20261022_043810_137041217121",
+      "queue_terminal": "completed(exit=0)",
+      "result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/main_kv_v34_h131072_b16/result.json",
+      "statistics_us": {
+        "spmd": {
+          "min": 727.78,
+          "mean": 732.012,
+          "max": 738.7,
+          "samples": [
+            730.36,
+            727.78,
+            738.7,
+            734.42,
+            728.8
+          ]
+        },
+        "mpmd_control": {
+          "min": 717.06,
+          "mean": 722.908,
+          "max": 727.82,
+          "samples": [
+            724.96,
+            723.78,
+            717.06,
+            727.82,
+            720.92
+          ]
+        },
+        "mpmd": {
+          "min": 707.2,
+          "mean": 713.08,
+          "max": 716.04,
+          "samples": [
+            716.04,
+            714.12,
+            715.14,
+            712.9,
+            707.2
+          ]
+        }
+      },
+      "ratio": 0.9741370360048743,
+      "candidate_over_control": 0.9864049090617341,
+      "checks": {
+        "spmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        }
+      },
+      "stage_analysis": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/main_kv_v34_h131072_b16/stages.json",
+      "mean_stages": {
+        "mpmd": [
+          {
+            "name": "hc_widen_rms",
+            "begin_us": 0.0,
+            "end_us": 14.924000000000001,
+            "kinds": {
+              "aiv": {
+                "min_us": 12.948,
+                "mean_us": 13.9945,
+                "max_us": 14.644,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "hc_linear",
+            "begin_us": 19.804000000000002,
+            "end_us": 29.727999999999998,
+            "kinds": {
+              "aic": {
+                "min_us": 8.688,
+                "mean_us": 9.266250000000001,
+                "max_us": 9.78,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "hc_reduce",
+            "begin_us": 32.356,
+            "end_us": 34.4,
+            "kinds": {
+              "aiv": {
+                "min_us": 1.78,
+                "mean_us": 1.857,
+                "max_us": 1.9400000000000002,
+                "instances": 4
+              }
+            }
+          },
+          {
+            "name": "hc_gate_mix_norm",
+            "begin_us": 36.62,
+            "end_us": 55.36,
+            "kinds": {
+              "aiv": {
+                "min_us": 17.408,
+                "mean_us": 17.918,
+                "max_us": 18.508,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "hc_sinkhorn",
+            "begin_us": 36.12,
+            "end_us": 52.072,
+            "kinds": {
+              "aiv": {
+                "min_us": 14.752,
+                "mean_us": 15.2405,
+                "max_us": 15.744,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "csa_row_offsets",
+            "begin_us": 8.452,
+            "end_us": 16.864,
+            "kinds": {
+              "aiv": {
+                "min_us": 8.412,
+                "mean_us": 8.412,
+                "max_us": 8.412,
+                "instances": 1
+              }
+            }
+          },
+          {
+            "name": "csa_rope_sign",
+            "begin_us": 12.372,
+            "end_us": 15.844000000000001,
+            "kinds": {
+              "aiv": {
+                "min_us": 0.852,
+                "mean_us": 1.7325000000000002,
+                "max_us": 3.328,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "csa_inverse_rope",
+            "begin_us": 16.18,
+            "end_us": 19.12,
+            "kinds": {
+              "aiv": {
+                "min_us": 1.62,
+                "mean_us": 2.1670000000000003,
+                "max_us": 2.656,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "csa_query_geometry",
+            "begin_us": 19.46,
+            "end_us": 25.212,
+            "kinds": {
+              "aiv": {
+                "min_us": 4.332,
+                "mean_us": 4.816,
+                "max_us": 5.456,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "qproj_a",
+            "begin_us": 57.0,
+            "end_us": 70.304,
+            "kinds": {
+              "aic": {
+                "min_us": 11.396,
+                "mean_us": 12.133000000000001,
+                "max_us": 13.132,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "qproj_a_rms_quant",
+            "begin_us": 72.1,
+            "end_us": 78.624,
+            "kinds": {
+              "aiv": {
+                "min_us": 5.468,
+                "mean_us": 5.9705,
+                "max_us": 6.468,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "index_front_chain",
+            "begin_us": 97.4,
+            "end_us": 238.50400000000002,
+            "kinds": {
+              "aic": {
+                "min_us": 116.488,
+                "mean_us": 117.5465,
+                "max_us": 118.424,
+                "instances": 8
+              },
+              "aiv": {
+                "min_us": 137.288,
+                "mean_us": 139.09,
+                "max_us": 141.012,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "main_front_chain",
+            "begin_us": 100.736,
+            "end_us": 240.232,
+            "kinds": {
+              "aic": {
+                "min_us": 79.748,
+                "mean_us": 97.23175,
+                "max_us": 114.744,
+                "instances": 16
+              },
+              "aiv": {
+                "min_us": 134.024,
+                "mean_us": 136.68825,
+                "max_us": 139.416,
+                "instances": 32
+              }
+            }
+          },
+          {
+            "name": "index_score_topk",
+            "begin_us": 249.50400000000002,
+            "end_us": 426.808,
+            "kinds": {
+              "aic": {
+                "min_us": 155.924,
+                "mean_us": 164.6125,
+                "max_us": 172.264,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 159.28,
+                "mean_us": 168.24958333333333,
+                "max_us": 176.796,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "indexer_topk_query",
+            "begin_us": 428.208,
+            "end_us": 441.86,
+            "kinds": {
+              "aiv": {
+                "min_us": 7.208,
+                "mean_us": 10.4355,
+                "max_us": 13.476,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "csa_attention_plan",
+            "begin_us": 444.4,
+            "end_us": 459.456,
+            "kinds": {
+              "aiv": {
+                "min_us": 7.596,
+                "mean_us": 13.283,
+                "max_us": 14.928,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "sparse_attn",
+            "begin_us": 461.04,
+            "end_us": 573.7560000000001,
+            "kinds": {
+              "aic": {
+                "min_us": 74.74,
+                "mean_us": 87.50716666666668,
+                "max_us": 108.828,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 78.24000000000001,
+                "mean_us": 92.10308333333333,
+                "max_us": 112.292,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "output_group_chain",
+            "begin_us": 575.456,
+            "end_us": 713.08,
+            "kinds": {
+              "aic": {
+                "min_us": 104.764,
+                "mean_us": 110.44983333333333,
+                "max_us": 113.644,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 126.556,
+                "mean_us": 131.34683333333334,
+                "max_us": 137.316,
+                "instances": 48
+              }
+            }
+          }
+        ],
+        "mpmd_control": [
+          {
+            "name": "hc_widen_rms",
+            "begin_us": 0.0,
+            "end_us": 14.556000000000001,
+            "kinds": {
+              "aiv": {
+                "min_us": 12.756,
+                "mean_us": 13.576500000000001,
+                "max_us": 14.332,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "hc_linear",
+            "begin_us": 19.592,
+            "end_us": 29.776,
+            "kinds": {
+              "aic": {
+                "min_us": 8.552,
+                "mean_us": 9.292250000000001,
+                "max_us": 10.08,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "hc_reduce",
+            "begin_us": 31.740000000000002,
+            "end_us": 33.712,
+            "kinds": {
+              "aiv": {
+                "min_us": 1.6520000000000001,
+                "mean_us": 1.765,
+                "max_us": 1.892,
+                "instances": 4
+              }
+            }
+          },
+          {
+            "name": "hc_gate_mix_norm",
+            "begin_us": 36.288000000000004,
+            "end_us": 55.24,
+            "kinds": {
+              "aiv": {
+                "min_us": 17.436,
+                "mean_us": 18.006,
+                "max_us": 18.772,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "hc_sinkhorn",
+            "begin_us": 35.768,
+            "end_us": 52.072,
+            "kinds": {
+              "aiv": {
+                "min_us": 14.884,
+                "mean_us": 15.544,
+                "max_us": 16.148,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "csa_row_offsets",
+            "begin_us": 9.552,
+            "end_us": 18.44,
+            "kinds": {
+              "aiv": {
+                "min_us": 8.888,
+                "mean_us": 8.888,
+                "max_us": 8.888,
+                "instances": 1
+              }
+            }
+          },
+          {
+            "name": "csa_rope_sign",
+            "begin_us": 13.948,
+            "end_us": 17.692,
+            "kinds": {
+              "aiv": {
+                "min_us": 0.856,
+                "mean_us": 1.9052499999999999,
+                "max_us": 3.208,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "csa_inverse_rope",
+            "begin_us": 14.616,
+            "end_us": 18.38,
+            "kinds": {
+              "aiv": {
+                "min_us": 1.764,
+                "mean_us": 2.4365,
+                "max_us": 3.184,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "csa_query_geometry",
+            "begin_us": 17.916,
+            "end_us": 23.584,
+            "kinds": {
+              "aiv": {
+                "min_us": 4.12,
+                "mean_us": 4.4005,
+                "max_us": 4.904,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "qproj_a",
+            "begin_us": 56.848,
+            "end_us": 70.648,
+            "kinds": {
+              "aic": {
+                "min_us": 11.716000000000001,
+                "mean_us": 12.50675,
+                "max_us": 13.704,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "qproj_a_rms_quant",
+            "begin_us": 72.8,
+            "end_us": 78.95200000000001,
+            "kinds": {
+              "aiv": {
+                "min_us": 4.98,
+                "mean_us": 5.5415,
+                "max_us": 6.072,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "kv_proj",
+            "begin_us": 72.892,
+            "end_us": 96.036,
+            "kinds": {
+              "aic": {
+                "min_us": 1.516,
+                "mean_us": 15.639000000000001,
+                "max_us": 23.036,
+                "instances": 12
+              }
+            }
+          },
+          {
+            "name": "kv_norm_rope",
+            "begin_us": 110.06,
+            "end_us": 120.472,
+            "kinds": {
+              "aiv": {
+                "min_us": 1.512,
+                "mean_us": 3.9499999999999997,
+                "max_us": 10.308,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "csa_cache_writeback",
+            "begin_us": 211.74,
+            "end_us": 216.708,
+            "kinds": {
+              "aiv": {
+                "min_us": 1.6320000000000001,
+                "mean_us": 3.6905,
+                "max_us": 4.396,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "index_front_chain",
+            "begin_us": 134.58,
+            "end_us": 260.528,
+            "kinds": {
+              "aic": {
+                "min_us": 98.432,
+                "mean_us": 101.169,
+                "max_us": 103.544,
+                "instances": 8
+              },
+              "aiv": {
+                "min_us": 119.58,
+                "mean_us": 122.5655,
+                "max_us": 125.492,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "main_front_chain",
+            "begin_us": 102.176,
+            "end_us": 208.972,
+            "kinds": {
+              "aic": {
+                "min_us": 71.388,
+                "mean_us": 74.3515,
+                "max_us": 77.232,
+                "instances": 16
+              },
+              "aiv": {
+                "min_us": 96.536,
+                "mean_us": 101.453125,
+                "max_us": 106.044,
+                "instances": 32
+              }
+            }
+          },
+          {
+            "name": "index_score_topk",
+            "begin_us": 262.212,
+            "end_us": 438.84000000000003,
+            "kinds": {
+              "aic": {
+                "min_us": 155.484,
+                "mean_us": 163.35066666666665,
+                "max_us": 170.756,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 158.492,
+                "mean_us": 166.961,
+                "max_us": 176.204,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "indexer_topk_query",
+            "begin_us": 440.34000000000003,
+            "end_us": 454.284,
+            "kinds": {
+              "aiv": {
+                "min_us": 4.628,
+                "mean_us": 9.124666666666666,
+                "max_us": 13.788,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "csa_attention_plan",
+            "begin_us": 456.536,
+            "end_us": 472.42,
+            "kinds": {
+              "aiv": {
+                "min_us": 8.16,
+                "mean_us": 14.1835,
+                "max_us": 15.816,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "sparse_attn",
+            "begin_us": 474.26,
+            "end_us": 582.652,
+            "kinds": {
+              "aic": {
+                "min_us": 71.02,
+                "mean_us": 82.79700000000001,
+                "max_us": 104.52,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 75.44800000000001,
+                "mean_us": 87.37966666666667,
+                "max_us": 107.99600000000001,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "output_group_chain",
+            "begin_us": 584.124,
+            "end_us": 722.908,
+            "kinds": {
+              "aic": {
+                "min_us": 105.376,
+                "mean_us": 111.686,
+                "max_us": 114.604,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 127.384,
+                "mean_us": 132.47708333333335,
+                "max_us": 138.42000000000002,
+                "instances": 48
+              }
+            }
+          }
+        ]
+      }
+    },
+    "h8192_b16": {
+      "task_id": "task_20261022_043810_137060529472",
+      "queue_terminal": "completed(exit=0)",
+      "result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/main_kv_v34_h8192_b16/result.json",
+      "statistics_us": {
+        "spmd": {
+          "min": 571.9,
+          "mean": 576.3,
+          "max": 585.16,
+          "samples": [
+            571.9,
+            585.16,
+            572.44,
+            580.08,
+            571.92
+          ]
+        },
+        "mpmd_control": {
+          "min": 576.48,
+          "mean": 593.624,
+          "max": 608.84,
+          "samples": [
+            600.42,
+            584.88,
+            597.5,
+            608.84,
+            576.48
+          ]
+        },
+        "mpmd": {
+          "min": 571.52,
+          "mean": 591.504,
+          "max": 599.46,
+          "samples": [
+            599.46,
+            571.52,
+            592.34,
+            597.14,
+            597.06
+          ]
+        }
+      },
+      "ratio": 1.026382092660073,
+      "candidate_over_control": 0.996428715820115,
+      "checks": {
+        "spmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        }
+      },
+      "stage_analysis": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/main_kv_v34_h8192_b16/stages.json",
+      "mean_stages": {
+        "mpmd": [
+          {
+            "name": "hc_widen_rms",
+            "begin_us": 0.0,
+            "end_us": 14.66,
+            "kinds": {
+              "aiv": {
+                "min_us": 12.808,
+                "mean_us": 13.759,
+                "max_us": 14.520000000000001,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "hc_linear",
+            "begin_us": 20.808,
+            "end_us": 30.484,
+            "kinds": {
+              "aic": {
+                "min_us": 8.648,
+                "mean_us": 9.16175,
+                "max_us": 9.62,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "hc_reduce",
+            "begin_us": 33.136,
+            "end_us": 35.148,
+            "kinds": {
+              "aiv": {
+                "min_us": 1.728,
+                "mean_us": 1.8230000000000002,
+                "max_us": 1.924,
+                "instances": 4
+              }
+            }
+          },
+          {
+            "name": "hc_gate_mix_norm",
+            "begin_us": 39.284,
+            "end_us": 58.372,
+            "kinds": {
+              "aiv": {
+                "min_us": 17.776,
+                "mean_us": 18.346,
+                "max_us": 18.892,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "hc_sinkhorn",
+            "begin_us": 38.772,
+            "end_us": 54.519999999999996,
+            "kinds": {
+              "aiv": {
+                "min_us": 14.676,
+                "mean_us": 15.206000000000001,
+                "max_us": 15.56,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "csa_row_offsets",
+            "begin_us": 4.0840000000000005,
+            "end_us": 13.736,
+            "kinds": {
+              "aiv": {
+                "min_us": 9.652000000000001,
+                "mean_us": 9.652000000000001,
+                "max_us": 9.652000000000001,
+                "instances": 1
+              }
+            }
+          },
+          {
+            "name": "csa_rope_sign",
+            "begin_us": 9.1,
+            "end_us": 13.384,
+            "kinds": {
+              "aiv": {
+                "min_us": 0.84,
+                "mean_us": 1.7525000000000002,
+                "max_us": 3.256,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "csa_inverse_rope",
+            "begin_us": 16.912,
+            "end_us": 19.496,
+            "kinds": {
+              "aiv": {
+                "min_us": 1.6,
+                "mean_us": 1.9905000000000002,
+                "max_us": 2.368,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "csa_query_geometry",
+            "begin_us": 20.608,
+            "end_us": 26.332,
+            "kinds": {
+              "aiv": {
+                "min_us": 4.408,
+                "mean_us": 4.897,
+                "max_us": 5.364,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "qproj_a",
+            "begin_us": 60.348,
+            "end_us": 73.816,
+            "kinds": {
+              "aic": {
+                "min_us": 11.568,
+                "mean_us": 12.502500000000001,
+                "max_us": 13.372,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "qproj_a_rms_quant",
+            "begin_us": 75.932,
+            "end_us": 81.85600000000001,
+            "kinds": {
+              "aiv": {
+                "min_us": 4.936,
+                "mean_us": 5.449,
+                "max_us": 5.876,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "index_front_chain",
+            "begin_us": 100.52,
+            "end_us": 236.048,
+            "kinds": {
+              "aic": {
+                "min_us": 112.288,
+                "mean_us": 113.2555,
+                "max_us": 114.272,
+                "instances": 8
+              },
+              "aiv": {
+                "min_us": 132.324,
+                "mean_us": 133.895,
+                "max_us": 135.27599999999998,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "main_front_chain",
+            "begin_us": 103.84,
+            "end_us": 243.24,
+            "kinds": {
+              "aic": {
+                "min_us": 73.696,
+                "mean_us": 95.35825,
+                "max_us": 114.072,
+                "instances": 16
+              },
+              "aiv": {
+                "min_us": 133.736,
+                "mean_us": 136.33175,
+                "max_us": 139.084,
+                "instances": 32
+              }
+            }
+          },
+          {
+            "name": "index_score_topk",
+            "begin_us": 251.868,
+            "end_us": 303.512,
+            "kinds": {
+              "aic": {
+                "min_us": 22.66,
+                "mean_us": 32.56366666666667,
+                "max_us": 45.548,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 26.212,
+                "mean_us": 36.78691666666667,
+                "max_us": 51.176,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "indexer_topk_query",
+            "begin_us": 305.06,
+            "end_us": 316.196,
+            "kinds": {
+              "aiv": {
+                "min_us": 2.412,
+                "mean_us": 7.903583333333334,
+                "max_us": 10.928,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "csa_attention_plan",
+            "begin_us": 319.132,
+            "end_us": 334.092,
+            "kinds": {
+              "aiv": {
+                "min_us": 7.824,
+                "mean_us": 13.4865,
+                "max_us": 14.856,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "sparse_attn",
+            "begin_us": 336.08,
+            "end_us": 450.46000000000004,
+            "kinds": {
+              "aic": {
+                "min_us": 81.64,
+                "mean_us": 91.5695,
+                "max_us": 110.584,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 85.384,
+                "mean_us": 96.07833333333333,
+                "max_us": 114.052,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "output_group_chain",
+            "begin_us": 452.74,
+            "end_us": 591.504,
+            "kinds": {
+              "aic": {
+                "min_us": 84.368,
+                "mean_us": 102.43466666666667,
+                "max_us": 113.488,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 125.516,
+                "mean_us": 132.078,
+                "max_us": 138.33599999999998,
+                "instances": 48
+              }
+            }
+          }
+        ],
+        "mpmd_control": [
+          {
+            "name": "hc_widen_rms",
+            "begin_us": 0.0,
+            "end_us": 15.46,
+            "kinds": {
+              "aiv": {
+                "min_us": 13.8,
+                "mean_us": 14.598,
+                "max_us": 15.248,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "hc_linear",
+            "begin_us": 21.088,
+            "end_us": 31.284000000000002,
+            "kinds": {
+              "aic": {
+                "min_us": 8.824,
+                "mean_us": 9.40525,
+                "max_us": 10.096,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "hc_reduce",
+            "begin_us": 33.6,
+            "end_us": 35.616,
+            "kinds": {
+              "aiv": {
+                "min_us": 1.7,
+                "mean_us": 1.806,
+                "max_us": 1.9360000000000002,
+                "instances": 4
+              }
+            }
+          },
+          {
+            "name": "hc_gate_mix_norm",
+            "begin_us": 37.948,
+            "end_us": 57.016,
+            "kinds": {
+              "aiv": {
+                "min_us": 18.064,
+                "mean_us": 18.369500000000002,
+                "max_us": 18.884,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "hc_sinkhorn",
+            "begin_us": 37.404,
+            "end_us": 53.812000000000005,
+            "kinds": {
+              "aiv": {
+                "min_us": 14.956000000000001,
+                "mean_us": 15.6605,
+                "max_us": 16.244,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "csa_row_offsets",
+            "begin_us": 7.284000000000001,
+            "end_us": 17.172,
+            "kinds": {
+              "aiv": {
+                "min_us": 9.888,
+                "mean_us": 9.888,
+                "max_us": 9.888,
+                "instances": 1
+              }
+            }
+          },
+          {
+            "name": "csa_rope_sign",
+            "begin_us": 11.688,
+            "end_us": 15.808,
+            "kinds": {
+              "aiv": {
+                "min_us": 0.8,
+                "mean_us": 1.8760000000000001,
+                "max_us": 3.644,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "csa_inverse_rope",
+            "begin_us": 18.296,
+            "end_us": 21.416,
+            "kinds": {
+              "aiv": {
+                "min_us": 1.864,
+                "mean_us": 2.271,
+                "max_us": 2.672,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "csa_query_geometry",
+            "begin_us": 20.732,
+            "end_us": 26.508,
+            "kinds": {
+              "aiv": {
+                "min_us": 4.316,
+                "mean_us": 5.025,
+                "max_us": 5.632000000000001,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "qproj_a",
+            "begin_us": 58.956,
+            "end_us": 71.312,
+            "kinds": {
+              "aic": {
+                "min_us": 10.504,
+                "mean_us": 11.32075,
+                "max_us": 12.276,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "qproj_a_rms_quant",
+            "begin_us": 73.68,
+            "end_us": 79.3,
+            "kinds": {
+              "aiv": {
+                "min_us": 4.684,
+                "mean_us": 5.134,
+                "max_us": 5.572,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "kv_proj",
+            "begin_us": 74.06,
+            "end_us": 93.196,
+            "kinds": {
+              "aic": {
+                "min_us": 1.904,
+                "mean_us": 12.987333333333334,
+                "max_us": 19.060000000000002,
+                "instances": 12
+              }
+            }
+          },
+          {
+            "name": "kv_norm_rope",
+            "begin_us": 101.78,
+            "end_us": 113.688,
+            "kinds": {
+              "aiv": {
+                "min_us": 1.116,
+                "mean_us": 3.9360000000000004,
+                "max_us": 11.724,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "csa_cache_writeback",
+            "begin_us": 221.872,
+            "end_us": 226.548,
+            "kinds": {
+              "aiv": {
+                "min_us": 1.512,
+                "mean_us": 3.7335000000000003,
+                "max_us": 4.484,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "index_front_chain",
+            "begin_us": 114.496,
+            "end_us": 250.864,
+            "kinds": {
+              "aic": {
+                "min_us": 108.884,
+                "mean_us": 110.6735,
+                "max_us": 114.36,
+                "instances": 8
+              },
+              "aiv": {
+                "min_us": 130.052,
+                "mean_us": 132.20000000000002,
+                "max_us": 135.724,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "main_front_chain",
+            "begin_us": 105.024,
+            "end_us": 219.132,
+            "kinds": {
+              "aic": {
+                "min_us": 77.048,
+                "mean_us": 81.124,
+                "max_us": 84.464,
+                "instances": 16
+              },
+              "aiv": {
+                "min_us": 104.428,
+                "mean_us": 108.9635,
+                "max_us": 113.78,
+                "instances": 32
+              }
+            }
+          },
+          {
+            "name": "index_score_topk",
+            "begin_us": 259.128,
+            "end_us": 309.252,
+            "kinds": {
+              "aic": {
+                "min_us": 20.868000000000002,
+                "mean_us": 30.799333333333333,
+                "max_us": 44.124,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 24.164,
+                "mean_us": 35.17191666666667,
+                "max_us": 49.696,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "indexer_topk_query",
+            "begin_us": 310.94,
+            "end_us": 322.252,
+            "kinds": {
+              "aiv": {
+                "min_us": 3.14,
+                "mean_us": 7.914916666666667,
+                "max_us": 11.128,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "csa_attention_plan",
+            "begin_us": 327.144,
+            "end_us": 342.136,
+            "kinds": {
+              "aiv": {
+                "min_us": 7.888,
+                "mean_us": 13.225,
+                "max_us": 14.884,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "sparse_attn",
+            "begin_us": 343.85200000000003,
+            "end_us": 450.224,
+            "kinds": {
+              "aic": {
+                "min_us": 71.604,
+                "mean_us": 82.58716666666666,
+                "max_us": 102.544,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 75.136,
+                "mean_us": 87.11441666666667,
+                "max_us": 105.884,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "output_group_chain",
+            "begin_us": 452.37600000000003,
+            "end_us": 593.624,
+            "kinds": {
+              "aic": {
+                "min_us": 88.168,
+                "mean_us": 106.991,
+                "max_us": 118.74000000000001,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 128.62800000000001,
+                "mean_us": 134.42391666666668,
+                "max_us": 140.78,
+                "instances": 48
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

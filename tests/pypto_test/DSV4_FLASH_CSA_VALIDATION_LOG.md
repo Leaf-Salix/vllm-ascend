@@ -21238,3 +21238,33 @@ KV RMS空worker，也未获得完整mean收益。
 离线分析按本次构建明确指定B16两侧编排：两侧同为21个task但提交顺序不同，
 不能只按task数量匹配。没有重新采样。下一候选从v32出发，评估把KV三阶段纳入
 Main局部流水，减少前段独立核资源争用，仍保留完整CSA多task结构。
+
+### 735.30：KV纳入Main局部流水，长短B16完整mean/max均改善
+
+v34从v32出发，将KV投影、RMS/RoPE和原始页写回移入Main局部MIX；Indexer、
+HC、QA/QR、metadata、Score、Top-K、Attention及输出仍为独立调度任务。
+融合容量区间从21减为18个task，小容量分支不变。Main AIC先KV再压缩投影/Q_B；
+AIV等齐KV列块后RMS，再发布单独的RMS完成阶段。写回继续按8行owner分工，
+等待实际32行RMS owner，不能把两者当作相同worker直接串接。新阶段均使用首次
+清零的独立代际信号，Main信号由4扩为6阶段，额外48KiB，不新增Host逐请求metadata。
+KV完整K累加、归约、RoPE、cache slot保护及状态数学保持不变。
+
+两档设备任务均completed(exit=0)。三侧eager、graph、post-L1的9类业务张量
+逐bit一致，全部保护区通过。五窗完整CSA L1，单位μs：
+
+| 场景 | 冻结SPMD min/mean/max | v32控制 min/mean/max | v34 min/mean/max | 相对控制mean |
+|---|---:|---:|---:|---:|
+| 128K/B16 | 727.78 / 732.012 / 738.70 | 717.06 / 722.908 / 727.82 | 707.20 / 713.080 / 716.04 | −1.36% |
+| 8K/B16 | 571.90 / 576.300 / 585.16 | 576.48 / 593.624 / 608.84 | 571.52 / 591.504 / 599.46 | −0.36% |
+
+长档Indexer首启mean134.58→97.40μs，但其AIV最大实例的mean125.49→141.01μs，
+因此不是所有核内计算都变快。Indexer末尾260.53→238.50μs，Main含KV后末尾
+208.97→240.23μs，两条链更均衡；Score首启262.21→249.50μs，完整降低9.83μs。
+短档Score首启提前7.26μs，但Attention实例耗时增加，完整只降低2.12μs。
+最大值分别降低11.78/9.38μs；保留候选，不能把短档小幅改善扩大解释为稳定大收益。
+
+证据、全部五窗及阶段见
+[main_kv_pipeline_results.json](csa_mpmd_tnd_20261021/main_kv_pipeline_results.json)。
+128K/B24已补排，用于较大容量覆盖；全八档、同址metadata/连续状态和16卡要求
+仍未完成，正式算子尚未替换。下一项独立候选v35从v32评估Score→Top-K→plan→
+Attention局部流水，便于隔离收益；之后再按设备结果决定是否与v34组合。
