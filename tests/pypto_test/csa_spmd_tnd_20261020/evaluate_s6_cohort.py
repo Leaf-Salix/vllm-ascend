@@ -77,6 +77,9 @@ def evaluate(jobs, selected, certificate=None):
         job = records[task_id]
         directory = Path(job["output"])
         result = json.loads((directory / "result.json").read_text())
+        snapshot = directory.with_name(directory.name + "_source")
+        if result.get("comparison_reference") or (snapshot / "comparison_reference.json").exists():
+            raise ValueError(f"{task_id}: incremental TND comparison cannot replace the BSH baseline")
         if not (
             job["last_observed_status"] == "completed (exit=0)"
             and result["stage"] == "complete"
