@@ -20374,3 +20374,47 @@ G128=1.293980，G8=1.336451，综合 G=1.302365；当前比冻结 SPMD 慢约 30
 根据泳道安排 Indexer 关键投影/Vector 链与 Q_B、KV、主 Compressor 的优先关系。当前 128K/B16
 初验泳道中 Score 约到 400μs 才启动，不能把整个差距直接归因于 Score 核内数学。
 所有后续取舍仍看同一冻结场景、同工具链下的完整 L1，而不是只看核内耗时。
+
+
+### 735.2：量化依赖采集干扰，后续主性能只保留 L1
+
+Simpler TMR 的 `submit_task_common` 在 dep_gen 开启时调用
+`dep_gen_aicpu_record_submit`，逐 task 复制 Tensor 描述符到采集缓冲，确实位于 AICPU 提交路径。
+不改算子/工具链/场景，在各自前次相同设备（长 B16 为5，短 B16 为10）补测两侧同时关闭 dep_gen：
+
+| 场景 | dep_gen=1 SPMD mean | dep_gen=1 MPMD mean | dep_gen=0 SPMD mean | dep_gen=0 MPMD mean |
+| --- | ---: | ---: | ---: | ---: |
+| 128K/B16 | 718.560 | 918.888 | 729.048 | 923.656 |
+| 8K/B16 | 572.284 | 781.336 | 574.532 | 754.936 |
+
+均为完整 L1、五窗，数值/图/保护检查通过。不同采集配置分进程，不能把所有差异都归因于 dep_gen：
+长档未改善，短档 MPMD 降约3.38%；该干扰不足以解释主要性能差距，停止扩大该项测试。
+后续主性能默认 `enable_chip_swimlane=1, enable_dep_gen=False`；需要调度图时显式 `--dep-gen`，
+与主性能结果分开。关闭依赖采集的原始 L1 时间戳仍有效，当前转换图中的 task 名称可能未解析；
+不填造本次没有采到的依赖。原始完整记录见 [dep_gen_diagnostic.json](csa_mpmd_tnd_20261021/dep_gen_diagnostic.json)。
+
+下一候选只恢复已有五张流式权重的 BYPASS 提示，先在私有包测试。测量同时放入冻结 SPMD、
+未改的 MPMD 控制组、候选 MPMD，保持同进程输入/初态和交替窗口，以避免把基线漂移当成代码收益。
+
+
+### 735.3：五张权重 BYPASS 同进程消融，收益小，暂不合入
+
+私有 v10 只在 Q_A、Q_B、KV、O_A、O_B 的 task 直属作用域恢复 BYPASS；
+这是冻结 SPMD 的流式权重提示，不改权重存储或数学。两档同进程同时运行冻结 SPMD、
+未改 MPMD 控制组及候选，L1 开、dep_gen 关，五窗交替且每次恢复同一初态。
+
+| 场景 | SPMD min/mean/max | MPMD 控制 min/mean/max | BYPASS min/mean/max | 候选/控制 mean |
+| --- | --- | --- | --- | ---: |
+| 128K/B16 | 715.74/720.08/726.42 | 908.20/927.42/941.58 | 900.66/918.16/924.48 | 0.990020 |
+| 8K/B16 | 539.08/567.10/588.50 | 750.18/757.89/764.72 | 742.48/755.67/767.82 | 0.997071 |
+
+单位 μs。eager、图重放及采样后，三组输出/Top-K/scores/cache/state 均逐 bit 一致，保护检查通过。
+长档 mean 降约1%、max 降17.10μs；短档 mean 只降0.293%、max 增3.10μs。
+每档只有3/5配对窗口更快，不能把小幅均值差宣称为稳定优化；暂不合入，不为此扩八档。
+候选相对同轮 SPMD 仍慢27.51%/33.25%，没有达到目标。完整采样与采用状态见
+[weight_bypass_diagnostic.json](csa_mpmd_tnd_20261021/weight_bypass_diagnostic.json)。
+
+继续检查关键前段：初版多个 task 沿用常驻 SPMD 的24/48 worker上限，
+即使逻辑工作远少于该上限也会整组占核；例如 Indexer compact Hadamard 实际只需少数块。
+下一候选只根据已有 Tensor 容量和原逻辑循环上界消除可证明的空 worker，
+不修改每块数学、核内 stride、真实 Q/L 或测试场景。

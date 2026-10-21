@@ -60,7 +60,7 @@ def export_l1(source, destination, side, kernel_config):
     task_ids = {r[1] for r in rows}
     if side == "spmd" and (len(rows) != 72 or len(task_ids) != 1):
         raise ValueError("冻结 SPMD 基线不再是完整 MIX SPMD")
-    if side == "mpmd" and len(task_ids) <= 1:
+    if side.startswith("mpmd") and len(task_ids) <= 1:
         raise ValueError("MPMD 必须包含多个独立调度 task")
     names = {}
     for node in ast.parse(kernel_config.read_text()).body:
@@ -70,7 +70,9 @@ def export_l1(source, destination, side, kernel_config):
                 names[str(ast.literal_eval(values["func_id"]))] = ast.literal_eval(values["name"])
     (destination / raw_path.name).write_bytes(raw_path.read_bytes())
     # L1 的原始记录只有 task id；函数名和依赖必须由同一窗口的 deps.json 解析。
-    (destination / "deps.json").write_bytes((source / "deps.json").read_bytes())
+    has_deps = (source / "deps.json").exists()
+    if has_deps:
+        (destination / "deps.json").write_bytes((source / "deps.json").read_bytes())
     write_json(destination / "names.json", {"callable_id_to_name": names})
     result = subprocess.run(
         [
@@ -98,6 +100,7 @@ def export_l1(source, destination, side, kernel_config):
         "records": len(rows),
         "task_groups": len(task_ids),
         "cores": len({r[0] for r in rows}),
+        "dependency_capture": has_deps,
         "raw": str(destination / raw_path.name),
         "trace": str(destination / "swimlane.json"),
     }
@@ -112,9 +115,14 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--frozen", type=Path, required=True)
     parser.add_argument("--candidate", type=Path, required=True)
+    parser.add_argument("--control-mpmd", type=Path, help="同进程增加已接受的多 task 控制组")
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--compile", action="store_true")
     parser.add_argument("--baseline-only", action="store_true")
+    dep_flags = parser.add_mutually_exclusive_group()
+    dep_flags.add_argument("--dep-gen", dest="dep_gen", action="store_true", help="额外采集依赖，仅用于调度诊断")
+    dep_flags.add_argument("--no-dep-gen", dest="dep_gen", action="store_false", help="只采完整 L1，默认行为")
+    parser.set_defaults(dep_gen=False)
     parser.add_argument("--device", type=int, help="task-submit 自动追加；须与 TASK_DEVICE 一致")
     parser.add_argument("--cases", type=Path, default=Path(__file__).with_name("cases.json"))
     args = parser.parse_args()
@@ -129,6 +137,8 @@ def main():
         "device_execution": False,
         "reference_commit": manifest["reference_commit"],
         "scope": "full CSA L1",
+        "enable_chip_swimlane": 1,
+        "enable_dep_gen": args.dep_gen,
     }
 
     def save(stage=None):
@@ -149,6 +159,14 @@ def main():
         mount_package(packages / "deepseek_v4_flash_csa", prefix + "deepseek_v4_flash_csa")
         baseline_name = mount_package(packages / "deepseek_v4_flash_csa_spmd_tnd", prefix + "_mpmd_tnd_reference")
         candidate_name = mount_package(args.candidate, prefix + "_mpmd_tnd_candidate")
+        control_name = (
+            mount_package(args.control_mpmd, prefix + "_mpmd_tnd_control") if args.control_mpmd is not None else None
+        )
+        report["sources"] = {
+            "spmd": str(packages / "deepseek_v4_flash_csa_spmd_tnd"),
+            "mpmd": str(args.candidate),
+            "mpmd_control": str(args.control_mpmd),
+        }
         options = CompileOptions(platform="a2a3", memory_planner=passes.MemoryPlanner.PYPTO)
         if args.cpu:
             module = importlib.import_module(candidate_name + ".entry")
@@ -180,6 +198,7 @@ def main():
         from vllm_ascend.utils import enable_custom_op
 
         device_id = int(os.environ["TASK_DEVICE"])
+        report["device_id"] = device_id
         if args.device is not None and args.device != device_id:
             raise ValueError("命令行设备与队列分配不一致")
         torch.npu.set_device(device_id)
@@ -256,8 +275,12 @@ def main():
                 raise AssertionError("Native fixture 与固定清单不一致")
 
             entries, guards = {}, {}
-            for side, package in (("spmd", baseline_name), ("mpmd", candidate_name)):
-                if side == "mpmd" and args.baseline_only:
+            variants = [("spmd", baseline_name)]
+            if control_name is not None:
+                variants.append(("mpmd_control", control_name))
+            variants.append(("mpmd", candidate_name))
+            for side, package in variants:
+                if side.startswith("mpmd") and args.baseline_only:
                     continue
 
                 def allocate(name, shape, dtype, device, side=side):
@@ -285,7 +308,7 @@ def main():
                 platform="a2a3",
                 runtime="tensormap_and_ringbuffer",
                 enable_chip_swimlane=1,
-                enable_dep_gen=True,
+                enable_dep_gen=args.dep_gen,
                 output_dir=str(args.output / "dfx"),
             )
             save("fixture_ready")
@@ -425,6 +448,10 @@ def main():
                 }
             if "mpmd" in entries:
                 report["ratio"] = report["statistics_us"]["mpmd"]["mean"] / report["statistics_us"]["spmd"]["mean"]
+            if "mpmd_control" in entries:
+                report["candidate_over_control"] = (
+                    report["statistics_us"]["mpmd"]["mean"] / report["statistics_us"]["mpmd_control"]["mean"]
+                )
             report["passed"] = True
             save("complete")
     except BaseException:

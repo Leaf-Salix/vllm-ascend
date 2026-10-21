@@ -1,0 +1,681 @@
+{
+  "candidate": "v10_weight_bypass",
+  "adoption": "暂不合入：长档均值降低0.998%，短档0.293%且max略升；先解决主关键路径，不扩大微小差异的重复测试。",
+  "changes": [
+    "q_a",
+    "q_b",
+    "kv",
+    "o_a",
+    "o_b 权重恢复 CachePolicy.BYPASS"
+  ],
+  "results": [
+    {
+      "case": {
+        "name": "h131072_b16",
+        "history_label": 131072,
+        "active_requests": 16,
+        "request_capacity": 17,
+        "query_lengths": [
+          6,
+          1,
+          4,
+          2,
+          5,
+          3,
+          6,
+          1,
+          4,
+          2,
+          5,
+          3,
+          6,
+          1,
+          4,
+          2
+        ],
+        "history_lengths": [
+          131072,
+          131071,
+          131041,
+          130945,
+          130943,
+          130047,
+          129023,
+          130561,
+          131072,
+          131071,
+          131041,
+          130945,
+          130943,
+          130047,
+          129023,
+          130561
+        ],
+        "valid_tokens": 55,
+        "token_capacity": 64,
+        "dummy_query_lengths": [
+          9
+        ],
+        "query_start_loc": [
+          0,
+          6,
+          7,
+          11,
+          13,
+          18,
+          21,
+          27,
+          28,
+          32,
+          34,
+          39,
+          42,
+          48,
+          49,
+          53,
+          55,
+          64
+        ],
+        "seq_lens": [
+          131078,
+          131072,
+          131045,
+          130947,
+          130948,
+          130050,
+          129029,
+          130562,
+          131076,
+          131073,
+          131046,
+          130948,
+          130949,
+          130048,
+          129027,
+          130563,
+          0
+        ],
+        "position_rule": "active request r: history_lengths[r] + arange(query_lengths[r]); padding positions=0",
+        "seed": 20261024,
+        "table_history": 131072,
+        "indexer_page_pattern": "original",
+        "reverse_pages": false
+      },
+      "stage": "complete",
+      "passed": true,
+      "reference_commit": "84751e34cb1f27eff9e4d3fdf03f8495982f1cdf",
+      "scope": "full CSA L1",
+      "enable_dep_gen": false,
+      "device_id": 1,
+      "sources": {
+        "spmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/sources/84751e34/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd",
+        "mpmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v10_weight_bypass/operator",
+        "mpmd_control": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v8/operator"
+      },
+      "statistics_us": {
+        "spmd": {
+          "min": 715.74,
+          "mean": 720.08,
+          "max": 726.42,
+          "samples": [
+            721.36,
+            718.48,
+            718.4,
+            726.42,
+            715.74
+          ]
+        },
+        "mpmd_control": {
+          "min": 908.2,
+          "mean": 927.42,
+          "max": 941.58,
+          "samples": [
+            937.02,
+            933.14,
+            908.2,
+            941.58,
+            917.16
+          ]
+        },
+        "mpmd": {
+          "min": 900.66,
+          "mean": 918.164,
+          "max": 924.48,
+          "samples": [
+            924.48,
+            921.36,
+            920.56,
+            900.66,
+            923.76
+          ]
+        }
+      },
+      "windows": [
+        {
+          "side": "spmd",
+          "incore_span_us": 721.36,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_00_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_00_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 937.02,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_00_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_00_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 924.48,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_00_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_00_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 921.36,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_01_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_01_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 933.14,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_01_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_01_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 718.48,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_01_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_01_spmd/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 718.4,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_02_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_02_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 908.2,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_02_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_02_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 920.56,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_02_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_02_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 900.66,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_03_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_03_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 941.58,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_03_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_03_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 726.42,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_03_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_03_spmd/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 715.74,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_04_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_04_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 917.16,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_04_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_04_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 923.76,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_04_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h131072_b16/l1_04_mpmd/swimlane.json"
+        }
+      ],
+      "ratio": 1.2750861015442727,
+      "candidate_over_control": 0.9900196243341745,
+      "checks": {
+        "spmd_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        }
+      }
+    },
+    {
+      "case": {
+        "name": "h8192_b16",
+        "history_label": 8192,
+        "active_requests": 16,
+        "request_capacity": 17,
+        "query_lengths": [
+          6,
+          1,
+          4,
+          2,
+          5,
+          3,
+          6,
+          1,
+          4,
+          2,
+          5,
+          3,
+          6,
+          1,
+          4,
+          2
+        ],
+        "history_lengths": [
+          8192,
+          8191,
+          8161,
+          8065,
+          8063,
+          7167,
+          6143,
+          7681,
+          8192,
+          8191,
+          8161,
+          8065,
+          8063,
+          7167,
+          6143,
+          7681
+        ],
+        "valid_tokens": 55,
+        "token_capacity": 64,
+        "dummy_query_lengths": [
+          9
+        ],
+        "query_start_loc": [
+          0,
+          6,
+          7,
+          11,
+          13,
+          18,
+          21,
+          27,
+          28,
+          32,
+          34,
+          39,
+          42,
+          48,
+          49,
+          53,
+          55,
+          64
+        ],
+        "seq_lens": [
+          8198,
+          8192,
+          8165,
+          8067,
+          8068,
+          7170,
+          6149,
+          7682,
+          8196,
+          8193,
+          8166,
+          8068,
+          8069,
+          7168,
+          6147,
+          7683,
+          0
+        ],
+        "position_rule": "active request r: history_lengths[r] + arange(query_lengths[r]); padding positions=0",
+        "seed": 20261027,
+        "table_history": 8192,
+        "indexer_page_pattern": "original",
+        "reverse_pages": false
+      },
+      "stage": "complete",
+      "passed": true,
+      "reference_commit": "84751e34cb1f27eff9e4d3fdf03f8495982f1cdf",
+      "scope": "full CSA L1",
+      "enable_dep_gen": false,
+      "device_id": 2,
+      "sources": {
+        "spmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/sources/84751e34/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd",
+        "mpmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v10_weight_bypass/operator",
+        "mpmd_control": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v8/operator"
+      },
+      "statistics_us": {
+        "spmd": {
+          "min": 539.08,
+          "mean": 567.1,
+          "max": 588.5,
+          "samples": [
+            582.36,
+            580.94,
+            544.62,
+            588.5,
+            539.08
+          ]
+        },
+        "mpmd_control": {
+          "min": 750.18,
+          "mean": 757.888,
+          "max": 764.72,
+          "samples": [
+            761.34,
+            750.18,
+            751.4,
+            761.8,
+            764.72
+          ]
+        },
+        "mpmd": {
+          "min": 742.48,
+          "mean": 755.668,
+          "max": 767.82,
+          "samples": [
+            748.26,
+            760.98,
+            767.82,
+            742.48,
+            758.8
+          ]
+        }
+      },
+      "windows": [
+        {
+          "side": "spmd",
+          "incore_span_us": 582.36,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_00_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_00_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 761.34,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_00_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_00_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 748.26,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_00_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_00_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 760.98,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_01_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_01_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 750.18,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_01_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_01_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 580.94,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_01_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_01_spmd/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 544.62,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_02_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_02_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 751.4,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_02_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_02_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 767.82,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_02_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_02_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 742.48,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_03_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_03_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 761.8,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_03_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_03_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 588.5,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_03_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_03_spmd/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 539.08,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_04_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_04_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 764.72,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_04_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_04_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 758.8,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_04_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/weight_bypass_v10_h8192_b16/l1_04_mpmd/swimlane.json"
+        }
+      ],
+      "ratio": 1.332512784341386,
+      "candidate_over_control": 0.9970708072960648,
+      "checks": {
+        "spmd_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        }
+      }
+    }
+  ]
+}
