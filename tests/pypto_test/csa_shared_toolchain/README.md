@@ -1,8 +1,9 @@
 # 三个CSA session共用的本地工具链
 
-新环境从源码复现（包括 vLLM-Ascend 自身、Native 自定义算子及四个 PTO 依赖）请使用
+新环境从源码进行 PyTorch 单卡复现请使用
 [2026-10-21 复现说明](../DSV4_CSA_REPRODUCTION_20261021.md)。
-其中固定 Git SHA，并提供浅拉取、构建、单卡检查和 v25 实验包的重建命令。
+其中固定 Git SHA，并提供 PTO 工具链构建、独立单卡检查和 v25 实验包的重建命令；
+无需安装 vLLM、vLLM-Ascend 或编译 Native 自定义算子。
 
 CSA-SPMD、CSA-SPMD-TND、CSA-MPMD-TND共用本目录的`manifest.json`。
 当前发布`csa-shared-20261021-upstream-fixes`已完成构建、定向回归及长短两档单卡验证。
