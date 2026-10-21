@@ -16,11 +16,13 @@ import re
 import statistics
 from pathlib import Path
 
+SUBMIT_RE = r"\brt_submit_(?:aic_task|aiv_task|task)\(\s*[^,\n]+,\s*params_t(\d+)\s*\)\s*;"
+
 
 def task_names(path):
     source = path.read_text()
     first_label = re.search(r"// (?:Spmd|Group) ", source)
-    submits = list(re.finditer(r"TaskOutputTensors task_\d+_outs = rt_submit_", source))
+    submits = list(re.finditer(SUBMIT_RE, source))
     if first_label is None or not submits:
         raise ValueError(f"未找到 task 提交：{path}")
     # 提交前计算 launch 大小可以有分支；提交区间本身必须是直线编排。
@@ -33,9 +35,14 @@ def task_names(path):
         label = re.search(r"// Spmd \S+: (\S+)|// Group (\S+):", line)
         if label:
             current = label.group(1) or label.group(2)
-        submit = re.search(r"TaskOutputTensors task_(\d+)_outs = rt_submit_", line)
+        # 未捕获TaskId且关闭early_resolve时可以只发起提交，不绑定返回变量。
+        # params_tN仍是编排提交序号；函数的第一个参数是callable id，不能混用。
+        submit = re.search(SUBMIT_RE, line)
         if submit:
             ordinal = int(submit.group(1))
+            captured = re.search(r"TaskOutputTensors task_(\d+)_outs", line)
+            if captured and int(captured.group(1)) != ordinal:
+                raise ValueError(f"捕获变量与参数提交序号不一致：{path}:{line}")
             if current is None or ordinal != len(names):
                 raise ValueError(f"缺少名称或提交序号不连续：{path}:{line}")
             names[ordinal] = current

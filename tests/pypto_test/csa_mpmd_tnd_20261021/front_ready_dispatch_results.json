@@ -1,0 +1,422 @@
+{
+  "candidate": "v32_front_ready_dispatch",
+  "control": "v31_front_pipelines",
+  "adopted_in_production": false,
+  "decision": "本轮两档各5窗前段完全串行均消除，max均降低；长档mean改善1.98%，短档mean回退1.12%。保留候选，继续优化KV准备拖延，尚不宣称全部长尾解决。",
+  "toolchain": {
+    "release": "csa-shared-20261021-upstream-fixes",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-mpmd-upstream-20261021",
+      "commit": "e891351e305e1b8ac70ffb9ffe60a243fc0420dc"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_mpmd_tnd_20261021/upstream_refresh_20261021/manifest.json",
+    "validated_at": "2026-10-21T18:47:25+08:00"
+  },
+  "cases": {
+    "h131072_b16": {
+      "task_id": "task_20261022_035834_40178989975",
+      "queue_terminal": "completed(exit=0)",
+      "result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/front_ready_v32_h131072_b16/result.json",
+      "statistics_us": {
+        "spmd": {
+          "min": 722.86,
+          "mean": 730.576,
+          "max": 737.96,
+          "samples": [
+            722.86,
+            733.56,
+            728.22,
+            737.96,
+            730.28
+          ]
+        },
+        "mpmd_control": {
+          "min": 711.66,
+          "mean": 755.528,
+          "max": 784.02,
+          "samples": [
+            720.9,
+            783.86,
+            777.2,
+            711.66,
+            784.02
+          ]
+        },
+        "mpmd": {
+          "min": 731.8,
+          "mean": 740.588,
+          "max": 748.38,
+          "samples": [
+            745.3,
+            731.8,
+            736.32,
+            741.14,
+            748.38
+          ]
+        }
+      },
+      "ratio": 1.013704255272552,
+      "candidate_over_control": 0.9802257494096843,
+      "checks": {
+        "spmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        }
+      },
+      "front": {
+        "mpmd": {
+          "serial_windows": 0,
+          "windows": [
+            {
+              "full_l1_us": 745.3000000000001,
+              "index_begin_us": 129.4,
+              "index_end_us": 269.92,
+              "main_begin_us": 101.24000000000001,
+              "main_end_us": 218.08,
+              "overlap_us": 88.68,
+              "serialized": false
+            },
+            {
+              "full_l1_us": 731.8000000000001,
+              "index_begin_us": 123.68,
+              "index_end_us": 260.36,
+              "main_begin_us": 108.86,
+              "main_end_us": 220.32,
+              "overlap_us": 96.63999999999999,
+              "serialized": false
+            },
+            {
+              "full_l1_us": 736.32,
+              "index_begin_us": 126.94,
+              "index_end_us": 266.58,
+              "main_begin_us": 107.92,
+              "main_end_us": 221.8,
+              "overlap_us": 94.86000000000001,
+              "serialized": false
+            },
+            {
+              "full_l1_us": 741.14,
+              "index_begin_us": 133.94,
+              "index_end_us": 268.14,
+              "main_begin_us": 105.68,
+              "main_end_us": 220.6,
+              "overlap_us": 86.66,
+              "serialized": false
+            },
+            {
+              "full_l1_us": 748.38,
+              "index_begin_us": 137.96,
+              "index_end_us": 270.8,
+              "main_begin_us": 104.02,
+              "main_end_us": 214.58,
+              "overlap_us": 76.62,
+              "serialized": false
+            }
+          ]
+        },
+        "mpmd_control": {
+          "serial_windows": 3,
+          "windows": [
+            {
+              "full_l1_us": 720.9,
+              "index_begin_us": 103.9,
+              "index_end_us": 247.12,
+              "main_begin_us": 107.8,
+              "main_end_us": 219.56,
+              "overlap_us": 111.76,
+              "serialized": false
+            },
+            {
+              "full_l1_us": 783.86,
+              "index_begin_us": 211.54,
+              "index_end_us": 318.64,
+              "main_begin_us": 103.18,
+              "main_end_us": 207.92000000000002,
+              "overlap_us": 0,
+              "serialized": true
+            },
+            {
+              "full_l1_us": 777.2,
+              "index_begin_us": 205.42000000000002,
+              "index_end_us": 313.90000000000003,
+              "main_begin_us": 103.46000000000001,
+              "main_end_us": 202.78,
+              "overlap_us": 0,
+              "serialized": true
+            },
+            {
+              "full_l1_us": 711.66,
+              "index_begin_us": 102.92,
+              "index_end_us": 248.20000000000002,
+              "main_begin_us": 101.64,
+              "main_end_us": 215.54,
+              "overlap_us": 112.61999999999999,
+              "serialized": false
+            },
+            {
+              "full_l1_us": 784.02,
+              "index_begin_us": 102.06,
+              "index_end_us": 209.9,
+              "main_begin_us": 213.84,
+              "main_end_us": 314.48,
+              "overlap_us": 0,
+              "serialized": true
+            }
+          ]
+        }
+      },
+      "stage_analysis": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/front_ready_v32_h131072_b16/stages.json"
+    },
+    "h8192_b16": {
+      "task_id": "task_20261022_035834_401793918087",
+      "queue_terminal": "completed(exit=0)",
+      "result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/front_ready_v32_h8192_b16/result.json",
+      "statistics_us": {
+        "spmd": {
+          "min": 555.54,
+          "mean": 568.068,
+          "max": 581.8,
+          "samples": [
+            567.14,
+            581.8,
+            556.54,
+            579.32,
+            555.54
+          ]
+        },
+        "mpmd_control": {
+          "min": 560.66,
+          "mean": 591.136,
+          "max": 648.84,
+          "samples": [
+            592.88,
+            584.12,
+            569.18,
+            648.84,
+            560.66
+          ]
+        },
+        "mpmd": {
+          "min": 574.34,
+          "mean": 597.78,
+          "max": 626.7,
+          "samples": [
+            574.34,
+            592.68,
+            610.46,
+            584.72,
+            626.7
+          ]
+        }
+      },
+      "ratio": 1.0523035974566426,
+      "candidate_over_control": 1.0112393763871597,
+      "checks": {
+        "spmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards_passed": 104,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        }
+      },
+      "front": {
+        "mpmd": {
+          "serial_windows": 0,
+          "windows": [
+            {
+              "full_l1_us": 574.34,
+              "index_begin_us": 95.64,
+              "index_end_us": 233.8,
+              "main_begin_us": 124.16,
+              "main_end_us": 234.92000000000002,
+              "overlap_us": 109.64000000000001,
+              "serialized": false
+            },
+            {
+              "full_l1_us": 592.6800000000001,
+              "index_begin_us": 127.92,
+              "index_end_us": 266.3,
+              "main_begin_us": 108.32000000000001,
+              "main_end_us": 226.82,
+              "overlap_us": 98.89999999999999,
+              "serialized": false
+            },
+            {
+              "full_l1_us": 610.46,
+              "index_begin_us": 127.14,
+              "index_end_us": 269.64,
+              "main_begin_us": 108.8,
+              "main_end_us": 229.8,
+              "overlap_us": 102.66000000000001,
+              "serialized": false
+            },
+            {
+              "full_l1_us": 584.72,
+              "index_begin_us": 127.46000000000001,
+              "index_end_us": 260.68,
+              "main_begin_us": 97.56,
+              "main_end_us": 210.14000000000001,
+              "overlap_us": 82.68,
+              "serialized": false
+            },
+            {
+              "full_l1_us": 626.7,
+              "index_begin_us": 150.92000000000002,
+              "index_end_us": 285.8,
+              "main_begin_us": 100.94,
+              "main_end_us": 222.9,
+              "overlap_us": 71.97999999999999,
+              "serialized": false
+            }
+          ]
+        },
+        "mpmd_control": {
+          "serial_windows": 1,
+          "windows": [
+            {
+              "full_l1_us": 592.88,
+              "index_begin_us": 103.12,
+              "index_end_us": 247.74,
+              "main_begin_us": 100.88,
+              "main_end_us": 217.88,
+              "overlap_us": 114.75999999999999,
+              "serialized": false
+            },
+            {
+              "full_l1_us": 584.12,
+              "index_begin_us": 95.06,
+              "index_end_us": 232.32,
+              "main_begin_us": 97.12,
+              "main_end_us": 205.54,
+              "overlap_us": 108.41999999999999,
+              "serialized": false
+            },
+            {
+              "full_l1_us": 569.1800000000001,
+              "index_begin_us": 102.2,
+              "index_end_us": 237.36,
+              "main_begin_us": 100.22,
+              "main_end_us": 208.12,
+              "overlap_us": 105.92,
+              "serialized": false
+            },
+            {
+              "full_l1_us": 648.84,
+              "index_begin_us": 203.84,
+              "index_end_us": 310.86,
+              "main_begin_us": 98.88,
+              "main_end_us": 199.98000000000002,
+              "overlap_us": 0,
+              "serialized": true
+            },
+            {
+              "full_l1_us": 560.66,
+              "index_begin_us": 93.88,
+              "index_end_us": 232.44,
+              "main_begin_us": 96.28,
+              "main_end_us": 203.3,
+              "overlap_us": 107.02000000000001,
+              "serialized": false
+            }
+          ]
+        }
+      },
+      "stage_analysis": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/front_ready_v32_h8192_b16/stages.json"
+    }
+  }
+}
