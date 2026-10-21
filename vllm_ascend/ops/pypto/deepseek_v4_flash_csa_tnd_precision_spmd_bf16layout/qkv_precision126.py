@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Private Native-order QA126 route; all other row counts retain the frozen math."""
+"""Native-order QA routes for measured T126/T168; retain other frozen routes."""
 
 import pypto.language as pl
 
@@ -32,8 +32,9 @@ from ..deepseek_v4_flash_csa_tnd_precision.qkv_proj_rope import (
 )
 from ..deepseek_v4_flash_csa_tnd_precision_spmd.qkv_proj_rope import kv_proj_rope
 
-# Measured against the actual FULL Native QA boundary; see the T126 report.
+# Measured against the actual FULL Native QA boundary at T126 and T168.
 QA_NATIVE_PACKET_ROWS = 126
+QA_NATIVE_PACKET_ROWS_B28 = 168
 QR_NATIVE_PACKET_BLOCKS = 2
 QR_NATIVE_PACKETS = QR_NATIVE_K_BLOCKS // QR_NATIVE_PACKET_BLOCKS
 
@@ -46,7 +47,7 @@ def q_proj_qa_126(
     tile_base: pl.Scalar[pl.INDEX],
     tile_rows: pl.Scalar[pl.INDEX],
 ):
-    """T126 Native NT schedule: K512 packets with ascending K256 halves."""
+    """Measured Native NT schedule: K512 packets with ascending K256 halves."""
     qa_tokens = pl.tensor.dim(x, 0)
     x_view = pl.reshape(x, [qa_tokens, D])
     qr_t_matmul = ((tile_rows + QR_M_TILE - 1) // QR_M_TILE) * QR_M_TILE
@@ -127,7 +128,9 @@ def q_proj_qr(
         with pl.scope():
             qr_t_matmul = ((tile_rows + QR_M_TILE - 1) // QR_M_TILE) * QR_M_TILE
             qr_fp32 = pl.create_tensor([qr_t_matmul, Q_LORA], dtype=pl.FP32)
-            if tile_rows == QA_NATIVE_PACKET_ROWS:
+            if tile_rows == QA_NATIVE_PACKET_ROWS:  # noqa: SIM114 - scalar branches required by PyPTO codegen
+                q_proj_qa_126(x, wq_a, qr_fp32, tile_base, tile_rows)
+            elif tile_rows == QA_NATIVE_PACKET_ROWS_B28:
                 q_proj_qa_126(x, wq_a, qr_fp32, tile_base, tile_rows)
             else:
                 q_proj_qa(x, wq_a, qr_fp32, tile_base, tile_rows)
