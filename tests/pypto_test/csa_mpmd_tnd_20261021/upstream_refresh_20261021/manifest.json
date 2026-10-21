@@ -1,0 +1,178 @@
+{
+  "status": "shared_toolchain_validated",
+  "query_evidence": "remote_status.json",
+  "source_session": "01a0c422-2ef1-7f91-a239-96f637f6c740",
+  "pypto": {
+    "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-mpmd-upstream-20261021",
+    "upstream_branch": "feat/kernel-mode-integration-test",
+    "upstream_base": "3cc5c61d8c3f3dcf55891452a43bcfbf49e8c37d",
+    "local_head": "e891351e305e1b8ac70ffb9ffe60a243fc0420dc",
+    "fixes": [
+      {
+        "issue": 2951,
+        "pr": 3004,
+        "upstream_sha_prefix": "a1702ad4",
+        "local_commit_prefix": "f803412",
+        "purpose": "tensor.dim保留形状表达式"
+      },
+      {
+        "issue": 3009,
+        "pr": 3013,
+        "upstream_sha_prefix": "2964333d",
+        "local_commit_prefix": "57384ea",
+        "purpose": "while条件循环状态存活"
+      },
+      {
+        "issue": 3014,
+        "pr": 3018,
+        "upstream_sha_prefix": "acc125ce",
+        "local_commit_prefix": "9dd54b1",
+        "purpose": "Group返回值与共享参数绑定"
+      },
+      {
+        "issue": 3015,
+        "pr": 3019,
+        "upstream_sha_prefix": "905ee5e2",
+        "local_commit_prefix": "6611d0c",
+        "purpose": "phi后的reshape/transpose_view来源"
+      },
+      {
+        "issue": 3016,
+        "pr": 3029,
+        "upstream_sha_prefix": "ec064a82",
+        "local_commit_prefix": "9026aa9",
+        "purpose": "条件分支共享Tile窗口及作用域"
+      },
+      {
+        "issue": 3026,
+        "pr": 3030,
+        "upstream_sha_prefix": "57821c37",
+        "local_commit_prefix": "dbf51c1",
+        "purpose": "有符号整除/取模全链路一致"
+      },
+      {
+        "issue": 3027,
+        "pr": 3031,
+        "upstream_sha_prefix": "69d5afb8",
+        "local_commit_prefix": "c50456c",
+        "purpose": "存储重绑定后语义别名维护"
+      },
+      {
+        "issue": 3017,
+        "pr": 3053,
+        "upstream_sha_prefix": "cb7e1778",
+        "local_commit_prefix": "a33f14c",
+        "purpose": "共享目的buffer的物理类型视图"
+      },
+      {
+        "issue": 3041,
+        "pr": 3092,
+        "upstream_sha_prefix": "fb939f5d",
+        "local_commit_prefix": "2b05e98",
+        "purpose": "内联自动名称role/version保持"
+      }
+    ]
+  },
+  "ptoas": {
+    "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/ptoas-csa-mpmd-upstream-20261021",
+    "upstream_base": "2a2bad22dfaecbb55747d49167642f479eb57118",
+    "local_head": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f",
+    "fixes": [
+      {
+        "issue": 1620,
+        "commit": "6f5e16afaaacd2ac1324e737235b96f33f12e08c",
+        "purpose": "动态显式地址跨SSA别名的同步"
+      },
+      {
+        "issue": 1622,
+        "commit": "7efff5ccde929a3cfe59fae3a5b45a1b9e09f8aa",
+        "purpose": "CFG回边参数并行赋值"
+      }
+    ]
+  },
+  "simpler": {
+    "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016",
+    "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5",
+    "changed": false,
+    "reason": "该批issue没有已合入的Simpler新修复；保留CORE256 Tensor ABI与既有TMR配套"
+  },
+  "constraints": [
+    "SPMD和MPMD使用同一工具链；升级后重取同轮基线",
+    "原生150tick等待保留",
+    "独立克隆与构建，不复制二进制，不改变其他session的全局安装",
+    "只取已合入修复；仍open的修复PR没有当作正式修复采用"
+  ],
+  "validation": {
+    "build": "passed",
+    "unit_regressions": "passed with declared capability skips",
+    "csa_cpu": "passed",
+    "csa_device": {
+      "passed": true,
+      "summary": "device_validation.json",
+      "cases": [
+        "h131072_b16",
+        "h8192_b16"
+      ],
+      "all_bit_equal": true,
+      "graph_replay": true,
+      "guards": true
+    },
+    "pypto_build": "passed, including torch_npu bridge",
+    "core_regressions": {
+      "passed": 891,
+      "seconds": 27.1
+    },
+    "codegen_stage1": {
+      "passed": 152,
+      "skipped": 5,
+      "deferred_ptoas_compile": 3,
+      "seconds": 0.91
+    },
+    "csa_frontend": {
+      "case": "h131072_b16",
+      "stage": "cpu_parse_passed",
+      "device_execution": false
+    },
+    "ptoas_build": "passed",
+    "codegen_stage2": {
+      "passed": 19,
+      "seconds": 0.76
+    },
+    "compat_regressions": {
+      "passed": 373,
+      "skipped": 6,
+      "seconds": 11.49,
+      "log": "/tmp/csa_shared_pypto_compat_final.log"
+    },
+    "ptoas_regressions": {
+      "passed": 12,
+      "result": "../runs/upstream_ptoas_selected_regressions/result.json",
+      "excluded_historical_candidate": "GM column disjoint optimization was reverted by e5c1c432 before this upgrade"
+    },
+    "arithmetic_shape_ptoas": {
+      "passed": 14,
+      "seconds": 7.97,
+      "log": "/tmp/csa_shared_arith_shape_ptoas.log"
+    },
+    "csa_cpu_result": "../runs/upstream_v17_cpu_v2/result.json",
+    "bsh_cpu": {
+      "passed": true,
+      "result": "../runs/upstream_bsh_cpu/result.json",
+      "sample_shapes_supplied": false,
+      "device_execution": false
+    },
+    "shared_imports": {
+      "passed": true,
+      "parent_child_match": true,
+      "result": "loaded_versions.json",
+      "launcher": "csa_roofline_optimization_20261020/run_isolated.sh"
+    },
+    "validated_at": "2026-10-21T18:47:25+08:00"
+  },
+  "shared_manifest": "../../csa_shared_toolchain/manifest.json",
+  "sessions": [
+    "CSA-SPMD",
+    "CSA-SPMD-TND",
+    "CSA-MPMD-TND"
+  ]
+}

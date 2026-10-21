@@ -201,9 +201,9 @@ def test_host_support_contract(tokens, requests, actual, max_q, length, expected
     )
 
 
-def service_case():
+def service_case(runtime_type=CSAServiceRuntime):
     case = native_case()
-    runtime = CSAServiceRuntime.__new__(CSAServiceRuntime)
+    runtime = runtime_type.__new__(runtime_type)
     runtime.prefixes = {name: name for name in case["groups"]}
     runtime.batch_capacity = 40
     runtime.layer_name = case["layer_name"]
@@ -311,14 +311,19 @@ def test_tnd_service_gate_rejects_unsupported_native_calls(fault):
     assert not runtime.eligible(context, case["hidden"], case["positions"])
 
 
-def test_custom_op_routes_mixed_tnd_and_reuses_prepared_workspace(monkeypatch):
+@pytest.mark.parametrize("variant", ["spmd_tnd", "mpmd_tnd"])
+def test_custom_op_routes_mixed_tnd_and_reuses_prepared_workspace(monkeypatch, variant):
     """真实custom-op Python边界接入新service；CPU桩只替代设备提交。"""
+    import importlib
+
     from vllm_ascend import memcache_comm_fence
     from vllm_ascend.attention import utils as attention_utils
     from vllm_ascend.ops import dsa, dsv4_csa
-    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd import service
 
-    runtime, context, case = service_case()
+    package = "deepseek_v4_flash_csa_spmd_tnd" if variant == "spmd_tnd" else "deepseek_v4_flash_csa_tnd"
+    service = importlib.import_module(f"vllm_ascend.ops.pypto.{package}.service")
+
+    runtime, context, case = service_case(service.CSAServiceRuntime)
     events, prepared_calls = [], []
     hadamard = torch.eye(128, dtype=torch.bfloat16)
     context.attn_metadata["indexer"].hadamard = hadamard
@@ -350,7 +355,7 @@ def test_custom_op_routes_mixed_tnd_and_reuses_prepared_workspace(monkeypatch):
             self.rebinds += 1
 
         def __call__(self):
-            events.append("spmd")
+            events.append(variant)
 
     monkeypatch.setattr(service, "PreparedDynamicCSA", Prepared)
     monkeypatch.setattr(torch.npu, "is_current_stream_capturing", lambda: False)
@@ -376,7 +381,7 @@ def test_custom_op_routes_mixed_tnd_and_reuses_prepared_workspace(monkeypatch):
     second_output = torch.empty_like(case["output"])
     monkeypatch.setattr(torch.npu, "is_current_stream_capturing", lambda: True)
     dsv4_csa.dsv4_csa_forward(case["hidden"], case["positions"], second_output, "layer")
-    assert events == ["wait", "start", "spmd", "notify", "save"] * 2
+    assert events == ["wait", "start", variant, "notify", "save"] * 2
     assert runtime.submissions == 2 and len(prepared_calls) == 1
     assert prepared_calls[0].rebinds == 1
     assert prepared_calls[0].native["x_out"] is second_output
@@ -477,7 +482,8 @@ def test_model_graph_contract_mismatch_redispatches_outside_graph(monkeypatch):
     "history,expected_graph",
     [(8192, True), (8185, False), (8186, True), (0, False), (1048575, False)],
 )
-def test_tnd_runner_preserves_framework_mixed_graph_choice(monkeypatch, history, expected_graph):
+@pytest.mark.parametrize("variant", ["spmd_tnd", "mpmd_tnd"])
+def test_tnd_runner_preserves_framework_mixed_graph_choice(monkeypatch, history, expected_graph, variant):
     from unittest.mock import Mock
 
     import numpy as np
@@ -486,7 +492,7 @@ def test_tnd_runner_preserves_framework_mixed_graph_choice(monkeypatch, history,
 
     from vllm_ascend.worker import model_runner_v1 as module
 
-    monkeypatch.setenv("PTO_CSA_VARIANT", "spmd_tnd")
+    monkeypatch.setenv("PTO_CSA_VARIANT", variant)
     monkeypatch.setattr(module, "enable_sp", lambda _: False)
     config = NS(
         model_config=NS(hf_config=NS(architectures=["PyptoCSADeepseekV4ForCausalLM"])),

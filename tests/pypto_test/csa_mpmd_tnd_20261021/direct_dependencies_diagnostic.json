@@ -1,0 +1,826 @@
+{
+  "candidate": "v13_direct_dependencies",
+  "status": "不采用；均值小幅改善而两档max均上升，保留原自动依赖，不扩大测试",
+  "graph": {
+    "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/matrix_v8_h131072_b16/l1_00_mpmd/deps.json",
+    "tasks": {
+      "hc_widen_rms": [],
+      "hc_linear": [
+        "hc_widen_rms"
+      ],
+      "hc_reduce": [
+        "hc_linear"
+      ],
+      "hc_pre_gates": [
+        "hc_reduce",
+        "hc_widen_rms"
+      ],
+      "hc_mix_norm": [
+        "hc_pre_gates",
+        "hc_widen_rms"
+      ],
+      "hc_sinkhorn": [
+        "hc_reduce",
+        "hc_widen_rms"
+      ],
+      "csa_row_offsets": [],
+      "csa_rope_sign": [],
+      "csa_inverse_rope": [],
+      "qproj_a": [
+        "hc_mix_norm"
+      ],
+      "indexer_compressor_kv_score": [
+        "hc_mix_norm"
+      ],
+      "qproj_a_rms_quant": [
+        "qproj_a"
+      ],
+      "indexer_compressor_pool": [
+        "indexer_compressor_kv_score"
+      ],
+      "indexer_state_commit": [
+        "indexer_compressor_kv_score",
+        "indexer_compressor_pool"
+      ],
+      "indexer_compressor_norm_rope": [
+        "csa_row_offsets",
+        "indexer_compressor_pool"
+      ],
+      "indexer_compressor_hadamard": [
+        "csa_row_offsets",
+        "indexer_compressor_norm_rope"
+      ],
+      "indexer_query_proj": [
+        "qproj_a_rms_quant"
+      ],
+      "indexer_query_rope": [
+        "csa_rope_sign",
+        "indexer_query_proj",
+        "qproj_a_rms_quant"
+      ],
+      "indexer_query_hadamard": [
+        "indexer_query_rope"
+      ],
+      "indexer_query_quant": [
+        "indexer_query_hadamard"
+      ],
+      "indexer_weights_proj": [
+        "hc_mix_norm"
+      ],
+      "indexer_weights_reduce": [
+        "indexer_weights_proj"
+      ],
+      "indexer_head_coefficients": [
+        "csa_row_offsets",
+        "indexer_query_quant",
+        "indexer_weights_reduce"
+      ],
+      "indexer_compressor_cache_write": [
+        "csa_row_offsets",
+        "indexer_compressor_hadamard"
+      ],
+      "indexer_scale_page_commit": [
+        "csa_row_offsets",
+        "indexer_compressor_cache_write"
+      ],
+      "compressor_kv_score": [
+        "hc_mix_norm",
+        "qproj_a"
+      ],
+      "compressor_pool": [
+        "compressor_kv_score"
+      ],
+      "compressor_state_commit": [
+        "compressor_kv_score",
+        "compressor_pool"
+      ],
+      "compressor_norm_rope_cache": [
+        "compressor_pool",
+        "csa_row_offsets"
+      ],
+      "qproj_b": [
+        "qproj_a_rms_quant"
+      ],
+      "qproj_dequant_rms_nope_rope": [
+        "csa_rope_sign",
+        "qproj_a_rms_quant",
+        "qproj_b"
+      ],
+      "kv_proj": [
+        "hc_mix_norm"
+      ],
+      "kv_norm_rope": [
+        "csa_rope_sign",
+        "kv_proj"
+      ],
+      "csa_cache_writeback": [
+        "kv_norm_rope"
+      ],
+      "index_score_topk": [
+        "csa_row_offsets",
+        "indexer_head_coefficients",
+        "indexer_query_quant",
+        "indexer_scale_page_commit"
+      ],
+      "indexer_topk_query": [
+        "csa_query_geometry",
+        "index_score_topk"
+      ],
+      "csa_attention_plan": [
+        "csa_query_geometry",
+        "indexer_topk_query"
+      ],
+      "sparse_attn_csa": [
+        "compressor_norm_rope_cache",
+        "csa_attention_plan",
+        "csa_cache_writeback",
+        "csa_inverse_rope",
+        "qproj_dequant_rms_nope_rope"
+      ],
+      "oproj_a": [
+        "sparse_attn_csa"
+      ],
+      "oproj_quant": [
+        "oproj_a"
+      ],
+      "oproj_b": [
+        "oproj_quant"
+      ],
+      "hc_post": [
+        "hc_pre_gates",
+        "hc_sinkhorn",
+        "oproj_b",
+        "oproj_quant"
+      ],
+      "csa_query_geometry": []
+    }
+  },
+  "results": [
+    {
+      "case": {
+        "name": "h131072_b16",
+        "history_label": 131072,
+        "active_requests": 16,
+        "request_capacity": 17,
+        "query_lengths": [
+          6,
+          1,
+          4,
+          2,
+          5,
+          3,
+          6,
+          1,
+          4,
+          2,
+          5,
+          3,
+          6,
+          1,
+          4,
+          2
+        ],
+        "history_lengths": [
+          131072,
+          131071,
+          131041,
+          130945,
+          130943,
+          130047,
+          129023,
+          130561,
+          131072,
+          131071,
+          131041,
+          130945,
+          130943,
+          130047,
+          129023,
+          130561
+        ],
+        "valid_tokens": 55,
+        "token_capacity": 64,
+        "dummy_query_lengths": [
+          9
+        ],
+        "query_start_loc": [
+          0,
+          6,
+          7,
+          11,
+          13,
+          18,
+          21,
+          27,
+          28,
+          32,
+          34,
+          39,
+          42,
+          48,
+          49,
+          53,
+          55,
+          64
+        ],
+        "seq_lens": [
+          131078,
+          131072,
+          131045,
+          130947,
+          130948,
+          130050,
+          129029,
+          130562,
+          131076,
+          131073,
+          131046,
+          130948,
+          130949,
+          130048,
+          129027,
+          130563,
+          0
+        ],
+        "position_rule": "active request r: history_lengths[r] + arange(query_lengths[r]); padding positions=0",
+        "seed": 20261024,
+        "table_history": 131072,
+        "indexer_page_pattern": "original",
+        "reverse_pages": false
+      },
+      "passed": true,
+      "reference_commit": "84751e34cb1f27eff9e4d3fdf03f8495982f1cdf",
+      "scope": "full CSA L1",
+      "enable_dep_gen": false,
+      "device_id": 1,
+      "sources": {
+        "spmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/sources/84751e34/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd",
+        "mpmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v13_direct_dependencies/operator",
+        "mpmd_control": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v8/operator"
+      },
+      "statistics_us": {
+        "spmd": {
+          "min": 728.14,
+          "mean": 731.304,
+          "max": 733.1,
+          "samples": [
+            733.1,
+            728.14,
+            732.48,
+            730.92,
+            731.88
+          ]
+        },
+        "mpmd_control": {
+          "min": 921.34,
+          "mean": 930.636,
+          "max": 935.92,
+          "samples": [
+            927.78,
+            921.34,
+            934.3,
+            935.92,
+            933.84
+          ]
+        },
+        "mpmd": {
+          "min": 914.84,
+          "mean": 927.104,
+          "max": 948.4,
+          "samples": [
+            914.84,
+            925.08,
+            948.4,
+            918.06,
+            929.14
+          ]
+        }
+      },
+      "windows": [
+        {
+          "side": "spmd",
+          "incore_span_us": 733.1,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_00_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_00_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 927.78,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_00_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_00_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 914.84,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_00_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_00_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 925.08,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_01_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_01_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 921.34,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_01_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_01_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 728.14,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_01_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_01_spmd/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 732.48,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_02_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_02_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 934.3,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_02_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_02_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 948.4,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_02_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_02_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 918.06,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_03_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_03_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 935.92,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_03_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_03_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 730.92,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_03_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_03_spmd/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 731.88,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_04_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_04_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 933.84,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_04_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_04_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 929.14,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_04_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h131072_b16/l1_04_mpmd/swimlane.json"
+        }
+      ],
+      "ratio": 1.2677409121240963,
+      "candidate_over_control": 0.9962047460016592,
+      "checks": {
+        "spmd_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        }
+      }
+    },
+    {
+      "case": {
+        "name": "h8192_b16",
+        "history_label": 8192,
+        "active_requests": 16,
+        "request_capacity": 17,
+        "query_lengths": [
+          6,
+          1,
+          4,
+          2,
+          5,
+          3,
+          6,
+          1,
+          4,
+          2,
+          5,
+          3,
+          6,
+          1,
+          4,
+          2
+        ],
+        "history_lengths": [
+          8192,
+          8191,
+          8161,
+          8065,
+          8063,
+          7167,
+          6143,
+          7681,
+          8192,
+          8191,
+          8161,
+          8065,
+          8063,
+          7167,
+          6143,
+          7681
+        ],
+        "valid_tokens": 55,
+        "token_capacity": 64,
+        "dummy_query_lengths": [
+          9
+        ],
+        "query_start_loc": [
+          0,
+          6,
+          7,
+          11,
+          13,
+          18,
+          21,
+          27,
+          28,
+          32,
+          34,
+          39,
+          42,
+          48,
+          49,
+          53,
+          55,
+          64
+        ],
+        "seq_lens": [
+          8198,
+          8192,
+          8165,
+          8067,
+          8068,
+          7170,
+          6149,
+          7682,
+          8196,
+          8193,
+          8166,
+          8068,
+          8069,
+          7168,
+          6147,
+          7683,
+          0
+        ],
+        "position_rule": "active request r: history_lengths[r] + arange(query_lengths[r]); padding positions=0",
+        "seed": 20261027,
+        "table_history": 8192,
+        "indexer_page_pattern": "original",
+        "reverse_pages": false
+      },
+      "passed": true,
+      "reference_commit": "84751e34cb1f27eff9e4d3fdf03f8495982f1cdf",
+      "scope": "full CSA L1",
+      "enable_dep_gen": false,
+      "device_id": 5,
+      "sources": {
+        "spmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/sources/84751e34/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd",
+        "mpmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v13_direct_dependencies/operator",
+        "mpmd_control": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v8/operator"
+      },
+      "statistics_us": {
+        "spmd": {
+          "min": 564.04,
+          "mean": 568.16,
+          "max": 575.04,
+          "samples": [
+            575.04,
+            567.96,
+            566.16,
+            567.6,
+            564.04
+          ]
+        },
+        "mpmd_control": {
+          "min": 747.98,
+          "mean": 756.136,
+          "max": 765.16,
+          "samples": [
+            754.04,
+            765.16,
+            747.98,
+            763.44,
+            750.06
+          ]
+        },
+        "mpmd": {
+          "min": 732.6,
+          "mean": 745.912,
+          "max": 774.86,
+          "samples": [
+            733.84,
+            732.6,
+            743.28,
+            774.86,
+            744.98
+          ]
+        }
+      },
+      "windows": [
+        {
+          "side": "spmd",
+          "incore_span_us": 575.04,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_00_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_00_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 754.04,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_00_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_00_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 733.84,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_00_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_00_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 732.6,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_01_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_01_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 765.16,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_01_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_01_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 567.96,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_01_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_01_spmd/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 566.16,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_02_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_02_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 747.98,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_02_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_02_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 743.28,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_02_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_02_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 774.86,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_03_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_03_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 763.44,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_03_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_03_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 567.6,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_03_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_03_spmd/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 564.04,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_04_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_04_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 750.06,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_04_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_04_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 744.98,
+          "records": 1032,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_04_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/direct_dependencies_v13_h8192_b16/l1_04_mpmd/swimlane.json"
+        }
+      ],
+      "ratio": 1.3128555336524923,
+      "candidate_over_control": 0.9864786228932362,
+      "checks": {
+        "spmd_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        }
+      }
+    }
+  ]
+}

@@ -2,6 +2,18 @@
 
 This document provides instructions for contributors to the vLLM Ascend project. Please read and follow these guidelines to ensure code quality, maintainability, and consistency.
 
+## Shared CSA toolchain (user requirement, 2026-10-21)
+
+CSA-SPMD、CSA-SPMD-TND、CSA-MPMD-TND 三个 session 必须使用同一套本地
+PyPTO、PTOAS、Simpler 源码和构建产物。唯一选择来自
+`tests/pypto_test/csa_shared_toolchain/manifest.json`；先 source 公共
+`env-dsv4-0251rc1.sh`，再 source `tests/pypto_test/csa_shared_toolchain/env.sh`。
+新任务使用公共 bootstrap 的 `--shared-toolchain`，不再另写个人 SDK 路径。
+子进程同样继承公共绑定。算子实验仍可冻结独立包，但不能另选工具链来比较性能。
+工具链更新须完成构建和受影响验证，再统一更新版本清单；`status=validating`
+表示仍在升级验证，不能当作已验收版本。历史结果和已冻结的旧启动器保留其原始
+版本信息，不能与新版本跨版本计算性能收益。不做逐文件重复 hash 扫描。
+
 ---
 
 ## Table of Contents

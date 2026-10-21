@@ -1,0 +1,803 @@
+{
+  "status": "adopted",
+  "experiment": "v14_nonempty_shape_gate",
+  "rule": "LIMIT_EMPTY_WORKERS = token_capacity <= 64",
+  "basis": "v11固定八档同进程消融 + v14启用/关闭两个分支设备集成验证",
+  "limitations": "没有以v14重跑完整八档；最终10%验收仍须最终采用版统一八档、边界/连续状态和16卡验证",
+  "results": [
+    {
+      "case": {
+        "name": "h131072_b4",
+        "history_label": 131072,
+        "active_requests": 4,
+        "request_capacity": 5,
+        "query_lengths": [
+          6,
+          1,
+          4,
+          2
+        ],
+        "history_lengths": [
+          131072,
+          131071,
+          131041,
+          130945
+        ],
+        "valid_tokens": 13,
+        "token_capacity": 16,
+        "dummy_query_lengths": [
+          3
+        ],
+        "query_start_loc": [
+          0,
+          6,
+          7,
+          11,
+          13,
+          16
+        ],
+        "seq_lens": [
+          131078,
+          131072,
+          131045,
+          130947,
+          0
+        ],
+        "position_rule": "active request r: history_lengths[r] + arange(query_lengths[r]); padding positions=0",
+        "seed": 20261022,
+        "table_history": 131072,
+        "indexer_page_pattern": "original",
+        "reverse_pages": false
+      },
+      "passed": true,
+      "reference_commit": "84751e34cb1f27eff9e4d3fdf03f8495982f1cdf",
+      "scope": "full CSA L1",
+      "enable_dep_gen": false,
+      "device_id": 15,
+      "sources": {
+        "spmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/sources/84751e34/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd",
+        "mpmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v14_nonempty_shape_gate/operator",
+        "mpmd_control": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v11_nonempty_workers/operator"
+      },
+      "policies": {
+        "spmd": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "COOPERATIVE_PREFIX": true,
+          "EARLY_ATTENTION_GEOMETRY": false,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": false,
+          "SPLIT_SCORE_ROWS": false,
+          "OUTPUT_WORK_BALANCE": false
+        },
+        "mpmd_control": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": false,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": false,
+          "SPLIT_SCORE_ROWS": false
+        },
+        "mpmd": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": false,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": false,
+          "SPLIT_SCORE_ROWS": false,
+          "LIMIT_EMPTY_WORKERS": true
+        }
+      },
+      "statistics_us": {
+        "spmd": {
+          "min": 456.72,
+          "mean": 470.776,
+          "max": 479.3,
+          "samples": [
+            474.52,
+            476.34,
+            467.0,
+            479.3,
+            456.72
+          ]
+        },
+        "mpmd_control": {
+          "min": 533.58,
+          "mean": 541.308,
+          "max": 550.86,
+          "samples": [
+            539.18,
+            547.68,
+            533.58,
+            550.86,
+            535.24
+          ]
+        },
+        "mpmd": {
+          "min": 523.76,
+          "mean": 535.232,
+          "max": 542.94,
+          "samples": [
+            537.9,
+            528.98,
+            542.58,
+            523.76,
+            542.94
+          ]
+        }
+      },
+      "windows": [
+        {
+          "side": "spmd",
+          "incore_span_us": 474.52,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_00_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_00_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 539.18,
+          "records": 602,
+          "task_groups": 42,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_00_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_00_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 537.9,
+          "records": 602,
+          "task_groups": 42,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_00_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_00_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 528.98,
+          "records": 602,
+          "task_groups": 42,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_01_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_01_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 547.68,
+          "records": 602,
+          "task_groups": 42,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_01_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_01_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 476.34,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_01_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_01_spmd/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 467.0,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_02_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_02_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 533.58,
+          "records": 602,
+          "task_groups": 42,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_02_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_02_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 542.58,
+          "records": 602,
+          "task_groups": 42,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_02_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_02_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 523.76,
+          "records": 602,
+          "task_groups": 42,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_03_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_03_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 550.86,
+          "records": 602,
+          "task_groups": 42,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_03_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_03_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 479.3,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_03_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_03_spmd/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 456.72,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_04_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_04_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 535.24,
+          "records": 602,
+          "task_groups": 42,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_04_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_04_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 542.94,
+          "records": 602,
+          "task_groups": 42,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_04_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b4/l1_04_mpmd/swimlane.json"
+        }
+      ],
+      "ratio": 1.1369143711659047,
+      "candidate_over_control": 0.9887753367768441,
+      "checks": {
+        "spmd_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        }
+      }
+    },
+    {
+      "case": {
+        "name": "h131072_b28",
+        "history_label": 131072,
+        "active_requests": 28,
+        "request_capacity": 29,
+        "query_lengths": [
+          6,
+          1,
+          4,
+          2,
+          5,
+          3,
+          6,
+          1,
+          4,
+          2,
+          5,
+          3,
+          6,
+          1,
+          4,
+          2,
+          5,
+          3,
+          6,
+          1,
+          4,
+          2,
+          5,
+          3,
+          6,
+          1,
+          4,
+          2
+        ],
+        "history_lengths": [
+          131072,
+          131071,
+          131041,
+          130945,
+          130943,
+          130047,
+          129023,
+          130561,
+          131072,
+          131071,
+          131041,
+          130945,
+          130943,
+          130047,
+          129023,
+          130561,
+          131072,
+          131071,
+          131041,
+          130945,
+          130943,
+          130047,
+          129023,
+          130561,
+          131072,
+          131071,
+          131041,
+          130945
+        ],
+        "valid_tokens": 97,
+        "token_capacity": 112,
+        "dummy_query_lengths": [
+          15
+        ],
+        "query_start_loc": [
+          0,
+          6,
+          7,
+          11,
+          13,
+          18,
+          21,
+          27,
+          28,
+          32,
+          34,
+          39,
+          42,
+          48,
+          49,
+          53,
+          55,
+          60,
+          63,
+          69,
+          70,
+          74,
+          76,
+          81,
+          84,
+          90,
+          91,
+          95,
+          97,
+          112
+        ],
+        "seq_lens": [
+          131078,
+          131072,
+          131045,
+          130947,
+          130948,
+          130050,
+          129029,
+          130562,
+          131076,
+          131073,
+          131046,
+          130948,
+          130949,
+          130048,
+          129027,
+          130563,
+          131077,
+          131074,
+          131047,
+          130946,
+          130947,
+          130049,
+          129028,
+          130564,
+          131078,
+          131072,
+          131045,
+          130947,
+          0
+        ],
+        "position_rule": "active request r: history_lengths[r] + arange(query_lengths[r]); padding positions=0",
+        "seed": 20261026,
+        "table_history": 131072,
+        "indexer_page_pattern": "original",
+        "reverse_pages": false
+      },
+      "passed": true,
+      "reference_commit": "84751e34cb1f27eff9e4d3fdf03f8495982f1cdf",
+      "scope": "full CSA L1",
+      "enable_dep_gen": false,
+      "device_id": 5,
+      "sources": {
+        "spmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/sources/84751e34/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd",
+        "mpmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v14_nonempty_shape_gate/operator",
+        "mpmd_control": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v8/operator"
+      },
+      "policies": {
+        "spmd": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 256,
+          "OB_ROWS": 128,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "COOPERATIVE_PREFIX": true,
+          "EARLY_ATTENTION_GEOMETRY": true,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": true,
+          "PLAN_PHYSICAL_ROWS": true,
+          "SPLIT_SCORE_ROWS": true,
+          "OUTPUT_WORK_BALANCE": false
+        },
+        "mpmd_control": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 256,
+          "OB_ROWS": 128,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": true,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": true,
+          "PLAN_PHYSICAL_ROWS": true,
+          "SPLIT_SCORE_ROWS": true
+        },
+        "mpmd": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 256,
+          "OB_ROWS": 128,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": true,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": true,
+          "PLAN_PHYSICAL_ROWS": true,
+          "SPLIT_SCORE_ROWS": true,
+          "LIMIT_EMPTY_WORKERS": false
+        }
+      },
+      "statistics_us": {
+        "spmd": {
+          "min": 979.54,
+          "mean": 984.504,
+          "max": 989.22,
+          "samples": [
+            982.36,
+            989.22,
+            985.16,
+            986.24,
+            979.54
+          ]
+        },
+        "mpmd_control": {
+          "min": 1212.56,
+          "mean": 1221.7,
+          "max": 1247.4,
+          "samples": [
+            1217.58,
+            1247.4,
+            1217.68,
+            1213.28,
+            1212.56
+          ]
+        },
+        "mpmd": {
+          "min": 1209.0,
+          "mean": 1222.812,
+          "max": 1249.02,
+          "samples": [
+            1249.02,
+            1220.74,
+            1209.0,
+            1214.6,
+            1220.7
+          ]
+        }
+      },
+      "windows": [
+        {
+          "side": "spmd",
+          "incore_span_us": 982.36,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_00_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_00_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 1217.58,
+          "records": 1202,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_00_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_00_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 1249.02,
+          "records": 1202,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_00_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_00_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 1220.74,
+          "records": 1202,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_01_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_01_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 1247.4,
+          "records": 1202,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_01_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_01_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 989.22,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_01_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_01_spmd/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 985.16,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_02_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_02_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 1217.68,
+          "records": 1202,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_02_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_02_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 1209.0,
+          "records": 1202,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_02_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_02_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 1214.6,
+          "records": 1202,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_03_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_03_mpmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 1213.28,
+          "records": 1202,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_03_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_03_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 986.24,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_03_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_03_spmd/swimlane.json"
+        },
+        {
+          "side": "spmd",
+          "incore_span_us": 979.54,
+          "records": 72,
+          "task_groups": 1,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_04_spmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_04_spmd/swimlane.json"
+        },
+        {
+          "side": "mpmd_control",
+          "incore_span_us": 1212.56,
+          "records": 1202,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_04_mpmd_control/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_04_mpmd_control/swimlane.json"
+        },
+        {
+          "side": "mpmd",
+          "incore_span_us": 1220.7,
+          "records": 1202,
+          "task_groups": 43,
+          "cores": 72,
+          "dependency_capture": false,
+          "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_04_mpmd/chip_swimlane_records.json",
+          "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/nonempty_gate_v14_h131072_b28/l1_04_mpmd/swimlane.json"
+        }
+      ],
+      "ratio": 1.2420589454182003,
+      "candidate_over_control": 1.0009102070884832,
+      "checks": {
+        "spmd_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "all_guards": true,
+          "all_bit_equal": true
+        }
+      }
+    }
+  ]
+}

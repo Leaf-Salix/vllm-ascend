@@ -19,9 +19,23 @@ from pathlib import Path
 
 
 def check_toolchain(manifest_path):
+    if manifest_path is None and os.environ.get("CSA_SHARED_TOOLCHAIN_MANIFEST"):
+        manifest_path = Path(os.environ["CSA_SHARED_TOOLCHAIN_MANIFEST"])
     if manifest_path is None:
         return {"passed": True, "scope": "Frozen BSH toolchain checked by launcher"}
     manifest = json.loads(manifest_path.read_text())
+    if "release" in manifest:
+        workspace = Path(os.environ["PTO_EAGER_ROOT"])
+        expected = {
+            "CSA_STATIC_PYPTO_ROOT": workspace / manifest["pypto"]["source"],
+            "PTOAS_ROOT": workspace / manifest["ptoas"]["build"],
+            "HCA_SIMPLER_ROOT": workspace / manifest["simpler"]["source"],
+        }
+        for name, root in expected.items():
+            if not os.environ.get(name) or Path(os.environ[name]).resolve() != root.resolve():
+                raise RuntimeError(f"公共 CSA 工具链路径不一致：{name}")
+        return {"passed": True, "manifest": str(manifest_path), "release": manifest["release"],
+                "scope": "shared source/build paths; loaded artifacts checked separately"}
     mismatches = [
         path
         for path, expected in manifest["files"].items()
@@ -55,7 +69,7 @@ def runtime_artifacts(*, require_loaded=False):
             raise RuntimeError(f"Expected runtime extension was not loaded: {name}")
         paths[name] = path
     return {
-        name: {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        name: {"path": str(path), "size_bytes": path.stat().st_size}
         for name, path in paths.items()
     }
 

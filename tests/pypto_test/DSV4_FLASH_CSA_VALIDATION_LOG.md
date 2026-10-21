@@ -20297,3 +20297,360 @@ WS不合入：731–732节已证明核内受益、完整回退且根因未收口
 按用户“已动代码完成、有益保留”的补充要求，本轮将上述分档改动及结果一起
 提交，随后停止测试和优化，不自动push。
 [采用与验证状态](csa_multitask_backport_20261020/QA_SHAPE_GATE_STATUS.json)。
+
+
+## 735. 2026-10-21：TND MPMD 新阶段，冻结参考与真实混长验收集草案
+
+用户目标：以 `84751e34cb1f27eff9e4d3fdf03f8495982f1cdf` 的
+`deepseek_v4_flash_csa` 多 task DAG 为骨架，结合同提交 `deepseek_v4_flash_csa_spmd_tnd`
+的原生 TND 合同及已验证核内实现。新增 `deepseek_v4_flash_csa_tnd`；保留旧入口。
+用户再次明确：完整 CSA 不能实现成一个 SPMD。当前先只看完整 L1（首个 incore 开始至最后一个结束），
+不另加 L4 或整模型性能门槛；最终目标仍包含真实 vLLM 接入与 16 卡功能验证。
+
+冻结八档：128K B1/B4/B8/B16/B24/B28，8K B16/B32；组内等权几何平均，长短权重 0.8/0.2，
+MPMD/SPMD 综合比值须 ≤0.90。单卡、同进程、同输入初态、同工具链、五窗交替采样，记录 min/mean/max。
+源码和轻量证据位于 [csa_mpmd_tnd_20261021](csa_mpmd_tnd_20261021/)。
+`cases.json` 当前是待冻结 SPMD 设备验证的草案：B1 固定 S6；其他档使用固定混合 S1～S6、
+变长历史、真实 query_start_loc 与独立 dummy 请求/容量，绝不重排成统一 B×6。
+验证通过后冻结；若冻结后发现 测试场景 错误，先报告并确认，不能静默修改分母。
+
+### 参考优化与迁移核对
+
+| 参考能力 | 现有 BSH 多 task 情况 | 本轮处理与证据 |
+| --- | --- | --- |
+| HC widen/RMS、split-K、gates、norm、Sinkhorn 分工 | 已有独立 task，已验证 | 保留多 task 链；以冻结 TND 数学核对数值 |
+| Q_A、Q_R、Q_B、KV、量化和 RoPE | 已有独立投影/Vector task；QA 小 M16 分档已验证 | 保留独立调度与 Q_A 对主 Compressor 的优先关系 |
+| 两条 Compressor 共享前缀状态 | 现有 `T/B`、`token//6` 绑定固定 S6 | 移植 TND Q/L pooling、全读完再 commit、compact 元数据合同；两条 state 独立 |
+| Indexer 分组、叶计划与 Top-K | 固定 S6 导出请求；已有已验证长短 Score、NZ/FIX 优化 | 使用 TND 真实请求 group/leaf 计划，Score 保持局部 MIX，Top-K 独立 task |
+| scale 页所有权/连续布局证明 | 现有独立 metadata task | 在设备侧生成本轮计划，复用 Native interleaved cache，无入口拆分或 Host D2H |
+| Attention 页计划与 QK/PV | 固定 S6 寻址；已有独立 plan 和局部 MIX | 换成 TND 的真实 query owner、padding 与页检查；仍独立于 Indexer 与输出链 |
+| O_A、量化、O_B、HCpost | 独立 task；小 T HCpost 已验证 | 保留独立任务链；SPMD 的 OA/OB 同核互补分工不能不加分析地照搬 |
+| 单 SPMD GM phase 通知 | 为常驻 SPMD 跨核协作而设 | 跨 task 依赖交给 TMR；只保留 Score/Attention 自身 Cube/Vector FFTS 流水 |
+| TND v83/v87/v88/v89 等 CPU 候选 | 参考日志未给出正式采用的设备证据 | 不作为已验证优化直接采用 |
+
+工具链按参考 `native_toolchain_manifest.json`：PyPTO `65477973` + 原生 150tick 等补丁、
+PTOAS `b48c84eb` + 同配套补丁、Simpler `57e49923`，两侧使用同一实际副本；当前未修改 SDK。
+源级初版按 BSH 多 task 边界组织了 43 个 task scope，其中仅 Score 和 Attention 各自为局部 MIX。
+这只是待编译/设备验证的实现，不代表数值已通过，也没有性能达标结论。
+
+
+### 735.1：多 task 初版设备验证与场景冻结（首阶段）
+
+2026-10-21 完成首个独立 TND MPMD 路径。长/短策略 CPU 后端编译通过；生成编排含 43 处独立 runtime submit，
+只有 Score 与 Attention 各自使用 MIX，其余投影、Compressor、量化、cache 写回及 HCpost 独立调度。
+跨 task 已删除单 SPMD 的 GM phase/代际工作区与轮询，改用 Tensor/TaskId 依赖；数学内必要的 FFTS 保留。
+
+用户确认 ACLGraph 容量 padding 必须纳入测试，并要求后续中文称“测试场景”。核对 Native
+`model_runner_v1._pad_query_start_loc_for_fia` 后，在冻结前修正尾部表达：mixed 分支只追加一个失活请求，
+其 Q 区间可超过六行；实际请求仍 S1～S6，dummy 的 L=0、slots=-1。此前拆成多个 dummy 的结果仅保留为初验。
+只补测受影响的 128K B16/B24/B28、8K B16/B32，B1/B4/B8 的场景内容没有变化，复用原结果。
+
+`cases.json` v2 已冻结。容量 6/16/32/64/96/112 是本轮显式配置的单卡图分档，
+不表示所有 vLLM 部署都会自动选择这组档位；16 卡真实捕获配置另行记录。真实 query、历史、seed、
+活动量/容量、Native 页与状态初态规则均明确记录，之后不为优化分支修改场景。
+
+八档在 eager、图重放、性能采样后的输出、Top-K、scores、所有 cache/state 写区均与冻结 TND SPMD **逐 bit 一致**；
+写区之外的 Native 原存储、只读 metadata 与工作区首尾保护均通过。
+尚未完成 B1 S1～S6 边界集、真实连续状态推进和 16 卡模型验证，不能用本次结果代替。
+
+完整 L1 初始数据如下（μs，五窗交替配对，开启 L1 及 dep_gen）：
+
+| 场景 | SPMD min | SPMD mean | SPMD max | MPMD min | MPMD mean | MPMD max | MPMD/SPMD mean |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| h131072_b1 | 351.22 | 359.14 | 366.78 | 479.52 | 493.25 | 511.82 | 1.373399 |
+| h131072_b4 | 474.20 | 476.68 | 478.06 | 590.28 | 607.54 | 620.12 | 1.274532 |
+| h131072_b8 | 550.58 | 553.34 | 556.10 | 707.94 | 712.40 | 717.92 | 1.287438 |
+| h131072_b16 | 713.94 | 718.56 | 722.40 | 914.72 | 918.89 | 924.40 | 1.278791 |
+| h131072_b24 | 834.02 | 836.87 | 841.72 | 1080.60 | 1092.13 | 1108.46 | 1.305012 |
+| h131072_b28 | 967.84 | 982.52 | 989.94 | 1217.76 | 1226.36 | 1232.92 | 1.248182 |
+| h8192_b16 | 565.70 | 572.28 | 580.50 | 775.82 | 781.34 | 792.28 | 1.365294 |
+| h8192_b32 | 742.14 | 746.80 | 752.10 | 964.98 | 976.98 | 993.90 | 1.308216 |
+
+G128=1.293980，G8=1.336451，综合 G=1.302365；当前比冻结 SPMD 慢约 30.24%，**未达到 G≤0.90**。
+完整采样、逐张量误差/bit 检查及泳道路径见 [initial_evidence.json](csa_mpmd_tnd_20261021/initial_evidence.json)。
+此阶段提交解决功能迁移、可复现对照和测试合同，不宣称性能优化完成；未注册新 vLLM variant。
+
+下一步先排查初版差距：核对 dep_gen 是否扰动 AICPU 提交，再恢复 BSH 已有的权重缓存提示，
+根据泳道安排 Indexer 关键投影/Vector 链与 Q_B、KV、主 Compressor 的优先关系。当前 128K/B16
+初验泳道中 Score 约到 400μs 才启动，不能把整个差距直接归因于 Score 核内数学。
+所有后续取舍仍看同一冻结场景、同工具链下的完整 L1，而不是只看核内耗时。
+
+
+### 735.2：量化依赖采集干扰，后续主性能只保留 L1
+
+Simpler TMR 的 `submit_task_common` 在 dep_gen 开启时调用
+`dep_gen_aicpu_record_submit`，逐 task 复制 Tensor 描述符到采集缓冲，确实位于 AICPU 提交路径。
+不改算子/工具链/场景，在各自前次相同设备（长 B16 为5，短 B16 为10）补测两侧同时关闭 dep_gen：
+
+| 场景 | dep_gen=1 SPMD mean | dep_gen=1 MPMD mean | dep_gen=0 SPMD mean | dep_gen=0 MPMD mean |
+| --- | ---: | ---: | ---: | ---: |
+| 128K/B16 | 718.560 | 918.888 | 729.048 | 923.656 |
+| 8K/B16 | 572.284 | 781.336 | 574.532 | 754.936 |
+
+均为完整 L1、五窗，数值/图/保护检查通过。不同采集配置分进程，不能把所有差异都归因于 dep_gen：
+长档未改善，短档 MPMD 降约3.38%；该干扰不足以解释主要性能差距，停止扩大该项测试。
+后续主性能默认 `enable_chip_swimlane=1, enable_dep_gen=False`；需要调度图时显式 `--dep-gen`，
+与主性能结果分开。关闭依赖采集的原始 L1 时间戳仍有效，当前转换图中的 task 名称可能未解析；
+不填造本次没有采到的依赖。原始完整记录见 [dep_gen_diagnostic.json](csa_mpmd_tnd_20261021/dep_gen_diagnostic.json)。
+
+下一候选只恢复已有五张流式权重的 BYPASS 提示，先在私有包测试。测量同时放入冻结 SPMD、
+未改的 MPMD 控制组、候选 MPMD，保持同进程输入/初态和交替窗口，以避免把基线漂移当成代码收益。
+
+
+### 735.3：五张权重 BYPASS 同进程消融，收益小，暂不合入
+
+私有 v10 只在 Q_A、Q_B、KV、O_A、O_B 的 task 直属作用域恢复 BYPASS；
+这是冻结 SPMD 的流式权重提示，不改权重存储或数学。两档同进程同时运行冻结 SPMD、
+未改 MPMD 控制组及候选，L1 开、dep_gen 关，五窗交替且每次恢复同一初态。
+
+| 场景 | SPMD min/mean/max | MPMD 控制 min/mean/max | BYPASS min/mean/max | 候选/控制 mean |
+| --- | --- | --- | --- | ---: |
+| 128K/B16 | 715.74/720.08/726.42 | 908.20/927.42/941.58 | 900.66/918.16/924.48 | 0.990020 |
+| 8K/B16 | 539.08/567.10/588.50 | 750.18/757.89/764.72 | 742.48/755.67/767.82 | 0.997071 |
+
+单位 μs。eager、图重放及采样后，三组输出/Top-K/scores/cache/state 均逐 bit 一致，保护检查通过。
+长档 mean 降约1%、max 降17.10μs；短档 mean 只降0.293%、max 增3.10μs。
+每档只有3/5配对窗口更快，不能把小幅均值差宣称为稳定优化；暂不合入，不为此扩八档。
+候选相对同轮 SPMD 仍慢27.51%/33.25%，没有达到目标。完整采样与采用状态见
+[weight_bypass_diagnostic.json](csa_mpmd_tnd_20261021/weight_bypass_diagnostic.json)。
+
+继续检查关键前段：初版多个 task 沿用常驻 SPMD 的24/48 worker上限，
+即使逻辑工作远少于该上限也会整组占核；例如 Indexer compact Hadamard 实际只需少数块。
+下一候选只根据已有 Tensor 容量和原逻辑循环上界消除可证明的空 worker，
+不修改每块数学、核内 stride、真实 Q/L 或测试场景。
+
+
+### 735.4：删除空 worker 的八档对照，小容量获益，大容量分档保留原分工
+
+v11 只收紧十处 task 的 launch 上界，仍保留43个独立 task、原数学、核内条带步长与依赖。
+QA 按既有 M32/M64/M16 分工；两 Compressor、两 Hadamard、head-weight、KV、输出量化和 HCpost
+均依据逻辑循环或已有工作区容量剔除确定为空的 worker，不读设备 Q/L 到 Host。
+特别是 KV 每段最多3个 M group ×4个 N128工作块，上界12；compact Hadamard 采用容量上界而非猜实际关闭行数。
+
+同进程三组，L1开、dep_gen关，固定五窗、相同初态；所有八档 eager/图/采样后输出、Top-K、scores、
+cache/state逐bit一致，保护检查通过。单位μs：
+
+| 场景 | SPMD min/mean/max | 原MPMD min/mean/max | 删除空worker min/mean/max | 相对原MPMD mean降低 |
+| --- | --- | --- | --- | ---: |
+| h131072_b1 | 361.44/367.90/373.08 | 495.84/501.88/517.92 | 422.22/429.53/436.42 | +14.417% |
+| h131072_b4 | 474.52/481.92/493.70 | 605.12/612.62/620.40 | 555.48/561.39/567.98 | +8.362% |
+| h131072_b8 | 559.96/564.00/567.36 | 713.32/723.71/729.04 | 635.62/646.24/658.78 | +10.704% |
+| h131072_b16 | 722.00/726.14/732.12 | 927.38/935.98/946.70 | 887.94/912.16/935.08 | +2.544% |
+| h131072_b24 | 834.66/837.54/845.92 | 1067.72/1075.29/1088.36 | 1057.12/1073.20/1093.30 | +0.195% |
+| h131072_b28 | 978.60/986.52/993.34 | 1210.00/1220.14/1230.64 | 1229.64/1244.59/1250.78 | -2.003% |
+| h8192_b16 | 558.24/565.95/575.76 | 745.64/759.22/779.28 | 731.86/741.88/752.06 | +2.283% |
+| h8192_b32 | 730.18/734.41/737.24 | 956.96/965.59/979.40 | 959.58/966.32/977.16 | -0.075% |
+
+全域候选相对原MPMD加权比值 0.950486，相对SPMD G=1.231352，仍未达到0.90。
+128K B1/B4/B8/B16与8K B16受益；128K B28回退2.003%，B24仅降0.195%且max上升，短B32近乎持平。
+采用计划：按token容量≤64（最多两个M32主体行块）启用，较大容量继续原分工，避免强行全域统一。
+本轮同进程数据按该规则组合得到G=1.228327，这里只是集成前估算，不能冒充v14新分支实测。
+已在正式目标中准备 LIMIT_EMPTY_WORKERS 编译期策略，v14冻结后补两个分支的编译/设备接入检查；
+此前八档已经覆盖实际数学与每档性能，不重复无依据的全量测试。详细数据见
+[nonempty_workers_matrix.json](csa_mpmd_tnd_20261021/nonempty_workers_matrix.json)。
+
+
+### 735.5：等价直接 TaskId 依赖消融，收益不足，不采用
+
+从首版实际采集的依赖图提取43个task的68条去重WAIT边，在私有v13中原样转为manual_scope下的TaskId依赖。
+未修改核内helper、launch数量、early resolve、sync_start和数学；关闭early geometry时，
+Top-K的附加依赖使用已有metadata task，原本已由Score传递等待，不新增dummy。
+独立CPU完整编译通过；两档以原v8为控制组，冻结SPMD同时参与，五窗纯L1。
+
+| 场景 | 原MPMD min/mean/max | 直接依赖 min/mean/max | 同轮SPMD min/mean/max |
+| --- | --- | --- | --- |
+| 128K/B16 | 921.34/930.64/935.92 | 914.84/927.10/948.40 | 728.14/731.30/733.10 |
+| 8K/B16 | 747.98/756.14/765.16 | 732.60/745.91/774.86 | 564.04/568.16/575.04 |
+
+两档输出、Top-K、score、cache/state与保护、eager/图/采样后检查全部逐bit通过。
+长档mean仅降低0.380%、max增加12.48μs；短档mean降低1.352%、max增加9.70μs。
+不能把这轮结果解释成主差距来自TensorMap；不采用、不扩八档。重建脚本为
+`prepare_direct_dependencies.py`，完整边图及采样见
+[direct_dependencies_diagnostic.json](csa_mpmd_tnd_20261021/direct_dependencies_diagnostic.json)。
+
+输出分组流水候选v12仍停在CPU：把原整组OA/quant/OB拆为8条独立组链后，
+O_B动态N偏移的NZ非负证明失败。已尝试简化全局编号和显式非负表达，尚未解决；
+未改SDK，未占卡测试，不宣称功能或性能通过。该优化点仍待解决，不标完成。
+
+下一候选v15从分档非空worker版本出发，只调整三条优先关系：主Compressor和Q_B等Indexer query投影，
+Q反量化等Indexer query RoPE。保留原计算与所有业务依赖，测试是否减少Score前的关键链排队，
+而不是把Q/KV整条链统一推到Score之后。
+
+
+### 735.6：采用小容量非空 worker 分档，较大容量保留原分工
+
+v14将735.4的变化按token容量≤64选择；阈值来自两个M32主体行块内的已测资源域，
+不枚举B/历史长度，不读设备Q/L。公式复用各核内模块的tile常量，避免两处常量漂移；
+helper及其GROUPS/VECTORS条带步长不变，分支在编译期消除。未采用BYPASS或manual依赖候选。
+
+分支启用/关闭两份CPU完整编译通过。只补两个设备集成检查：
+
+| 场景与对照 | 已测对照 min/mean/max | 分档版 min/mean/max | 同轮SPMD min/mean/max |
+| --- | --- | --- | --- |
+| 128K/B4，启用，对照v11 | 533.58/541.31/550.86 | 523.76/535.23/542.94 | 456.72/470.78/479.30 |
+| 128K/B28，关闭，对照原v8 | 1212.56/1221.70/1247.40 | 1209.00/1222.81/1249.02 | 979.54/984.50/989.22 |
+
+单位μs，五窗纯L1、同进程。两档全部输出/Top-K/scores/cache/state逐bit一致，保护与图检查通过。
+大容量分支相对原版mean变化+0.091%，没有复现全域删空worker时B28约2%的回退。
+正式采用分档，不把B4这次与v11的小幅波动另外算成一种优化，也不拼接更快样本重算八档。
+八档性能沿用735.4的消融证据，集成后的最终全量验收留给后续最终版；当前远未达到G≤0.90。
+详见[nonempty_workers_adoption.json](csa_mpmd_tnd_20261021/nonempty_workers_adoption.json)。
+
+阶段状态：首个明确有益的分档调度改动完成；真实vLLM入口、B1边界及连续状态、16卡验证仍待做。
+v15的三条Indexer优先依赖正在单卡验证，尚未采用。
+
+
+### 735.7：Indexer优先与局部Vector融合完成单卡检查，输出逐组流水否决
+
+本节均为升级前同一工具链，不能与后续官方修复工具链跨版本计算收益。
+固定混长/尾部padding的128K/B16和8K/B16，同进程SPMD、MPMD控制、候选三组，
+五窗纯L1。六次运行均完成eager、图重放、采样后数值和保护检查。
+
+| 候选 | 场景 | MPMD控制 min/mean/max | 候选 min/mean/max | 同轮SPMD min/mean/max |
+| --- | --- | --- | --- | --- |
+| v15 Indexer query优先 | 128K/B16 | 889.02/916.13/947.02 | 905.00/908.72/915.20 | 739.30/743.74/747.36 |
+| v15 Indexer query优先 | 8K/B16 | 756.10/767.96/774.12 | 721.48/743.16/756.28 | 558.36/571.79/576.54 |
+| v16 同核Vector局部融合 | 128K/B16 | 892.80/905.55/919.26 | 859.34/889.02/911.70 | 728.66/733.16/737.70 |
+| v16 同核Vector局部融合 | 8K/B16 | 727.98/740.17/753.44 | 716.98/735.00/751.82 | 575.62/580.12/586.06 |
+| v12 输出逐组流水 | 128K/B16 | 896.42/909.84/919.68 | 914.50/920.67/925.20 | 719.70/728.56/737.78 |
+| v12 输出逐组流水 | 8K/B16 | 740.06/771.10/780.70 | 777.68/784.65/788.52 | 547.86/557.15/566.84 |
+
+单位μs。v15和v16控制均为已采用的v14，v12控制为原v8，不能将三轮串成累计提升。
+输出、Top-K、scores和cache/state均逐bit一致，保护检查通过。
+
+v15只增加三条Indexer query优先依赖：主Compressor与Q_B等query投影，Q反量化等query RoPE。
+长档mean降低0.808%、max降低31.82μs，短档mean降低3.229%；候选保留但尚未进入正式入口。
+v16将HC gates→mix norm、Indexer pool→norm RoPE、main pool→norm RoPE cache三对同owner
+Vector任务局部融合，43组减为40组；中间bar_all保证原GM写入可见，状态commit仍等整个pool组。
+长/短mean分别降低1.825%/0.699%；保留候选，后续在新工具链下联合检查，不把两项收益相加。
+
+更正735.5的v12状态：CPU范围证明问题已经定位并解决。外层parallel的组号非负事实在
+Simplify中消除了max保护，而OutlineIncore捕获标量后不再携带该范围；改用独立@pl.jit.incore
+入口、scope内单调用，并在incore内计算worker映射后，两份完整CPU编译及设备验证通过。
+但8组OA→quant→OB拆分增加task组数后，长/短完整mean分别回退1.190%/1.757%，因此不采用。
+这是一项已经完成且否决的性能尝试，不能继续标成仅CPU受阻。
+
+全部样本、数值汇总与原始证据链接见
+[priority_fusion_output_results.json](csa_mpmd_tnd_20261021/priority_fusion_output_results.json)。
+
+### 735.8：接入独立mpmd_tnd服务入口，CPU合同检查57项通过
+
+新增PTO_CSA_VARIANT=mpmd_tnd，仍保留performance及spmd_tnd入口。
+MPMD服务复用TND的Native绑定、图描述符、cache connector及回退生命周期，通过三个工厂钩子
+替换权重签名、资源策略和PreparedDynamicCSA实际提交；没有调用单SPMD数学入口。
+模型准备使用decode_csa_tnd根签名，仍限定NZ2、TMR、TP1及原有CSA模型路径。
+
+CPU合同测试对SPMD/MPMD两种variant检查真实custom-op分派、缓存工作区复用、图捕获重绑、
+Native回退和框架混合TND分档选择：57 passed（旧工具链，未占NPU）。Ruff通过。
+这只证明Python接入边界；真实模型、连续状态、16卡验证仍未完成，不能作为整模型通过依据。
+
+
+### 735.9：拉取CSA-SPMD已修复issue，并统一三个session的本地工具链
+
+用户要求采用CSA-SPMD session已提交/跟进issue的官方修复，随后明确要求
+CSA-SPMD、CSA-SPMD-TND、CSA-MPMD-TND三个session使用同一套本地版本，
+并已停止另外两个session以便切换。此要求取代各session分别选取SDK的工作方式。
+
+已以最新kernel调试分支3cc5c61d为基础，移植9项PyPTO官方已合入修复（含既有#2951），
+PTOAS采用master 2a2bad22，包含#1620动态地址同步和#1622 CFG并行赋值修复。
+继续使用Simpler 57e49923，保留CORE256 ABI、原生150tick等待和CSA已验证的必要补丁。
+说明关闭而没有实现变更的#2886不算代码修复；仍open的PR不冒充已正式合入。
+具体issue、官方提交、本地适配和实时GitHub查询证据见
+[修复接入记录](csa_mpmd_tnd_20261021/upstream_refresh_20261021/README.md)。
+
+三个日常入口已改读唯一清单
+[`csa_shared_toolchain/manifest.json`](csa_shared_toolchain/manifest.json)，
+公共bootstrap新增--shared-toolchain，Python子进程继承同一源码绑定，避免editable finder
+选回旧包。BSH历史清单只提供冻结算子源码，当前SDK由公共清单选择。
+已停止的两个session恢复后应直接使用这些公共入口。仓库与工作区AGENTS均记录此要求。
+公共PTOAS缺少可执行产物时立即报错，不从PATH回退到旧版本。
+
+当前阶段仍为validating：PyPTO及torch_npu桥接已经独立构建，核心回归891项通过，
+共享目的存储/内存规划代码生成152项通过，算术及tensor.dim代码生成19项通过。
+5个packed-FP4测试属于调试分支不存在的类型，明确跳过；3个PTOAS编译检查待新产物完成。
+两项Buffer函数恒等测试保留完整IR及属性验证，因本分支未实现pl.buffer文本解析，
+不执行该项文本roundtrip；未放宽CSA精度门槛。冻结SPMD/MPMD的128K/B16前端解析通过。
+这些CPU检查不执行PTOAS或NPU，不能替代完整编译和单卡验收。
+
+PTOAS完整构建仍在进行。尚未开始新工具链的NPU计时，未将旧版本的性能数据用作新版收益。
+历史冻结实验和源码目录保留，后续正式实验统一从公共入口生成；不反复扫描文件hash。
+
+
+### 735.10：公共工具链通过构建、回归和长短单卡验证，三个session统一启用
+
+正式版本：PyPTO `e891351`、PTOAS `914863e`（0.69）、Simpler `57e49923`。
+公共manifest已标为validated，CSA-SPMD、CSA-SPMD-TND、CSA-MPMD-TND的日常入口
+及Python子进程均读取同一份实际源码和构建产物。父子进程加载检查通过，结果保存在
+[loaded_versions.json](csa_mpmd_tnd_20261021/upstream_refresh_20261021/loaded_versions.json)。
+该记录及作业清单保留采集时的validating标签，正式状态以公共manifest为准。
+
+升级过程中补齐两处实际兼容问题：官方共享目标视图与旧move特例叠加导致重复reshape，
+现由PrepareTileDestination统一处理，并保留上游全零replay sentinel规则；新分支的
+常量Scalar填充转换会对原本纯Scalar的metadata产生MTE3/Scalar混写，现只在不会
+制造混写时采用DMA转换，失败则保留原Scalar循环。复用既有别名分析，不关闭真实混写拒绝，
+不修改冻结算子源码、场景或精度门槛。详细中文Signed-off-by提交为PyPTO `e891351`。
+
+定向结果分别列出，存在覆盖重叠，不能相加冒充唯一用例数量：
+
+- 初始核心回归891项、代码生成152项、算术/形状代码生成19项通过。
+- 实际兼容修复后，5个受影响文件373 passed、6 skipped：5项为packed-FP4缺失类型，
+  1项为主线完整Buffer IR lowering尚未进入调试分支；保留原断言，不算通过。
+- PTOAS定向12项、PyPTO算术/形状与PTOAS联编14项通过。
+- 冻结MPMD的128K/B16完整CPU后端编译通过；当前BSH单SPMD的完整动态入口CPU编译通过。
+- 长短两档设备任务均通过eager、图重放和采样后检查；每阶段9项输出/Top-K/scores/cache-state
+  逐bit一致，SPMD的101项、MPMD的100项保护/只读检查通过。只覆盖本轮场景，不外推到全部八档。
+
+更正迁移范围：初次PTOAS回归纳入了历史GM列分片候选测试，但旧工具链`e5c1c432`
+已明确撤回该优化，源码中的说明/测试未同步清理。该测试不属于现行能力，
+本轮不恢复它、不将其失败算作新版本回退；保留现行GM屏障。Acc/L1精确范围仍通过。
+
+同一场景内同卡、同进程、同工具链，固定混合S1～S6与padding，五窗纯L1：
+
+| 场景 | 冻结TND SPMD min/mean/max | 当前TND MPMD min/mean/max | MPMD/SPMD mean |
+| --- | --- | --- | --- |
+| 128K/B16 | 727.78 / 732.328 / 737.90 | 888.46 / 897.936 / 905.96 | 1.226139 |
+| 8K/B16 | 564.64 / 569.728 / 573.74 | 737.76 / 747.536 / 759.86 | 1.312093 |
+
+单位μs。完整采样、任务路径及逐阶段结果见
+[device_validation.json](csa_mpmd_tnd_20261021/upstream_refresh_20261021/device_validation.json)。
+这轮完成工具链统一和兼容验证，不能跨版本计算性能收益。八档G≤0.90目标、B1边界/连续状态
+及真实16卡整模型验证仍未完成。后续在公共版本上继续检查v15/v16组合，保留多task架构。
+
+
+### 735.11：组合前驱优先与同owner融合；局部query链完成CPU编译，保存推送检查点
+
+统一工具链后，将已单独检查的v15/v16合为v18：三个同owner的Vector阶段融合，
+中间bar_all保留原写回可见性；Indexer query投影/RoPE优先于主Compressor与Q_B相关任务。
+任务scope从43降到40，state commit仍等待整个pool组结束，不改变任何数学或Native存储。
+以正式v17为控制，同进程冻结SPMD、控制、候选三组、五窗纯L1：
+
+| 场景 | 冻结SPMD min/mean/max | 正式MPMD控制 min/mean/max | v18组合 min/mean/max | mean变化 |
+| --- | --- | --- | --- | --- |
+| 128K/B16 | 720.88 / 724.700 / 726.94 | 884.06 / 907.764 / 928.94 | 884.94 / 900.248 / 915.82 | -0.828% |
+| 8K/B16 | 559.82 / 572.972 / 583.30 | 727.48 / 745.788 / 760.72 | 734.86 / 743.220 / 756.88 | -0.344% |
+
+单位μs。三侧eager、图、采样后输出/Top-K/scores/cache-state均逐bit一致，保护检查通过。
+结果尚不足以完成八档采用验收，v18保留为候选，未覆盖正式入口。此处是完整CSA收益；
+融合task的核内净收益尚未单独隔离，不把少3个scope等同于核内加速。
+
+v17长B16已有五窗L1与该次实际生成的43条静态submit顺序核对后，Score平均在392.83μs
+开始、595.38μs结束。前置query链存在多段明显调度间隔；例如query投影236.15→262.04μs、
+RoPE297.03→314.24μs、Hadamard330.31→336.98μs、量化354.31→368.51μs。
+这些是同次轨迹的阶段首尾，不累加并发耗时，也不把所有间隔都认定为AICPU计算耗时。
+
+据此准备v19：仅将Indexer query投影、RoPE、Hadamard、量化、系数生成合为一个局部MIX，
+保留36个可独立调度task；不是完整单SPMD。复用冻结参考的数学及150tick阶段完成协议，
+信号只在该局部MIX内部使用，外部依赖继续交给TMR。增加184320字节独占信号工作区，
+仅首次准备时清零，各调用由全部24AIC/48AIV共同推进代际，不增加Host逐请求metadata。
+
+首次CPU编译在后继Score遇到BF16/INT8错配，定位为新wrapper的InOut参数顺序与返回顺序
+不一致。对齐JIT调用边界的参数/返回顺序后，128K/B16完整CPU后端编译通过。
+截至本节，v19未做设备验证、未有性能结论，也未接入正式实现；工作区必须顺序独占。
+
+两档全部采样与检查汇总见
+[priority_fusion_query_chain.json](csa_mpmd_tnd_20261021/priority_fusion_query_chain.json)。
+`prepare_priority_fusion.py`从正式实现生成v18，`prepare_query_group.py`在指定候选上生成局部链，
+生成后执行Ruff整理再冻结；实验包与大输出不提交。共享SDK没有继续修改。
+
+按用户要求提交并推送当前检查点。Ruff/格式与git diff --check通过；执行format.sh ci时，
+当前环境缺少pre-commit而退出，不能声称完整仓库格式检查通过。八档10%及16卡目标仍未完成。

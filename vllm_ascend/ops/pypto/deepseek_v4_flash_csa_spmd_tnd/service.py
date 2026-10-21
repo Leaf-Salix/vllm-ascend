@@ -57,13 +57,25 @@ def _native_token_views(requests, layer_name, tokens):
 
 
 class CSAServiceRuntime(AttentionServiceBase):
+    @staticmethod
+    def _prepare_weights(attention, layer):
+        return prepare_weights(attention, None, layer)
+
+    @staticmethod
+    def _select_policy(**descriptors):
+        return select_policy(**descriptors)
+
+    @staticmethod
+    def _prepare_binding(native, **options):
+        return PreparedDynamicCSA(native, **options)
+
     def __init__(self, attention, operators, max_num_seqs, layer=None):
         # operators参数保留模型准备钩子的统一调用约定；本实现不注册多task算子。
         if operators is not None:
-            raise ValueError("TND单SPMD直接提交，不接受多task CSAOperators")
+            raise ValueError("TND CSA直接提交，不接受旧BSH CSAOperators")
         self.wrapper = attention.dsa_attn
         self.layer_name = self.wrapper.dsa_attn.layer_name
-        self.weights = prepare_weights(attention, None, layer)
+        self.weights = self._prepare_weights(attention, layer)
         self.prefixes = {
             "swa": self.wrapper.swa_cache_layer.prefix,
             "compressed": self.layer_name,
@@ -175,7 +187,7 @@ class CSAServiceRuntime(AttentionServiceBase):
         descriptors.append(("hadamard", tensor_descriptor(indexer.hadamard)))
         kv_cache = _build_kv_cache(self.wrapper, context)
         descriptors.append(("kv_cache", tuple(tensor_descriptor(value) for value in kv_cache)))
-        policy = select_policy(
+        policy = self._select_policy(
             tokens=tokens,
             requests=indexer.decode.seq_lens.numel(),
             max_query_tokens=MAX_QUERY_TOKENS,
@@ -312,7 +324,7 @@ class CSAServiceRuntime(AttentionServiceBase):
         maximum = metadata["indexer"].decode.max_seq_lens
         # 固定的是本服务允许的query上界，真实Q/L仍可在1..6之间逐请求变化。
         # 不因当前max_q较小而把图容量误判为T > B*max_q。
-        policy = select_policy(
+        policy = self._select_policy(
             tokens=tokens,
             requests=requests,
             max_query_tokens=MAX_QUERY_TOKENS,
@@ -322,7 +334,7 @@ class CSAServiceRuntime(AttentionServiceBase):
         if key not in self._bindings:
             if capturing:
                 raise RuntimeError("TND CSA须在捕获前warmup当前描述符与策略")
-            self._bindings[key] = PreparedDynamicCSA(
+            self._bindings[key] = self._prepare_binding(
                 native,
                 max_query_tokens=MAX_QUERY_TOKENS,
                 max_seq_len=maximum,
