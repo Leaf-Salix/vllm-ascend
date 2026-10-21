@@ -20654,3 +20654,93 @@ RoPE297.03→314.24μs、Hadamard330.31→336.98μs、量化354.31→368.51μs�
 
 按用户要求提交并推送当前检查点。Ruff/格式与git diff --check通过；执行format.sh ci时，
 当前环境缺少pre-commit而退出，不能声称完整仓库格式检查通过。八档10%及16卡目标仍未完成。
+
+
+### 735.12：局部query MIX数值通过，但完整CSA回退；继续修正Score与Attention前驱的调度
+
+本轮为上一阶段候选v19补齐长短B16单卡设备验证。公共PyPTO/PTOAS/Simpler
+仍使用已发布的e891351/914863e/57e49923，固定混合S1～S6、padding与五窗交替不变。
+控制为v18，冻结SPMD仍84751e34，三侧在同一卡、同进程运行。
+
+| 场景 | 冻结SPMD min/mean/max | v18控制 min/mean/max | v19 query MIX min/mean/max | mean变化 |
+|---|---:|---:|---:|---:|
+| 128K/B16 | 724.68 / 727.82 / 730.76 | 862.30 / 882.91 / 902.82 | 881.38 / 900.55 / 915.74 | +2.00% |
+| 8K/B16 | 553.86 / 566.14 / 573.90 | 717.04 / 730.06 / 747.26 | 728.14 / 745.84 / 764.48 | +2.16% |
+
+单位μs。两档三侧的eager、图重放、L1采样后各9项输出/索引/浮点状态都逐bit一致，
+全部保护检查通过；新增query代次信号在连续调用中未触发图重放问题。本轮通过不代表
+真实请求变更的连续decode矩阵或16卡模型已验收。v19因完整回退不采用。
+
+增加轻量离线分析器`analyze_task_l1.py`，由同次构建的静态submit序号解释L1 TaskId，
+严格检查单ring、完整0..N-1任务集合和完整跨度，不用callable id冒充task id。
+每窗保存阶段首尾与AIC/AIV实例min/mean/max，并保留全部原始记录路径。若编排数量
+不能唯一匹配，则要求显式指定；提交区间有动态控制流时拒绝推断。无需再次占卡采集。
+
+长档五窗平均显示：query链由150.00→363.70μs收敛到164.82→244.71μs；
+其AIC/AIV实例mean分别51.71/75.88μs（包含局部软等待，不能当作纯指令计算时间）。
+Score首启379.74→335.78μs，提前43.96μs，但主Compressor cache结束324.38→611.63μs，
+Q后处理结束290.51→580.12μs，Attention首启615.94→631.96μs。短档同样出现query
+提前而Attention前驱延后的现象。这个证据支持“query局部链缩短，但资源争用/派发
+时序抵消收益”，不能把所有间隔都定性为AICPU计算开销，也不能据此否定局部收益。
+
+下一候选v20只增加Score等待main_pool_tid和query_ready_tid的两条调度依赖，
+保留原idx_cache_tid、所有业务依赖、数学及36个task。目的为防止先到达的长MIX
+让其它Attention前驱迟迟拿不到核；并非声称Score数学需要main cache/Q。
+长档CPU后端编译通过后已排队长短B16同进程SPMD/v18/v20对照，结果待收集。
+
+完整五窗、保护区汇总和阶段明细见
+[query_group_results.json](csa_mpmd_tnd_20261021/query_group_results.json)，
+原任务与命令继续记录于[jobs.json](csa_mpmd_tnd_20261021/jobs.json)。
+正式入口未改变；八档G≤0.90、动态状态矩阵和真实16卡验证仍待完成。
+
+
+### 735.13：Score就绪门控未带来完整收益，发现融合后优先依赖扩大
+
+v20在v19局部query MIX上，仅给Score增加main_pool_tid、query_ready_tid两条调度依赖。
+两档仍同卡同进程对照v18和冻结SPMD，公共工具链、五窗和数值规则不变。
+
+| 场景 | 冻结SPMD min/mean/max | v18控制 min/mean/max | v20 min/mean/max | mean变化 |
+|---|---:|---:|---:|---:|
+| 128K/B16 | 714.16 / 717.49 / 723.26 | 869.74 / 882.87 / 894.54 | 884.48 / 892.98 / 899.26 | +1.14% |
+| 8K/B16 | 568.54 / 572.64 / 574.74 | 709.62 / 724.32 / 737.18 | 715.64 / 743.58 / 763.02 | +2.66% |
+
+单位μs。三侧eager、图重放、采样后各9项数值仍逐bit一致，全部保护区通过。
+v20不采用。与上一轮v19并非同一配对窗口，不能以两个候选的跨轮差值声称调度收益。
+完整原始五窗、各阶段和检查汇总见
+[query_score_ready_results.json](csa_mpmd_tnd_20261021/query_score_ready_results.json)。
+
+审查依赖发现，v18的主Compressor/Q_B只等Indexer query投影，Q后处理只等query RoPE；
+v19把它们指向局部MIX TaskId后，约束扩大为等待整条投影→RoPE→Hadamard→量化→系数链。
+这不是原来的数学依赖，导致融合后主干投影与query链被额外串行化。故v21在保留Score
+就绪门控的基础上删除这三条额外优先边，真实Tensor依赖全部保留，并删除不再使用的
+index_query_tid绑定。`prepare_query_score_ready.py --release-query-priority`可复现。
+
+v21保持36个task，未改变核内数学、worker划分或信号协议。长档CPU后端编译通过后，
+排队长短B16同进程SPMD/v18/v21；此时只记录待验证，不将理论重叠当成实测收益。
+
+
+### 735.14：解除融合后扩大的query优先边，完整mean与max两档均改善
+
+v21完成长短B16同卡、同进程SPMD/v18/v21对照。除三个额外调度依赖和未使用的
+TaskId绑定外，AST核对确认与v20的36个task计算体相同；没有修改核内数学。
+
+| 场景 | 冻结SPMD min/mean/max | v18控制 min/mean/max | v21 min/mean/max | mean变化 |
+|---|---:|---:|---:|---:|
+| 128K/B16 | 711.16 / 717.86 / 721.64 | 863.96 / 892.02 / 923.86 | 877.30 / 887.40 / 903.12 | −0.52% |
+| 8K/B16 | 567.82 / 572.71 / 575.04 | 719.32 / 732.70 / 743.84 | 715.74 / 719.19 / 721.62 | −1.84% |
+
+单位μs。长档min变差，但mean下降4.620μs、max下降20.740μs；短档min/mean/max均下降。
+全部三侧eager、图重放、采样后9张量逐bit一致，全部保护区通过。保留该候选用于继续
+优化，不把两档小幅收益外推八档，不覆盖正式入口，也不宣称达到冻结SPMD×0.90。
+完整采样与阶段数据见
+[query_release_priority_results.json](csa_mpmd_tnd_20261021/query_release_priority_results.json)。
+
+长档主Compressor cache结束提前至154.37μs；query链为233.16→320.67μs，
+Q后处理结束314.52μs，Score开始378.54μs，Attention开始613.70μs。
+目前query链已经较紧凑，但Q_A直到145.56μs才开始；其输入normed在56.05μs就就绪。
+更早运行的KV、main Compressor、Indexer Compressor与head weights投影占用了前段
+Cube资源。下一步应审查Q_A这条同时供给Q_B和Indexer query的共同前驱优先级，
+而非再次把完整query链设为其它投影的强制前驱。
+
+本轮离线阶段分析无需新采集；全仓format.sh ci的pre-commit缺失限制仍在，
+新增Python定向Ruff、格式检查与git diff --check通过。公共SDK未变。
