@@ -57,6 +57,8 @@ class ACLGraphEntry:
     input_addresses: list[int] | None = None
     # Populated only by the opt-in CSA HBG service while capturing this graph.
     csa_hbg_host_metadata: dict[str, Any] | None = None
+    # TND routes/policy/root addresses must still match before Python is bypassed.
+    csa_tnd_contracts: dict[str, Any] | None = None
 
 
 class ACLGraphWrapper:
@@ -237,6 +239,9 @@ class ACLGraphWrapper:
             host_metadata = forward_context.additional_kwargs.get("pto_csa_hbg_graph_metadata")
             if host_metadata:
                 entry.csa_hbg_host_metadata = dict(host_metadata)
+            tnd_contracts = forward_context.additional_kwargs.get("pto_csa_tnd_graph_contracts")
+            if tnd_contracts:
+                entry.csa_tnd_contracts = dict(tnd_contracts)
 
             compilation_counter.num_cudagraph_captured += 1
 
@@ -244,6 +249,18 @@ class ACLGraphWrapper:
             # the weak ref of the output, so that pytorch can correctly
             # manage the memory during acl graph capture
             return output
+
+        if entry.csa_tnd_contracts and not all(
+            contract.allows_replay(forward_context) for contract in entry.csa_tnd_contracts.values()
+        ):
+            # 旧图可能捕获了Native/空路径，或请求容量/策略/输入地址已经变化。
+            # 走正常Python派发，支持的调用仍可进入SPMD，范围外由服务回退Native。
+            previous_mode = forward_context.cudagraph_runtime_mode
+            forward_context.cudagraph_runtime_mode = CUDAGraphMode.NONE
+            try:
+                return self.runnable(*args, **kwargs)
+            finally:
+                forward_context.cudagraph_runtime_mode = previous_mode
 
         if entry.csa_hbg_host_metadata:
             from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.host_metadata import validate_graph_replay

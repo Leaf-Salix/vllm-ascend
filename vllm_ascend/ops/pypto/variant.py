@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CSA默认且唯一维护性能实现；精度版已于2026-10-01封存。
+"""CSA实现选择：默认多task性能版，显式spmd_tnd选择独立TND单SPMD。
 
-保留performance/perf兼容值，以及排队实验所需的性能版私有包选择。
+保留performance/perf兼容值，以及排队实验所需的私有包选择。
 精度版历史源码和复现说明见tests/pypto_test/archive/csa_precision_20261001。
 该维护决策不改变已有Native/PTO精度未对齐的结论。
 """
@@ -9,6 +9,7 @@
 import os
 
 _CSA_PACKAGE = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa"
+_CSA_TND_PACKAGE = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd"
 _ENV = "PTO_CSA_VARIANT"
 
 
@@ -25,14 +26,14 @@ def csa_runtime() -> str:
 
 
 def selected_variant() -> str:
-    """验证选择后返回performance；不将旧precision配置静默改名。"""
-    variant_package()
-    return "performance"
+    """返回明确选择的实现，不将旧precision配置静默改名。"""
+    return "spmd_tnd" if variant_package() == _CSA_TND_PACKAGE else "performance"
 
 
 def variant_package() -> str:
     """定位实现包。
 
+    `spmd_tnd` 指向独立维护的TND单SPMD包，服务合同由该包明确限定。
     `PTO_CSA_VARIANT=pkg:<name>` 直接指定 `vllm_ascend.ops.pypto.<name>`，用于把同一
     份性能版拆成几个只差一处改动的副本、同时排进队列做定位。副本必须与性能版同构
     （连同layout / native_storage / service_config整包复制），且只在定位期间
@@ -41,6 +42,8 @@ def variant_package() -> str:
     from vllm_ascend import envs
 
     value = envs.PTO_CSA_VARIANT.strip()
+    if value.lower() == "spmd_tnd":
+        return _CSA_TND_PACKAGE
     if value.lower() in ("precision", "prec", "pkg:deepseek_v4_flash_dspark"):
         raise ValueError(
             f"{_ENV}={value!r}: CSA精度版已封存；请取消该配置或使用performance。"
@@ -52,7 +55,7 @@ def variant_package() -> str:
             raise ValueError(f"{_ENV}={value!r} 的包名不合法")
         return f"vllm_ascend.ops.pypto.{name}"
     if value.lower() not in ("performance", "perf"):
-        raise ValueError(f"{_ENV}只接受performance/perf或性能版实验pkg:<name>，得到{value!r}")
+        raise ValueError(f"{_ENV}只接受performance/perf、spmd_tnd或实验pkg:<name>，得到{value!r}")
     return _CSA_PACKAGE
 
 

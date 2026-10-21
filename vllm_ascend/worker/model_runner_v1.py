@@ -126,7 +126,12 @@ from vllm_ascend.eplb.core.eplb_device_transfer_loader import D2DExpertWeightLoa
 from vllm_ascend.eplb.core.eplb_worker import EplbProcess
 from vllm_ascend.eplb.eplb_updator import EplbUpdator
 from vllm_ascend.model_executor.offloader import create_offloader
-from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.service_config import can_replay_csa_graph, is_csa_model
+from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.service_config import (
+    can_replay_csa_graph,
+    is_csa_model,
+    is_tnd_csa_model,
+    tnd_graph_lengths_supported,
+)
 from vllm_ascend.ops.pypto.deepseek_v4_flash_hca.service_config import is_hca_model
 from vllm_ascend.ops.rotary_embedding import set_cos_and_sin, update_cos_sin
 from vllm_ascend.patch.worker.patch_draft_quarot import patch_load_weights
@@ -2711,6 +2716,22 @@ class NPUModelRunner(GPUModelRunner):
         )
         has_lora = num_active_loras > 0 if force_has_lora is None else force_has_lora
 
+        if force_uniform_decode is None and is_tnd_csa_model(self.vllm_config):
+            # Native eager uses effective TND rows. Unsupported real batches
+            # must return to eager before graph padding adds dummy Q endpoints.
+            # These arrays already belong to the scheduler's Host state.
+            maximum_length = (
+                int(np.max(
+                    self.input_batch.num_computed_tokens_cpu[:num_reqs]
+                    + num_scheduled_tokens_np[:num_reqs]
+                )) if num_reqs else 0
+            )
+            if not tnd_graph_lengths_supported(
+                all_decode=is_all_decode, max_query_tokens=max_num_scheduled_tokens,
+                max_seq_len=maximum_length,
+            ):
+                force_eager = True
+
         csa_actual_tokens = num_tokens
         # ruff: noqa: E731
         def dispatch_cudagraph(num_tokens, disable_full=False, valid_modes=None):
@@ -2725,11 +2746,12 @@ class NPUModelRunner(GPUModelRunner):
                 invalid_modes={CUDAGraphMode.FULL} if disable_full else None,
                 num_active_loras=num_active_loras,
             )
-            # 图重放不再经过 Python 入口判定，CSA/HCA 共用实际 S6 请求与捕获档位检查。
+            # 旧CSA/HCA保留S6合同；TND由图包装器核对容量、策略、地址和metadata生产者。
             if mode == CUDAGraphMode.FULL and (is_csa_model(self.vllm_config) or is_hca_model(self.vllm_config)):
                 if not can_replay_csa_graph(
                     num_tokens=csa_actual_tokens, num_reqs=num_reqs,
                     uniform_decode=uniform_decode, padded_tokens=descriptor.num_tokens,
+                    single_spmd_tnd=is_tnd_csa_model(self.vllm_config),
                 ):
                     return CUDAGraphMode.NONE, BatchDescriptor(num_tokens)
             return mode, descriptor

@@ -144,6 +144,8 @@ class TestACLGraphWrapper(TestBase):
         self.mock_forward_context = MagicMock(spec=ForwardContext)
         self.mock_forward_context.batch_descriptor = self.mock_batch_descriptor
         self.mock_forward_context.cudagraph_runtime_mode = CUDAGraphMode.FULL
+        # Ascend context attaches this per-forward dictionary at runtime.
+        self.mock_forward_context.additional_kwargs = {}
 
     @patch("vllm_ascend.compilation.acl_graph.current_platform")
     @patch("vllm_ascend.compilation.acl_graph.envs")

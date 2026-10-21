@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Host-only selection rules for the opt-in CSA service integration."""
 
+from vllm_ascend.ops.pypto.variant import csa_runtime, selected_variant
+
 from .config import DECODE_BATCH
 
 MODEL_ARCHITECTURE = "PyptoCSADeepseekV4ForCausalLM"
@@ -13,7 +15,28 @@ def is_csa_model(config) -> bool:
                for name in getattr(config.model_config.hf_config, "architectures", ()))
 
 
-def can_replay_csa_graph(*, num_tokens, num_reqs, uniform_decode, padded_tokens) -> bool:
+def is_tnd_csa_model(config) -> bool:
+    return (
+        MODEL_ARCHITECTURE in getattr(config.model_config.hf_config, "architectures", ())
+        and selected_variant() == "spmd_tnd"
+    )
+
+
+def tnd_graph_lengths_supported(*, all_decode, max_query_tokens, max_seq_len) -> bool:
+    """Reject unsupported real batches before graph padding creates dummy rows."""
+    from ..deepseek_v4_flash_csa_spmd_tnd.service_config import (
+        MAX_QUERY_TOKENS,
+        MAX_SEQUENCE_LENGTH,
+        MIN_SEQUENCE_LENGTH,
+    )
+
+    return bool(
+        all_decode and 1 <= max_query_tokens <= MAX_QUERY_TOKENS
+        and MIN_SEQUENCE_LENGTH <= max_seq_len <= MAX_SEQUENCE_LENGTH
+    )
+
+
+def can_replay_csa_graph(*, num_tokens, num_reqs, uniform_decode, padded_tokens, single_spmd_tnd=False) -> bool:
     """补位请求由 kernel 内的 seq_lens 判据屏蔽，因此补位档位也可以重放。
 
     原先还要求 ``num_tokens == padded_tokens``，即整档不得含补位；那条一旦命中就
@@ -24,6 +47,10 @@ def can_replay_csa_graph(*, num_tokens, num_reqs, uniform_decode, padded_tokens)
     ``num_tokens``／``num_reqs`` 是本步的**实际**量，``padded_tokens`` 是档位容量。
     判定只用调度器持有的主机计数，绝不读设备张量的值。
     """
+    if single_spmd_tnd:
+        # TND的最终合同在ACLGraphWrapper重放前检查，包括Native metadata生产者。
+        # 不把本步T/B反算成固定S6；框架仍自行决定uniform/mixed图的可用档位。
+        return 0 < num_tokens <= padded_tokens and num_reqs > 0
     captures_pto = 0 < padded_tokens <= MAX_BATCH_SIZE * QUERY_TOKENS and padded_tokens % QUERY_TOKENS == 0
     return not captures_pto or (
         uniform_decode and num_tokens <= padded_tokens and num_tokens == num_reqs * QUERY_TOKENS
@@ -77,6 +104,13 @@ def validate_configuration(config):
     if config.use_v2_model_runner:
         raise ValueError("PTO CSA service graph dispatch currently requires Model Runner V1")
     graph_mode = config.compilation_config.cudagraph_mode
+    if selected_variant() == "spmd_tnd":
+        if get_ascend_config().weight_nz_mode != 2 or csa_runtime() != "tensormap_and_ringbuffer":
+            raise ValueError("TND单SPMD首版要求NZ2与tensormap_and_ringbuffer")
+        if MODEL_ARCHITECTURE not in getattr(hf, "architectures", ()):
+            raise ValueError("TND单SPMD首版只接入PyptoCSA模型，不扩张HCA输入合同")
+        # Native/空调用的捕获或容量/策略/地址变更由ACLGraphWrapper合同拒绝重放，
+        # 再走正常服务分派。FULL_DECODE_ONLY的图档位仍遵循框架的原始选择。
     if graph_mode not in (CUDAGraphMode.NONE, CUDAGraphMode.FULL_DECODE_ONLY):
         raise ValueError("PTO CSA supports eager or FULL_DECODE_ONLY graph mode")
     if graph_mode != CUDAGraphMode.NONE:

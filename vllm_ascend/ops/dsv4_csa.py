@@ -30,6 +30,12 @@ def dsv4_csa_forward(hidden_states: torch.Tensor, positions: torch.Tensor,
     context = get_forward_context()
     wrapper = context.no_compile_layers[layer_name]
     runtime = getattr(wrapper, "_pto_csa_runtime", None)
+    record_route = getattr(type(runtime), "record_graph_route", None)
+    if record_route is not None:
+        record_route(runtime, context, hidden_states, positions)
+    empty_call = getattr(type(runtime), "handle_empty_call", None)
+    if empty_call is not None and empty_call(runtime, context, hidden_states, positions, output):
+        return
     if runtime is None or not runtime.eligible(context, hidden_states, positions):
         _native_attention_half(wrapper, hidden_states, positions, output)
         return

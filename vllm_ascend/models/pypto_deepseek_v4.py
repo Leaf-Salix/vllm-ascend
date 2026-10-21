@@ -102,27 +102,36 @@ def prepare_csa_model(model):
     )
     from vllm_ascend.ops.pypto.variant import csa_runtime, selected_variant, variant_package
 
-    # CSA只使用性能实现；pkg:仅选择同实现的私有实验副本。
-    # service_config与model_runner共用一份，保持档位和图重放闸门一致。
+    # 默认保持多task；TND单SPMD使用独立Native直调入口和工作区管理。
+    # service_config与model_runner的图合同必须与所选实现一致。
     package = variant_package()
     hbg = csa_runtime() == "host_build_graph"
     effective_mode = get_ascend_config().weight_nz_mode
     validate_weight_nz_mode(effective_mode)
-    adapter = importlib.import_module(f"{package}.native_adapter")
-    CSAOperators = adapter.HBGCSAOperators if hbg else adapter.CSAOperators
     CSAServiceRuntime = importlib.import_module(f"{package}.service").CSAServiceRuntime
-    root_function = importlib.import_module(f"{package}.decode_csa")._decode_csa_tp1_layer
+    if selected_variant() == "spmd_tnd":
+        if hbg:
+            raise ValueError("TND单SPMD首版使用tensormap_and_ringbuffer运行时")
+        CSAOperators = None
+        root_function = importlib.import_module(f"{package}.entry").decode_csa_spmd
+    else:
+        adapter = importlib.import_module(f"{package}.native_adapter")
+        CSAOperators = adapter.HBGCSAOperators if hbg else adapter.CSAOperators
+        root_function = importlib.import_module(f"{package}.decode_csa")._decode_csa_tp1_layer
     layouts = root_weight_layouts(root_function)
     from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.reduction import ATOMIC_ADD
 
-    reduction = importlib.import_module(f"{package}.qkv_proj_rope")
-    logger.info(
-        "PTO_CSA_REDUCTION atomic_add=%d qr_split_k=%d kv_split_k=%d",
-        ATOMIC_ADD, reduction.QR_OK, reduction.KV_OK,
-    )
+    if selected_variant() == "spmd_tnd":
+        logger.info("PTO_CSA_SINGLE_SPMD_TND package=%s atomic_add=%d", package, ATOMIC_ADD)
+    else:
+        reduction = importlib.import_module(f"{package}.qkv_proj_rope")
+        logger.info(
+            "PTO_CSA_REDUCTION atomic_add=%d qr_split_k=%d kv_split_k=%d",
+            ATOMIC_ADD, reduction.QR_OK, reduction.KV_OK,
+        )
 
     init_pto_runtime()
-    operators = CSAOperators.register()
+    operators = CSAOperators.register() if CSAOperators is not None else None
     max_num_seqs = get_current_vllm_config().scheduler_config.max_num_seqs
     count = 0
     for layer in model.model.layers:
