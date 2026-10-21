@@ -62,3 +62,14 @@ SuperKernel成功返回、唯一ACLGraph及实际格式29证据。
 - [当前CSA理论算力与带宽评估](theory_roofline/README.md)：七档矩阵工作量、
   冷缓存主数据下界、Attention中转量及既有真机阶段证据；纯离线计算，
   不将理论差额承诺为可实现收益，不恢复性能优化。
+
+## 2026-10-21：补充 Native 128K/B1/S6
+
+按用户要求只补 Native B1，继续使用本目录原脚本和原计量方式。30次
+PyTorch Profiler 全流整层跨度中位数 **632.75 μs**；20次无 profiler 的
+图外 Event 中位数 **614.91 μs**，后者不替代主表口径。静态编译/安装、
+SuperKernel、唯一 ACLGraph、四主投影 NZ29、Native 多流及保护区检查通过。
+
+完整结果、原始 trace 路径和复现命令见
+[B1 补测记录](../csa_native_b1_20261021/README.md)。本目录原七档表保持历史值，
+后续八档对比的 Native B1 列使用 632.75 μs；不把本次补测误记成七档重测。
