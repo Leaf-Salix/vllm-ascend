@@ -21699,3 +21699,24 @@ RoPE和BF16舍入保留，scale/RoPE重读代价由本MPMD完整对照判断。
 不修改SDK。长B24开启与短B16关闭分支CPU编译通过，长B24/B16已提交同轮对照，
 以冻结v52为控制；暂无设备收益结论。来源与限制见
 [query_contiguous_provenance.json](csa_mpmd_tnd_20261021/query_contiguous_provenance.json)。
+
+### 735.46：当前正式组合的同址S1～S6与四步连续状态通过
+
+任务`task_20261022_071043_17314681625` completed(exit=0)、stage=complete。
+使用06dced14正式代码的不可变v52副本，与冻结84751e34同卡对照，公共工具链
+未变。9个metadata场景及4个连续步骤全部通过；两侧每项9类业务结果逐bit
+一致，既定容差未放宽，非有限值规则和整数/索引精确要求不变。
+
+覆盖S1/S6/S2/S3/S4/S5、零compact输出、混合请求反转物理owner、再回S1。
+同一个T64/R17捕获根和每侧同一张图反复重放，全部buffer地址不变；SPMD全局
+及MPMD各局部signal工作区均每次推进一代、槽内隔离字保持零；C4计数/offset、
+只读metadata、合法slot写入范围和scratch保护区均通过。
+
+连续四步的请求集合/顺序依次为[0,1,2,3,4,5]、[0,1,2,3,4,5]、[5,0,4,1]、
+[1,6,5,0,4]，每步S长度不同。第二步起两侧分别加载自己上一轮产生的状态，
+没有重新恢复初始cache；同址图正确处理了重排、离开与新请求进入。
+摘要及原始result路径见
+[state_validation_results.json](csa_mpmd_tnd_20261021/state_validation_results.json)。
+
+这是独立功能场景，未采性能、不修改八档输入，也不代替实际服务和16卡验收。
+另把冻结B1/S2、S3、S4的缺口提交为三个单卡任务；已测S1/S5/S6不重复采集。
