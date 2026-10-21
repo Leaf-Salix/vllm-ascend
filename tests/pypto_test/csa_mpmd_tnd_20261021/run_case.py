@@ -7,6 +7,7 @@ CPU 模式只验证源码依赖和编译，不初始化 NPU。设备模式必须
 
 import argparse
 import ast
+import copy
 import importlib
 import importlib.util
 import json
@@ -43,6 +44,26 @@ def check_case(case):
     assert len(case["query_start_loc"]) == bc + 1
     assert case["query_start_loc"][-1] == case["token_capacity"]
     assert case["seq_lens"] == [a + n for a, n in zip(h, q)] + [0] * (bc - b)
+
+
+def select_case(manifest, name, boundary_query_length=None):
+    """主八档原样返回；边界仅来自已冻结的b1_boundaries，不改验收输入。"""
+    case = copy.deepcopy(next(c for c in manifest["cases"] if c["name"] == name))
+    if boundary_query_length is None:
+        return case
+    if name != "h131072_b1":
+        raise ValueError("固定S1～S6边界仅对应128K/B1，不能修改其它主性能场景")
+    boundary = next(c for c in manifest["b1_boundaries"] if c["query_lengths"] == [boundary_query_length])
+    case.update(copy.deepcopy(boundary))
+    assert case["request_capacity"] == 1 and case["token_capacity"] == boundary_query_length
+    case.update(
+        name=f"{name}_s{boundary_query_length}",
+        valid_tokens=boundary_query_length,
+        query_start_loc=[0, boundary_query_length],
+        seq_lens=[case["history_lengths"][0] + boundary_query_length],
+        dummy_query_lengths=[],
+    )
+    return case
 
 
 def export_l1(source, destination, side, kernel_config):
@@ -112,6 +133,7 @@ def main():
         sys.path.insert(0, str(helpers))
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", required=True)
+    parser.add_argument("--boundary-query-length", type=int, choices=range(1, 7), help="使用已冻结B1边界，排除于八档G")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--frozen", type=Path, required=True)
     parser.add_argument("--candidate", type=Path, required=True)
@@ -128,8 +150,9 @@ def main():
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     manifest = json.loads(args.cases.read_text())
-    case = next(c for c in manifest["cases"] if c["name"] == args.case)
+    case = select_case(manifest, args.case, args.boundary_query_length)
     check_case(case)
+    max_query_tokens = max(case["query_lengths"])
     report = {
         "case": case,
         "stage": "initializing",
@@ -137,9 +160,12 @@ def main():
         "device_execution": False,
         "reference_commit": manifest["reference_commit"],
         "scope": "full CSA L1",
+        "max_query_tokens": max_query_tokens,
         "enable_chip_swimlane": 1,
         "enable_dep_gen": args.dep_gen,
     }
+    if args.boundary_query_length is not None:
+        report["scope"] = "full CSA L1, fixed B1 boundary excluded from eight-case G"
 
     def save(stage=None):
         if stage:
@@ -173,7 +199,7 @@ def main():
             policy = importlib.import_module(candidate_name + ".policy").select_policy(
                 tokens=case["token_capacity"],
                 requests=case["request_capacity"],
-                max_query_tokens=6,
+                max_query_tokens=max_query_tokens,
                 max_seq_len=max(case["seq_lens"]),
             )
             module.decode_csa_tnd._get_dep_graph()
@@ -294,7 +320,7 @@ def main():
 
                 entries[side] = importlib.import_module(package + ".binding").PreparedDynamicCSA(
                     native,
-                    max_query_tokens=6,
+                    max_query_tokens=max_query_tokens,
                     max_seq_len=max(case["seq_lens"]),
                     allocator=allocate,
                 )

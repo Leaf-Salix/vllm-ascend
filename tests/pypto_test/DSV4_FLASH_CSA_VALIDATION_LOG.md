@@ -21064,3 +21064,17 @@ B1完整mean近乎持平且max增加5.34μs，不声称全档提升。
 补排128K/B4、B8、B24、B28和8K/B32。已完成的三档沿用同一不可变候选和公共SDK
 的原五窗，不重复采样。八档主分母统一冻结SPMD，额外控制统一v28，计划及任务见
 [output_group_matrix_plan.json](csa_mpmd_tnd_20261021/output_group_matrix_plan.json)。
+
+### 735.24：接通已冻结B1 S1～S6边界入口，尚未计作设备验收
+
+run_case新增`--case h131072_b1 --boundary-query-length 1..6`，只从原cases.json的
+b1_boundaries选择既定query/history/容量；沿用B1的seed、页规则和保护/容差，不
+修改清单或主八档。结果采用独立名称h131072_b1_sN及boundary scope，收集器不能
+把它混入八档G。CPU策略及两侧绑定使用本次真实Host query上界，边界分别为1..6；
+这对应服务eager的req.max_seqlen_q描述符，真实模型固定上界图路径仍须单独验证。
+
+离线核对八个主场景字典保持原样、query上界仍全为6；六个边界的Q、L和容量均
+与冻结清单一致，禁止把该参数用于B4等主性能场景。定向Ruff、格式和diff检查通过。
+当前只完成场景选择检查，未把这些边界记作NPU通过。正在排队的v29使用此前冻结
+的run_case副本，不受修改影响；边界验证需要在后续选定算子版本后重新冻结测试
+入口。此项也不代替同址metadata变化、连续状态推进和真实16卡验证。
