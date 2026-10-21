@@ -124,3 +124,39 @@ def test_incremental_callback_requires_native150(source, accepted):
     else:
         with pytest.raises(ValueError):
             callback(source)
+
+
+@pytest.mark.parametrize(
+    "enabled,values,expected",
+    [
+        (True, (37, 37), True),
+        (True, (37, 38), False),
+        (False, None, None),
+    ],
+)
+def test_unused_score_arena_guard(enabled, values, expected):
+    here = Path(__file__).resolve().parent
+    path = here / "runs/short_half_ub_harness_v95/run_probe.py"
+    if not path.exists():
+        pytest.skip("Requires the local frozen short-half probe")
+    tree = ast.parse(path.read_text())
+    function = next(
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "workspace_padding_checks"
+    )
+    namespace = {}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
+
+    class HostValues:
+        def cpu(self):
+            assert values is not None, "Disabled branch must not read the score arena"
+            return self
+
+        def __eq__(self, other):
+            return SimpleNamespace(all=lambda: all(value == other for value in values))
+
+    entry = SimpleNamespace(
+        policy=SimpleNamespace(score_tile=768, hc_consumer_reduce=False, short_half_score_ub=enabled),
+        buffers={"indexer_transfer": SimpleNamespace(ndim=2, shape=(96, 768)), "score_arena": HostValues()},
+    )
+    checks = namespace["workspace_padding_checks"](entry)
+    assert checks.get("score_arena_unused_untouched") is expected

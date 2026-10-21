@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--harness", type=Path, default=here)
     parser.add_argument("--reference", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--unused-score-arena", action="store_true")
     args = parser.parse_args()
     source, reference, target = (p.resolve() for p in (args.harness, args.reference, args.output))
     if reference != here / "runs/output_work_balance_native_candidate_v4":
@@ -113,6 +114,15 @@ def main():
     )
     text = replace_once(text, "passed=(native or legacy)", "passed=native and not legacy")
     revised[name] = text
+    if args.unused_score_arena:
+        name = "run_probe.py"
+        revised[name] = replace_once(
+            originals[name],
+            "    return checks\n",
+            '    if getattr(entry.policy, "short_half_score_ub", False):\n'
+            '        checks["score_arena_unused_untouched"] = bool((entry.buffers["score_arena"].cpu() == 37).all())\n'
+            "    return checks\n",
+        )
     name = "submit_probe.py"
     if source == here:
         revised[name] = replace_once(
@@ -136,6 +146,8 @@ def main():
         "service_probe.py",
         "service_metadata_replay.py",
     )
+    if args.unused_score_arena:
+        untouched = tuple(name for name in untouched if name != "run_probe.py")
     assert all((target / name).read_bytes() == (source / name).read_bytes() for name in untouched)
     report = {
         "harness": str(target),
@@ -145,6 +157,7 @@ def main():
         "shell_syntax_passed": True,
         "files": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(target.iterdir()) if p.is_file()},
         "device_execution": False,
+        "unused_score_arena_check": args.unused_score_arena,
     }
     (here / (target.name + ".patch")).write_text("".join(patch))
     (here / (target.name + ".json")).write_text(json.dumps(report, indent=2) + "\n")

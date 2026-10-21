@@ -107,6 +107,7 @@ a241fa61 BSH静态形状修复；候选为O_A/O_B互补分工v4。B1/B16经完�
 | 128K/B28/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 1142.46 | 1160.02 | +1.54% | 不适用 | PASS | [结果](runs/borrowed_score_owner_h131072_b28_s6_v90/result.json) |
 | 128K/B1/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 358.08 | 366.26 | +2.28% | 不适用 | PASS | [结果](runs/qa_incremental_b1_s6_v93b/result.json) |
 | 128K/B16/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 785.02 | 788.22 | +0.41% | 不适用 | PASS | [结果](runs/ws_incremental_b16_s6_v93b/result.json) |
+| 8K/B16/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 647.54 | 643.64 | -0.60% | 不适用 | PASS | [结果](runs/short_half_ub_h8192_b16_s6_v95/result.json) |
 
 ## 任务与原始证据
 
@@ -224,6 +225,7 @@ a241fa61 BSH静态形状修复；候选为O_A/O_B互补分工v4。B1/B16经完�
 | `task_20261021_141858_318908415657` | [ws_incremental_b16_s6_v93](runs/ws_incremental_b16_s6_v93/result.json) | 未知 | 缺少结果 | 否 |
 | `task_20261021_142045_325426029053` | [qa_incremental_b1_s6_v93b](runs/qa_incremental_b1_s6_v93b/result.json) | completed (exit=0) | complete | PASS |
 | `task_20261021_142045_32543028090` | [ws_incremental_b16_s6_v93b](runs/ws_incremental_b16_s6_v93b/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_144229_86824910253` | [short_half_ub_h8192_b16_s6_v95](runs/short_half_ub_h8192_b16_s6_v95/result.json) | completed (exit=0) | complete | PASS |
 
 各任务完整命令和固定launcher SHA256见 `jobs.json`。
 Native超阈值元素、Top-K替换、cache/state及保护区明细仍在原始result.json；
