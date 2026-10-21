@@ -1,0 +1,350 @@
+{
+  "status": "已完成并采用QA入口分档；本轮收尾后停止",
+  "script": "prepare_qa_shape_gate.py",
+  "candidate_package_generated": true,
+  "harness_integrated": true,
+  "cpu_compiled": true,
+  "device_tested": true,
+  "production_adopted": true,
+  "proposal": "按Tensor逻辑行数选择SINGLE_M16_QA constexpr；0<T<=16允许原长短历史运行时选择，其它形状编译时去除新增QA策略2",
+  "motivation": "运行时关闭并未保证完整CSA零回退；先证明完整关闭编排与核列表保持一致",
+  "stop_rule": "只完成已有入口分档改动；明确有益则保留，阶段结束后仍停下",
+  "resume_instruction": "动了代码的地方就继续完成一下，好就保留下",
+  "remaining": [],
+  "codegen_audit": "QA_SHAPE_GATE_CODEGEN.json",
+  "codegen_passed": true,
+  "representative": {
+    "h131072_b1": {
+      "result": "runs/qa_shape_gate_v1/h131072_b1_shape_gate_v1/result.json",
+      "passed": true,
+      "l1_us": {
+        "multitask_original": {
+          "samples_us": [
+            432.5,
+            433.42,
+            430.52,
+            434.36,
+            431.84
+          ],
+          "min_us": 430.52,
+          "mean_us": 432.528,
+          "max_us": 434.36,
+          "median_us": 432.5
+        },
+        "multitask_current": {
+          "samples_us": [
+            389.48,
+            379.96,
+            378.0,
+            380.74,
+            381.04
+          ],
+          "min_us": 378.0,
+          "mean_us": 381.844,
+          "max_us": 389.48,
+          "median_us": 380.74
+        },
+        "multitask_candidate": {
+          "samples_us": [
+            370.34,
+            370.68,
+            374.88,
+            368.16,
+            374.32
+          ],
+          "min_us": 368.16,
+          "mean_us": 371.676,
+          "max_us": 374.88,
+          "median_us": 370.68
+        },
+        "single_spmd": {
+          "samples_us": [
+            367.48,
+            361.84,
+            368.34,
+            369.52,
+            372.22
+          ],
+          "min_us": 361.84,
+          "mean_us": 367.88,
+          "max_us": 372.22,
+          "median_us": 368.34
+        }
+      },
+      "dispatch": {
+        "multitask_candidate": {
+          "route": "CSAOperators.register + NativeCSACall",
+          "constexpr": {
+            "SINGLE_M16_QA": true
+          },
+          "operator": "csa_backport_multitask_candidate.attention_single_m16.default"
+        }
+      },
+      "boundary_replay": {
+        "passed": true,
+        "same_graph_replays": 5,
+        "context_switch_history": 32765,
+        "padding_exercised": false,
+        "internal_scratch_guards_checked": false,
+        "mixed_query_validated": false,
+        "steps": [
+          {
+            "state": "A",
+            "active": 1,
+            "max_seq_len": 131078,
+            "passed": true,
+            "same_addresses": true
+          },
+          {
+            "state": "B",
+            "active": 1,
+            "max_seq_len": 131077,
+            "passed": true,
+            "same_addresses": true
+          },
+          {
+            "state": "A",
+            "active": 1,
+            "max_seq_len": 131078,
+            "passed": true,
+            "same_addresses": true
+          },
+          {
+            "state": "C",
+            "active": 1,
+            "max_seq_len": 32771,
+            "passed": true,
+            "same_addresses": true
+          },
+          {
+            "state": "A",
+            "active": 1,
+            "max_seq_len": 131078,
+            "passed": true,
+            "same_addresses": true
+          }
+        ]
+      }
+    },
+    "h8192_b16": {
+      "result": "runs/qa_shape_gate_v1/h8192_b16_shape_gate_v1/result.json",
+      "passed": true,
+      "l1_us": {
+        "multitask_original": {
+          "samples_us": [
+            668.46,
+            652.68,
+            659.68,
+            653.74,
+            657.6
+          ],
+          "min_us": 652.68,
+          "mean_us": 658.432,
+          "max_us": 668.46,
+          "median_us": 657.6
+        },
+        "multitask_current": {
+          "samples_us": [
+            645.3,
+            659.64,
+            640.52,
+            650.18,
+            657.1
+          ],
+          "min_us": 640.52,
+          "mean_us": 650.548,
+          "max_us": 659.64,
+          "median_us": 650.18
+        },
+        "multitask_candidate": {
+          "samples_us": [
+            631.92,
+            651.58,
+            656.18,
+            636.14,
+            650.2
+          ],
+          "min_us": 631.92,
+          "mean_us": 645.204,
+          "max_us": 656.18,
+          "median_us": 650.2
+        },
+        "single_spmd": {
+          "samples_us": [
+            638.02,
+            644.56,
+            645.48,
+            646.52,
+            644.28
+          ],
+          "min_us": 638.02,
+          "mean_us": 643.7719999999999,
+          "max_us": 646.52,
+          "median_us": 644.56
+        }
+      },
+      "dispatch": {
+        "multitask_candidate": {
+          "route": "CSAOperators.register + NativeCSACall",
+          "constexpr": {
+            "SINGLE_M16_QA": false
+          },
+          "operator": "csa_backport_multitask_candidate.attention.default"
+        }
+      },
+      "boundary_replay": null
+    }
+  },
+  "legacy_qr_compile": {
+    "result": "runs/qa_shape_gate_v1/cpu_legacy_shape_v1/result.json",
+    "passed": true,
+    "scope": "旧七参数QR入口CPU lowering/PTOAS/编排链接；非HCA设备测试"
+  },
+  "b1_qa_group_us": {
+    "multitask_current": {
+      "samples_us": [
+        10.480000000000004,
+        11.719999999999999,
+        10.920000000000002,
+        11.019999999999996,
+        11.459999999999994
+      ],
+      "min_us": 10.480000000000004,
+      "mean_us": 11.12,
+      "max_us": 11.719999999999999,
+      "task_incore_us": {
+        "samples": 40,
+        "min_us": 9.079999999999998,
+        "mean_us": 10.261499999999998,
+        "max_us": 11.620000000000005,
+        "median_us": 10.209999999999994
+      }
+    },
+    "multitask_candidate": {
+      "samples_us": [
+        8.439999999999998,
+        8.599999999999994,
+        9.000000000000014,
+        8.280000000000001,
+        8.820000000000007
+      ],
+      "min_us": 8.280000000000001,
+      "mean_us": 8.628000000000004,
+      "max_us": 9.000000000000014,
+      "task_incore_us": {
+        "samples": 80,
+        "min_us": 5.8799999999999955,
+        "mean_us": 7.150000000000001,
+        "max_us": 8.860000000000014,
+        "median_us": 7.119999999999997
+      }
+    }
+  },
+  "b1_phase_intervals_us": {
+    "multitask_candidate": {
+      "before_score": {
+        "min_us": 176.18,
+        "mean_us": 185.612,
+        "max_us": 190.66
+      },
+      "score_to_attention": {
+        "min_us": 63.72000000000003,
+        "mean_us": 65.78,
+        "max_us": 69.45999999999998
+      },
+      "attention_to_output": {
+        "min_us": 47.19999999999999,
+        "mean_us": 48.76800000000001,
+        "max_us": 49.51999999999998
+      },
+      "output_to_end": {
+        "min_us": 67.71999999999997,
+        "mean_us": 71.51600000000002,
+        "max_us": 75.80000000000001
+      }
+    },
+    "multitask_current": {
+      "before_score": {
+        "min_us": 184.28,
+        "mean_us": 187.828,
+        "max_us": 191.28
+      },
+      "score_to_attention": {
+        "min_us": 67.19999999999996,
+        "mean_us": 71.916,
+        "max_us": 75.10000000000002
+      },
+      "attention_to_output": {
+        "min_us": 45.700000000000045,
+        "mean_us": 49.424,
+        "max_us": 50.91999999999996
+      },
+      "output_to_end": {
+        "min_us": 67.39999999999998,
+        "mean_us": 72.676,
+        "max_us": 80.64000000000004
+      }
+    },
+    "multitask_original": {
+      "before_score": {
+        "min_us": 186.22,
+        "mean_us": 188.912,
+        "max_us": 193.38
+      },
+      "score_to_attention": {
+        "min_us": 101.10000000000002,
+        "mean_us": 102.44400000000003,
+        "max_us": 103.84000000000003
+      },
+      "attention_to_output": {
+        "min_us": 51.099999999999966,
+        "mean_us": 51.527999999999984,
+        "max_us": 51.81999999999999
+      },
+      "output_to_end": {
+        "min_us": 87.38000000000005,
+        "mean_us": 89.64400000000002,
+        "max_us": 92.75999999999999
+      }
+    }
+  },
+  "incore_caveat": "QA N128×8改N64×16，每核工作不同；按相同总输出的整组span评价，完整收益不能全部归因于QA",
+  "matrix": "MATRIX_qa_shape_gate_v1_shape_gate_v1.json",
+  "shared_toolchain_changed": false,
+  "device_tasks_completed": 9,
+  "cpu_checks_completed": 3,
+  "production_files": [
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/qkv_proj_rope.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_csa.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/native_adapter.py"
+  ],
+  "adoption_rule": "采用已验证的单M16分档；0<T<=16进入支持长短动态选择的N64程序，其它形状编译时完全保留原程序。S6实际开启B1/B2，非B1白名单。",
+  "decision_evidence": "B1五窗均更快，完整mean减少10.168us、max减少14.60us；关闭程序生成源码完整等价。其它档位观测有正负差值，不认领新的算法收益，也不宣称所有采样零差值。",
+  "closed_path_positive_deltas": [
+    {
+      "history": 131072,
+      "batch": 16,
+      "mean_delta_us": 4.26400000000001,
+      "max_delta_us": 7.2999999999999545
+    },
+    {
+      "history": 131072,
+      "batch": 28,
+      "mean_delta_us": 0.6040000000000418,
+      "max_delta_us": -15.1400000000001
+    },
+    {
+      "history": 8192,
+      "batch": 32,
+      "mean_delta_us": 1.0360000000000582,
+      "max_delta_us": 5.420000000000073
+    }
+  ],
+  "adoption_validation": {
+    "tested_candidate": "qa_shape_gate_v1",
+    "production_ast_equal_after_local_formatting": true,
+    "ruff_passed": true,
+    "scope": "单卡第4层NZ2/CANN9.2；不是16卡整模型token/DSpark验收；HBG只检查ABI，旧QR只检查CPU编译"
+  },
+  "spmd_goal": "尚未达到所有档位完整L1快于单SPMD；本轮不扩展新优化点"
+}

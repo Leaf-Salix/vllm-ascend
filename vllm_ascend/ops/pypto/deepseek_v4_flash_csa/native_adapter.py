@@ -12,7 +12,12 @@ import torch
 from vllm.logger import logger
 
 from .config import DECODE_BATCH
-from .decode_csa import _decode_csa_tp1_layer, decode_csa_tp1_layer_hbg, decode_csa_tp1_layer_test
+from .decode_csa import (
+    _decode_csa_tp1_layer,
+    csa_compile_constants,
+    decode_csa_tp1_layer_hbg,
+    decode_csa_tp1_layer_test,
+)
 from .host_metadata import CSAHostMetadata
 from .native_storage import indexer_storage, physical_pages, table_storage
 from .nz_mode import root_weight_layouts
@@ -98,21 +103,30 @@ def repack_weights(tensors: dict, source_layouts: dict, target_layouts: dict, ta
 @dataclass(frozen=True)
 class CSAOperators:
     attention: Any
+    attention_single_m16: Any = None
 
     @classmethod
-    def register(cls, kernel=decode_csa_tp1_layer_test) -> "CSAOperators":
+    def register(cls, kernel=decode_csa_tp1_layer_test, *, namespace="dsv4_csa", config=None) -> "CSAOperators":
         import pypto.torch
 
         from .reduction import validate_reduction_mode
 
         validate_reduction_mode()
 
-        def register(kernel, name):
-            return pypto.torch.register(kernel, f"dsv4_csa::{name}")
+        def register(name, constants=None):
+            return pypto.torch.register(kernel, f"{namespace}::{name}", constexpr=constants, config=config)
 
-        return cls(
-            register(kernel, "attention"),
-        )
+        if kernel is decode_csa_tp1_layer_test:
+            return cls(
+                register("attention", {"SINGLE_M16_QA": False}),
+                register("attention_single_m16", {"SINGLE_M16_QA": True}),
+            )
+        return cls(register("attention"))
+
+    def for_tokens(self, tokens):
+        if self.attention_single_m16 is not None and csa_compile_constants(tokens)["SINGLE_M16_QA"]:
+            return self.attention_single_m16
+        return self.attention
 
 
 # torch_npu 的 acl format 取值：0=NCHW、2=ND，二者都是 PyPTO 根入参接受的基础格式。
@@ -347,7 +361,9 @@ class NativeCSACall:
         return {"idx_native_kv_cache": native_cache}
 
     def __call__(self):
-        self.ops.attention(*self.core_args)
+        selector = getattr(self.ops, "for_tokens", None)
+        entry = self.ops.attention if selector is None else selector(self.args["x_hc"].shape[0])
+        entry(*self.core_args)
         return self.args["x_out"]
 
 

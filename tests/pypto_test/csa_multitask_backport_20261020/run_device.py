@@ -374,7 +374,25 @@ def main():
             return
         if args.parse_only or args.compile_only:
             compile_entry = candidate_adapter.decode_csa_tp1_layer_test
-            compile_keywords = {}
+            select_constants = getattr(candidate_adapter, "csa_compile_constants", None)
+            compile_keywords = {} if select_constants is None else select_constants(args.batch * 6)
+            if select_constants is not None and not (args.compile_spmd_reference or args.compile_legacy_qr):
+                report["candidate_controls"] = compile_keywords
+                # 注册只解析前端IR，不初始化NPU；检查实际入口选择及TMR/HBG运行时ABI。
+                cpu_ops = candidate_adapter.CSAOperators.register(namespace="csa_shape_gate_cpu")
+                selected_op = cpu_ops.for_tokens(args.batch * 6)
+                default_names = [p.name for p in cpu_ops.attention._schema.arguments]
+                selected_names = [p.name for p in selected_op._schema.arguments]
+                hbg_op = candidate_adapter.HBGCSAOperators.register().attention
+                hbg_names = [p.name for p in hbg_op._schema.arguments]
+                if selected_names != default_names or hbg_names != [*default_names, "host_max_seq_len"]:
+                    raise AssertionError("入口分档不应改变TMR Tensor ABI或HBG Host scalar ABI")
+                report["registered_entry_abi"] = {
+                    "selected": str(selected_op),
+                    "tmr_parameters": default_names,
+                    "hbg_parameters": hbg_names,
+                    "device_execution": False,
+                }
             if args.compile_spmd_reference:
                 compile_entry = importlib.import_module(donor.name + ".entry").decode_csa_spmd
                 compile_keywords = donor.select_policy(
@@ -390,6 +408,7 @@ def main():
 
                 helper = importlib.import_module(candidate_adapter.__package__ + ".qkv_proj_rope").q_proj_qr
                 compile_entry = make_probe(helper)
+                compile_keywords = {}
                 report["compile_scope"] = "仅HCA旧七参数QR入口，未运行HCA设备计算"
             compile_entry._get_dep_graph()
             if args.compile_only:
@@ -561,19 +580,40 @@ def main():
                 report["stage"] = "layout_proof_validation"
                 save(output, report)
                 report["layout_probe"] = validate_layout(candidate_adapter, device, options)
+
+            def multitask_entry(adapter, role):
+                select_constants = getattr(adapter, "csa_compile_constants", None)
+                if select_constants is None:
+                    return lambda: adapter.decode_csa_tp1_layer_test(*call.core_args, config=options)
+                ops = adapter.CSAOperators.register(namespace=f"csa_backport_{role}", config=options)
+                bound_call = adapter.NativeCSACall(
+                    ops,
+                    weights,
+                    fixture["hidden"],
+                    fixture["positions"],
+                    groups,
+                    layer_name=layer.self_attn.dsa_attn.dsa_attn.layer_name,
+                    compact_metadata=fixture["compact"],
+                    buffers={name: call.args[name] for name in ("idx_topk_scores", "idx_topk", "x_out")},
+                )
+                if bound_call.param_names != call.param_names:
+                    raise AssertionError("入口分档不应改变原CSA运行时Tensor参数顺序")
+                report.setdefault("entry_dispatch", {})[role] = {
+                    "route": "CSAOperators.register + NativeCSACall",
+                    "constexpr": select_constants(tokens),
+                    "operator": str(ops.for_tokens(tokens)),
+                }
+                return bound_call
+
             entries = {
-                "multitask_original": lambda: original.decode_csa_tp1_layer_test(*call.core_args, config=options),
-                "multitask_candidate": lambda: candidate_adapter.decode_csa_tp1_layer_test(
-                    *call.core_args, config=options
-                ),
+                "multitask_original": multitask_entry(original, "multitask_original"),
+                "multitask_candidate": multitask_entry(candidate_adapter, "multitask_candidate"),
                 "single_spmd": lambda: spmd(config=options),
             }
             if current_adapter is not None:
                 entries = {
                     "multitask_original": entries["multitask_original"],
-                    "multitask_current": lambda: current_adapter.decode_csa_tp1_layer_test(
-                        *call.core_args, config=options
-                    ),
+                    "multitask_current": multitask_entry(current_adapter, "multitask_current"),
                     "multitask_candidate": entries["multitask_candidate"],
                     "single_spmd": entries["single_spmd"],
                 }

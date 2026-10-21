@@ -353,6 +353,7 @@ _q_proj_qa_tiles = _q_proj_qa_nz if BF16_WEIGHT_NZ else _q_proj_qa_nd
 
 
 QA_M16_WORKER_LIMIT = QR_N_BLOCKS * QR_FIXED_M_GROUPS
+QA_SINGLE_M16_N_TILE = QR_N_TILE // 2
 
 
 @pl.jit.inline(auto_scope=False)
@@ -362,28 +363,31 @@ def q_proj_qa_m16_parallel(
     qr_fp32: pl.Tensor[[QPROJ_MM_T_DYN, Q_LORA], pl.FP32],
     tile_base: pl.Scalar[pl.INDEX],
     tile_rows: pl.Scalar[pl.INDEX],
+    N_TILE: pl.constexpr = QR_N_TILE,
+    SYNC_START: pl.constexpr = False,
 ):
-    """66882634：每个M16/N128独立输出分核，K次序及实际尾行保持。"""
+    """66882634：每个M16/N_TILE独立输出分核，K次序及实际尾行保持。"""
     launch_workers = pl.min(
         QA_M16_WORKER_LIMIT,
-        QR_N_BLOCKS * ((tile_rows + QR_M_TILE - 1) // QR_M_TILE),
+        (Q_LORA // N_TILE) * ((tile_rows + QR_M_TILE - 1) // QR_M_TILE),
     )
-    with pl.spmd(launch_workers, name_hint="qr_proj_matmul_m16",
-                 allow_early_resolve=True) as qa_tid:
+    with pl.spmd(
+        launch_workers, name_hint="qr_proj_matmul_m16", allow_early_resolve=True, sync_start=SYNC_START
+    ) as qa_tid:
         pl.set_cache_policy(wq_a, pl.CachePolicy.BYPASS)
         worker_id = pl.tile.get_block_idx()
         tokens = tile_rows
         m16_blocks = (tokens + QR_M_TILE - 1) // QR_M_TILE
-        for logical_worker in pl.range(pl.max(worker_id, 0), QR_N_BLOCKS * m16_blocks, QA_M16_WORKER_LIMIT):
-            column = (logical_worker % QR_N_BLOCKS) * QR_N_TILE
-            row = (logical_worker // QR_N_BLOCKS) * QR_M_TILE
-            m16_acc = pl.create_tensor([QR_M_TILE, QR_N_TILE], dtype=pl.FP32)
+        for logical_worker in pl.range(pl.max(worker_id, 0), (Q_LORA // N_TILE) * m16_blocks, QA_M16_WORKER_LIMIT):
+            column = (logical_worker % (Q_LORA // N_TILE)) * N_TILE
+            row = (logical_worker // (Q_LORA // N_TILE)) * QR_M_TILE
+            m16_acc = pl.create_tensor([QR_M_TILE, N_TILE], dtype=pl.FP32)
             for k_block in pl.pipeline(D // QR_K_TILE, stage=2):
                 k0 = k_block * QR_K_TILE
                 valid_rows = pl.min(QR_M_TILE, tokens - row)
                 m16_x = pl.slice(x, [QR_M_TILE, QR_K_TILE], [tile_base + row, k0],
                                  valid_shape=[valid_rows, QR_K_TILE])
-                m16_weight = wq_a[column : column + QR_N_TILE, k0 : k0 + QR_K_TILE]
+                m16_weight = wq_a[column : column + N_TILE, k0 : k0 + QR_K_TILE]
                 m16_acc = pl.matmul_acc(m16_acc, m16_x, m16_weight, b_trans=True, init_cond=(k_block == 0))
             qr_fp32 = pl.assemble(qr_fp32, m16_acc, [row, column])
     return qa_tid
@@ -397,22 +401,69 @@ def q_proj_qa_policy(
     tile_base: pl.Scalar[pl.INDEX],
     tile_rows: pl.Scalar[pl.INDEX],
     qa_m16_parallel: pl.Scalar[pl.INT32],
+    SINGLE_M16_QA: pl.constexpr = False,
 ):
     """Keep complete K traversal; partition independent M/N outputs for fixed-K."""
-    if ATOMIC_ADD == 1:
-        qa_tid = _q_proj_qa_tiles(
-            x, wq_a, qr_fp32, tile_base, tile_rows, QR_DENSE_M_TILE, 1,
-        )
-    elif qa_m16_parallel != 0:
-        qa_tid = q_proj_qa_m16_parallel(x, wq_a, qr_fp32, tile_base, tile_rows)
-    elif tile_rows < QR_FIXED_SMALL_ROWS:
-        qa_tid = _q_proj_qa_tiles(
-            x, wq_a, qr_fp32, tile_base, tile_rows, QR_FIXED_SMALL_M_TILE, QR_FIXED_M_GROUPS,
-        )
+    if SINGLE_M16_QA:
+        if ATOMIC_ADD == 1:
+            qa_tid = _q_proj_qa_tiles(
+                x,
+                wq_a,
+                qr_fp32,
+                tile_base,
+                tile_rows,
+                QR_DENSE_M_TILE,
+                1,
+            )
+        elif qa_m16_parallel == 2:
+            qa_tid = q_proj_qa_m16_parallel(
+                x,
+                wq_a,
+                qr_fp32,
+                tile_base,
+                tile_rows,
+                N_TILE=QA_SINGLE_M16_N_TILE,
+                SYNC_START=True,
+            )
+        elif qa_m16_parallel != 0:
+            qa_tid = q_proj_qa_m16_parallel(
+                x,
+                wq_a,
+                qr_fp32,
+                tile_base,
+                tile_rows,
+                N_TILE=QR_N_TILE,
+                SYNC_START=False,
+            )
+        elif tile_rows < QR_FIXED_SMALL_ROWS:
+            qa_tid = _q_proj_qa_tiles(
+                x,
+                wq_a,
+                qr_fp32,
+                tile_base,
+                tile_rows,
+                QR_FIXED_SMALL_M_TILE,
+                QR_FIXED_M_GROUPS,
+            )
+        else:
+            qa_tid = _q_proj_qa_tiles(
+                x,
+                wq_a,
+                qr_fp32,
+                tile_base,
+                tile_rows,
+                QR_DENSE_M_TILE,
+                QR_FIXED_M_GROUPS,
+            )
     else:
-        qa_tid = _q_proj_qa_tiles(
-            x, wq_a, qr_fp32, tile_base, tile_rows, QR_DENSE_M_TILE, QR_FIXED_M_GROUPS,
-        )
+        if ATOMIC_ADD == 1:
+            qa_tid = _q_proj_qa_tiles(x, wq_a, qr_fp32, tile_base, tile_rows, QR_DENSE_M_TILE, 1)
+        elif qa_m16_parallel != 0:
+            qa_tid = q_proj_qa_m16_parallel(x, wq_a, qr_fp32, tile_base, tile_rows, N_TILE=QR_N_TILE, SYNC_START=False)
+        elif tile_rows < QR_FIXED_SMALL_ROWS:
+            qa_tid = _q_proj_qa_tiles(x, wq_a, qr_fp32, tile_base, tile_rows, QR_FIXED_SMALL_M_TILE, QR_FIXED_M_GROUPS)
+        else:
+            qa_tid = _q_proj_qa_tiles(x, wq_a, qr_fp32, tile_base, tile_rows, QR_DENSE_M_TILE, QR_FIXED_M_GROUPS)
     return qa_tid
 
 
@@ -426,6 +477,7 @@ def q_proj_qr_policy(
     qr_i8_matmul: pl.Tensor[[QPROJ_T_PAD, Q_LORA], pl.INT8],
     qr_scale_pad_store: pl.Tensor[[QPROJ_T_PAD, 1], pl.FP32],
     qa_m16_parallel: pl.Scalar[pl.INT32],
+    SINGLE_M16_QA: pl.constexpr = False,
 ):
     """Q LoRA, RMSNorm and quantization -- the half the indexer query chain needs.
 
@@ -444,7 +496,9 @@ def q_proj_qr_policy(
             qr_fp32 = pl.create_tensor([qr_t_matmul, Q_LORA], dtype=pl.FP32)
             # Bind before the array update: nested inline expansion otherwise
             # creates a reserved auto-name in the current PyPTO compiler.
-            qa_task = q_proj_qa_policy(x, wq_a, qr_fp32, tile_base, tile_rows, qa_m16_parallel)
+            qa_task = q_proj_qa_policy(
+                x, wq_a, qr_fp32, tile_base, tile_rows, qa_m16_parallel, SINGLE_M16_QA=SINGLE_M16_QA
+            )
             qa_tids[0] = qa_task
 
             q_proj_qr_normalize(qr_fp32, gamma_cq, qr, qr_scale, qr_i8_matmul, qr_scale_pad_store, tile_base, tile_rows)
@@ -827,12 +881,15 @@ def q_proj_rope_policy(
     qr: pl.Tensor[[T_DYN, Q_LORA], pl.INT8],
     qr_scale: pl.Tensor[[T_DYN, 1], pl.FP32],
     qa_m16_parallel: pl.Scalar[pl.INT32],
+    SINGLE_M16_QA: pl.constexpr = False,
 ):
     """Q LoRA, RMSNorm, quantization, and RoPE over bounded dense tiles."""
     qr_i8_matmul = pl.create_tensor([QPROJ_T_PAD, Q_LORA], dtype=pl.INT8)
     # The quant scale rides the qr_i8 -> qproj_matmul -> dequant chain.
     qr_scale_pad_store = pl.create_tensor([QPROJ_T_PAD, 1], dtype=pl.FP32, manual_dep=True)
-    qa_tid = q_proj_qr_policy(x, wq_a, gamma_cq, qr, qr_scale, qr_i8_matmul, qr_scale_pad_store, qa_m16_parallel)
+    qa_tid = q_proj_qr_policy(
+        x, wq_a, gamma_cq, qr, qr_scale, qr_i8_matmul, qr_scale_pad_store, qa_m16_parallel, SINGLE_M16_QA=SINGLE_M16_QA
+    )
     q_seq_dep = pl.system.task_dummy(deps=[])
     q_proj_q(
         x,
@@ -1128,6 +1185,7 @@ def qkv_proj_rope_policy(
     qr_scale: pl.Tensor[[T_DYN, 1], pl.FP32],
     late_dep: pl.Scalar[pl.TASK_ID],
     qa_m16_parallel: pl.Scalar[pl.INT32],
+    SINGLE_M16_QA: pl.constexpr = False,
 ):
     """Fused q + kv projection: both branches share one token axis and one rope table."""
     t_dim = pl.tensor.dim(x, 0)
@@ -1147,6 +1205,7 @@ def qkv_proj_rope_policy(
         qr,
         qr_scale,
         qa_m16_parallel,
+        SINGLE_M16_QA=SINGLE_M16_QA,
     )
     kv_proj_rope(
         x,
@@ -1195,6 +1254,7 @@ def qkv_proj_rope(
         qr_scale,
         late_dep,
         pl.cast(0, pl.INT32),
+        SINGLE_M16_QA=False,
     )
 
 
@@ -1207,14 +1267,7 @@ def q_proj_qa(
     tile_rows: pl.Scalar[pl.INDEX],
 ):
     """Keep complete K traversal; partition independent M/N outputs for fixed-K."""
-    return q_proj_qa_policy(
-        x,
-        wq_a,
-        qr_fp32,
-        tile_base,
-        tile_rows,
-        pl.cast(0, pl.INT32),
-    )
+    return q_proj_qa_policy(x, wq_a, qr_fp32, tile_base, tile_rows, pl.cast(0, pl.INT32), SINGLE_M16_QA=False)
 
 
 @pl.jit.inline(auto_scope=False)
@@ -1235,14 +1288,7 @@ def q_proj_qr(
     current caller has t_dim <= PREFILL_DENSE_TILE, i.e. a single iteration.
     """
     return q_proj_qr_policy(
-        x,
-        wq_a,
-        gamma_cq,
-        qr,
-        qr_scale,
-        qr_i8_matmul,
-        qr_scale_pad_store,
-        pl.cast(0, pl.INT32),
+        x, wq_a, gamma_cq, qr, qr_scale, qr_i8_matmul, qr_scale_pad_store, pl.cast(0, pl.INT32), SINGLE_M16_QA=False
     )
 
 
@@ -1274,4 +1320,5 @@ def q_proj_rope(
         qr,
         qr_scale,
         pl.cast(0, pl.INT32),
+        SINGLE_M16_QA=False,
     )

@@ -216,6 +216,7 @@ def _make_decode_csa_entry(*, host_metadata: bool):
         idx_topk: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
         x_out: pl.Out[pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16]],
         host_max_seq_len: pl.Scalar[pl.INT32] = 0,
+        SINGLE_M16_QA: pl.constexpr = False,
     ):
         """TP1 整层：mHC 的 pre 门 + input_layernorm + attention + mHC 的 post。
 
@@ -391,12 +392,20 @@ def _make_decode_csa_entry(*, host_metadata: bool):
         with pl.scope():
             # Projection-chain dependency marker.
             late_dep = pl.system.task_dummy(deps=[rope_tid])
-            # 66882634：长G6且16<T<32；按实际T选择，不枚举batch点。
+            # 来源66882634的独立输出块分工；长历史单M16用N64，原两M16区间保留N128。
             qa_m16_parallel = pl.cast(0, pl.INT32)
-            if max_seq_len // COMPRESS_RATIO > TOPK_CANDIDATES_PER_LEAF:
-                if t_dim >= LONG_S6_MIN_QUERY_ROWS:
-                    if t_dim < 2 * QR_M_TILE:
-                        qa_m16_parallel = pl.cast(1, pl.INT32)
+            if SINGLE_M16_QA:
+                if max_seq_len // COMPRESS_RATIO > TOPK_CANDIDATES_PER_LEAF:
+                    if t_dim <= QR_M_TILE:
+                        qa_m16_parallel = pl.cast(2, pl.INT32)
+                    elif t_dim >= LONG_S6_MIN_QUERY_ROWS:
+                        if t_dim < 2 * QR_M_TILE:
+                            qa_m16_parallel = pl.cast(1, pl.INT32)
+            else:
+                if max_seq_len // COMPRESS_RATIO > TOPK_CANDIDATES_PER_LEAF:
+                    if t_dim >= LONG_S6_MIN_QUERY_ROWS:
+                        if t_dim < 2 * QR_M_TILE:
+                            qa_m16_parallel = pl.cast(1, pl.INT32)
             q, qa_tid = qkv_proj_rope_policy(
                 x_normed_t,
                 wq_a,
@@ -413,6 +422,7 @@ def _make_decode_csa_entry(*, host_metadata: bool):
                 qr_scale,
                 late_dep,
                 qa_m16_parallel,
+                SINGLE_M16_QA=SINGLE_M16_QA,
             )
 
             ori_block_num = pl.tensor.dim(kv_cache, 0)
@@ -528,7 +538,7 @@ def _make_decode_csa_entry(*, host_metadata: bool):
         _decode_csa_tp1_layer.__annotations__["host_max_seq_len"] = pl.constexpr
     else:
         # The new public ABI must never silently assume an empty history.
-        _decode_csa_tp1_layer.__defaults__ = None
+        _decode_csa_tp1_layer.__defaults__ = (False,)
     return _decode_csa_tp1_layer
 
 
@@ -537,3 +547,8 @@ _decode_csa_tp1_layer_hbg = _make_decode_csa_entry(host_metadata=True)
 decode_csa_tp1_layer = pl.jit.inline(auto_scope=False)(_decode_csa_tp1_layer)
 decode_csa_tp1_layer_test = pl.jit(auto_scope=False)(_decode_csa_tp1_layer)
 decode_csa_tp1_layer_hbg = pl.jit(auto_scope=False)(_decode_csa_tp1_layer_hbg)
+
+
+def csa_compile_constants(tokens: int) -> dict[str, bool]:
+    """只看Tensor逻辑行数，不读取NPU内容；长度/页表/padding仍由设备处理。"""
+    return {"SINGLE_M16_QA": 0 < tokens <= QR_M_TILE}

@@ -1,9 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""未执行草稿：拟用Tensor元数据选择QA编译期开关。
-
-缺少测试harness接入，尚未生成私有包、编译或运行设备测试；不能当作已验证实现。
-关闭入口消除新增策略分支只是待验证目标。用户要求本轮结束后暂停，保留草稿供后续审阅。
-"""
+"""按Tensor逻辑行数选择单M16 QA编译分支，关闭分支须单独验证完整编排。"""
 
 import argparse
 import ast
@@ -14,10 +10,35 @@ import textwrap
 
 from prepare import HERE
 from prepare_query_ready import replace_once
-from prepare_query_score import append_call_arguments, append_parameters
 
 FLAG = "SINGLE_M16_QA"
 POLICIES = {"q_proj_qa_policy", "q_proj_qr_policy", "q_proj_rope_policy", "qkv_proj_rope_policy"}
+
+
+def append_flag_parameter(source, name):
+    node = next(n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.FunctionDef) and n.name == name)
+    lines = source.splitlines(keepends=True)
+    close = next(i for i in range(node.lineno, node.body[0].lineno) if lines[i].strip() == "):")
+    lines.insert(close, " " * (node.col_offset + 4) + f"{FLAG}: pl.constexpr = False,\n")
+    return "".join(lines)
+
+
+def append_policy_flag(source, value):
+    """仅改调用实参，兼容原有单行与多行调用；AST位置按UTF-8字节处理。"""
+    data = source.encode()
+    offsets = [0]
+    for line in data.splitlines(keepends=True):
+        offsets.append(offsets[-1] + len(line))
+    calls = [
+        n
+        for n in ast.walk(ast.parse(source))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in POLICIES
+    ]
+    for node in sorted(calls, key=lambda n: (n.lineno, n.col_offset), reverse=True):
+        start, end = offsets[node.lineno - 1] + node.col_offset, offsets[node.end_lineno - 1] + node.end_col_offset
+        node.keywords.append(ast.keyword(arg=FLAG, value=ast.parse(value, mode="eval").body))
+        data = data[:start] + ast.unparse(node).encode() + data[end:]
+    return data.decode()
 
 
 def main():
@@ -42,7 +63,7 @@ def main():
     lines[selection.lineno - 1 : selection.end_lineno] = [textwrap.indent(body, " " * selection.col_offset)]
     source = "".join(lines)
     for name in POLICIES:
-        source = append_parameters(source, name, [f"{FLAG}: pl.constexpr = False"])
+        source = append_flag_parameter(source, name)
     # 只在显式policy链上传递开关；HCA旧辅助入口等其它调用固定关闭。
     lines = source.splitlines(keepends=True)
     for function in sorted(
@@ -50,13 +71,13 @@ def main():
     ):
         text = "".join(lines[function.lineno - 1 : function.end_lineno])
         value = FLAG if function.name in POLICIES else "False"
-        text = append_call_arguments(text, POLICIES, [f"{FLAG}={value}"])
+        text = append_policy_flag(text, value)
         lines[function.lineno - 1 : function.end_lineno] = [text]
     source = "".join(lines)
 
     root = (base / "decode_csa.py").read_text()
-    root = append_parameters(root, "_decode_csa_tp1_layer", [f"{FLAG}: pl.constexpr = False"])
-    root = append_call_arguments(root, {"qkv_proj_rope_policy"}, [f"{FLAG}={FLAG}"])
+    root = append_flag_parameter(root, "_decode_csa_tp1_layer")
+    root = append_policy_flag(root, FLAG)
     old_selection = (
         "            if max_seq_len // COMPRESS_RATIO > TOPK_CANDIDATES_PER_LEAF:\n"
         "                if t_dim <= QR_M_TILE:\n"
