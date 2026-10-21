@@ -21,14 +21,7 @@
       "regression_log": "runs/pypto_native_wait_regression.log"
     }
   },
-  "live_device_tasks": [
-    {
-      "case": "requested_s6_mixed_b16_20261022_v124",
-      "task_id": "task_20261022_005219_338877432506",
-      "status": "pending",
-      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/requested_s6_mixed_b16_20261022_v124"
-    }
-  ],
+  "live_device_tasks": [],
   "latest_completed": {
     "b1_capacity6_s1_s6": "task_20261021_022330_182138327918; six cases pass; wait150 actual CCEC audit pass",
     "cube_publication_trial": "Both B1/B16 numerical/protocol pass but no benefit: B1 400.04->404.72us, B16 778.62->786.24us; not adopted",
@@ -111,12 +104,12 @@
     "three_way_shared_v117": "B8 candidate616.26/current640.50/BSH641.85us; B1candidate372.14/current370.30/BSH363.39us. Both exit0, allstrict/protocol PASS; B1S1-S6PASS. Diagnostic only.",
     "masked_rope_v118": "FullB1 exact/graph/state/guards/protocol/S1-S6 PASS;currentv106376.22->371.58us(-1.2333%,4/5).39 helper tests passed in v121. v119/v120 launcher errors preserved.",
     "shared_t41_v123": "task_20261021_205606_81859127914 completed exit0; result complete/passed; metadata and continuous-state matrix; no performance measured.",
-    "shared_t65_v123": "task_20261021_204517_18664022262 completed exit0; actual single-layer service, mixed T65, metadata replay and fallback checks passed; separate event timing only."
+    "shared_t65_v123": "task_20261021_204517_18664022262 completed exit0; actual single-layer service, mixed T65, metadata replay and fallback checks passed; separate event timing only.",
+    "requested_s6_mixed_v124": "s6_mixed_compare_result_v124.json; task_20261022_005731_366392031421 exit0; S6 TND+0.8036%, mixed TND-4.4533% versus same-input original; TND mixed versus S6 latency-9.3213%."
   },
   "critical_next_steps": [
-    "Collect only task_20261022_005219_338877432506; do not restart or resubmit while pending/running.",
-    "Report both workload latency reduction (T96 versus T56) and same-input TND versus original-SPMD kernel ratios; preserve Native differences and full L1 windows.",
-    "After this requested comparison, stop. The broad optimization goal remains paused; no new optimization or push."
+    "Report the completed requested comparison and its scope; do not resubmit either case.",
+    "Stop after this requested verification. Broad optimization remains paused; no push without a new explicit request."
   ],
   "native_toolchain_manifest": "Historical only: native_toolchain_manifest.json; old sources/results preserved, no longer selected for new tests",
   "current_bsh_baseline": "a241fa6178ddad24ced30e5a93d109dfb17f5b53 + local static inactive-B1 shape fix; bsh_baseline_a241fa61_short_typefix_manifest.json; original snapshots/FAIL preserved",
@@ -154,7 +147,7 @@
       ]
     }
   },
-  "updated_at": "2026-10-22T00:53:33.068390+08:00",
+  "updated_at": "2026-10-22T01:32:11.909047+08:00",
   "latest_complete_cohort": {
     "report": "cohort_shared_combined_v122_result.json",
     "geometric_mean_ratio": 1.0007191243527511,
@@ -216,19 +209,20 @@
     },
     {
       "case": "requested_s6_mixed_b16_20261022_v124",
-      "task_id": "task_20261022_005219_338877432506",
-      "status": "pending",
-      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/requested_s6_mixed_b16_20261022_v124"
+      "task_id": "task_20261022_005731_366392031421",
+      "status": "completed (exit=0)",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/requested_s6_mixed_b16_20261022_v124",
+      "replaces_cancelled_task": "task_20261022_005219_338877432506",
+      "device": 0
     }
   ],
   "next_actions": [
-    "Collect only task_20261022_005219_338877432506; do not restart or resubmit while pending/running.",
-    "Report both workload latency reduction (T96 versus T56) and same-input TND versus original-SPMD kernel ratios; preserve Native differences and full L1 windows.",
-    "After this requested comparison, stop. The broad optimization goal remains paused; no new optimization or push."
+    "Report the completed requested comparison and its scope; do not resubmit either case.",
+    "Stop after this requested verification. Broad optimization remains paused; no push without a new explicit request."
   ],
   "live_cpu_jobs": [],
   "pending_cleanup": null,
-  "current_work": "Run requested two-shape comparison with frozen private v122, same reserved device and shared release. Do not modify or adopt operators. Previous v122 eight-case cohort and T65/T41 validations are complete.",
+  "current_work": "Requested two-case comparison completed on device0. S6 original808.84/TND815.34us; mixedT56 original773.80/TND739.34us. No-new-regression checks passed; Native discrepancies retained. Stop; broad optimization goal remains paused.",
   "integration_base": "3c92ca84a9e69b3dfa09414e0e7fa7034cc80c08",
   "stage_commits": [
     {
@@ -306,6 +300,10 @@
     {
       "commit": "6a86e5e6",
       "scope": "Merge upstream shared test environment while preserving paused local work; local only"
+    },
+    {
+      "commit": "20816b44",
+      "scope": "Shared-toolchain eight-case evidence, private tail/v122 candidates, and requested two-case comparison preparation"
     }
   ],
   "previous_goal_turn_classification": "limited user-requested measurement while general goal is paused",
@@ -321,7 +319,7 @@
   "resumed_at": "2026-10-21T12:01:26.138561+00:00",
   "consecutive_blocked_turns_since_resume": 0,
   "resume_note": "Historical full-goal resume was superseded by user pause; latest request authorizes the two-case comparison only.",
-  "next_device_actions": "Collect only task_20261022_005219_338877432506; do not restart or resubmit while pending/running.",
+  "next_device_actions": "None; all requested device work complete.",
   "adopted_candidate": "runs/borrowed_combined_candidate_v106",
   "shared_toolchain": {
     "manifest": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_shared_toolchain/manifest.json",
