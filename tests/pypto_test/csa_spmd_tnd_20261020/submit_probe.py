@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+METADATA_HISTORY_SLACK = 128
+
 
 def validate_fixture_arguments(arguments):
     """Reject known harness-contract mistakes before reserving an NPU."""
@@ -16,6 +18,8 @@ def validate_fixture_arguments(arguments):
         return
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--batch", type=int, required=True)
+    parser.add_argument("--history", type=int)
+    parser.add_argument("--table-history", type=int)
     parser.add_argument("--query-tokens", type=int, default=5)
     parser.add_argument("--query-lengths")
     parser.add_argument("--token-capacity", type=int)
@@ -41,6 +45,9 @@ def validate_fixture_arguments(arguments):
             expected = f"B6、各S6、41<=T容量<=72、请求容量{required_requests}（覆盖S1的dummy尾部）"
         if not valid:
             raise ValueError(f"metadata矩阵的初始捕获输入须为{expected}；各变长场景由矩阵内部生成")
+        if (args.history is None or args.table_history is None
+                or args.table_history < args.history + METADATA_HISTORY_SLACK):
+            raise ValueError("metadata矩阵须提供history及至少history+128的table-history；提交前拒绝不完整fixture")
     if args.service_metadata_replay and queries == list(reversed(queries)):
         raise ValueError("该服务metadata用例要求query长度反转后发生变化；B1请使用标准framework-graph检查")
 

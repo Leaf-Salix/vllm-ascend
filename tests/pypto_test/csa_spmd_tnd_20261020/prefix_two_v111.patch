@@ -1,0 +1,88 @@
+--- a/entry.py
++++ b/entry.py
+@@ -293,6 +293,7 @@
+     SHORT_HALF_SCORE_UB: pl.constexpr = False,
+     SHORT_TOPK_PREFIX: pl.constexpr = False,
+     QB_WIDE_N: pl.constexpr = False,
++    PREFIX_BRANCH_GROUPS: pl.constexpr = 4,
+ ):
+     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
+     with pl.cluster(name_hint="dynamic_csa_full"):
+@@ -388,6 +389,7 @@
+             SPLIT_SCORE_ROWS,
+             OUTPUT_WORK_BALANCE,
+             QB_WIDE_N,
++            PREFIX_BRANCH_GROUPS,
+         )
+         (
+             x_fp32,
+@@ -825,6 +827,7 @@
+     SHORT_HALF_SCORE_UB: pl.constexpr = False,
+     SHORT_TOPK_PREFIX: pl.constexpr = False,
+     QB_WIDE_N: pl.constexpr = False,
++    PREFIX_BRANCH_GROUPS: pl.constexpr = 4,
+ ):
+     # Native cache只作为一个根入参传入。两份Key是编排内的零拷贝描述符，
+     # 避免把“可写cache+部分重叠只读视图”当作独立外部入参触发Torch别名拒绝。
+@@ -1078,6 +1081,7 @@
+             SHORT_HALF_SCORE_UB,
+             SHORT_TOPK_PREFIX,
+             QB_WIDE_N,
++            PREFIX_BRANCH_GROUPS,
+         )
+     return (
+         x_fp32,
+--- a/cube_schedule.py
++++ b/cube_schedule.py
+@@ -201,6 +201,7 @@
+     SPLIT_SCORE_ROWS: pl.constexpr = False,
+     OUTPUT_WORK_BALANCE: pl.constexpr = False,
+     QB_WIDE_N: pl.constexpr = False,
++    PREFIX_BRANCH_GROUPS: pl.constexpr = 4,
+ ):
+     # 恢复原分task五份流式权重的BYPASS；预定义incore使用函数属性表达。
+     # 当前PyPTO此属性只接受(参数序号,策略整数)，1表示CachePolicy.BYPASS。
+@@ -312,7 +313,7 @@
+             normed, main_wkv, main_wgate, main_value, main_score,
+             weights_proj, weights_partial, idx_query_rope_heads, hadamard,
+             idx_query_had, qr_matmul, wq_b, q_proj, idx_lengths, idx_count,
+-            idx_normed, idx_had, wkv, kv_fp32, signal, worker, generation, 4,
++            idx_normed, idx_had, wkv, kv_fp32, signal, worker, generation, PREFIX_BRANCH_GROUPS,
+             QB_WIDE_N,
+         )
+     else:
+--- a/policy.py
++++ b/policy.py
+@@ -101,6 +101,8 @@
+ SCORE_SPLIT_MIN_TOKENS = 32
+ # At most two query-group work items per each of the 24 physical groups.
+ SHORT_HALF_SCORE_GROUP_LIMIT = 48
++# Two M256 query-Hadamard tiles cover the existing first M8 token block.
++TWO_HADAMARD_MAX_TOKENS = 8
+ 
+ 
+ @dataclass(frozen=True)
+@@ -128,6 +130,7 @@
+     short_topk_prefix: bool = False
+     short_half_score_ub: bool = False
+     qb_wide_n: bool = False
++    prefix_branch_groups: int = 4
+ 
+     def constexprs(self) -> dict[str, int | bool]:
+         return {
+@@ -155,6 +158,7 @@
+             "SHORT_TOPK_PREFIX": self.short_topk_prefix,
+             "SHORT_HALF_SCORE_UB": self.short_half_score_ub,
+             "QB_WIDE_N": self.qb_wide_n,
++            "PREFIX_BRANCH_GROUPS": self.prefix_branch_groups,
+         }
+ 
+ 
+@@ -208,6 +212,7 @@
+         ob_rows=ob_rows,
+         # Does not infer real query lengths; only the existing Host token-capacity tier.
+         qb_wide_n=tokens < EARLY_GEOMETRY_MIN_TOKENS,
++        prefix_branch_groups=2 if tokens <= TWO_HADAMARD_MAX_TOKENS else 4,
+         # Host upper bound only; real mixed-query membership remains on device.
+         short_half_score_ub=(not long_history and group == 2
+                              and requests * ((max_query_tokens + 1) // 2)

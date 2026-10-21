@@ -30,10 +30,15 @@ def test_incremental_measurements_rejected_by_bsh_gate(tmp_path, marker):
         evaluate(jobs, task_ids)
 
 
-@pytest.mark.parametrize("kind", ["qa", "ws", "combined"])
-def test_actual_launcher_snapshot_uses_frozen_tnd_reference(tmp_path, kind):
+@pytest.mark.parametrize(
+    "kind,version,expected_kind",
+    [("qa", "v93b", "adopted_tnd_output_balance_v4"),
+     ("ws", "v93b", "adopted_tnd_output_balance_v4"),
+     ("combined", "v108b", "adopted_tnd_borrowed_combined_v106"),
+     ("qb_wide", "v112", "validated_qb_wide_v108b")],
+)
+def test_actual_launcher_snapshot_uses_frozen_tnd_reference(tmp_path, kind, version, expected_kind):
     here = Path(__file__).resolve().parent
-    version = "v108b" if kind == "combined" else "v93b"
     harness = here / f"runs/incremental_{kind}_harness_{version}"
     if not harness.exists():
         pytest.skip("Requires the local frozen incremental probe; skip is not device evidence")
@@ -64,8 +69,9 @@ def test_actual_launcher_snapshot_uses_frozen_tnd_reference(tmp_path, kind):
     )
     assert not (snapshot / "bsh_baseline_manifest.json").exists()
     saved = json.loads((snapshot / "comparison_reference.json").read_text())
-    expected_kind = "adopted_tnd_borrowed_combined_v106" if kind == "combined" else "adopted_tnd_output_balance_v4"
     assert saved["kind"] == expected_kind
+    if kind == "qb_wide":
+        assert saved["adopted"] is False
     assert saved["formal_bsh_gate_eligible"] is False
     for name, expected in saved["files"].items():
         assert hashlib.sha256((snapshot / "original_spmd" / name).read_bytes()).hexdigest() == expected

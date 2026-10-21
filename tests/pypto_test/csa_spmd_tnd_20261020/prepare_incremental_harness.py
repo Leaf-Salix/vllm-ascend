@@ -23,6 +23,7 @@ def main():
     parser.add_argument("--unused-score-arena", action="store_true")
     args = parser.parse_args()
     source, reference, target = (p.resolve() for p in (args.harness, args.reference, args.output))
+    reference_adopted = True
     if reference == here / "runs/output_work_balance_native_candidate_v4":
         reference_kind = "adopted_tnd_output_balance_v4"
         reference_label = "TND output_balance v4 (incremental comparison only)"
@@ -33,8 +34,21 @@ def main():
         for name, expected in accepted["source_manifest"].items():
             if hashlib.sha256((reference / name).read_bytes()).hexdigest() != expected:
                 raise ValueError(f"Accepted combined-v106 source changed: {name}")
+    elif reference == here / "runs/qb_wide_candidate_v108b":
+        reference_kind = "validated_qb_wide_v108b"
+        reference_label = "QB-wide v108b (experimental reference, incremental comparison only)"
+        reference_adopted = False
+        accepted = json.loads((here / "qb_wide_v108b.json").read_text())
+        for name, expected in accepted["source_manifest"].items():
+            if hashlib.sha256((reference / name).read_bytes()).hexdigest() != expected:
+                raise ValueError(f"Validated QB-wide source changed: {name}")
+        for case in ("qb_wide_b1_s1_s6_matrix_v110", "qb_wide_t41_r12_matrix_v110"):
+            evidence = json.loads((here / "runs" / case / "result.json").read_text())
+            if not (evidence["passed"] and evidence["stage"] == "complete"):
+                raise ValueError(f"QB-wide reference requires completed correctness: {case}")
     else:
-        raise ValueError("This probe's reference label is reserved for adopted output_balance v4 or combined v106")
+        raise ValueError("This probe's reference label is reserved for adopted output_balance v4, combined v106, "
+                         "or the validated experimental QB-wide v108b")
     target.mkdir(parents=True, exist_ok=False)
     names = (
         "run_probe.py",
@@ -56,6 +70,7 @@ def main():
         "source": str(reference),
         "frozen_source": str(frozen),
         "formal_bsh_gate_eligible": False,
+        "adopted": reference_adopted,
         "files": {
             str(p.relative_to(frozen)): hashlib.sha256(p.read_bytes()).hexdigest()
             for p in sorted(frozen.rglob("*"))

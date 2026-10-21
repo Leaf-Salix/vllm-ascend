@@ -114,6 +114,7 @@ a241fa61 BSH静态形状修复+150tick；候选为输出分工v4+短前缀TopK+�
 | 8K/B16/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 641.12 | 640.38 | -0.12% | 不适用 | PASS | [结果](runs/cohort_borrowed_combined_h8192_b16_s6_v106/result.json) |
 | 128K/B1/S6 独立工作区 | TND combined v106 (incremental comparison only) | 366.50 | 355.42 | -3.02% | 不适用 | 未完成 | [结果](runs/qb_wide_b1_s6_and_s1_s6_v109/result.json) |
 | 128K/B8/S6 独立工作区 | TND combined v106 (incremental comparison only) | 613.56 | 609.60 | -0.65% | 不适用 | PASS | [结果](runs/qb_wide_h131072_b8_s6_v109/result.json) |
+| 128K/B4/S6 独立工作区 | TND combined v106 (incremental comparison only) | 487.38 | 489.72 | +0.48% | 不适用 | PASS | [结果](runs/qb_wide_h131072_b4_s6_v110/result.json) |
 
 ## 任务与原始证据
 
@@ -242,6 +243,10 @@ a241fa61 BSH静态形状修复+150tick；候选为输出分工v4+短前缀TopK+�
 | `task_20261021_162824_11409259262` | [cohort_borrowed_combined_h8192_b16_s6_v106](runs/cohort_borrowed_combined_h8192_b16_s6_v106/result.json) | completed (exit=0) | complete | PASS |
 | `task_20261021_165204_1559193337` | [qb_wide_b1_s6_and_s1_s6_v109](runs/qb_wide_b1_s6_and_s1_s6_v109/result.json) | completed (exit=1) | tnd_metadata_and_continuous_state | 否 |
 | `task_20261021_165204_15601729493` | [qb_wide_h131072_b8_s6_v109](runs/qb_wide_h131072_b8_s6_v109/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_170809_210455428383` | [qb_wide_b1_s1_s6_matrix_v110](runs/qb_wide_b1_s1_s6_matrix_v110/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_170809_210475710362` | [qb_wide_t41_r12_matrix_v110](runs/qb_wide_t41_r12_matrix_v110/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_171014_231115820997` | [qb_wide_h131072_b4_s6_v110](runs/qb_wide_h131072_b4_s6_v110/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_172027_32968638376` | [prefix_two_b1_s6_and_s1_s6_v112](runs/prefix_two_b1_s6_and_s1_s6_v112/result.json) | running | original_spmd_attribution | 否 |
 
 各任务完整命令和固定launcher SHA256见 `jobs.json`。
 Native超阈值元素、Top-K替换、cache/state及保护区明细仍在原始result.json；
