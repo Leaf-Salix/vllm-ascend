@@ -1,0 +1,29 @@
+# 三个CSA session共用的本地工具链
+
+CSA-SPMD、CSA-SPMD-TND、CSA-MPMD-TND共用本目录的`manifest.json`。
+其中路径同时指定源码和实际构建产物；目录名保留开发时名称，三个session不再各选一套SDK。
+
+```bash
+source /data/pyptouser/qinchuanyu/pto-eager/env-dsv4-0251rc1.sh
+source /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_shared_toolchain/env.sh
+python tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py \
+  --shared-toolchain /path/to/test.py
+```
+
+公共入口已接入CSA-SPMD的`csa_roofline_optimization_20261020/run_isolated.sh`、
+TND SPMD的`csa_spmd_tnd_20261020/run_probe.sh`/`run_cpu.sh`，以及
+TND MPMD的`csa_mpmd_tnd_20261021/launch.sh`。
+工作进程继承统一的Python模块查找路径，优先于历史editable安装。
+入口打印实际选择；BSH旧清单只保留算子源码参考，新的SDK选择由公共清单决定。
+
+`status=validating`表示本轮升级仍在验证，不能作为已验收版本使用。
+若PTOAS产物缺失，公共入口立即报错，不从PATH退回其他版本。
+完成定向回归和受影响单卡运行后，将版本及证据记入清单。
+新性能对照的各方必须在同一进程/任务使用本清单；历史结果仍保留当时版本，禁止跨版本算收益。
+
+SDK源码修改、重建和下一次升级由公共清单统一发布，不在有排队/运行任务时原地编辑已发布SDK。
+算子实验仍可使用冻结的私有包；历史冻结启动器和结果不改写。
+不进行反复逐文件hash扫描，来源检查以版本、路径和实际加载产物为准。
+
+本轮修复明细与验证状态：
+[`upstream_refresh_20261021`](../csa_mpmd_tnd_20261021/upstream_refresh_20261021/README.md)。

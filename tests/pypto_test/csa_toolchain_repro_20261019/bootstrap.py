@@ -10,6 +10,7 @@ PyPTO 必须在指定源码树构建；Simpler 必须安装到自己目录下的
 import argparse
 import importlib.abc
 import importlib.machinery
+import json
 import os
 import runpy
 import sys
@@ -18,9 +19,10 @@ from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pypto-root", type=Path, required=True)
-    parser.add_argument("--simpler-root", type=Path, required=True)
-    parser.add_argument("--ptoas-root", type=Path, required=True)
+    parser.add_argument("--shared-toolchain", action="store_true")
+    parser.add_argument("--pypto-root", type=Path)
+    parser.add_argument("--simpler-root", type=Path)
+    parser.add_argument("--ptoas-root", type=Path)
     parser.add_argument("--vllm-root", type=Path)
     parser.add_argument("--workspace-root", type=Path)
     parser.add_argument("script", type=Path)
@@ -28,6 +30,29 @@ def main():
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[3]
     workspace = args.workspace_root.resolve() if args.workspace_root else repo.parent
+    if args.shared_toolchain:
+        if any((args.pypto_root, args.simpler_root, args.ptoas_root)):
+            parser.error("--shared-toolchain 与单独指定 SDK 路径互斥")
+        sys.path.insert(0, str(repo / "tests/pypto_test"))
+        from csa_shared_toolchain.selection import selected_toolchain
+
+        selected, paths, manifest = selected_toolchain()
+        args.pypto_root, args.simpler_root, args.ptoas_root = paths["pypto"], paths["simpler"], paths["ptoas"]
+        print(
+            "CSA_SHARED_TOOLCHAIN "
+            + json.dumps(
+                {
+                    "release": selected["release"],
+                    "status": selected["status"],
+                    "manifest": str(manifest),
+                    **{key: str(path) for key, path in paths.items()},
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+    elif not all((args.pypto_root, args.simpler_root, args.ptoas_root)):
+        parser.error("请选择 --shared-toolchain 或完整指定三个 SDK 路径")
     pypto = args.pypto_root.resolve()
     simpler = args.simpler_root.resolve()
     ptoas = args.ptoas_root.resolve()
@@ -82,6 +107,17 @@ def main():
     os.environ["PATH"] = str(ptoas / "bin") + os.pathsep + os.environ.get("PATH", "")
     # vLLM 的模型注册检查会另起进程，继续使用相同的模型及插件源码。
     child_sources = [str(repo)]
+    if args.shared_toolchain:
+        os.environ.update(
+            CSA_SHARED_TOOLCHAIN_RELEASE=selected["release"],
+            CSA_SHARED_TOOLCHAIN_MANIFEST=str(manifest),
+            CSA_SHARED_PYPTO_ROOT=str(pypto),
+            CSA_SHARED_SIMPLER_ROOT=str(simpler),
+            CSA_SHARED_PTOAS_ROOT=str(ptoas),
+            CSA_SDMA_PYPTO_ROOT=str(pypto),
+            CSA_SDMA_SIMPLER_ROOT=str(simpler),
+        )
+        child_sources.insert(0, str(repo / "tests/pypto_test/csa_shared_toolchain/python_startup"))
     if args.vllm_root:
         child_sources.insert(0, str(args.vllm_root.resolve()))
     inherited = [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep) if p]

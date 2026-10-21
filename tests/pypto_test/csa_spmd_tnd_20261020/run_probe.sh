@@ -35,47 +35,23 @@ if [[ ${1:-} == --candidate-source ]]; then
     shift 2
 fi
 baseline_source="$repo/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd"
-pypto_root="$workspace/.worktrees/pypto-csa-repro-20261019"
-ptoas_root="$workspace/.worktrees/ptoas-csa-repro-20261019/build"
+# 旧BSH清单只固定算子源码；实际SDK统一由公共工具链选择。
 if [[ $bsh_mode == true ]]; then
     manifest="$repo/tests/pypto_test/csa_spmd_tnd_20261020/bsh_baseline_a241fa61_short_typefix_manifest.json"
-    readarray -t bsh_roots < <(python - "$manifest" <<'PY'
-import hashlib
+    baseline_source=$(python - "$manifest" <<'SOURCE_PATH'
 import json
-import subprocess
 import sys
 from pathlib import Path
-
-data = json.loads(Path(sys.argv[1]).read_text())
-for name in ("pypto", "ptoas"):
-    root = Path(data[name]["source"])
-    head = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
-    if head != data[name]["commit"]:
-        raise RuntimeError(f"Frozen {name} source revision changed")
-    for relative, expected in data[name]["copied_binaries"].items():
-        if hashlib.sha256((root / relative).read_bytes()).hexdigest() != expected:
-            raise RuntimeError(f"Frozen {name} binary changed: {relative}")
-print(data["pypto"]["source"])
-print(str(Path(data["ptoas"]["source"]) / "build"))
-print(str(Path(data["bsh"]["snapshot"]) / "deepseek_v4_flash_csa_spmd"))
-PY
+print(str(Path(json.loads(Path(sys.argv[1]).read_text())["bsh"]["snapshot"]) / "deepseek_v4_flash_csa_spmd"))
+SOURCE_PATH
 )
-    [[ ${#bsh_roots[@]} == 3 ]]
-    pypto_root=${bsh_roots[0]}
-    ptoas_root=${bsh_roots[1]}
-    baseline_source=${bsh_roots[2]}
-fi
-if [[ $native_toolchain == true ]]; then
-    pypto_root="$workspace/.worktrees/pypto-csa-tnd-perf-20261021"
-    ptoas_root="$workspace/.worktrees/ptoas-csa-tnd-perf-20261021/build"
-    [[ -f "$repo/tests/pypto_test/csa_spmd_tnd_20261020/native_toolchain_manifest.json" ]]
-    [[ -x "$ptoas_root/bin/ptoas" ]]
 fi
 if [[ -e "$out" ]]; then
     printf '拒绝覆盖结果目录：%s\n' "$out" >&2
     exit 2
 fi
 source "$workspace/env-dsv4-0251rc1.sh"
+source "$repo/tests/pypto_test/csa_shared_toolchain/env.sh"
 export TORCH_DEVICE_BACKEND_AUTOLOAD=0 PYTHONDONTWRITEBYTECODE=1
 export VLLM_ASCEND_ENABLE_NZ=2 VLLM_ASCEND_PTO_CSA_ATOMIC_ADD=0
 if [[ $mode == performance || $mode == phase_profile ]]; then
@@ -135,10 +111,7 @@ manifest = {
 }
 (snapshot / "source_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 PY
-if [[ $native_toolchain == true ]]; then
-    cp "$repo/tests/pypto_test/csa_spmd_tnd_20261020/native_toolchain_manifest.json" \
-        "$snapshot/native_toolchain_manifest.json"
-fi
+cp "$CSA_SHARED_TOOLCHAIN_MANIFEST" "$snapshot/shared_toolchain_manifest.json"
 if [[ $mode == performance ]]; then
     target="$snapshot/perf_helpers/run_device.py"
     source_args=(--spmd-source "$snapshot/spmd" --source-matrix-reference "$snapshot/original_spmd")
@@ -153,7 +126,7 @@ elif [[ $bsh_mode == true ]]; then
         --wait-policy-source "$snapshot/original_spmd/wait_codegen.py"
         --spmd-source "$snapshot/spmd" --baseline-spmd-source "$snapshot/original_spmd")
     if [[ $native_toolchain == true ]]; then
-        source_args+=(--toolchain-manifest "$snapshot/native_toolchain_manifest.json")
+        source_args+=(--toolchain-manifest "$snapshot/shared_toolchain_manifest.json")
     fi
 else
     target="$snapshot/run_probe.py"
@@ -161,8 +134,6 @@ else
 fi
 exec python "$repo/tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py" \
     --workspace-root "$workspace" \
+    --shared-toolchain \
     --vllm-root "$workspace/.cache/migration-v0.25.1rc1/vllm" \
-    --pypto-root "$pypto_root" \
-    --simpler-root "$workspace/.worktrees/simpler-csa-core-args-256-20261016" \
-    --ptoas-root "$ptoas_root" \
     "$target" --output "$out" "${source_args[@]}" "$@"

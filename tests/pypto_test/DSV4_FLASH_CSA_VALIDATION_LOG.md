@@ -20543,3 +20543,34 @@ MPMD服务复用TND的Native绑定、图描述符、cache connector及回退生�
 CPU合同测试对SPMD/MPMD两种variant检查真实custom-op分派、缓存工作区复用、图捕获重绑、
 Native回退和框架混合TND分档选择：57 passed（旧工具链，未占NPU）。Ruff通过。
 这只证明Python接入边界；真实模型、连续状态、16卡验证仍未完成，不能作为整模型通过依据。
+
+
+### 735.9：拉取CSA-SPMD已修复issue，并统一三个session的本地工具链
+
+用户要求采用CSA-SPMD session已提交/跟进issue的官方修复，随后明确要求
+CSA-SPMD、CSA-SPMD-TND、CSA-MPMD-TND三个session使用同一套本地版本，
+并已停止另外两个session以便切换。此要求取代各session分别选取SDK的工作方式。
+
+已以最新kernel调试分支3cc5c61d为基础，移植9项PyPTO官方已合入修复（含既有#2951），
+PTOAS采用master 2a2bad22，包含#1620动态地址同步和#1622 CFG并行赋值修复。
+继续使用Simpler 57e49923，保留CORE256 ABI、原生150tick等待和CSA已验证的必要补丁。
+说明关闭而没有实现变更的#2886不算代码修复；仍open的PR不冒充已正式合入。
+具体issue、官方提交、本地适配和实时GitHub查询证据见
+[修复接入记录](csa_mpmd_tnd_20261021/upstream_refresh_20261021/README.md)。
+
+三个日常入口已改读唯一清单
+[`csa_shared_toolchain/manifest.json`](csa_shared_toolchain/manifest.json)，
+公共bootstrap新增--shared-toolchain，Python子进程继承同一源码绑定，避免editable finder
+选回旧包。BSH历史清单只提供冻结算子源码，当前SDK由公共清单选择。
+已停止的两个session恢复后应直接使用这些公共入口。仓库与工作区AGENTS均记录此要求。
+公共PTOAS缺少可执行产物时立即报错，不从PATH回退到旧版本。
+
+当前阶段仍为validating：PyPTO及torch_npu桥接已经独立构建，核心回归891项通过，
+共享目的存储/内存规划代码生成152项通过，算术及tensor.dim代码生成19项通过。
+5个packed-FP4测试属于调试分支不存在的类型，明确跳过；3个PTOAS编译检查待新产物完成。
+两项Buffer函数恒等测试保留完整IR及属性验证，因本分支未实现pl.buffer文本解析，
+不执行该项文本roundtrip；未放宽CSA精度门槛。冻结SPMD/MPMD的128K/B16前端解析通过。
+这些CPU检查不执行PTOAS或NPU，不能替代完整编译和单卡验收。
+
+PTOAS完整构建仍在进行。尚未开始新工具链的NPU计时，未将旧版本的性能数据用作新版收益。
+历史冻结实验和源码目录保留，后续正式实验统一从公共入口生成；不反复扫描文件hash。
