@@ -5,6 +5,7 @@
 提交序号；要求窗口中完整出现 0..N-1，且只含一个 ring。自动匹配要求
 提交数量唯一，否则必须用 --orchestration SIDE=PATH 明确指定源码。
 incore 时间包含核内等待，不能仅凭 L1 把 task 间隔归因于 AICPU 计算。
+平均阶段首尾只比较位置；任务顺序可逐窗变化，不能拼成一条真实泳道或据此断言并发。
 """
 
 import argparse
@@ -99,6 +100,7 @@ def main():
         "case": result["case"]["name"],
         "result": str((args.run / "result.json").resolve()),
         "method": "单 ring 完整静态提交序号匹配；incore begin/end；等待含在 task 内，不推断 AICPU 忙时",
+        "mean_stage_limit": "跨窗平均不是单次泳道；并发和先后关系必须在同一窗口核实",
         "sides": {},
     }
     for side in sorted({w["side"] for w in result["windows"] if w["side"].startswith("mpmd")}):

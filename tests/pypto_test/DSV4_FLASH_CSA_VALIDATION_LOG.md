@@ -20744,3 +20744,43 @@ Cube资源。下一步应审查Q_A这条同时供给Q_B和Indexer query的共同
 
 本轮离线阶段分析无需新采集；全仓format.sh ci的pre-commit缺失限制仍在，
 新增Python定向Ruff、格式检查与git diff --check通过。公共SDK未变。
+
+
+### 735.15：共同前驱Q_A优先，长档完整mean下降1.39%，短档基本持平
+
+v22从v21出发，只让KV、main Compressor、Indexer Compressor及head weights投影
+等待Q_A完成后放行；保留36个task、全部真实数据依赖、核内数学和query信号协议。
+对照改为同进程v21，不能与上一轮v18的数字串成累计提升；公共工具链仍未改变。
+
+| 场景 | 冻结SPMD min/mean/max | v21控制 min/mean/max | v22 min/mean/max | mean变化 |
+|---|---:|---:|---:|---:|
+| 128K/B16 | 721.58 / 727.01 / 730.38 | 878.16 / 893.49 / 905.50 | 877.98 / 881.08 / 886.12 | −1.39% |
+| 8K/B16 | 551.56 / 567.91 / 579.42 | 690.86 / 715.23 / 735.26 | 699.70 / 715.04 / 732.02 | −0.03% |
+
+单位μs。长档mean下降12.416μs、max下降19.380μs；短档mean仅下降0.192μs，
+不能据此宣称短档有明确收益，且min回退。两档三侧eager、图重放和采样后各9张量
+逐bit一致，全部保护区通过。CPU后端、Ruff/格式与diff检查通过；全仓格式仍受
+pre-commit缺失限制。新候选保留，正式入口仍是已验收的分档非空worker实现。
+
+完整五窗与检查摘要、关键阶段见
+[front_q_priority_results.json](csa_mpmd_tnd_20261021/front_q_priority_results.json)。
+该轮两份MPMD编排都是36个task，分析时从实际生成的qa_tid声明识别v22，
+显式传入两份C++路径；没有靠相同task数量猜测来源。分析器补充说明：跨窗口
+平均首尾不能组成一条真实泳道；并发/先后必须回到同一窗口核实。此前v21长档
+五窗中query先于Q_B三次、Q_B先于query两次，短档为四次/一次。
+
+长档Q_A首启144.46→57.86μs，QR完成178.46→93.06μs，query MIX首启
+273.99→201.91μs；Score首启387.80→375.66μs，Attention首启623.62→610.83μs。
+短档Q_A同样提前到56.99μs，但head weights投影/规约被推后至176.44→220.52μs，
+query MIX因此到248.46μs才启动。这个局部MIX把系数生成一起合入后，必须在task
+开始时满足head_weights输入，暴露了另一个可以改善的前驱范围。
+
+下一步优先评估：将head weights投影与规约纳入局部query MIX，在query投影完成
+后利用Cube等待RoPE的时段计算head weights；Vector随后规约，保持原四份partial
+相加顺序与FP32结果。这样可去掉query首启对外部head_weights task的等待，仍只
+是Indexer query局部融合，完整CSA保持多个独立task。先审查owner、阶段通知与
+循环依赖，再做同卡同进程完整L1/数值验证，不将设计预测当作收益。
+
+本轮v22/冻结SPMD的mean比值仍为1.211914（长）和1.259077（短），显著未达到
+0.90目标；不能用相对上一候选的小幅收益代替最终验收。固定八档、B1边界与
+动态连续状态、真实TND的16卡整模型验证仍待完成。
