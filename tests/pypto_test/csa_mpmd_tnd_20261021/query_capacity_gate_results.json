@@ -1,0 +1,523 @@
+{
+  "candidate": "v26_query_capacity_gate",
+  "adopted": false,
+  "decision": "恢复独立query阶段仍未消除小容量回退；大容量与v25静态相同，0.77%变化不能视为新算法收益。下一候选恢复小容量完整编排。",
+  "toolchain": {
+    "release": "csa-shared-20261021-upstream-fixes",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-mpmd-upstream-20261021",
+      "commit": "e891351e305e1b8ac70ffb9ffe60a243fc0420dc"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_mpmd_tnd_20261021/upstream_refresh_20261021/manifest.json",
+    "validated_at": "2026-10-21T18:47:25+08:00"
+  },
+  "cases": {
+    "h131072_b1": {
+      "task_id": "task_20261021_210210_11004205611",
+      "queue_terminal": "completed (exit=0), rechecked 2026-10-22",
+      "result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/query_capacity_gate_v26_h131072_b1/result.json",
+      "sources": {
+        "spmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/sources/84751e34/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd",
+        "mpmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v26_query_capacity_gate/operator",
+        "mpmd_control": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v17_upstream_fixes/operator"
+      },
+      "device_id": 9,
+      "policies": {
+        "spmd": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "COOPERATIVE_PREFIX": true,
+          "EARLY_ATTENTION_GEOMETRY": false,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": false,
+          "SPLIT_SCORE_ROWS": false,
+          "OUTPUT_WORK_BALANCE": true
+        },
+        "mpmd_control": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": false,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": false,
+          "SPLIT_SCORE_ROWS": false,
+          "LIMIT_EMPTY_WORKERS": true
+        },
+        "mpmd": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": false,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": false,
+          "SPLIT_SCORE_ROWS": false,
+          "LIMIT_EMPTY_WORKERS": true,
+          "GROUP_QUERY": false
+        }
+      },
+      "statistics_us": {
+        "spmd": {
+          "min": 366.46,
+          "mean": 374.128,
+          "max": 387.02,
+          "samples": [
+            387.02,
+            371.58,
+            366.86,
+            378.72,
+            366.46
+          ]
+        },
+        "mpmd_control": {
+          "min": 405.28,
+          "mean": 410.656,
+          "max": 417.9,
+          "samples": [
+            416.36,
+            405.28,
+            407.54,
+            406.2,
+            417.9
+          ]
+        },
+        "mpmd": {
+          "min": 412.6,
+          "mean": 426.704,
+          "max": 448.28,
+          "samples": [
+            424.3,
+            417.2,
+            431.14,
+            412.6,
+            448.28
+          ]
+        }
+      },
+      "ratio": 1.1405294444682035,
+      "candidate_over_control": 1.0390789371152498,
+      "checks": {
+        "spmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards_passed": 100,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards_passed": 100,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards_passed": 100,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        }
+      }
+    },
+    "h131072_b4": {
+      "task_id": "task_20261021_210210_11005687400",
+      "queue_terminal": "completed (exit=0), rechecked 2026-10-22",
+      "result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/query_capacity_gate_v26_h131072_b4/result.json",
+      "sources": {
+        "spmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/sources/84751e34/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd",
+        "mpmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v26_query_capacity_gate/operator",
+        "mpmd_control": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v17_upstream_fixes/operator"
+      },
+      "device_id": 10,
+      "policies": {
+        "spmd": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "COOPERATIVE_PREFIX": true,
+          "EARLY_ATTENTION_GEOMETRY": false,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": false,
+          "SPLIT_SCORE_ROWS": false,
+          "OUTPUT_WORK_BALANCE": false
+        },
+        "mpmd_control": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": false,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": false,
+          "SPLIT_SCORE_ROWS": false,
+          "LIMIT_EMPTY_WORKERS": true
+        },
+        "mpmd": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": false,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": false,
+          "SPLIT_SCORE_ROWS": false,
+          "LIMIT_EMPTY_WORKERS": true,
+          "GROUP_QUERY": false
+        }
+      },
+      "statistics_us": {
+        "spmd": {
+          "min": 474.76,
+          "mean": 482.172,
+          "max": 485.36,
+          "samples": [
+            485.18,
+            485.36,
+            480.88,
+            484.68,
+            474.76
+          ]
+        },
+        "mpmd_control": {
+          "min": 542.7,
+          "mean": 549.456,
+          "max": 563.46,
+          "samples": [
+            551.6,
+            545.4,
+            563.46,
+            542.7,
+            544.12
+          ]
+        },
+        "mpmd": {
+          "min": 555.38,
+          "mean": 561.804,
+          "max": 569.72,
+          "samples": [
+            565.46,
+            556.52,
+            561.94,
+            555.38,
+            569.72
+          ]
+        }
+      },
+      "ratio": 1.1651526841044273,
+      "candidate_over_control": 1.0224731370664801,
+      "checks": {
+        "spmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards_passed": 100,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards_passed": 100,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards_passed": 100,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        }
+      }
+    },
+    "h131072_b24": {
+      "task_id": "task_20261021_210210_110071518353",
+      "queue_terminal": "completed (exit=0), rechecked 2026-10-22",
+      "result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/query_capacity_gate_v26_h131072_b24/result.json",
+      "sources": {
+        "spmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/sources/84751e34/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd",
+        "mpmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v26_query_capacity_gate/operator",
+        "mpmd_control": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v25_score_leaf_rotation/operator"
+      },
+      "device_id": 11,
+      "policies": {
+        "spmd": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 96,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "COOPERATIVE_PREFIX": true,
+          "EARLY_ATTENTION_GEOMETRY": true,
+          "LOCAL_ATTENTION_STATS": true,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": true,
+          "SPLIT_SCORE_ROWS": true,
+          "OUTPUT_WORK_BALANCE": true
+        },
+        "mpmd_control": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 96,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": true,
+          "LOCAL_ATTENTION_STATS": true,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": true,
+          "SPLIT_SCORE_ROWS": true,
+          "LIMIT_EMPTY_WORKERS": false
+        },
+        "mpmd": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 96,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": true,
+          "LOCAL_ATTENTION_STATS": true,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": true,
+          "SPLIT_SCORE_ROWS": true,
+          "LIMIT_EMPTY_WORKERS": false,
+          "GROUP_QUERY": true
+        }
+      },
+      "statistics_us": {
+        "spmd": {
+          "min": 832.06,
+          "mean": 837.016,
+          "max": 842.02,
+          "samples": [
+            832.06,
+            836.86,
+            842.02,
+            841.66,
+            832.48
+          ]
+        },
+        "mpmd_control": {
+          "min": 1001.56,
+          "mean": 1013.896,
+          "max": 1023.4,
+          "samples": [
+            1013.38,
+            1019.16,
+            1023.4,
+            1001.56,
+            1011.98
+          ]
+        },
+        "mpmd": {
+          "min": 998.82,
+          "mean": 1006.064,
+          "max": 1016.4,
+          "samples": [
+            1001.84,
+            1016.4,
+            998.82,
+            1005.38,
+            1007.88
+          ]
+        }
+      },
+      "ratio": 1.2019650759364218,
+      "candidate_over_control": 0.9922753418496572,
+      "checks": {
+        "spmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        }
+      }
+    }
+  }
+}
