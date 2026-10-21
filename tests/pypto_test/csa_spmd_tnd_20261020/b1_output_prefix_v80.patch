@@ -1,0 +1,113 @@
+--- a/vector_schedule.py
++++ b/vector_schedule.py
+@@ -569,17 +569,31 @@
+     if worker < (tokens + 7) // 8:
+         signal = publish_phase(signal, PHASE_COMB, core, CORES, generation)
+ 
+-    # Q_A 每个 M 组有八个 N128 列块；不能只等每行的一个 owner。
+-    if QA_M16_PARALLEL:
+-        # 与AIC同一constexpr：global M16块×八列，跨波次仍只等实际物理owner。
+-        qa_tasks = pl.min(GROUPS, 8 * ((tokens + 15) // 16))
+-        signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
+-    elif tokens < 128:
+-        qa_tasks = 8 * pl.min(3, pl.max(1, tokens // 32))
+-        signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
++    if BALANCED and QUERY_GROUP == 2:
++        if worker < (tokens + 7) // 8:
++            # Q_A 每个 M 组有八个 N128 列块；不能只等每行的一个 owner。
++            if QA_M16_PARALLEL:
++                # 与AIC同一constexpr：global M16块×八列，跨波次仍只等实际物理owner。
++                qa_tasks = pl.min(GROUPS, 8 * ((tokens + 15) // 16))
++                signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
++            elif tokens < 128:
++                qa_tasks = 8 * pl.min(3, pl.max(1, tokens // 32))
++                signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
++            else:
++                qa_tasks = 8 * pl.min(3, pl.max(1, tokens // 64))
++                signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
+     else:
+-        qa_tasks = 8 * pl.min(3, pl.max(1, tokens // 64))
+-        signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
++        # Q_A 每个 M 组有八个 N128 列块；不能只等每行的一个 owner。
++        if QA_M16_PARALLEL:
++            # 与AIC同一constexpr：global M16块×八列，跨波次仍只等实际物理owner。
++            qa_tasks = pl.min(GROUPS, 8 * ((tokens + 15) // 16))
++            signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
++        elif tokens < 128:
++            qa_tasks = 8 * pl.min(3, pl.max(1, tokens // 32))
++            signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
++        else:
++            qa_tasks = 8 * pl.min(3, pl.max(1, tokens // 64))
++            signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
+     qr, qr_scale, qr_matmul, qr_scale_pad = q_r_stage(
+         qa,
+         gamma_cq,
+@@ -659,7 +673,11 @@
+             COOPERATIVE_PREFIX,
+         )
+     # 前段QR及RoPE已等待过；Indexer INT8投影按32个N256列块归24个AIC。
+-    signal = wait_row_owners(signal, PHASE_IDX_QUERY_PROJECT, CORES, generation, 0, 32, 1, GROUPS, 0, 1)
++    if BALANCED and QUERY_GROUP == 2:
++        if worker < ((tokens + 7) // 8) * 16:
++            signal = wait_row_owners(signal, PHASE_IDX_QUERY_PROJECT, CORES, generation, 0, 32, 1, GROUPS, 0, 1)
++    else:
++        signal = wait_row_owners(signal, PHASE_IDX_QUERY_PROJECT, CORES, generation, 0, 32, 1, GROUPS, 0, 1)
+     idx_query_rope = indexer_query_dequant_rope_stage(
+         qr_scale,
+         idx_wq_b_scale,
+@@ -672,7 +690,11 @@
+     )
+     signal = publish_phase(signal, PHASE_IDX_QUERY_ROPE, core, CORES, generation)
+     weights_tasks = ((tokens + 15) // 16) * 4
+-    signal = wait_row_owners(signal, PHASE_WEIGHTS_PROJECT, CORES, generation, 0, weights_tasks, 1, GROUPS, 0, 1)
++    if BALANCED and QUERY_GROUP == 2:
++        if worker < (tokens + 15) // 16:
++            signal = wait_row_owners(signal, PHASE_WEIGHTS_PROJECT, CORES, generation, 0, weights_tasks, 1, GROUPS, 0, 1)
++    else:
++        signal = wait_row_owners(signal, PHASE_WEIGHTS_PROJECT, CORES, generation, 0, weights_tasks, 1, GROUPS, 0, 1)
+     head_weights = indexer_weights_reduce_stage(weights_partial, head_weights, tokens, worker, VECTORS)
+     signal = publish_phase(signal, PHASE_WEIGHTS, core, CORES, generation)
+     if COOPERATIVE_PREFIX:
+@@ -744,7 +766,11 @@
+             generation,
+             COOPERATIVE_PREFIX,
+         )
+-    signal = wait_row_owners(signal, PHASE_IDX_QUERY_HAD, CORES, generation, 0, tokens, 1, GROUPS, 0, 1)
++    if BALANCED and QUERY_GROUP == 2:
++        if worker < tokens:
++            signal = wait_row_owners(signal, PHASE_IDX_QUERY_HAD, CORES, generation, 0, tokens, 1, GROUPS, 0, 1)
++    else:
++        signal = wait_row_owners(signal, PHASE_IDX_QUERY_HAD, CORES, generation, 0, tokens, 1, GROUPS, 0, 1)
+     idx_query_i8, idx_query_scale = indexer_query_quant_stage(
+         idx_query_had,
+         idx_query_i8,
+@@ -757,8 +783,14 @@
+ 
+     # 系数要读取其他核的head权重/scale及请求分组。公共计划此前已等待，
+     # planner在HC早期已启动；等待只建立必要数据依赖，不在SPMD入口做全核集合。
+-    signal = wait_row_owners(signal, PHASE_WEIGHTS, CORES, generation, 0, tokens, 16, VECTORS, GROUPS, 1)
+-    signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)
++    if BALANCED and QUERY_GROUP == 2:
++        coefficient_groups = pl.cast(pl.read(group_offsets, [idx_requests]), pl.INDEX)
++        if worker < coefficient_groups:
++            signal = wait_row_owners(signal, PHASE_WEIGHTS, CORES, generation, 0, tokens, 16, VECTORS, GROUPS, 1)
++            signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)
++    else:
++        signal = wait_row_owners(signal, PHASE_WEIGHTS, CORES, generation, 0, tokens, 16, VECTORS, GROUPS, 1)
++        signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)
+     coefficients = indexer_head_coefficients_stage(
+         idx_query_scale_heads,
+         head_weights,
+@@ -777,7 +809,11 @@
+     # AIC可以用既有两槽提前生产，槽复用继续由原SCORE_READY/ACK保证。
+     compact_count = pl.cast(pl.read(idx_count, [0]), pl.INDEX)
+     had_tasks = ((compact_count + 15) // 16) * 2
+-    signal = wait_row_owners(signal, PHASE_IDX_HADAMARD, CORES, generation, 0, had_tasks, 1, GROUPS, 0, 1)
++    if BALANCED and QUERY_GROUP == 2:
++        if worker < idx_requests:
++            signal = wait_row_owners(signal, PHASE_IDX_HADAMARD, CORES, generation, 0, had_tasks, 1, GROUPS, 0, 1)
++    else:
++        signal = wait_row_owners(signal, PHASE_IDX_HADAMARD, CORES, generation, 0, had_tasks, 1, GROUPS, 0, 1)
+     idx_scales, idx_debug, idx_cache = indexer_compact_quant_cache_stage(
+         idx_had,
+         positions,

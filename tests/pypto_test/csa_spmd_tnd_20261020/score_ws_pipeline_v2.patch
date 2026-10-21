@@ -1,0 +1,209 @@
+--- v1/indexer_score_stages.py
++++ v2/indexer_score_stages.py
+@@ -434,7 +434,7 @@
+     SCORE_READY_EVENT: pl.constexpr,
+     SCORE_CONSUMED_EVENT: pl.constexpr,
+ ):
+-    """Three M128 QKs; retire QK1 before WS0, and QK2 FIX after WS0 issue."""
++    """Key prefetch stays in L1; the current Key retires before two-slot WS Right."""
+     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
+     groups = pl.cast(pl.read(plan, [0]), pl.INDEX)
+     buf_max_leaves = pl.cast(pl.read(plan, [2]), pl.INDEX)
+@@ -521,12 +521,6 @@
+                     [query_group_size * IDX_N_HEADS, qk_panel_cols], dtype=pl.FP16,
+                     target_memory=pl.MemorySpace.Mat,
+                 )
+-                buf_current_key = pl.tile.create(
+-                    [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+-                )
+-                buf_prefetched_key = pl.tile.create(
+-                    [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+-                )
+                 buf_key_l1_pool = pl.tile.create(
+                     [2 * qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                 )
+@@ -571,32 +565,15 @@
+                                         [buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                         [BLOCK_SIZE, IDX_HEAD_DIM],
+                                     )
+-                    if key_prefetch_to_l0:
+-                        buf_current_key = pl.tile.extract(
+-                            pl.tile.transpose_view(buf_key_l1_pool),
+-                            0,
+-                            0,
+-                            [IDX_HEAD_DIM, qk_panel_cols],
+-                            target_memory=pl.MemorySpace.Right,
+-                        )
+                 # 固定panel顺序：本panel QK与前panel head归约同时存活，保留FP16舍入位置。
+                 for buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
+                     buf_panel_col = buf_qk_panel * qk_panel_cols
+                     buf_load_col = (buf_qk_panel + key_prefetch_panels) * qk_panel_cols
+                     buf_load_slot = (buf_qk_panel + key_prefetch_panels) % 2 * qk_panel_cols
+-                    if key_prefetch_panels > 0:
+-                        if not key_prefetch_to_l0:
+-                            buf_current_key = pl.tile.extract(
+-                                pl.tile.transpose_view(buf_key_l1_pool),
+-                                0,
+-                                buf_qk_panel % 2 * qk_panel_cols,
+-                                [IDX_HEAD_DIM, qk_panel_cols],
+-                                target_memory=pl.MemorySpace.Right,
+-                            )
++                    buf_panel_keys = pl.tile.create(
++                        [qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
++                    )
+                     if buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols:
+-                        buf_panel_keys = pl.tile.create(
+-                            [qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+-                        )
+                         for buf_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                             buf_key_row = (
+                                 buf_logical_begin
+@@ -651,59 +628,49 @@
+                                             [buf_native_byte // IDX_HEAD_DIM, 0],
+                                             [BLOCK_SIZE, IDX_HEAD_DIM],
+                                         )
+-                        if key_prefetch_panels > 0:
+-                            if key_prefetch_to_l0:
+-                                buf_prefetched_key = pl.tile.extract(
+-                                    pl.tile.transpose_view(buf_key_l1_pool),
+-                                    0,
+-                                    buf_load_slot,
+-                                    [IDX_HEAD_DIM, qk_panel_cols],
+-                                    target_memory=pl.MemorySpace.Right,
+-                                )
+-                        else:
+-                            buf_prefetched_key = pl.tile.move(
+-                                pl.tile.transpose_view(buf_panel_keys), target_memory=pl.MemorySpace.Right
+-                            )
+-                    if key_prefetch_panels > 0:
+-                        buf_key_panel = buf_current_key
+-                    else:
+-                        buf_key_panel = buf_prefetched_key
+                     wide_current = pl.tile.create(
+                         [query_group_size * IDX_N_HEADS, qk_panel_cols], dtype=pl.FP16,
+                         target_memory=pl.MemorySpace.Mat,
+-                    )
+-                    triple_qk0 = pl.tile.matmul(split_query0, buf_key_panel)
+-                    triple_qk1 = pl.tile.matmul(split_query1, buf_key_panel)
+-                    wide_current = pl.tile.assemble(
+-                        wide_current, triple_qk0, [0 * TRIPLE_QK_ROWS, 0],
+-                        pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
+-                    )
+-                    triple_qk2 = pl.tile.matmul(split_query2, buf_key_panel)
+-                    wide_current = pl.tile.assemble(
+-                        wide_current, triple_qk1, [1 * TRIPLE_QK_ROWS, 0],
+-                        pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
+                     )
+                     if buf_qk_panel > 0:
+                         wide_right0 = pl.tile.extract(
+                             wide_previous, 0 * WIDE_WS_K_ROWS, 0, [WIDE_WS_K_ROWS, qk_panel_cols],
+                             target_memory=pl.MemorySpace.Right,
+                         )
++                        if key_prefetch_panels > 0:
++                            buf_key_panel = pl.tile.extract(
++                                pl.tile.transpose_view(buf_key_l1_pool), 0, buf_qk_panel % 2 * qk_panel_cols,
++                                [IDX_HEAD_DIM, qk_panel_cols], target_memory=pl.MemorySpace.Right,
++                            )
++                        else:
++                            buf_key_panel = pl.tile.move(pl.tile.transpose_view(buf_panel_keys), target_memory=pl.MemorySpace.Right)
++                        triple_qk0 = pl.tile.matmul(split_query0, buf_key_panel)
++                        triple_qk1 = pl.tile.matmul(split_query1, buf_key_panel)
++                        wide_current = pl.tile.assemble(
++                            wide_current, triple_qk0, [0 * TRIPLE_QK_ROWS, 0],
++                            pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
++                        )
++                        triple_qk2 = pl.tile.matmul(split_query2, buf_key_panel)
++                        wide_current = pl.tile.assemble(
++                            wide_current, triple_qk1, [1 * TRIPLE_QK_ROWS, 0],
++                            pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
++                        )
++                        wide_right1 = pl.tile.extract(
++                            wide_previous, 1 * WIDE_WS_K_ROWS, 0, [WIDE_WS_K_ROWS, qk_panel_cols],
++                            target_memory=pl.MemorySpace.Right,
++                        )
+                         wide_ws0 = pl.tile.matmul(split_coefficient0, wide_right0)
+                         wide_current = pl.tile.assemble(
+                             wide_current, triple_qk2, [2 * TRIPLE_QK_ROWS, 0],
+                             pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
+                         )
+-                        wide_right1 = pl.tile.extract(
+-                            wide_previous, 1 * WIDE_WS_K_ROWS, 0, [WIDE_WS_K_ROWS, qk_panel_cols],
+-                            target_memory=pl.MemorySpace.Right,
+-                        )
+-                        wide_ws1 = pl.tile.matmul_acc(
+-                            wide_ws0, split_coefficient1, wide_right1,
+-                        )
+                         wide_right2 = pl.tile.extract(
+                             wide_previous, 2 * WIDE_WS_K_ROWS, 0, [WIDE_WS_K_ROWS, qk_panel_cols],
+                             target_memory=pl.MemorySpace.Right,
+                         )
++                        wide_ws1 = pl.tile.matmul_acc(
++                            wide_ws0, split_coefficient1, wide_right1,
++                        )
+                         wide_ws2 = pl.tile.matmul_acc(
+                             wide_ws1, split_coefficient2, wide_right2,
+                         )
+@@ -712,30 +679,44 @@
+                             [buf_transfer_row, buf_panel_col - qk_panel_cols], buf_score_transfer,
+                         )
+                     else:
++                        if key_prefetch_panels > 0:
++                            buf_key_panel = pl.tile.extract(
++                                pl.tile.transpose_view(buf_key_l1_pool), 0, buf_qk_panel % 2 * qk_panel_cols,
++                                [IDX_HEAD_DIM, qk_panel_cols], target_memory=pl.MemorySpace.Right,
++                            )
++                        else:
++                            buf_key_panel = pl.tile.move(pl.tile.transpose_view(buf_panel_keys), target_memory=pl.MemorySpace.Right)
++                        triple_qk0 = pl.tile.matmul(split_query0, buf_key_panel)
++                        triple_qk1 = pl.tile.matmul(split_query1, buf_key_panel)
++                        wide_current = pl.tile.assemble(
++                            wide_current, triple_qk0, [0 * TRIPLE_QK_ROWS, 0],
++                            pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
++                        )
++                        triple_qk2 = pl.tile.matmul(split_query2, buf_key_panel)
++                        wide_current = pl.tile.assemble(
++                            wide_current, triple_qk1, [1 * TRIPLE_QK_ROWS, 0],
++                            pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
++                        )
+                         wide_current = pl.tile.assemble(
+                             wide_current, triple_qk2, [2 * TRIPLE_QK_ROWS, 0],
+                             pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
+                         )
+                     wide_previous = wide_current
+-                    if key_prefetch_panels > 0:
+-                        if key_prefetch_to_l0:
+-                            if buf_qk_panel + 1 < score_tile // qk_panel_cols:
+-                                buf_current_key = buf_prefetched_key
+                 wide_right0_last = pl.tile.extract(
+                     wide_previous, 0 * WIDE_WS_K_ROWS, 0, [WIDE_WS_K_ROWS, qk_panel_cols],
+                     target_memory=pl.MemorySpace.Right,
+                 )
+-                wide_ws0_last = pl.tile.matmul(split_coefficient0, wide_right0_last)
+                 wide_right1_last = pl.tile.extract(
+                     wide_previous, 1 * WIDE_WS_K_ROWS, 0, [WIDE_WS_K_ROWS, qk_panel_cols],
+                     target_memory=pl.MemorySpace.Right,
+                 )
+-                wide_ws1_last = pl.tile.matmul_acc(
+-                    wide_ws0_last, split_coefficient1, wide_right1_last,
+-                )
++                wide_ws0_last = pl.tile.matmul(split_coefficient0, wide_right0_last)
+                 wide_right2_last = pl.tile.extract(
+                     wide_previous, 2 * WIDE_WS_K_ROWS, 0, [WIDE_WS_K_ROWS, qk_panel_cols],
+                     target_memory=pl.MemorySpace.Right,
++                )
++                wide_ws1_last = pl.tile.matmul_acc(
++                    wide_ws0_last, split_coefficient1, wide_right1_last,
+                 )
+                 wide_ws2_last = pl.tile.matmul_acc(
+                     wide_ws1_last, split_coefficient2, wide_right2_last,
+--- v1/policy.py
++++ v2/policy.py
+@@ -129,7 +129,7 @@
+             "QK_PANEL": self.qk_panel,
+             "SCORE_TILE": self.score_tile,
+             "PREFETCH": self.prefetch,
+-            "TO_L0": True,
++            "TO_L0": not self.split_score_rows,
+             "BALANCED": self.balanced,
+             "ROOTS": self.roots,
+             "OA_COLS": self.oa_cols,

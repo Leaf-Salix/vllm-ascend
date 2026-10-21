@@ -1,0 +1,48 @@
+--- v1/oa_small_supply.py
++++ v2/oa_small_supply.py
+@@ -51,18 +51,18 @@
+                 [128, A_COL_TILE], target_memory=pl.MemorySpace.Right)
+             oa_acc_first_0 = pl.tile.matmul_acc(
+                 oa_acc_iter, oa_l_first_0, oa_r_first_0, init_cond=(oa_pair == 0))
+-            oa_acc_first_1 = pl.tile.matmul_acc(
+-                oa_acc_first_0, oa_l_first_1, oa_r_first_1, init_cond=False)
+             oa_l_first_2 = pl.tile.extract(oa_x_first, 0, 256,
+                 [16, 128], target_memory=pl.MemorySpace.Left)
+             oa_r_first_2 = pl.tile.extract(oa_weight_first, 256, 0,
+                 [128, A_COL_TILE], target_memory=pl.MemorySpace.Right)
+-            oa_acc_first_2 = pl.tile.matmul_acc(
+-                oa_acc_first_1, oa_l_first_2, oa_r_first_2, init_cond=False)
++            oa_acc_first_1 = pl.tile.matmul_acc(
++                oa_acc_first_0, oa_l_first_1, oa_r_first_1, init_cond=False)
+             oa_l_first_3 = pl.tile.extract(oa_x_first, 0, 384,
+                 [16, 128], target_memory=pl.MemorySpace.Left)
+             oa_r_first_3 = pl.tile.extract(oa_weight_first, 384, 0,
+                 [128, A_COL_TILE], target_memory=pl.MemorySpace.Right)
++            oa_acc_first_2 = pl.tile.matmul_acc(
++                oa_acc_first_1, oa_l_first_2, oa_r_first_2, init_cond=False)
+             oa_acc_first_3 = pl.tile.matmul_acc(
+                 oa_acc_first_2, oa_l_first_3, oa_r_first_3, init_cond=False)
+             oa_weight_second = pl.tile.reshape(oa_w_second, [512, A_COL_TILE])
+@@ -76,18 +76,18 @@
+                 [128, A_COL_TILE], target_memory=pl.MemorySpace.Right)
+             oa_acc_second_0 = pl.tile.matmul_acc(
+                 oa_acc_first_3, oa_l_second_0, oa_r_second_0, init_cond=False)
+-            oa_acc_second_1 = pl.tile.matmul_acc(
+-                oa_acc_second_0, oa_l_second_1, oa_r_second_1, init_cond=False)
+             oa_l_second_2 = pl.tile.extract(oa_x_second, 0, 256,
+                 [16, 128], target_memory=pl.MemorySpace.Left)
+             oa_r_second_2 = pl.tile.extract(oa_weight_second, 256, 0,
+                 [128, A_COL_TILE], target_memory=pl.MemorySpace.Right)
+-            oa_acc_second_2 = pl.tile.matmul_acc(
+-                oa_acc_second_1, oa_l_second_2, oa_r_second_2, init_cond=False)
++            oa_acc_second_1 = pl.tile.matmul_acc(
++                oa_acc_second_0, oa_l_second_1, oa_r_second_1, init_cond=False)
+             oa_l_second_3 = pl.tile.extract(oa_x_second, 0, 384,
+                 [16, 128], target_memory=pl.MemorySpace.Left)
+             oa_r_second_3 = pl.tile.extract(oa_weight_second, 384, 0,
+                 [128, A_COL_TILE], target_memory=pl.MemorySpace.Right)
++            oa_acc_second_2 = pl.tile.matmul_acc(
++                oa_acc_second_1, oa_l_second_2, oa_r_second_2, init_cond=False)
+             oa_acc_second_3 = pl.tile.matmul_acc(
+                 oa_acc_second_2, oa_l_second_3, oa_r_second_3, init_cond=False)
+             oa_finished = pl.yield_(oa_acc_second_3)

@@ -1,0 +1,82 @@
+--- a/cube_schedule.py
++++ b/cube_schedule.py
+@@ -33,6 +33,8 @@
+ """
+ 
+ import pypto.language as pl
++
++from .scale_dependencies import wait_indexer_scale_writers
+ 
+ from .attention_stream_stages import attention_qk_pv_cube_stage
+ from .attention_dependencies import wait_attention_plan_rows
+@@ -369,7 +371,9 @@
+     signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)
+     groups = pl.cast(pl.read(group_plan, [0]), pl.INDEX)
+     signal = wait_row_owners(signal, PHASE_COEFF, CORES, generation, 0, groups, 1, VECTORS, GROUPS, 1)
+-    signal = wait_row_owners(signal, PHASE_IDX_SCALE, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
++    signal = wait_indexer_scale_writers(
++        signal, group_offsets, tokens, pl.tensor.dim(idx_lengths, 0), generation, VECTORS
++    )
+     indexer_transfer = indexer_score_cube_stage(
+         idx_query_i8,
+         coefficients,
+--- a/vector_schedule.py
++++ b/vector_schedule.py
+@@ -59,6 +59,8 @@
+ """
+ 
+ import pypto.language as pl
++
++from .scale_dependencies import wait_indexer_scale_writers
+ 
+ from .attention_dependencies import wait_attention_plan_rows
+ from .attention_plan_stages import (
+@@ -851,7 +853,9 @@
+         )
+     # Score两种角色必须同时可推进。不能先等PHASE_SCORE_CUBE“整段完成”，否则
+     # Cube等待AIV归还双缓冲槽，而AIV等待Cube退出，形成环。这里只等输入就绪。
+-    signal = wait_row_owners(signal, PHASE_IDX_SCALE, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
++    signal = wait_indexer_scale_writers(
++        signal, group_offsets, tokens, pl.tensor.dim(idx_lengths, 0), generation, VECTORS
++    )
+     score_arena, pair_arena = indexer_score_vector_lane_stage(
+         idx_cache,
+         indexer_table,
+--- /dev/null
++++ b/scale_dependencies.py
+@@ -0,0 +1,35 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Acquire current-invocation scale writers after the caller acquired META."""
++
++import pypto.language as pl
++
++from .indexer_group_stages import OFFSET_ROWS_DYN
++from .indexer_scale_plan_stages import indexer_scale_plan_base
++from .phase_sync import SIGNAL_SLOT_WORDS, SIGNAL_WORDS
++from .runtime_abi import CORES, GROUPS, PHASE_IDX_SCALE
++from .signals import csa_signal_wait
++
++
++@pl.jit.inline(auto_scope=False)
++def wait_indexer_scale_writers(
++    signal: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
++    workspace: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
++    tokens: pl.Scalar[pl.INDEX],
++    requests: pl.Scalar[pl.INDEX],
++    generation: pl.Scalar[pl.INT32],
++    WORKERS: pl.constexpr,
++):
++    """The existing per-page plan includes every possible Native key write."""
++    base = indexer_scale_plan_base(requests, tokens)
++    for owner in pl.range(WORKERS):
++        # All heads are rewritten by the unique META producer each invocation.
++        # No signal slot or producer publication is elided or reused early.
++        if pl.read(workspace, [base + owner]) >= 0:
++            core = GROUPS + owner
++            offset = (PHASE_IDX_SCALE * CORES + core) * SIGNAL_SLOT_WORDS
++            signal = csa_signal_wait(signal, offset, generation)
++    # Keep the business-data acquire even when no scale/key writer is active.
++    pl.system.fence()
++    pl.system.cacheinvalid()
++    pl.system.fence()
++    return signal

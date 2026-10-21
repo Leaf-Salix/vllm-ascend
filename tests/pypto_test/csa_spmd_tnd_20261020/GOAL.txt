@@ -1,0 +1,87 @@
+本轮 goal：
+基于当前 CSA 的动态单 SPMD 实现，完成原生 TND 变长 decode 支持，并接入 vllm-ascend。支持同一 batch 内各请求 query 长度不同，直接消费 Native 的 token、请求边界和分页 KV cache，完成精度、状态、图重放及性能回归。
+
+一、基线与范围
+
+仓库：vllm-ascend-dsv4-pto-0251rc1
+
+重点代码：
+- vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/
+- vllm_ascend/ops/pypto/deepseek_v4_flash_csa/native_adapter.py
+- vllm_ascend/ops/pypto/deepseek_v4_flash_csa/service.py
+- vllm_ascend/ops/pypto/deepseek_v4_flash_csa/service_config.py
+- vllm_ascend/ops/dsv4_csa.py
+
+使用独立 worktree，先核对并记录源码、工具链和已验证基线，保留现有单 SPMD 已采用的优化，不影响另一会话。
+
+已有 request_geometry、动态分组和 binding 是实现基础，先审计缺口再修改。根据实际源码与验证记录判断完成度，不把注释中的“支持动态”当成设备验收通过。
+
+本轮保持单卡 TP1、现有模型、dtype、量化及分页 KV 布局。首版活动请求的 query 长度覆盖 1～6，允许同批混合；实现不再依赖所有请求 S=6。
+
+不包含通用 prefill、chunked prefill、prefill/decode 混跑、新增并行方式或 ACLNN/SuperKernel 封装。
+
+二、TND 输入合同
+整链入口保持 Native hidden[T_capacity,4,4096]，其中 4 是 mHC 路数；Attention Query 按 token 组织。
+
+直接使用 Native：
+- query_start_loc[B+1]
+- seq_lens[B]
+- positions
+- 各 cache group 的 block_table、slot_mapping 和紧凑压缩 metadata
+
+每请求：
+query_len[r] = Q[r+1] - Q[r]
+history_start[r] = L[r] - query_len[r]
+
+B、token 容量、有效 token 数分别处理。不得使用 token//6、request*6、T//B 等方式推导请求归属。
+支持有效请求、padding/dummy 和容量尾部的正确屏蔽；空 batch/空 rank 须明确采用安全空操作或服务回退，不能发生越界、错误写回或同步死锁。
+保留 Native 分页 KV/state 存储。不能通过整批补成固定 B×6、搬运后调用旧 S6 核来宣称原生 TND 已完成。内部矩阵 tile 的对齐和尾块 padding 可以保留。
+
+三、实现要求
+保持完整计算主体为单 SPMD，覆盖：
+HC_pre → input RMSNorm → CSA → HC_post。
+
+重点检查并修正：
+1. 服务 eligibility、Native 绑定及图档位中的固定 S6 限制。
+2. 两条 Compressor 的请求边界、C4 关闭组数、紧凑偏移和跨步 state 更新。
+3. Indexer 的请求内 query 分组、尾组、可见历史、Score/Top-K 和工作区容量。
+4. Attention 的请求映射、causal/SWA 范围、页表索引及输出归属。
+5. 无工作核、失活请求和动态工作量变化下的阶段通知、等待及缓冲复用。
+
+复用 Native 已有 metadata，不新增 device→host 回读或同步来计算逐请求工作量。新增前后处理如确有必要，必须说明并计入完整链路成本。
+明确当前历史长度与策略的支持区间，重点审计短历史 Vector Score 缺口。不能只验证 8K/128K 两个点就宣称通用服务支持；未覆盖区间必须明确列出并正确回退。
+接入可选择的 vLLM 服务路径。支持范围内的请求必须实际命中单 SPMD；不能把 Native fallback 的成功计为 SPMD 验收。只完成手工构造 PreparedDynamicCSA 的测试不算服务接入完成。
+
+四、验证要求
+先功能和精度，再性能。设备任务使用 task-submit，复用已有测试与 incore-profiling 流程。
+
+至少覆盖：
+- 均匀 S1～S6，以及 [2,6,1]、[1,2,3,4,5,6] 等混长 batch。
+- T 不整除 6、8、16 的尾部情况。
+- C4 压缩边界、不同历史长度、不同物理页映射。
+- padding/dummy、请求增减和重排。
+- 同地址图重放时 Q/L、positions、页表和有效工作量变化。
+- 连续多步 decode，验证 cache/state 实际演进，不能每轮恢复初始状态替代。
+- 真实 vLLM 路由命中及范围外回退。
+
+混长场景以 Native TND 路径或经独立核实的参考为正确性依据；不能直接把固定 S6 的多 task 版作为混长 golden。
+分别核对输出、Top-K/score、cache/state、有效写入范围及保护区，沿用已有数值和语义标准，不通过放宽阈值掩盖问题。
+对已有验证，只有源码、工具链和相关路径一致时才能复用；不重复无关验证，也不把旧结果扩大成新场景通过。
+
+五、性能与完成条件
+
+保留原有 S6 七档回归：
+- 128K：B4、B8、B16、B24、B28
+- 8K：B16、B32
+
+性能沿用完整 HC_pre + RMSNorm + CSA + HC_post 的 L1 incore 首尾跨度，包含内部等待和阶段间隙；另记录新增适配带来的整链成本。
+同轮比较修改前后 S6 性能，并报告代表性混长场景。多 task 只在其支持的场景参与对照。
+本轮完成条件是 TND 功能、真实接入和明确范围内的验证通过，不继承旧“相对多 task 降低 30%”目标，不开展无止境性能探索。出现明显回退应定位并如实报告。
+
+交付：
+在ops/pypto下新建deepseek_v4_flash_csa_spmd_tnd
+- 隔离 worktree 中可审阅的实现。
+- 支持范围、限制及回退条件。
+- 可复现的验证命令、任务编号、原始结果和性能对照。
+
+完成本轮验收和交付后停止，不继续扩展到 prefill 或其他优化目标。

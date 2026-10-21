@@ -1,0 +1,21 @@
+--- a/binding.py
++++ b/binding.py
+@@ -25,6 +25,9 @@
+ from vllm_ascend import envs
+ 
+ from .policy import CSASPMDPolicy, select_policy
++
++# Private FP32 FIFO row gap; mathematical score tiles keep their original width.
++INDEXER_TRANSFER_PAD_COLUMNS = 64 // 4
+ 
+ 
+ def _pad(value: int, block: int) -> int:
+@@ -207,7 +210,7 @@
+             ),
+             "group_plan": ((8,), torch.int32),
+             "coefficients": ((t * 16, group * 64), torch.float16),
+-            "indexer_transfer": ((24 * 2 * group, self.policy.score_tile), torch.float32),
++            "indexer_transfer": ((24 * 2 * group, self.policy.score_tile + INDEXER_TRANSFER_PAD_COLUMNS), torch.float32),
+             "score_arena": ((24 * 2 * group, 8192), torch.float32),
+             "pair_arena": ((t * 64, 1024), torch.float32),
+             "attention_indices": ((p8, 512), torch.int32),

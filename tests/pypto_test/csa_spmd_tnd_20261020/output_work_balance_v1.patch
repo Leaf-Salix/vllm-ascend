@@ -1,0 +1,117 @@
+--- a/cube_schedule.py
++++ b/cube_schedule.py
+@@ -192,6 +192,7 @@
+     QA_M16_PARALLEL: pl.constexpr = False,
+     COOPERATIVE_PREFIX: pl.constexpr = False,
+     SPLIT_SCORE_ROWS: pl.constexpr = False,
++    OUTPUT_WORK_BALANCE: pl.constexpr = False,
+ ):
+     # 恢复原分task五份流式权重的BYPASS；预定义incore使用函数属性表达。
+     # 当前PyPTO此属性只接受(参数序号,策略整数)，1表示CachePolicy.BYPASS。
+@@ -437,17 +438,37 @@
+         # O_B的NZ owner为(group*8+dc)%24，每个dc内部保留所有动态行块。
+         # 量化末块发布仍包含INT8尾零，保留这些owner的原依赖。
+         # NZ大M路径在O_B内部按真实T截断；其它路径仍可安全读取完整OB_ROWS。
+-        for ob_group in pl.range(8):
+-            ob_first = ob_group * 8
+-            ob_owned = worker + ((ob_first + GROUPS - 1 - worker) // GROUPS) * GROUPS
+-            if ob_owned < ob_first + 8:
+-                signal = wait_row_owners(
+-                    signal, PHASE_O_QUANT_GROUP_BASE + ob_group, CORES, generation,
+-                    ob_group * quant_per_group, quant_per_group, 1, VECTORS, GROUPS, 1
+-                )
+-                o_partials = o_b_groups_stage(
+-                    o_quant, wo_b, o_partials, tokens, worker, GROUPS, OB_ROWS, ob_group, ob_group + 1
+-                )
++        if OUTPUT_WORK_BALANCE:
++            # In the existing N128, single-M128 domain, O_A gives cores 0..15
++            # three jobs and cores 16..23 two. Use 32 logical O_B ranks on the
++            # same 24 physical AICs: respectively two/four independent jobs.
++            # These are software ranks, not additional SPMD participants.
++            for ob_group in pl.range(8):
++                ob_worker = worker + 16
++                if worker >= 16:
++                    ob_worker = worker - 16 + (ob_group % 2) * 8
++                ob_first = ob_group * 8
++                ob_owned = ob_worker + ((ob_first + 31 - ob_worker) // 32) * 32
++                if ob_owned < ob_first + 8:
++                    signal = wait_row_owners(
++                        signal, PHASE_O_QUANT_GROUP_BASE + ob_group, CORES, generation,
++                        ob_group * quant_per_group, quant_per_group, 1, VECTORS, GROUPS, 1
++                    )
++                    o_partials = o_b_groups_stage(
++                        o_quant, wo_b, o_partials, tokens, ob_worker, 32, OB_ROWS, ob_group, ob_group + 1
++                    )
++        else:
++            for ob_group in pl.range(8):
++                ob_first = ob_group * 8
++                ob_owned = worker + ((ob_first + GROUPS - 1 - worker) // GROUPS) * GROUPS
++                if ob_owned < ob_first + 8:
++                    signal = wait_row_owners(
++                        signal, PHASE_O_QUANT_GROUP_BASE + ob_group, CORES, generation,
++                        ob_group * quant_per_group, quant_per_group, 1, VECTORS, GROUPS, 1
++                    )
++                    o_partials = o_b_groups_stage(
++                        o_quant, wo_b, o_partials, tokens, worker, GROUPS, OB_ROWS, ob_group, ob_group + 1
++                    )
+     else:
+         # 保留整阶段路径供区间策略与同轮对照；两分支复用全部数学helper。
+         o_r = o_projection_a_stage_nz(packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS)
+--- a/entry.py
++++ b/entry.py
+@@ -289,6 +289,7 @@
+     SCALE_PAGE_COALESCING: pl.constexpr = False,
+     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+     SPLIT_SCORE_ROWS: pl.constexpr = False,
++    OUTPUT_WORK_BALANCE: pl.constexpr = False,
+ ):
+     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
+     with pl.cluster(name_hint="dynamic_csa_full"):
+@@ -382,6 +383,7 @@
+             QA_M16_PARALLEL,
+             COOPERATIVE_PREFIX,
+             SPLIT_SCORE_ROWS,
++            OUTPUT_WORK_BALANCE,
+         )
+         (
+             x_fp32,
+@@ -813,6 +815,7 @@
+     SCALE_PAGE_COALESCING: pl.constexpr = False,
+     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+     SPLIT_SCORE_ROWS: pl.constexpr = False,
++    OUTPUT_WORK_BALANCE: pl.constexpr = False,
+ ):
+     # Native cache只作为一个根入参传入。两份Key是编排内的零拷贝描述符，
+     # 避免把“可写cache+部分重叠只读视图”当作独立外部入参触发Torch别名拒绝。
+@@ -1062,6 +1065,7 @@
+             SCALE_PAGE_COALESCING,
+             PLAN_PHYSICAL_ROWS,
+             SPLIT_SCORE_ROWS,
++            OUTPUT_WORK_BALANCE,
+         )
+     return (
+         x_fp32,
+--- a/policy.py
++++ b/policy.py
+@@ -122,6 +122,7 @@
+     scale_page_coalescing: bool = False
+     plan_physical_rows: bool = False
+     split_score_rows: bool = False
++    output_work_balance: bool = False
+ 
+     def constexprs(self) -> dict[str, int | bool]:
+         return {
+@@ -145,6 +146,7 @@
+             "SCALE_PAGE_COALESCING": self.scale_page_coalescing,
+             "PLAN_PHYSICAL_ROWS": self.plan_physical_rows,
+             "SPLIT_SCORE_ROWS": self.split_score_rows,
++            "OUTPUT_WORK_BALANCE": self.output_work_balance,
+         }
+ 
+ 
+@@ -223,4 +225,5 @@
+         # 前段资源区间；依据完整实测取舍，不把回退唯一归因于QA或假定最优。
+         # 实际有效query/长度/页表仍在device读取，不按B4/B8等测试点枚举。
+         split_score_rows=long_history and group == 6 and tokens >= SCORE_SPLIT_MIN_TOKENS,
++        output_work_balance=tokens <= LOCAL_STATS_MAX_TOKENS,
+     )

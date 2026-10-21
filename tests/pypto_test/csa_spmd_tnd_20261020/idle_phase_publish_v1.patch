@@ -1,0 +1,35 @@
+--- a/vector_schedule.py
++++ b/vector_schedule.py
+@@ -398,7 +398,9 @@
+     pl.system.set_ffts(ffts)
+     tokens = pl.tensor.dim(x, 0)
+     x_fp32, inv = hc_widen_rms_range(x, x_fp32, inv, widen_tail, worker, VECTORS)
+-    signal = publish_phase(signal, PHASE_INPUT, core, CORES, generation)
++    # Producers and all consumers use the same eight-row ownership.
++    if worker < (tokens + 7) // 8:
++        signal = publish_phase(signal, PHASE_INPUT, core, CORES, generation)
+ 
+     # 公共metadata只有Q/L/positions依赖，可与HC投影重叠。选择第一个没有HC M8条带的
+     # AIV；若48核都有工作，则选47号，先完成其本轮全部widen并发布，再计算计划。
+@@ -590,7 +592,9 @@
+         worker,
+         VECTORS,
+     )
+-    signal = publish_phase(signal, PHASE_QR, core, CORES, generation)
++    # Producers and all consumers use the same eight-row ownership.
++    if worker < (tokens + 7) // 8:
++        signal = publish_phase(signal, PHASE_QR, core, CORES, generation)
+     # RoPE只依赖输入sin；放在QR发布后，与AIC的QB阶段并行，不等待QB。
+     rope_signed, rope_swap = q_rope_prepare_stage(rope_sin, rope_signed, rope_swap, worker, VECTORS)
+     inverse_sin = attention_inverse_rope_sign_stage(rope_sin, inverse_sin, worker, VECTORS)
+@@ -603,7 +607,9 @@
+             pl.tensor.dim(main_cache, 0) // 32, worker, VECTORS,
+             PLAN_PHYSICAL_ROWS,
+         )
+-    signal = publish_phase(signal, PHASE_ROPE, core, CORES, generation)
++    # Producers and all consumers use the same eight-row ownership.
++    if worker < (tokens + 7) // 8:
++        signal = publish_phase(signal, PHASE_ROPE, core, CORES, generation)
+     # 主Query与Indexer query数学独立；先完成后者的RoPE/pool/norm，
+     # 让AIC继续query Hadamard并在其主Q_B期间做量化/系数。QR/ROPE获取
+     # 随第一个消费者前移，不能只移动计算却遗漏跨核数据可见性。

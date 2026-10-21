@@ -1,0 +1,52 @@
+--- a/indexer_score_stages.py
++++ b/indexer_score_stages.py
+@@ -916,6 +916,28 @@
+                     single_contiguous = pl.read(offsets, [layout_row + 1])
+                     single_first_page = pl.cast(pl.read(offsets, [layout_row]), pl.INDEX)
+                     single_first_page = single_first_page + pl.cast(single_contiguous, pl.INDEX) * single_page_begin
++                # Metadata is immutable during this invocation. Compute each
++                # live query's visibility once per leaf, including every original
++                # request/position/causal check. Empty lanes must not read positions.
++                cached_visible0 = pl.cast(0, pl.INDEX)
++                cached_visible1 = pl.cast(0, pl.INDEX)
++                cached_visible2 = pl.cast(0, pl.INDEX)
++                if query_group_size == 6:
++                    if buf_score_lane * 3 < buf_live:
++                        cached_visible0, _causal0 = indexer_query_visibility(
++                            bounds, kv_seq_lens, position_ids, single_batch,
++                            single_query + buf_score_lane * 3,
++                        )
++                    if buf_score_lane * 3 + 1 < buf_live:
++                        cached_visible1, _causal1 = indexer_query_visibility(
++                            bounds, kv_seq_lens, position_ids, single_batch,
++                            single_query + buf_score_lane * 3 + 1,
++                        )
++                    if buf_score_lane * 3 + 2 < buf_live:
++                        cached_visible2, _causal2 = indexer_query_visibility(
++                            bounds, kv_seq_lens, position_ids, single_batch,
++                            single_query + buf_score_lane * 3 + 2,
++                        )
+                 single_roots = pl.tile.full([query_group_size // 2, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF)
+                 single_segments = pl.tile.full(
+                     [query_group_size, BUFFERED_LONG_SCORE_TILE], dtype=pl.FP32, value=FP32_NEG_INF
+@@ -1036,9 +1058,17 @@
+                         for single_local in pl.unroll(query_group_size // 2):
+                             single_query_lane = buf_score_lane * (query_group_size // 2) + single_local
+                             if single_query_lane < buf_live:
+-                                (single_query_visible, _causal) = indexer_query_visibility(
+-                                    bounds, kv_seq_lens, position_ids, single_batch, single_query + single_query_lane
+-                                )
++                                if query_group_size == 6:
++                                    single_query_visible = cached_visible0
++                                    if single_local == 1:
++                                        single_query_visible = cached_visible1
++                                    elif single_local == 2:
++                                        single_query_visible = cached_visible2
++                                else:
++                                    (single_query_visible, _causal) = indexer_query_visibility(
++                                        bounds, kv_seq_lens, position_ids, single_batch,
++                                        single_query + single_query_lane,
++                                    )
+                                 single_segment_valid = pl.max(
+                                     pl.min(single_query_visible - single_segment_begin, single_segment_span), 0
+                                 )

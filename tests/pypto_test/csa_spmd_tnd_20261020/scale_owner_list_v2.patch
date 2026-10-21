@@ -1,0 +1,104 @@
+--- v1/binding.py
++++ v2/binding.py
+@@ -25,6 +25,7 @@
+ from vllm_ascend import envs
+ 
+ from .policy import CSASPMDPolicy, select_policy
++from .scale_dependencies import SCALE_WRITER_LIST_WORDS
+ 
+ 
+ def _pad(value: int, block: int) -> int:
+@@ -202,7 +203,7 @@
+             # 启用连续页策略时尾部2*B项为(first_page,direction)，关闭时维持原容量。
+             "group_offsets": (
+                 (_pad(_pad(b + 1, 16) + 4 * t, 16) + 48 + 4 * t
+-                 + (2 * b if self.policy.scale_page_coalescing else 0),),
++                 + (2 * b if self.policy.scale_page_coalescing else 0) + SCALE_WRITER_LIST_WORDS,),
+                 torch.int32,
+             ),
+             "group_plan": ((8,), torch.int32),
+--- v1/vector_schedule.py
++++ v2/vector_schedule.py
+@@ -60,7 +60,7 @@
+ 
+ import pypto.language as pl
+ 
+-from .scale_dependencies import wait_indexer_scale_writers
++from .scale_dependencies import indexer_scale_writer_list_stage, wait_indexer_scale_writers
+ 
+ from .attention_dependencies import wait_attention_plan_rows
+ from .attention_plan_stages import (
+@@ -450,6 +450,9 @@
+             pl.tensor.dim(idx_scales, 0),
+             VECTORS,
+         )
++        group_offsets = indexer_scale_writer_list_stage(
++            group_offsets, tokens, pl.tensor.dim(idx_lengths, 0), VECTORS
++        )
+         if BALANCED and SCALE_PAGE_COALESCING:
+             # 整个请求的连续页证明与数值无关，移到同一 META producer；
+             # 每叶两条 AIV 复用结果。碎片/越界/失活请求记录0方向，保留原读取。
+--- v1/scale_dependencies.py
++++ v2/scale_dependencies.py
+@@ -1,5 +1,5 @@
+ # SPDX-License-Identifier: Apache-2.0
+-"""Acquire current-invocation scale writers after the caller acquired META."""
++"""Publish a private active-writer list inside the existing META phase."""
+ 
+ import pypto.language as pl
+ 
+@@ -8,6 +8,28 @@
+ from .phase_sync import SIGNAL_SLOT_WORDS, SIGNAL_WORDS
+ from .runtime_abi import CORES, GROUPS, PHASE_IDX_SCALE
+ from .signals import csa_signal_wait
++
++SCALE_WRITER_LIST_WORDS = 64
++
++
++@pl.jit.inline(auto_scope=False)
++def indexer_scale_writer_list_stage(
++    workspace: pl.InOut[pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]],
++    tokens: pl.Scalar[pl.INDEX],
++    requests: pl.Scalar[pl.INDEX],
++    WORKERS: pl.constexpr,
++):
++    """Only the unique META writer calls this, after filling all current heads."""
++    heads = indexer_scale_plan_base(requests, tokens)
++    owner_base = pl.tensor.dim(workspace, 0) - SCALE_WRITER_LIST_WORDS
++    active = pl.cast(0, pl.INDEX)
++    for owner in pl.range(WORKERS):
++        if pl.read(workspace, [heads + owner]) >= 0:
++            pl.write(workspace, [owner_base + 1 + active], pl.cast(owner, pl.INT32))
++            active = active + 1
++    # Zero active writers explicitly overwrite the count, preventing stale reuse.
++    pl.write(workspace, [owner_base], pl.cast(active, pl.INT32))
++    return workspace
+ 
+ 
+ @pl.jit.inline(auto_scope=False)
+@@ -19,16 +41,15 @@
+     generation: pl.Scalar[pl.INT32],
+     WORKERS: pl.constexpr,
+ ):
+-    """The existing per-page plan includes every possible Native key write."""
+-    base = indexer_scale_plan_base(requests, tokens)
+-    for owner in pl.range(WORKERS):
+-        # All heads are rewritten by the unique META producer each invocation.
+-        # No signal slot or producer publication is elided or reused early.
+-        if pl.read(workspace, [base + owner]) >= 0:
+-            core = GROUPS + owner
+-            offset = (PHASE_IDX_SCALE * CORES + core) * SIGNAL_SLOT_WORDS
+-            signal = csa_signal_wait(signal, offset, generation)
+-    # Keep the business-data acquire even when no scale/key writer is active.
++    """Caller acquired META; all producer publications and key waits are kept."""
++    owner_base = pl.tensor.dim(workspace, 0) - SCALE_WRITER_LIST_WORDS
++    count = pl.cast(pl.read(workspace, [owner_base]), pl.INDEX)
++    for ordinal in pl.range(count):
++        owner = pl.cast(pl.read(workspace, [owner_base + 1 + ordinal]), pl.INDEX)
++        core = GROUPS + owner
++        offset = (PHASE_IDX_SCALE * CORES + core) * SIGNAL_SLOT_WORDS
++        signal = csa_signal_wait(signal, offset, generation)
++    # The business acquire is still unconditional, including an empty list.
+     pl.system.fence()
+     pl.system.cacheinvalid()
+     pl.system.fence()

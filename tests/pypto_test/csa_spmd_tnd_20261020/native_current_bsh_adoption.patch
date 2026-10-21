@@ -1,0 +1,465 @@
+--- a/policy.py
++++ b/policy.py
+@@ -79,6 +79,12 @@
+ 长B8/B16/B24/B28完整实测改善，小域保留原Score。关闭/开启代码等价、
+ 真实S1/S5及T30/T36边界已核对后采用；范围和原始数据见统一优化日志。
+ 这不是所有动态输入都已测过或五档30%目标已完成的声明。
++
++B1原半叶区间
++    单请求、query容量5或6且压缩历史上界在(8192,65536]时，保留G2，
++    将原8192叶的两个动态半叶分别分派；不按固定S反推本轮有效query。
++    半叶分数和累计归并根留在UB，保持原末叶跨度及六条排序分支同分规则。
++    这是B1区间策略，其余请求数/容量继续使用原策略；不是固定128K模板。
+ """
+ 
+ from dataclasses import dataclass
+@@ -147,9 +153,8 @@
+     values = (tokens, requests, max_query_tokens, max_seq_len)
+     if any(type(v) is not int or v <= 0 for v in values):
+         raise ValueError("tokens/requests/max_query_tokens/max_seq_len须为已有的正整数描述符")
+-    # T是图输入/工作区容量，可以包含按tile或图档位补齐的尾行。
+-    # 有效query数须由Native Host合同及device Q/L共同约束，不能把容量T
+-    # 与B×query上界比较来拒绝合法TND padding。
++    if tokens > requests * max_query_tokens:
++        raise ValueError("token容量超过请求容量×query上界；请绑定Native同一档描述符")
+     cache_rows = max_seq_len // 4
+     if cache_rows < 2048:
+         raise NotImplementedError("完整动态SPMD的小历史Vector Score路径尚未接入")
+@@ -174,6 +179,12 @@
+     short_steps_upper = (cache_rows + SHORT_SCORE_TILE - 1) // SHORT_SCORE_TILE
+     short_half_span_upper = short_steps_upper * (SHORT_SCORE_TILE // 2)
+     short_key_prefetch = group == 2 and short_half_span_upper <= SHORT_PREFETCH_HALF_SORT_LIMIT
++    # 用户允许单请求独立分档。仅改变已有G2的历史工作分配，
++    # 保留动态Q/L及原半叶边界（末叶可小于4096）；较大容量及S1维持原策略。
++    single_request_leaves = (
++        requests == 1 and long_history and cache_rows <= 65536
++        and 5 <= max_query_tokens <= 6
++    )
+     ob_rows = 32 if tokens <= 32 else 96 if tokens <= 96 else 128
+     parallel_small_qa = group == 6 and 16 < tokens < 32
+     return CSASPMDPolicy(
+@@ -181,8 +192,8 @@
+         qk_panel=64 if group == 6 else 128,
+         score_tile=1024 if long_history else SHORT_SCORE_TILE,
+         prefetch=1 if long_history or short_key_prefetch else 0,
+-        balanced=long_history and group == 6,
+-        roots=1 if long_history and group == 6 else 2,
++        balanced=(long_history and group == 6) or single_request_leaves,
++        roots=1 if (long_history and group == 6) or single_request_leaves else 2,
+         oa_cols=128 if tokens <= 96 else 256,
+         ob_rows=ob_rows,
+         # 沿已有G6分界选择两M16尾块的并行；G2已观察回退，不按B4/B5白名单。
+--- a/indexer_group_stages.py
++++ b/indexer_group_stages.py
+@@ -55,6 +55,12 @@
+     其中 H=L-query_len。陈旧位置只被屏蔽，不被当作另一个合法 decode 场景。
+     原始全局 Q 单调、不重叠及页表一致性仍是入口合同。正常组的计算顺序
+     与原系数相同；新增 mixed/odd 分组及其设备数值/性能需要单独验证。
++
++B1原半叶调度
++    BALANCED且GROUP_SIZE=2表示把原8192叶的两个半叶独立分派。末叶
++    半跨度为min(ceil(original_valid/1024)*512,4096)，来自本轮device
++    visible；不能统一成4096。保留末尾空根及原前后半叶顺序，供最终归并
++    精确复现旧同分规则。GROUP_SIZE=6仍使用原1024粒度平衡叶计划。
+ """
+ 
+ import pypto.language as pl
+@@ -168,7 +174,14 @@
+         leaf_tiles = pl.cast(CANDIDATES_PER_LEAF // SCORE_TILE, pl.INDEX)
+         extra = pl.cast(0, pl.INDEX)
+         if BALANCED:
+-            leaves, leaf_tiles, extra = indexer_long_leaf_plan(max_history, groups)
++            if GROUP_SIZE == 2:
++                # B1把原每个8192叶的两个半叶独立调度，包含尾部空根。
++                # 末叶边界依赖各组实际visible，不能把全部半叶静态等分为4096。
++                leaf_tiles = pl.cast(CANDIDATES_PER_LEAF // (2 * SCORE_TILE), pl.INDEX)
++                leaves = 2 * pl.max((max_history + CANDIDATES_PER_LEAF - 1)
++                                    // CANDIDATES_PER_LEAF, 1)
++            else:
++                leaves, leaf_tiles, extra = indexer_long_leaf_plan(max_history, groups)
+         pl.write(plan, [0], pl.cast(groups, pl.INT32))
+         pl.write(plan, [1], pl.cast(max_history, pl.INT32))
+         pl.write(plan, [2], pl.cast(leaves, pl.INT32))
+@@ -256,10 +269,19 @@
+     leaf_tiles: pl.Scalar[pl.INDEX],
+     extra: pl.Scalar[pl.INDEX],
+     visible: pl.Scalar[pl.INDEX],
+-):
+-    """先分1024候选的整tile，再按组/单query实际visible截断；返回begin/capacity/valid。"""
+-    begin = (leaf * leaf_tiles + pl.min(leaf, extra)) * SCORE_TILE
+-    capacity = (leaf_tiles + pl.cast(leaf < extra, pl.INDEX)) * SCORE_TILE
++    BALANCED: pl.constexpr,
++    GROUP_SIZE: pl.constexpr,
++):
++    """普通叶沿1024分片；B1逐项复现原末叶半跨度，再返回begin/capacity/valid。"""
++    if BALANCED and GROUP_SIZE == 2:
++        original_begin = (leaf // 2) * CANDIDATES_PER_LEAF
++        original_valid = pl.max(pl.min(visible - original_begin, CANDIDATES_PER_LEAF), 0)
++        original_tiles = (original_valid + SCORE_TILE - 1) // SCORE_TILE
++        capacity = pl.min(original_tiles * (SCORE_TILE // 2), CANDIDATES_PER_LEAF // 2)
++        begin = original_begin + (leaf % 2) * capacity
++    else:
++        begin = (leaf * leaf_tiles + pl.min(leaf, extra)) * SCORE_TILE
++        capacity = (leaf_tiles + pl.cast(leaf < extra, pl.INDEX)) * SCORE_TILE
+     valid = pl.max(pl.min(visible - begin, capacity), 0)
+     return begin, capacity, valid
+ 
+--- a/indexer_score_stages.py
++++ b/indexer_score_stages.py
+@@ -67,6 +67,13 @@
+     全部T/B/历史/页表和合法尾组仍动态；SPLIT_SCORE_ROWS仅按既有Host
+     容量T>=32选择编译策略，小域及其它资源组合沿原helper。完整验证范围
+     与性能证据见统一优化日志，不能把数学helper数量当成多个incore task。
++
++B1原半叶路径
++    balanced/G2由一名AIC处理一个原半叶，两个AIV各处理一条query。
++    每AIV将各段1024分数保存在4×1024 UB Tile，再reshape后按原长度
++    分支排序；不写回中间score GM，也不改成流式2048归并。动态尾部与
++    空query仍按原协议消费/归还FIFO，空半叶显式发布空根。行布局避免
++    PTOAS将列子视图的物理宽度恢复成母Tile后导致A3 TMOV形状不匹配。
+ """
+ 
+ import pypto.language as pl
+@@ -84,7 +91,10 @@
+     indexer_work_item,
+ )
+ from .indexer_scale_layout_stages import LAYOUT_WORDS_PER_REQUEST, indexer_scale_layout_base
+-from .indexer_topk_stages import PAIR_ROWS_DYN, SCORE_ROWS_DYN, indexer_topk_half_leaf
++from .indexer_topk_stages import (
++    PAIR_ROWS_DYN, SCORE_ROWS_DYN, indexer_topk_half_leaf,
++    indexer_topk_half_leaf_resident,
++)
+ from .request_geometry import QUERY_BOUNDS_DYN, REQUESTS_DYN
+ 
+ QUERY_HEAD_ROWS_DYN = pl.dynamic("CSA_SCORE_QUERY_HEAD_ROWS")
+@@ -147,7 +157,8 @@
+             bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
+         )
+         buf_logical_begin, buf_leaf_capacity, work_valid = indexer_leaf_range(
+-            buf_leaf, buf_leaf_tiles, buf_extra_leaves, buf_visible_count
++            buf_leaf, buf_leaf_tiles, buf_extra_leaves, buf_visible_count,
++            balance_leaves, query_group_size,
+         )
+         if work_valid > 0:
+             buf_cache_len = pl.cast(pl.read(kv_seq_lens, [buf_batch_idx]), pl.INDEX) // COMPRESS_RATIO
+@@ -440,7 +451,8 @@
+             bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
+         )
+         buf_logical_begin, buf_leaf_capacity, work_valid = indexer_leaf_range(
+-            buf_leaf, buf_leaf_tiles, buf_extra_leaves, buf_visible_count
++            buf_leaf, buf_leaf_tiles, buf_extra_leaves, buf_visible_count,
++            balance_leaves, query_group_size,
+         )
+         if work_valid > 0:
+             buf_cache_len = pl.cast(pl.read(kv_seq_lens, [buf_batch_idx]), pl.INDEX) // COMPRESS_RATIO
+@@ -873,7 +885,8 @@
+             bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
+         )
+         buf_logical_begin, buf_leaf_capacity, work_valid = indexer_leaf_range(
+-            buf_leaf, buf_leaf_tiles, buf_extra_leaves, buf_visible_count
++            buf_leaf, buf_leaf_tiles, buf_extra_leaves, buf_visible_count,
++            balance_leaves, query_group_size,
+         )
+         if work_valid > 0:
+             buf_cache_len = pl.cast(pl.read(kv_seq_lens, [buf_batch_idx]), pl.INDEX) // COMPRESS_RATIO
+@@ -907,7 +920,17 @@
+                 single_segments = pl.tile.full(
+                     [query_group_size, BUFFERED_LONG_SCORE_TILE], dtype=pl.FP32, value=FP32_NEG_INF
+                 )
+-                # balanced每AIV持G/2条完整query；连续两轮凑2048候选，尾轮仍按实际valid排序。
++                # 在共同作用域声明Tile以保持SSA作用域；只有B1初始化内容。
++                # G6只保留未使用的描述符，不发射16KiB填充；不能假定full会被DCE删除。
++                legacy_half_scores = pl.tile.create(
++                    [TOPK_CANDIDATES_PER_LEAF // (2 * score_tile), score_tile], dtype=pl.FP32
++                )
++                if query_group_size == 2:
++                    # B1保留原完整半叶、同分规则和有效前缀；不用流式2048归并。
++                    legacy_half_scores = pl.tile.full(
++                        [TOPK_CANDIDATES_PER_LEAF // (2 * score_tile), score_tile], dtype=pl.FP32, value=FP32_NEG_INF
++                    )
++                # G6仍按原流式2048候选处理，B1分支在下方单独保留整半叶。
+                 for single_step in pl.range(single_steps):
+                     single_score_begin = single_begin + single_step * score_tile
+                     single_transfer_row = (
+@@ -994,10 +1017,17 @@
+                             single_scores, single_local, 0, [1, score_tile], target_memory=pl.MemorySpace.Vec
+                         )
+                         single_scaled = pl.mul(single_score_row, single_kv_scale)
+-                        single_segments = pl.tile.assemble(
+-                            single_segments, single_scaled, [single_local * 2 + single_step % 2, 0]
+-                        )
+-                    if single_step % 2 == 1 or single_step + 1 == single_steps:
++                        if query_group_size == 2:
++                            # 同一AIV连续收集1024分数，叶内无跨核消费者，
++                            # UB槽仅在本叶排序结束后复用，不需要GM发布。
++                            legacy_half_scores = pl.tile.assemble(
++                                legacy_half_scores, single_scaled, [single_step, 0]
++                            )
++                        else:
++                            single_segments = pl.tile.assemble(
++                                single_segments, single_scaled, [single_local * 2 + single_step % 2, 0]
++                            )
++                    if query_group_size != 2 and (single_step % 2 == 1 or single_step + 1 == single_steps):
+                         single_segment_begin = single_begin + single_step // 2 * (2 * score_tile)
+                         single_segment_span = (single_step % 2 + 1) * score_tile
+                         single_segment_rows = pl.tile.reshape(
+@@ -1108,14 +1138,30 @@
+                 for single_local in pl.unroll(query_group_size // 2):
+                     single_query_lane = buf_score_lane * (query_group_size // 2) + single_local
+                     if single_query_lane < buf_live:
+-                        single_root = pl.tile.extract(
+-                            single_roots, single_local, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec
+-                        )
+-                        pl.store(
+-                            single_root,
+-                            [(single_query + single_query_lane) * TOPK_ROWS_PER_QUERY + single_leaf, 0],
+-                            pair_arena,
+-                        )
++                        if query_group_size == 2:
++                            legacy_visible, _legacy_causal = indexer_query_visibility(
++                                bounds, kv_seq_lens, position_ids, single_batch, single_query + single_query_lane
++                            )
++                            legacy_valid = pl.max(pl.min(legacy_visible - single_begin, single_capacity), 0)
++                            legacy_slot = (single_query + single_query_lane) * TOPK_ROWS_PER_QUERY + single_leaf
++                            if legacy_valid > 0:
++                                legacy_half_flat = pl.tile.reshape(legacy_half_scores, [1, TOPK_CANDIDATES_PER_LEAF // 2])
++                                indexer_topk_half_leaf_resident(
++                                    legacy_half_flat, pair_arena,
++                                    single_begin, legacy_valid, legacy_slot,
++                                )
++                            else:
++                                pl.store(pl.tile.full([1, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF),
++                                         [legacy_slot, 0], pair_arena)
++                        else:
++                            single_root = pl.tile.extract(
++                                single_roots, single_local, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec
++                            )
++                            pl.store(
++                                single_root,
++                                [(single_query + single_query_lane) * TOPK_ROWS_PER_QUERY + single_leaf, 0],
++                                pair_arena,
++                            )
+             else:
+                 buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
+                 buf_tile_count = (buf_valid_count + score_tile - 1) // score_tile
+@@ -1213,4 +1259,11 @@
+                                 [buf_half_slot, 0],
+                                 pair_arena,
+                             )
++        elif balance_leaves and query_group_size == 2:
++            # 尾部空半叶不触发Cube/Vector交接，但仍发布原布局的空根。
++            # query根计数仍包含它，不能让消费者读到上一轮内容。
++            if buf_score_lane < buf_live:
++                empty_slot = (buf_query + buf_score_lane) * TOPK_ROWS_PER_QUERY + buf_leaf
++                pl.store(pl.tile.full([1, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF),
++                         [empty_slot, 0], pair_arena)
+     return score_arena, pair_arena
+--- a/indexer_topk_stages.py
++++ b/indexer_topk_stages.py
+@@ -42,6 +42,12 @@
+     申请；tile.extract把循环携带root明确限制为1024个FP32，避免携带大scratch。
+     中文注释说明关键阶段，但运算树、排序分支和输入先后保持canonical原样。
+     当前数学AST及CPU编译不等于设备TopK/同分结果或性能已经验证。
++
++B1分数驻留UB
++    indexer_topk_half_leaf_resident对应同文件的GM半叶helper，只将输入
++    搬运改为UB等宽extract；六条候选长度分支及每次MrgSort输入先后必须
++    保持一致。不能把全部长度补到4096统一排序，否则同分Top-K会改变。
++    保留GM接口供原路径使用，避免给其它资源区间引入新的搬运或Tile存活期。
+ """
+ 
+ import pypto.language as pl
+@@ -212,6 +218,128 @@
+ 
+ 
+ @pl.jit.inline(auto_scope=False)
++def indexer_topk_half_leaf_resident(
++    half_scores: pl.Tile[[1, 4096], pl.FP32],
++    pair_arena: pl.InOut[pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]],
++    logical_begin: pl.Scalar[pl.INDEX],
++    valid_count: pl.Scalar[pl.INDEX],
++    output_slot: pl.Scalar[pl.INDEX],
++) -> None:
++    """UB内原半叶：六条长度分支、物理排序宽度及同分顺序均复现GM版。"""
++    logical_begin_i32 = pl.cast(logical_begin, pl.INT32)
++    if valid_count <= 512:
++        # 即使只有一项，也按512候选的固定tile排序；尾列由valid_shape和fillpad
++        # 写成最小score。index先按全局位置生成，再只按位解释为UINT32给sort32。
++        short_indices = pl.add(pl.tile.arange(0, [1, 512], dtype=pl.INT32), logical_begin_i32)
++        short_raw = pl.tile.extract(
++            half_scores, 0, 0, [1, 512], target_memory=pl.MemorySpace.Vec
++        )
++        short_raw = pl.set_validshape(short_raw, 1, valid_count)
++        short_scores = pl.tile.fillpad(short_raw, pad_value=pl.PadValue.min)
++        short_scores = pl.maximum(short_scores, FP32_NEG_INF)
++        short_pairs = pl.sort32(short_scores, pl.reinterpret_view(short_indices, pl.UINT32))
++        # 32候选局部run→128候选run→512候选根；长度64/256是pair元素数。
++        short_pairs = pl.mrgsort(short_pairs, block_len=64)
++        short_pairs = pl.mrgsort(short_pairs, block_len=256)
++        pl.store(short_pairs, [output_slot, 0], pair_arena)
++    elif valid_count <= 1024:
++        # 两个512根分开取出后按原left/right顺序合并；不能套用其它分支的
++        # “后段优先”，因为1024分支的原输入顺序与2560/4096分支不同。
++        small_indices = pl.add(pl.tile.arange(0, [1, 1024], dtype=pl.INT32), logical_begin_i32)
++        small_raw = pl.tile.extract(
++            half_scores, 0, 0, [1, 1024], target_memory=pl.MemorySpace.Vec
++        )
++        small_raw = pl.set_validshape(small_raw, 1, valid_count)
++        small_scores = pl.tile.fillpad(small_raw, pad_value=pl.PadValue.min)
++        small_scores = pl.maximum(small_scores, FP32_NEG_INF)
++        small_pairs = pl.sort32(small_scores, pl.reinterpret_view(small_indices, pl.UINT32))
++        small_pairs = pl.mrgsort(small_pairs, block_len=64)
++        small_pairs = pl.mrgsort(small_pairs, block_len=256)
++        small_left = pl.tile.slice(small_pairs, [1, TOPK_PAIR_WIDTH], [0, 0])
++        small_right = pl.tile.slice(small_pairs, [1, TOPK_PAIR_WIDTH], [0, 1024])
++        small_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
++        small_merged = pl.tile.mrgsort(small_left, small_right, tmp=small_tmp)
++        small_top = pl.tile.slice(small_merged, [1, TOPK_PAIR_WIDTH], [0, 0])
++        pl.store(small_top, [output_slot, 0], pair_arena)
++    elif valid_count <= 2048:
++        # 三轮归并完成2048候选排序，仅前512对写GM；其余排序结果不外传。
++        leaf_indices = pl.add(pl.tile.arange(0, [1, 2048], dtype=pl.INT32), logical_begin_i32)
++        leaf_scores_raw = pl.tile.extract(
++            half_scores, 0, 0, [1, 2048], target_memory=pl.MemorySpace.Vec
++        )
++        leaf_scores_raw = pl.set_validshape(leaf_scores_raw, 1, valid_count)
++        leaf_scores = pl.tile.fillpad(leaf_scores_raw, pad_value=pl.PadValue.min)
++        leaf_scores = pl.maximum(leaf_scores, FP32_NEG_INF)
++        pairs = pl.sort32(leaf_scores, pl.reinterpret_view(leaf_indices, pl.UINT32))
++        pairs = pl.mrgsort(pairs, block_len=64)
++        pairs = pl.mrgsort(pairs, block_len=256)
++        pairs = pl.mrgsort(pairs, block_len=1024)
++        pl.store(pl.tile.slice(pairs, [1, TOPK_PAIR_WIDTH], [0, 0]), [output_slot, 0], pair_arena)
++    elif valid_count <= 2560:
++        # 2560恰好五个512候选run：前四组先组成2048，再让最后一组优先于前缀。
++        # 不补到4096，既保持原tile容量，也保持同分时后2048段的优先关系。
++        partial_indices = pl.add(pl.tile.arange(0, [1, 2560], dtype=pl.INT32), logical_begin_i32)
++        partial_raw = pl.tile.extract(
++            half_scores, 0, 0, [1, 2560], target_memory=pl.MemorySpace.Vec
++        )
++        partial_raw = pl.set_validshape(partial_raw, 1, valid_count)
++        partial_scores = pl.tile.fillpad(partial_raw, pad_value=pl.PadValue.min)
++        partial_scores = pl.maximum(partial_scores, FP32_NEG_INF)
++        partial_pairs = pl.sort32(partial_scores, pl.reinterpret_view(partial_indices, pl.UINT32))
++        partial_pairs = pl.mrgsort(partial_pairs, block_len=64)
++        partial_pairs = pl.mrgsort(partial_pairs, block_len=256)
++        partial_prefix = pl.set_validshape(partial_pairs, 1, 4096)
++        # 这里4096是2048个(score,index)的元素宽度，不是4096个候选。
++        partial_prefix = pl.mrgsort(partial_prefix, block_len=1024)
++        partial_left = pl.tile.slice(partial_prefix, [1, TOPK_PAIR_WIDTH], [0, 0])
++        partial_right = pl.tile.slice(partial_pairs, [1, TOPK_PAIR_WIDTH], [0, 4096])
++        partial_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
++        partial_merged = pl.tile.mrgsort(partial_right, partial_left, tmp=partial_tmp)
++        pl.store(pl.tile.slice(partial_merged, [1, TOPK_PAIR_WIDTH], [0, 0]), [output_slot, 0], pair_arena)
++    elif valid_count <= 3072:
++        # 六个512候选run：前四组归并，两份右根按原顺序一起置于前缀之前。
++        triple_indices = pl.add(pl.tile.arange(0, [1, 3072], dtype=pl.INT32), logical_begin_i32)
++        triple_raw = pl.tile.extract(
++            half_scores, 0, 0, [1, 3072], target_memory=pl.MemorySpace.Vec
++        )
++        triple_raw = pl.set_validshape(triple_raw, 1, valid_count)
++        triple_scores = pl.tile.fillpad(triple_raw, pad_value=pl.PadValue.min)
++        triple_scores = pl.maximum(triple_scores, FP32_NEG_INF)
++        triple_pairs = pl.sort32(triple_scores, pl.reinterpret_view(triple_indices, pl.UINT32))
++        triple_pairs = pl.mrgsort(triple_pairs, block_len=64)
++        triple_pairs = pl.mrgsort(triple_pairs, block_len=256)
++        triple_prefix = pl.set_validshape(triple_pairs, 1, 4096)
++        triple_prefix = pl.mrgsort(triple_prefix, block_len=1024)
++        triple_left = pl.tile.slice(triple_prefix, [1, TOPK_PAIR_WIDTH], [0, 0])
++        triple_right0 = pl.tile.slice(triple_pairs, [1, TOPK_PAIR_WIDTH], [0, 4096])
++        triple_right1 = pl.tile.slice(triple_pairs, [1, TOPK_PAIR_WIDTH], [0, 5120])
++        triple_tmp = pl.tile.create([1, 3 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
++        # right0→right1→left是原三路tie优先序；不要为了按地址排序改成逆序。
++        triple_merged = pl.tile.mrgsort(triple_right0, triple_right1, triple_left, tmp=triple_tmp)
++        pl.store(pl.tile.slice(triple_merged, [1, TOPK_PAIR_WIDTH], [0, 0]), [output_slot, 0], pair_arena)
++    elif valid_count <= 4096:
++        # 八个512 run先各合成2048半段，再合成Top512；完整scratch允许容纳
++        # 两份1024元素根，但GM只保存截取后的一个根。
++        medium_indices = pl.add(pl.tile.arange(0, [1, 4096], dtype=pl.INT32), logical_begin_i32)
++        medium_scores_raw = pl.tile.extract(
++            half_scores, 0, 0, [1, 4096], target_memory=pl.MemorySpace.Vec
++        )
++        medium_scores_raw = pl.set_validshape(medium_scores_raw, 1, valid_count)
++        medium_scores = pl.tile.fillpad(medium_scores_raw, pad_value=pl.PadValue.min)
++        medium_scores = pl.maximum(medium_scores, FP32_NEG_INF)
++        medium_pairs = pl.sort32(medium_scores, pl.reinterpret_view(medium_indices, pl.UINT32))
++        medium_pairs = pl.mrgsort(medium_pairs, block_len=64)
++        medium_pairs = pl.mrgsort(medium_pairs, block_len=256)
++        medium_pairs = pl.mrgsort(medium_pairs, block_len=1024)
++        medium_left = pl.tile.slice(medium_pairs, [1, TOPK_PAIR_WIDTH], [0, 0])
++        medium_right = pl.tile.slice(medium_pairs, [1, TOPK_PAIR_WIDTH], [0, 4096])
++        medium_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
++        # 新的后2048段在前，因此同分时medium_right优先于medium_left。
++        medium_merged = pl.tile.mrgsort(medium_right, medium_left, tmp=medium_tmp)
++        pl.store(pl.tile.slice(medium_merged, [1, TOPK_PAIR_WIDTH], [0, 0]), [output_slot, 0], pair_arena)
++
++
++@pl.jit.inline(auto_scope=False)
+ def indexer_topk_segment_pairs(
+     score_arena: pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32],
+     score_row: pl.Scalar[pl.INDEX],
+--- a/indexer_publish_stages.py
++++ b/indexer_publish_stages.py
+@@ -54,6 +54,12 @@
+     的未满部分沿用原排序pad语义，不另换分数或排序算法。
+     计划/容量不合法的防越界分支同样写空行，但这不是异常输入支持承诺；外层
+     仍须统一拒绝不匹配策略和容量。本模块无Host数值回读，不使用冻结IR。
++
++B1半叶根
++    balanced/G2的根仍对应原8192叶的前/后半叶，包含最后的空后半根。
++    累计根留在UB，逐child按incoming优先左折叠，只在末尾写根0；不能
++    替换成balanced/G6使用的多路归并树。根数和实际等待写者来自同一
++    device计划，保留本轮代际及业务数据发布/获取。
+ """
+ 
+ import pypto.language as pl
+@@ -115,7 +121,12 @@
+             if leaves > 0 and leaves <= MAX_LEAVES and leaf_tiles > 0:
+                 if extra_leaves >= 0 and extra_leaves < leaves:
+                     leaf_count = (visible + TOPK_CANDIDATES_PER_LEAF - 1) // TOPK_CANDIDATES_PER_LEAF
+-                    if BALANCED:
++                    if BALANCED and pl.read(plan, [5]) == 2:
++                        # B1独立调度原半叶，保留原2*ceil(visible/8192)个根。
++                        # 包含末叶的空后半根，叶内与最终归并顺序均不改变。
++                        if leaf_count > 0 and leaf_count * 2 <= leaves:
++                            roots = leaf_count * 2
++                    elif BALANCED:
+                         # 与canonical一致：先覆盖extra个大叶，再覆盖其余普通叶。
+                         # 用visible的1024向上取整计算叶前缀，不能用ceil(visible/8192)。
+                         visible_tiles = (visible + SCORE_TILE - 1) // SCORE_TILE
+@@ -185,9 +196,25 @@
+                 signals, plan, group, local_query % QUERY_GROUP, root_count,
+                 generation, QUERY_GROUP, BALANCED,
+             )
+-            if BALANCED:
++            if BALANCED and QUERY_GROUP != 2:
++                # G2独立半叶仍走下方原顺序左折叠，保持同分规则。
+                 # 多路归并helper保持incoming3/2/1/root顺序及最后不足四路分支。
+                 root_pairs = merge_top512_roots(pair_arena, arena_base, root_count)
++            elif BALANCED and QUERY_GROUP == 2:
++                # 单请求4K叶仍按child递增左折叠，incoming始终放在旧根之前。
++                # 累积根在UB跨轮复用，不能换成另一棵归并树或交换同分优先级。
++                root_pairs = pl.load(pair_arena, [arena_base, 0], [1, TOPK_PAIR_WIDTH])
++                for child in pl.range(1, root_count):
++                    next_pairs = pl.load(pair_arena, [arena_base + child, 0], [1, TOPK_PAIR_WIDTH])
++                    resident_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
++                    resident_merged = pl.tile.mrgsort(next_pairs, root_pairs, tmp=resident_tmp)
++                    # 实取1024元素，避免把整个2048结果的生命周期带进下一轮。
++                    root_pairs = pl.tile.extract(
++                        resident_merged, 0, 0, [1, TOPK_PAIR_WIDTH],
++                        target_memory=pl.MemorySpace.Vec,
++                    )
++                # 保留原根0最终内容；只消除无人消费的中间写回。
++                pl.store(root_pairs, [arena_base, 0], pair_arena)
+             else:
+                 # 原始短路径逐child向根0左折叠，且每次incoming先于旧root。
+                 # 保留原位写入及顺序；不能为了“统一接口”替换成另一棵merge树。
+--- a/signals.py
++++ b/signals.py
+@@ -50,5 +50,5 @@
+ ) -> pl.Tensor:
+     """等待该槽达到 expected，不清零；业务数据可见性由外层保证。"""
+     # 等待不清除信号，多个消费者可以独立等待同一个生产者。
+-    pl.system.signal_wait(signal, [offset], expected)
++    pl.system.signal_wait(signal, [offset], expected, backoff_ticks=150)
+     return signal

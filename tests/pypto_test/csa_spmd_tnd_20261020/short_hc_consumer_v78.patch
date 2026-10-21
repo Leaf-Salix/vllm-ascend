@@ -1,0 +1,12 @@
+--- a/policy.py
++++ b/policy.py
+@@ -201,6 +201,9 @@
+         # 沿已有G6分界选择两M16尾块的并行；G2已观察回退，不按B4/B5白名单。
+         qa_m16_parallel=parallel_small_qa,
+         cooperative_prefix=True,
++        hc_consumer_reduce=(
++            not long_history and EARLY_GEOMETRY_MIN_TOKENS <= tokens <= 256
++        ),
+         # 前置几何在小M16并行域及较大T区间有已测收益；中间单M32主体加尾块
+         # 的域先保留后置算法，避免把metadata放到RoPE关键路径。64表示至少
+         # 两个完整M32行块，仍须边界验证；不代表所有形状下都是理论最优。

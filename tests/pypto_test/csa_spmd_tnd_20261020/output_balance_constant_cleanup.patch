@@ -1,0 +1,44 @@
+--- a/cube_schedule.py
++++ b/cube_schedule.py
+@@ -118,6 +118,15 @@
+     B,
+     T,
+ )
++
++
++# The existing N128 output grid has 64 jobs on 24 physical AICs: the first
++# sixteen get three O_A jobs, the last eight get two. Software O_B ranks
++# compensate with two/four jobs respectively; they do not add physical cores.
++OUTPUT_BALANCE_HEAVY_CORES = 16
++OUTPUT_BALANCE_VIRTUAL_WORKERS = 32
++OUTPUT_BALANCE_LAST_RANK = OUTPUT_BALANCE_VIRTUAL_WORKERS - 1
++OUTPUT_BALANCE_COLUMNS_PER_GROUP = 8
+ 
+ 
+ @pl.jit.incore
+@@ -444,18 +453,18 @@
+             # same 24 physical AICs: respectively two/four independent jobs.
+             # These are software ranks, not additional SPMD participants.
+             for ob_group in pl.range(8):
+-                ob_worker = worker + 16
+-                if worker >= 16:
+-                    ob_worker = worker - 16 + (ob_group % 2) * 8
+-                ob_first = ob_group * 8
+-                ob_owned = ob_worker + ((ob_first + 31 - ob_worker) // 32) * 32
+-                if ob_owned < ob_first + 8:
++                ob_worker = worker + OUTPUT_BALANCE_HEAVY_CORES
++                if worker >= OUTPUT_BALANCE_HEAVY_CORES:
++                    ob_worker = worker - OUTPUT_BALANCE_HEAVY_CORES + (ob_group % 2) * OUTPUT_BALANCE_COLUMNS_PER_GROUP
++                ob_first = ob_group * OUTPUT_BALANCE_COLUMNS_PER_GROUP
++                ob_owned = ob_worker + ((ob_first + OUTPUT_BALANCE_LAST_RANK - ob_worker) // OUTPUT_BALANCE_VIRTUAL_WORKERS) * OUTPUT_BALANCE_VIRTUAL_WORKERS
++                if ob_owned < ob_first + OUTPUT_BALANCE_COLUMNS_PER_GROUP:
+                     signal = wait_row_owners(
+                         signal, PHASE_O_QUANT_GROUP_BASE + ob_group, CORES, generation,
+                         ob_group * quant_per_group, quant_per_group, 1, VECTORS, GROUPS, 1
+                     )
+                     o_partials = o_b_groups_stage(
+-                        o_quant, wo_b, o_partials, tokens, ob_worker, 32, OB_ROWS, ob_group, ob_group + 1
++                        o_quant, wo_b, o_partials, tokens, ob_worker, OUTPUT_BALANCE_VIRTUAL_WORKERS, OB_ROWS, ob_group, ob_group + 1
+                     )
+         else:
+             for ob_group in pl.range(8):

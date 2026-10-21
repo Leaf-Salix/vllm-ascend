@@ -1,0 +1,75 @@
+--- a/output_projection_b_stages.py
++++ b/output_projection_b_stages.py
+@@ -263,7 +263,7 @@
+ 
+ 
+ @pl.jit.inline(auto_scope=False)
+-def o_dequant_hc_post_stage(
++def _o_dequant_hc_post_rows(
+     partials: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * D], pl.INT32],
+     act_scale_dq: pl.Tensor[[O_GROUPS, SCALE_ROWS_DYN], pl.FP32],
+     wo_b_scale: pl.Tensor[[D], pl.FP32],
+@@ -295,3 +295,63 @@
+         out_bf16 = pl.cast(out_t, target_type=pl.BF16, mode="rint")
+         out_flat = hc_post_row_block(out_bf16, residual_flat, post, comb, out_flat, b_tb, 0, D)
+     return out_flat
++
++
++@pl.jit.inline(auto_scope=False)
++def _o_dequant_hc_post_columns(
++    partials: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * D], pl.INT32],
++    act_scale_dq: pl.Tensor[[O_GROUPS, SCALE_ROWS_DYN], pl.FP32],
++    wo_b_scale: pl.Tensor[[D], pl.FP32],
++    residual_flat: pl.Tensor[[T_DYN, HC_MULT * D], pl.BF16],
++    post: pl.Tensor[[T_DYN, HC_MULT], pl.FP32],
++    comb: pl.Tensor[[T_DYN, HC_MULT * HC_MULT], pl.FP32],
++    out_flat: pl.Out[pl.Tensor[[T_DYN, HC_MULT * D], pl.BF16]],
++    worker_id: pl.Scalar[pl.INDEX],
++    WORKERS: pl.constexpr,
++    COLS: pl.constexpr,
++):
++    """Unique (token, column block) owner; there is no cross-column reduction."""
++    tokens = pl.tensor.dim(out_flat, 0)
++    blocks_per_row = D // COLS
++    for work in pl.range(worker_id, tokens * blocks_per_row, WORKERS):
++        b_tb = work // blocks_per_row
++        n0 = (work % blocks_per_row) * COLS
++        wb_scale = pl.load(wo_b_scale, [n0], [COLS])
++        wb_scale_chunk = pl.reshape(wb_scale, [1, COLS])
++        acc = pl.tile.full([1, COLS], dtype=pl.FP32, value=0.0)
++        for act_g in pl.pipeline(O_GROUPS, stage=2):
++            p_col0 = act_g * D + n0
++            p_g = pl.load(partials, [b_tb, p_col0], [1, COLS])
++            g_scale_scalar = pl.read(act_scale_dq, [act_g, b_tb])
++            p_g_f32 = pl.cast(p_g, target_type=pl.FP32, mode="none")
++            acc = pl.add(acc, pl.mul(p_g_f32, g_scale_scalar))
++        out_t = pl.col_expand_mul(acc, wb_scale_chunk)
++        out_bf16 = pl.create_tensor([1, COLS], dtype=pl.BF16)
++        out_bf16 = pl.cast(out_t, target_type=pl.BF16, mode="rint")
++        out_flat = hc_post_row_block(out_bf16, residual_flat, post, comb, out_flat, b_tb, n0, COLS)
++    return out_flat
++
++
++@pl.jit.inline(auto_scope=False)
++def o_dequant_hc_post_stage(
++    partials: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * D], pl.INT32],
++    act_scale_dq: pl.Tensor[[O_GROUPS, SCALE_ROWS_DYN], pl.FP32],
++    wo_b_scale: pl.Tensor[[D], pl.FP32],
++    residual_flat: pl.Tensor[[T_DYN, HC_MULT * D], pl.BF16],
++    post: pl.Tensor[[T_DYN, HC_MULT], pl.FP32],
++    comb: pl.Tensor[[T_DYN, HC_MULT * HC_MULT], pl.FP32],
++    out_flat: pl.Out[pl.Tensor[[T_DYN, HC_MULT * D], pl.BF16]],
++    worker_id: pl.Scalar[pl.INDEX],
++    WORKERS: pl.constexpr,
++):
++    """Fill idle AIVs with independent columns; retain row ownership at larger T."""
++    tokens = pl.tensor.dim(out_flat, 0)
++    if tokens * 8 <= WORKERS:
++        out_flat = _o_dequant_hc_post_columns(partials, act_scale_dq, wo_b_scale, residual_flat, post, comb, out_flat, worker_id, WORKERS, 512)
++    elif tokens * 4 <= WORKERS:
++        out_flat = _o_dequant_hc_post_columns(partials, act_scale_dq, wo_b_scale, residual_flat, post, comb, out_flat, worker_id, WORKERS, 1024)
++    elif tokens * 2 <= WORKERS:
++        out_flat = _o_dequant_hc_post_columns(partials, act_scale_dq, wo_b_scale, residual_flat, post, comb, out_flat, worker_id, WORKERS, 2048)
++    else:
++        out_flat = _o_dequant_hc_post_rows(partials, act_scale_dq, wo_b_scale, residual_flat, post, comb, out_flat, worker_id, WORKERS)
++    return out_flat

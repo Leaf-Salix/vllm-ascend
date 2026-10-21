@@ -1,0 +1,50 @@
+{
+  "sessions": {
+    "CSA-多task": "01a0c3f6-3686-7611-95d5-37bed175d574",
+    "接入vllm-ascend": "01a0c422-2ef1-7f91-a239-96f637f6c740"
+  },
+  "bsh_formal_spmd": "a241fa6178ddad24ced30e5a93d109dfb17f5b53",
+  "priority": [
+    {
+      "name": "QA single-M16 N64",
+      "source_commit": "a658188cde9c4d58081feb3a3fbe96307b21ff23",
+      "evidence": "multi-task B1 mean381.844->371.676us; one eight-case cohort+boundary+graph; disabled code equivalent",
+      "state": "Private v83b: B1 enabled/B16 disabled CPU passed; B16 C++ except pto debug comments and host orchestration equal to v4; not device-tested or adopted"
+    },
+    {
+      "name": "B16 WS column pool + proven contiguous scale reads",
+      "source": "tests/pypto_test/csa_roofline_optimization_20261020/source_score_stream_guarded",
+      "evidence": "794.50->782.66 and reverse792.24->784.34us; integrated781.96->780.02us; no additive claim",
+      "state": "Private v84 source prepared; not compiled/device-tested or adopted"
+    },
+    {
+      "name": "B28 Score logical-to-physical worker permutation",
+      "source": "tests/pypto_test/csa_roofline_optimization_20261020/source_score_owner_interval",
+      "evidence": "1161.42->1151.32 and reverse1162.06->1149.28us; integrated1166.02->1149.78us",
+      "state": "unadopted; domain144<T<=256; inverse-writer waits and mixed dynamic proof required"
+    }
+  ],
+  "b24_combination_reverse": {
+    "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/focus_combined_b24_reverse_v1/result.json",
+    "passed": true,
+    "original_us": 1025.58,
+    "combined_us": 1022.12,
+    "note": "Roles reversed; companion report spmd_candidate is ORIGINAL. Prior forward combined+4.68us, reverse combined-3.46us; not a stable regression proof."
+  },
+  "already_inherited": [
+    "150tick waits",
+    "B1 original half-leaves plus score/root UB residency",
+    "long G6 split-QK early FIX",
+    "attention physical-row plan/MGATHER",
+    "O_B tail-row cropping",
+    "cooperative prefix/early geometry/local attention stats resource policies"
+  ],
+  "not_recommended": [
+    "SDMA O_B prefetch full-CSA regression",
+    "multi-task WS local speed with full-CSA regression",
+    "Attention arithmetic change explicitly abandoned and nonbitexact",
+    "G6/24 leaf retie regression",
+    "direct wholesale HC_pre replacement changes arithmetic and synchronization contracts"
+  ],
+  "limits": "Other-session timings have their own baselines and sometimes use mean; do not splice into current equal-weight eight-case median gate."
+}

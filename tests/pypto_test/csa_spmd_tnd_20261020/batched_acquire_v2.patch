@@ -1,0 +1,543 @@
+--- a/phase_sync.py
++++ b/phase_sync.py
+@@ -129,6 +129,7 @@
+     producer_workers: pl.Scalar[pl.INDEX],
+     producer_base: pl.Scalar[pl.INDEX],
+     producer_stride: pl.Scalar[pl.INDEX],
++    ACQUIRE: pl.constexpr = True,
+ ):
+     """按行 tile 的轮转所有权，等待覆盖目标行区间的不同生产者。
+ 
+@@ -149,7 +150,8 @@
+             offset = (phase * participant_count + core) * SIGNAL_SLOT_WORDS
+             signals = csa_signal_wait(signals, offset, generation)
+         # 多个 owner 的信号全部满足后统一刷新业务缓存，避免每条依赖都刷新整份 GM。
+-        pl.system.fence()
+-        pl.system.cacheinvalid()
+-        pl.system.fence()
++        if ACQUIRE:
++            pl.system.fence()
++            pl.system.cacheinvalid()
++            pl.system.fence()
+     return signals
+--- a/vector_schedule.py
++++ b/vector_schedule.py
+@@ -465,10 +465,7 @@
+         # 只等本核所有真实消费行的四个producer，随后直接归约所需列。
+         # inv来自本AIV已经发布的INPUT；RAW缓冲不再读写，也没有RAW通知。
+         if worker < (tokens + 7) // 8:
+-            signal = wait_row_owners(
+-                signal, PHASE_PARTIAL, CORES, generation,
+-                (worker // 2) * 4, 4, 1, GROUPS, 0, 1
+-            )
++            signal = wait_row_owners(signal, PHASE_PARTIAL, CORES, generation, worker // 2 * 4, 4, 1, GROUPS, 0, 1, ACQUIRE=True)
+     else:
+         # 投影 task=(M16 行块*4+K4096 split)，一维 task % 24 决定真实 AIC owner。
+         if HC_ROW_DEPENDENCIES:
+@@ -476,24 +473,10 @@
+             # (4*rb+k)%24。48*4能被24整除，所有wave均对应相同四个producer。
+             # 空归约者不读取partials，也不应为无关行等待；仍照合同发布RAW。
+             if worker < (tokens + 15) // 16:
+-                signal = wait_row_owners(
+-                    signal, PHASE_PARTIAL, CORES, generation,
+-                    worker * 4, 4, 1, GROUPS, 0, 1
+-                )
++                signal = wait_row_owners(signal, PHASE_PARTIAL, CORES, generation, worker * 4, 4, 1, GROUPS, 0, 1, ACQUIRE=True)
+         else:
+             projection_tasks = ((tokens + 15) // 16) * 4
+-            signal = wait_row_owners(
+-                signal,
+-                PHASE_PARTIAL,
+-                CORES,
+-                generation,
+-                0,
+-                projection_tasks,
+-                1,
+-                GROUPS,
+-                0,
+-                1,
+-            )
++            signal = wait_row_owners(signal, PHASE_PARTIAL, CORES, generation, 0, projection_tasks, 1, GROUPS, 0, 1, ACQUIRE=True)
+         raw = hc_reduce_range(partials, raw, worker, VECTORS)
+         # RAW消费者只覆盖真实T的M16 owner；较大P16的原数学/尾写仍保留。
+         if worker < (tokens + 15) // 16:
+@@ -505,40 +488,12 @@
+             # PHASE_INPUT发布已保证本核写回，因此无需再等其它核的INPUT。
+             hc_gate_tiles = (tokens + 7) // 8
+             if worker < hc_gate_tiles:
+-                signal = wait_row_owners(
+-                    signal, PHASE_RAW, CORES, generation,
+-                    worker // 2, 1, 1, VECTORS, GROUPS, 1
+-                )
++                signal = wait_row_owners(signal, PHASE_RAW, CORES, generation, worker // 2, 1, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+                 if worker + VECTORS < hc_gate_tiles:
+-                    signal = wait_row_owners(
+-                        signal, PHASE_RAW, CORES, generation,
+-                        worker // 2 + VECTORS // 2, 1, 1, VECTORS, GROUPS, 1
+-                    )
++                    signal = wait_row_owners(signal, PHASE_RAW, CORES, generation, worker // 2 + VECTORS // 2, 1, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+         else:
+-            signal = wait_row_owners(
+-                signal,
+-                PHASE_RAW,
+-                CORES,
+-                generation,
+-                0,
+-                tokens,
+-                16,
+-                VECTORS,
+-                GROUPS,
+-                1,
+-            )
+-            signal = wait_row_owners(
+-                signal,
+-                PHASE_INPUT,
+-                CORES,
+-                generation,
+-                0,
+-                tokens,
+-                8,
+-                VECTORS,
+-                GROUPS,
+-                1,
+-            )
++            signal = wait_row_owners(signal, PHASE_RAW, CORES, generation, 0, tokens, 16, VECTORS, GROUPS, 1, ACQUIRE=True)
++            signal = wait_row_owners(signal, PHASE_INPUT, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1, ACQUIRE=True)
+     pre, post = hc_gates_range(
+         inv,
+         raw,
+@@ -573,13 +528,13 @@
+     if QA_M16_PARALLEL:
+         # 与AIC同一constexpr：global M16块×八列，跨波次仍只等实际物理owner。
+         qa_tasks = pl.min(GROUPS, 8 * ((tokens + 15) // 16))
+-        signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
++        signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1, ACQUIRE=True)
+     elif tokens < 128:
+         qa_tasks = 8 * pl.min(3, pl.max(1, tokens // 32))
+-        signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
++        signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1, ACQUIRE=True)
+     else:
+         qa_tasks = 8 * pl.min(3, pl.max(1, tokens // 64))
+-        signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
++        signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1, ACQUIRE=True)
+     qr, qr_scale, qr_matmul, qr_scale_pad = q_r_stage(
+         qa,
+         gamma_cq,
+@@ -607,30 +562,8 @@
+     # 主Query与Indexer query数学独立；先完成后者的RoPE/pool/norm，
+     # 让AIC继续query Hadamard并在其主Q_B期间做量化/系数。QR/ROPE获取
+     # 随第一个消费者前移，不能只移动计算却遗漏跨核数据可见性。
+-    signal = wait_row_owners(
+-        signal,
+-        PHASE_ROPE,
+-        CORES,
+-        generation,
+-        0,
+-        tokens,
+-        8,
+-        VECTORS,
+-        GROUPS,
+-        1,
+-    )
+-    signal = wait_row_owners(
+-        signal,
+-        PHASE_QR,
+-        CORES,
+-        generation,
+-        0,
+-        tokens,
+-        8,
+-        VECTORS,
+-        GROUPS,
+-        1,
+-    )
++    signal = wait_row_owners(signal, PHASE_ROPE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1, ACQUIRE=False)
++    signal = wait_row_owners(signal, PHASE_QR, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1, ACQUIRE=True)
+     idx_requests = pl.tensor.dim(idx_lengths, 0)
+     main_requests = pl.tensor.dim(main_lengths, 0)
+     if COOPERATIVE_PREFIX:
+@@ -659,7 +592,7 @@
+             COOPERATIVE_PREFIX,
+         )
+     # 前段QR及RoPE已等待过；Indexer INT8投影按32个N256列块归24个AIC。
+-    signal = wait_row_owners(signal, PHASE_IDX_QUERY_PROJECT, CORES, generation, 0, 32, 1, GROUPS, 0, 1)
++    signal = wait_row_owners(signal, PHASE_IDX_QUERY_PROJECT, CORES, generation, 0, 32, 1, GROUPS, 0, 1, ACQUIRE=True)
+     idx_query_rope = indexer_query_dequant_rope_stage(
+         qr_scale,
+         idx_wq_b_scale,
+@@ -672,7 +605,7 @@
+     )
+     signal = publish_phase(signal, PHASE_IDX_QUERY_ROPE, core, CORES, generation)
+     weights_tasks = ((tokens + 15) // 16) * 4
+-    signal = wait_row_owners(signal, PHASE_WEIGHTS_PROJECT, CORES, generation, 0, weights_tasks, 1, GROUPS, 0, 1)
++    signal = wait_row_owners(signal, PHASE_WEIGHTS_PROJECT, CORES, generation, 0, weights_tasks, 1, GROUPS, 0, 1, ACQUIRE=True)
+     head_weights = indexer_weights_reduce_stage(weights_partial, head_weights, tokens, worker, VECTORS)
+     signal = publish_phase(signal, PHASE_WEIGHTS, core, CORES, generation)
+     if COOPERATIVE_PREFIX:
+@@ -744,7 +677,7 @@
+             generation,
+             COOPERATIVE_PREFIX,
+         )
+-    signal = wait_row_owners(signal, PHASE_IDX_QUERY_HAD, CORES, generation, 0, tokens, 1, GROUPS, 0, 1)
++    signal = wait_row_owners(signal, PHASE_IDX_QUERY_HAD, CORES, generation, 0, tokens, 1, GROUPS, 0, 1, ACQUIRE=True)
+     idx_query_i8, idx_query_scale = indexer_query_quant_stage(
+         idx_query_had,
+         idx_query_i8,
+@@ -757,8 +690,8 @@
+ 
+     # 系数要读取其他核的head权重/scale及请求分组。公共计划此前已等待，
+     # planner在HC早期已启动；等待只建立必要数据依赖，不在SPMD入口做全核集合。
+-    signal = wait_row_owners(signal, PHASE_WEIGHTS, CORES, generation, 0, tokens, 16, VECTORS, GROUPS, 1)
+-    signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)
++    signal = wait_row_owners(signal, PHASE_WEIGHTS, CORES, generation, 0, tokens, 16, VECTORS, GROUPS, 1, ACQUIRE=False)
++    signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+     coefficients = indexer_head_coefficients_stage(
+         idx_query_scale_heads,
+         head_weights,
+@@ -777,7 +710,7 @@
+     # AIC可以用既有两槽提前生产，槽复用继续由原SCORE_READY/ACK保证。
+     compact_count = pl.cast(pl.read(idx_count, [0]), pl.INDEX)
+     had_tasks = ((compact_count + 15) // 16) * 2
+-    signal = wait_row_owners(signal, PHASE_IDX_HADAMARD, CORES, generation, 0, had_tasks, 1, GROUPS, 0, 1)
++    signal = wait_row_owners(signal, PHASE_IDX_HADAMARD, CORES, generation, 0, had_tasks, 1, GROUPS, 0, 1, ACQUIRE=True)
+     idx_scales, idx_debug, idx_cache = indexer_compact_quant_cache_stage(
+         idx_had,
+         positions,
+@@ -795,7 +728,7 @@
+     # 量化key/中间scale先全部完成；随后物理page%48确定唯一scale页写者。
+     # 同页多offset由同核顺序RMW，不同页并行。空writer也发布完成，消费者
+     # 根据本阶段48个参与者等待；这不同于上一版只等AIV0的阶段合同。
+-    signal = wait_row_owners(signal, PHASE_IDX_QUANT, CORES, generation, 0, idx_requests, 1, VECTORS, GROUPS, 1)
++    signal = wait_row_owners(signal, PHASE_IDX_QUANT, CORES, generation, 0, idx_requests, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+     idx_cache = indexer_scale_page_commit_stage(
+         idx_scales,
+         group_offsets,
+@@ -808,7 +741,7 @@
+     signal = publish_phase(signal, PHASE_IDX_SCALE, core, CORES, generation)
+ 
+     # 每个head占两个NZ N256列块。首版等全部128列块的24个真实owner。
+-    signal = wait_row_owners(signal, PHASE_QB, CORES, generation, 0, 128, 1, GROUPS, 0, 1)
++    signal = wait_row_owners(signal, PHASE_QB, CORES, generation, 0, 128, 1, GROUPS, 0, 1, ACQUIRE=True)
+     q_flat = q_dequant_rope_stage(
+         wq_b_scale,
+         rope_cos,
+@@ -851,7 +784,7 @@
+         )
+     # Score两种角色必须同时可推进。不能先等PHASE_SCORE_CUBE“整段完成”，否则
+     # Cube等待AIV归还双缓冲槽，而AIV等待Cube退出，形成环。这里只等输入就绪。
+-    signal = wait_row_owners(signal, PHASE_IDX_SCALE, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
++    signal = wait_row_owners(signal, PHASE_IDX_SCALE, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+     score_arena, pair_arena = indexer_score_vector_lane_stage(
+         idx_cache,
+         indexer_table,
+@@ -941,9 +874,9 @@
+     # 每组Attention处理q=group+k*24，只等这些query对应的八行plan owner。
+     # Native cache可包含共享页，继续保留原完整写者依赖，不擅自按request缩窄。
+     signal = wait_attention_plan_rows(signal, tokens, pl.tile.get_block_idx(), generation)
+-    signal = wait_row_owners(signal, PHASE_ORIGINAL_CACHE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)
+-    signal = wait_row_owners(signal, PHASE_MAIN_OUTPUT, CORES, generation, 0, main_requests, 1, VECTORS, GROUPS, 1)
+-    signal = wait_row_owners(signal, PHASE_ROPE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)
++    signal = wait_row_owners(signal, PHASE_ORIGINAL_CACHE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1, ACQUIRE=False)
++    signal = wait_row_owners(signal, PHASE_MAIN_OUTPUT, CORES, generation, 0, main_requests, 1, VECTORS, GROUPS, 1, ACQUIRE=False)
++    signal = wait_row_owners(signal, PHASE_ROPE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1, ACQUIRE=True)
+     # 事件2..5用于Attention三槽流水，和Indexer的0/1分开。publish完成phase
+     # 不能代替这些逐槽READY/ACK；每个helper返回前均需排空自己的末尾在途项。
+     kv_ring, probability_ring, mi_ring, li_ring, packed = attention_qk_pv_vector_lane_stage(
+@@ -988,10 +921,7 @@
+             if quant_owned < quant_first + quant_per_group:
+                 # amax需要本行的全部1024列。首版按整组所有行的真实O_A owner
+                 # 获取数据，已比等待全八组更细；不声称做到逐行块最小依赖。
+-                signal = wait_row_owners(
+-                    signal, PHASE_OA_GROUP_BASE + quant_group, CORES, generation,
+-                    quant_group * oa_per_group, oa_per_group, 1, GROUPS, 0, 1
+-                )
++                signal = wait_row_owners(signal, PHASE_OA_GROUP_BASE + quant_group, CORES, generation, quant_group * oa_per_group, oa_per_group, 1, GROUPS, 0, 1, ACQUIRE=True)
+                 o_quant, o_scales = o_projection_groups_quant_stage(
+                     o_r, o_quant, o_scales, tokens, worker, VECTORS, OB_ROWS, quant_group, quant_group + 1
+                 )
+@@ -1000,12 +930,12 @@
+                 signal = publish_phase(signal, PHASE_O_QUANT_GROUP_BASE + quant_group, core, CORES, generation)
+     else:
+         oa_tasks = 8 * ((tokens + 127) // 128) * (1024 // OA_COLS)
+-        signal = wait_row_owners(signal, PHASE_OA, CORES, generation, 0, oa_tasks, 1, GROUPS, 0, 1)
++        signal = wait_row_owners(signal, PHASE_OA, CORES, generation, 0, oa_tasks, 1, GROUPS, 0, 1, ACQUIRE=True)
+         o_quant, o_scales = o_projection_group_quant_stage(
+             o_r, o_quant, o_scales, tokens, worker, VECTORS, OB_ROWS
+         )
+         signal = publish_phase(signal, PHASE_O_QUANT, core, CORES, generation)
+-    signal = wait_row_owners(signal, PHASE_OB, CORES, generation, 0, 64, 1, GROUPS, 0, 1)
++    signal = wait_row_owners(signal, PHASE_OB, CORES, generation, 0, 64, 1, GROUPS, 0, 1, ACQUIRE=True)
+     # 所有有有效comb输出的HC角色先发布COMB，再进入未改动的Score全48核完成集合；post/comb此时已
+     # 完整，且未复用其工作区。原hidden也必须保持只读直到最后的HCpost结束。
+     output = o_dequant_hc_post_stage(
+--- a/cube_schedule.py
++++ b/cube_schedule.py
+@@ -229,37 +229,12 @@
+         hc_waves = (hc_tasks + GROUPS - 1 - worker) // GROUPS
+         for hc_wave in pl.range(pl.min(hc_waves, VECTORS // (2 * (GROUPS // 4)))):
+             hc_first = ((worker + hc_wave * GROUPS) // 4) * 16
+-            signal = wait_row_owners(
+-                signal, PHASE_INPUT, CORES, generation,
+-                hc_first, pl.min(16, tokens - hc_first), 8, VECTORS, GROUPS, 1
+-            )
++            signal = wait_row_owners(signal, PHASE_INPUT, CORES, generation, hc_first, pl.min(16, tokens - hc_first), 8, VECTORS, GROUPS, 1, ACQUIRE=True)
+     else:
+-        signal = wait_row_owners(
+-            signal,
+-            PHASE_INPUT,
+-            CORES,
+-            generation,
+-            0,
+-            tokens,
+-            8,
+-            VECTORS,
+-            GROUPS,
+-            1,
+-        )
++        signal = wait_row_owners(signal, PHASE_INPUT, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1, ACQUIRE=True)
+     partials = hc_project_range(x_fp32, hc_fn, partials, worker, GROUPS)
+     signal = publish_phase(signal, PHASE_PARTIAL, worker, CORES, generation)
+-    signal = wait_row_owners(
+-        signal,
+-        PHASE_NORM,
+-        CORES,
+-        generation,
+-        0,
+-        tokens,
+-        8,
+-        VECTORS,
+-        GROUPS,
+-        1,
+-    )
++    signal = wait_row_owners(signal, PHASE_NORM, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1, ACQUIRE=True)
+     # cluster 的 GM 合同显式保留原参数别名；q_a_stage 的动态 M 分支只写同一缓冲。
+     # Host仅在G6的原两M16尾块区间启用；T与全局M16任务数仍由device维度求得。
+     qa = q_a_stage(normed, wq_a, qa, worker, GROUPS, QA_M16_PARALLEL)
+@@ -277,18 +252,7 @@
+         GROUPS,
+     )
+     signal = publish_phase(signal, PHASE_IDX_PROJECT, worker, CORES, generation)
+-    signal = wait_row_owners(
+-        signal,
+-        PHASE_QR,
+-        CORES,
+-        generation,
+-        0,
+-        tokens,
+-        8,
+-        VECTORS,
+-        GROUPS,
+-        1,
+-    )
++    signal = wait_row_owners(signal, PHASE_QR, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1, ACQUIRE=True)
+     # Indexer query投影与head权重都只依赖前段结果；先发出需要AIV处理的投影。
+     # 不能在写出这些结果之前等待Indexer归一化或量化，否则会形成等待环。
+     idx_query_acc = indexer_query_project_stage(qr, idx_wq_b, idx_query_acc, worker, GROUPS)
+@@ -315,9 +279,7 @@
+ 
+         # query的8行×4head反量化块共有ceil(T/8)*16个，不把T误当作其owner数量。
+         query_rope_tasks = ((tokens + 7) // 8) * 16
+-        signal = wait_row_owners(
+-            signal, PHASE_IDX_QUERY_ROPE, CORES, generation, 0, query_rope_tasks, 1, VECTORS, GROUPS, 1
+-        )
++        signal = wait_row_owners(signal, PHASE_IDX_QUERY_ROPE, CORES, generation, 0, query_rope_tasks, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+         idx_query_had = indexer_query_hadamard_stage(
+             idx_query_rope_heads,
+             hadamard,
+@@ -337,7 +299,7 @@
+         planner = pl.min((tokens + 7) // 8, VECTORS - 1)
+         signal = wait_producer(signal, PHASE_META, GROUPS + planner, CORES, generation)
+         requests = pl.tensor.dim(idx_lengths, 0)
+-        signal = wait_row_owners(signal, PHASE_IDX_NORM, CORES, generation, 0, requests, 1, VECTORS, GROUPS, 1)
++        signal = wait_row_owners(signal, PHASE_IDX_NORM, CORES, generation, 0, requests, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+         compact_count = pl.cast(pl.read(idx_count, [0]), pl.INDEX)
+         idx_had = indexer_compressor_hadamard_stage(
+             idx_normed,
+@@ -366,10 +328,10 @@
+ 
+     # Score消费query INT8、系数和Native key/scale。Key写回与scale RMW不是一件事：
+     # 后者按物理页分配唯一AIV写者；全部48个writer发布后，cache才可整体消费。
+-    signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)
++    signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+     groups = pl.cast(pl.read(group_plan, [0]), pl.INDEX)
+-    signal = wait_row_owners(signal, PHASE_COEFF, CORES, generation, 0, groups, 1, VECTORS, GROUPS, 1)
+-    signal = wait_row_owners(signal, PHASE_IDX_SCALE, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
++    signal = wait_row_owners(signal, PHASE_COEFF, CORES, generation, 0, groups, 1, VECTORS, GROUPS, 1, ACQUIRE=False)
++    signal = wait_row_owners(signal, PHASE_IDX_SCALE, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+     indexer_transfer = indexer_score_cube_stage(
+         idx_query_i8,
+         coefficients,
+@@ -400,7 +362,7 @@
+     # 每个实际读取的计划行都在对应Top-K根可见后发布；无需等待无关行。
+     signal = wait_attention_plan_rows(signal, tokens, worker, generation)
+     # query反量化head分组随T变化，首版等待48个明确发布的角色完成；没有猜测tile公式。
+-    signal = wait_row_owners(signal, PHASE_QUERY, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
++    signal = wait_row_owners(signal, PHASE_QUERY, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+     score_ring, pv_ring = attention_qk_pv_cube_stage(
+         q_heads,
+         attention_mask,
+@@ -418,7 +380,7 @@
+     # 每个query归q%24组，其双AIV共同完成packed。这里只等真实活跃组的两个AIV，
+     # 等待的是发布完packed，而不是只等AIC的PV矩阵指令已经发出。
+     packed_workers = pl.min(tokens, GROUPS) * 2
+-    signal = wait_row_owners(signal, PHASE_ATTN_VECTOR, CORES, generation, 0, packed_workers, 1, VECTORS, GROUPS, 1)
++    signal = wait_row_owners(signal, PHASE_ATTN_VECTOR, CORES, generation, 0, packed_workers, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+     if OUTPUT_GROUP_PIPELINE:
+         oa_per_group = ((tokens + 127) // 128) * (1024 // OA_COLS)
+         # 固定8是模型的输出组数，不是B/S档位。每组内部任务数由本次T决定；
+@@ -441,10 +403,7 @@
+             ob_first = ob_group * 8
+             ob_owned = worker + ((ob_first + GROUPS - 1 - worker) // GROUPS) * GROUPS
+             if ob_owned < ob_first + 8:
+-                signal = wait_row_owners(
+-                    signal, PHASE_O_QUANT_GROUP_BASE + ob_group, CORES, generation,
+-                    ob_group * quant_per_group, quant_per_group, 1, VECTORS, GROUPS, 1
+-                )
++                signal = wait_row_owners(signal, PHASE_O_QUANT_GROUP_BASE + ob_group, CORES, generation, ob_group * quant_per_group, quant_per_group, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+                 o_partials = o_b_groups_stage(
+                     o_quant, wo_b, o_partials, tokens, worker, GROUPS, OB_ROWS, ob_group, ob_group + 1
+                 )
+@@ -453,7 +412,7 @@
+         o_r = o_projection_a_stage_nz(packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS)
+         signal = publish_phase(signal, PHASE_OA, worker, CORES, generation)
+         quant_tasks = 8 * ((tokens + 31) // 32)
+-        signal = wait_row_owners(signal, PHASE_O_QUANT, CORES, generation, 0, quant_tasks, 1, VECTORS, GROUPS, 1)
++        signal = wait_row_owners(signal, PHASE_O_QUANT, CORES, generation, 0, quant_tasks, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+         o_partials = o_b_stage(o_quant, wo_b, o_partials, tokens, worker, GROUPS, OB_ROWS)
+     signal = publish_phase(signal, PHASE_OB, worker, CORES, generation)
+     return (
+--- a/projection_overlap_stages.py
++++ b/projection_overlap_stages.py
+@@ -143,19 +143,14 @@
+         planner = pl.min((tokens + 7) // 8, VECTORS - 1)
+         signal = wait_producer(signal, PHASE_META, GROUPS + planner, CORES, generation)
+         requests = pl.tensor.dim(idx_lengths, 0)
+-        signal = wait_row_owners(
+-            signal, PHASE_IDX_NORM, CORES, generation, 0, requests, 1, VECTORS, GROUPS, 1
+-        )
++        signal = wait_row_owners(signal, PHASE_IDX_NORM, CORES, generation, 0, requests, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+         compact_count = pl.cast(pl.read(idx_count, [0]), pl.INDEX)
+         idx_had = indexer_compressor_hadamard_stage(
+             idx_normed, hadamard, idx_had, compact_count, worker, BRANCH_GROUPS
+         )
+         signal = publish_phase(signal, PHASE_IDX_HADAMARD, worker, CORES, generation)
+         query_rope_tasks = ((tokens + 7) // 8) * 16
+-        signal = wait_row_owners(
+-            signal, PHASE_IDX_QUERY_ROPE, CORES, generation,
+-            0, query_rope_tasks, 1, VECTORS, GROUPS, 1,
+-        )
++        signal = wait_row_owners(signal, PHASE_IDX_QUERY_ROPE, CORES, generation, 0, query_rope_tasks, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+         query_had = _query_hadamard_four_tokens(
+             query_rope, hadamard, query_had, tokens, worker, BRANCH_GROUPS
+         )
+--- a/attention_plan_stages.py
++++ b/attention_plan_stages.py
+@@ -281,10 +281,7 @@
+         rows = pl.min(ROWS, tokens - first)
+         # Top-K按query%48写，plan按八行tile%48写。只等这个tile真正读取的
+         # 最多八个owner；尾部仅rows行。wait内仍保留业务缓存的获取语义。
+-        signals = wait_row_owners(
+-            signals, PHASE_TOPK, CORES, generation, first, rows, 1,
+-            WORKERS, GROUPS, 1,
+-        )
++        signals = wait_row_owners(signals, PHASE_TOPK, CORES, generation, first, rows, 1, WORKERS, GROUPS, 1, ACQUIRE=True)
+         c_raw_tile = pl.cast(
+             pl.load(topk, [first, 0], [ROWS, TOPK], valid_shape=[rows, TOPK]),
+             target_type=pl.FP32,
+--- a/vector_prefix_stages.py
++++ b/vector_prefix_stages.py
+@@ -113,7 +113,7 @@
+     idx_requests = pl.tensor.dim(idx_lengths, 0)
+     idx_tasks = ((tokens + 15) // 16) * 8
+     if not COOPERATIVE_PREFIX or worker < pl.min(idx_requests, VECTORS):
+-        signal = wait_row_owners(signal, PHASE_IDX_PROJECT, CORES, generation, 0, idx_tasks, 1, GROUPS, 0, 1)
++        signal = wait_row_owners(signal, PHASE_IDX_PROJECT, CORES, generation, 0, idx_tasks, 1, GROUPS, 0, 1, ACQUIRE=True)
+     idx_pooled = indexer_compressor_pool_stage(
+         idx_value,
+         idx_score,
+@@ -129,7 +129,7 @@
+     )
+     signal = publish_phase(signal, PHASE_IDX_POOL, core, CORES, generation)
+     if not COOPERATIVE_PREFIX or worker < pl.min(idx_requests, VECTORS):
+-        signal = wait_row_owners(signal, PHASE_IDX_POOL, CORES, generation, 0, idx_requests, 1, VECTORS, GROUPS, 1)
++        signal = wait_row_owners(signal, PHASE_IDX_POOL, CORES, generation, 0, idx_requests, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+     idx_state = indexer_compressor_state_commit_stage(
+         idx_value,
+         idx_score,
+@@ -191,7 +191,7 @@
+     main_requests = pl.tensor.dim(main_lengths, 0)
+     main_tasks = ((tokens + 63) // 64) * 16
+     if not COOPERATIVE_PREFIX or worker < pl.min(main_requests, VECTORS):
+-        signal = wait_row_owners(signal, PHASE_MAIN_PROJECT, CORES, generation, 0, main_tasks, 1, GROUPS, 0, 1)
++        signal = wait_row_owners(signal, PHASE_MAIN_PROJECT, CORES, generation, 0, main_tasks, 1, GROUPS, 0, 1, ACQUIRE=True)
+     main_pooled = compressor_pool_stage(
+         main_value,
+         main_score,
+@@ -207,7 +207,7 @@
+     )
+     signal = publish_phase(signal, PHASE_MAIN_POOL, core, CORES, generation)
+     if not COOPERATIVE_PREFIX or worker < pl.min(main_requests, VECTORS):
+-        signal = wait_row_owners(signal, PHASE_MAIN_POOL, CORES, generation, 0, main_requests, 1, VECTORS, GROUPS, 1)
++        signal = wait_row_owners(signal, PHASE_MAIN_POOL, CORES, generation, 0, main_requests, 1, VECTORS, GROUPS, 1, ACQUIRE=True)
+     main_state = compressor_state_commit_stage(
+         main_value,
+         main_score,
+@@ -262,13 +262,13 @@
+         # KV投影逻辑worker已循环置换；实际有归一化工作的核才取得全部AIC。
+         # 此时已完成本核Score，不能让独立KV链阻断Score的两槽ACK消费者。
+         if worker < pl.min((tokens + 31) // 32, VECTORS):
+-            signal = wait_row_owners(signal, PHASE_KV_PROJECT, CORES, generation, 0, GROUPS, 1, GROUPS, 0, 1)
+-            signal = wait_row_owners(signal, PHASE_ROPE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)
++            signal = wait_row_owners(signal, PHASE_KV_PROJECT, CORES, generation, 0, GROUPS, 1, GROUPS, 0, 1, ACQUIRE=True)
++            signal = wait_row_owners(signal, PHASE_ROPE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1, ACQUIRE=True)
+             kv = kv_norm_rope_stage(kv_fp32, gamma_ckv, rope_cos, rope_signed, rope_swap, kv, worker, VECTORS)
+         signal = publish_phase(signal, PHASE_KV_NORM, core, CORES, generation)
+         # cache每8行一个owner；其余AIV可直接继续Top-K，不替无业务角色等KV。
+         if worker < pl.min((tokens + 7) // 8, VECTORS):
+-            signal = wait_row_owners(signal, PHASE_KV_NORM, CORES, generation, 0, tokens, 32, VECTORS, GROUPS, 1)
++            signal = wait_row_owners(signal, PHASE_KV_NORM, CORES, generation, 0, tokens, 32, VECTORS, GROUPS, 1, ACQUIRE=True)
+             cache_rows = original_kv_writeback_stage(kv, native_slots, cache_rows, worker, VECTORS)
+         signal = publish_phase(signal, PHASE_ORIGINAL_CACHE, core, CORES, generation)
+     else:
+@@ -277,37 +277,15 @@
+         first_segment = pl.min(tokens, 512)
+         if first_segment < 128:
+             kv_tasks = 4 * pl.min(3, pl.max(1, first_segment // 32))
+-            signal = wait_row_owners(signal, PHASE_KV_PROJECT, CORES, generation, 0, kv_tasks, 1, GROUPS, 0, 1)
++            signal = wait_row_owners(signal, PHASE_KV_PROJECT, CORES, generation, 0, kv_tasks, 1, GROUPS, 0, 1, ACQUIRE=True)
+         else:
+             kv_tasks = 4 * pl.min(3, pl.max(1, first_segment // 64))
+-            signal = wait_row_owners(signal, PHASE_KV_PROJECT, CORES, generation, 0, kv_tasks, 1, GROUPS, 0, 1)
+-        signal = wait_row_owners(
+-            signal,
+-            PHASE_ROPE,
+-            CORES,
+-            generation,
+-            0,
+-            tokens,
+-            8,
+-            VECTORS,
+-            GROUPS,
+-            1,
+-        )
++            signal = wait_row_owners(signal, PHASE_KV_PROJECT, CORES, generation, 0, kv_tasks, 1, GROUPS, 0, 1, ACQUIRE=True)
++        signal = wait_row_owners(signal, PHASE_ROPE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1, ACQUIRE=True)
+         kv = kv_norm_rope_stage(kv_fp32, gamma_ckv, rope_cos, rope_signed, rope_swap, kv, worker, VECTORS)
+         signal = publish_phase(signal, PHASE_KV_NORM, core, CORES, generation)
+         # KVnorm每32行一个owner，写cache每8行一个owner，不能误用同一分块公式。
+-        signal = wait_row_owners(
+-            signal,
+-            PHASE_KV_NORM,
+-            CORES,
+-            generation,
+-            0,
+-            tokens,
+-            32,
+-            VECTORS,
+-            GROUPS,
+-            1,
+-        )
++        signal = wait_row_owners(signal, PHASE_KV_NORM, CORES, generation, 0, tokens, 32, VECTORS, GROUPS, 1, ACQUIRE=True)
+         cache_rows = original_kv_writeback_stage(kv, native_slots, cache_rows, worker, VECTORS)
+         signal = publish_phase(signal, PHASE_ORIGINAL_CACHE, core, CORES, generation)
+ 

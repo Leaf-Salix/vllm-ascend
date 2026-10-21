@@ -1,0 +1,38 @@
+--- a/cube_schedule.py
++++ b/cube_schedule.py
+@@ -49,7 +49,7 @@
+ from .projection_overlap_stages import projection_overlap_stage
+ from .output_projection_a_stages import o_projection_a_groups_stage_nz, o_projection_a_stage_nz
+ from .output_projection_b_stages import o_b_groups_stage, o_b_stage
+-from .phase_sync import begin_invocation, publish_phase, wait_producer, wait_row_owners
++from .phase_sync import begin_invocation, publish_cube_tile_phase as publish_phase, wait_producer, wait_row_owners
+ from .qkv_stages import BF16_WEIGHT_LAYOUT, q_a_stage
+ from .query_projection_stages import QUANT_WEIGHT_LAYOUT, q_b_stage
+ from .runtime_abi import (
+--- a/phase_sync.py
++++ b/phase_sync.py
+@@ -153,3 +153,24 @@
+         pl.system.cacheinvalid()
+         pl.system.fence()
+     return signals
++
++
++@pl.jit.inline(auto_scope=False)
++def publish_cube_tile_phase(
++    signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
++    phase: pl.Scalar[pl.INDEX],
++    core_id: pl.Scalar[pl.INDEX],
++    participant_count: pl.Scalar[pl.INDEX],
++    generation: pl.Scalar[pl.INT32],
++):
++    """Cube-only trial: Tile/FIX payload, no dirty scalar business stores.
++
++    Keep the GM fence, PIPE_ALL before notification, the signal's own cache
++    maintenance and every consumer acquire. Omit only the full scalar-cache
++    flush and its following duplicate fence. Vector publication is unchanged.
++    The source call-graph audit and generated code must support this contract.
++    """
++    pl.system.fence()
++    offset = (phase * participant_count + core_id) * SIGNAL_SLOT_WORDS
++    signals = csa_signal_notify(signals, offset, generation)
++    return signals

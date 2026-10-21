@@ -1,0 +1,14 @@
+--- a/policy.py
++++ b/policy.py
+@@ -211,8 +211,9 @@
+         # 沿已有小M16并行域和O_A N256的较大T域启用，中间域保留逐页读取。
+         # 不按B/history验收点枚举；页是否连续仍由本轮device表完整证明。
+         # 小M16与较大T边界已做完整同轮验证；其余验证边界见统一优化日志。
+-        scale_page_coalescing=(long_history and group == 6 and
+-                               (parallel_small_qa or tokens > LOCAL_STATS_MAX_TOKENS)),
++        scale_page_coalescing=(single_request_leaves or
++                               (long_history and group == 6 and
++                                (parallel_small_qa or tokens > LOCAL_STATS_MAX_TOKENS))),
+         # 沿已有至少两个M32行块的前置几何区间，统一在plan验证选中页，
+         # 并把压缩逻辑索引转换成物理行；消费者不再重复Q/L扫描和页表查询。
+         # 小T的计划生产者更少，搬移地址工作未稳定获益，保留原逻辑表示。

@@ -1,0 +1,26 @@
+--- a/policy.py
++++ b/policy.py
+@@ -159,7 +159,7 @@
+     group = 2
+     if long_history:
+         # 24个query起可用多叶填满24组；query长度不足6时不为复用Key扩张M384。
+-        if tokens >= 24 and max_query_tokens >= 6:
++        if (tokens >= 24 or requests == 1) and max_query_tokens >= 6:
+             group = 6
+     elif max_query_tokens >= 6 and requests >= 24:
+         # 对工作量上界比较，而不是声明T/6就是实际请求数；不等长请求仍在device
+--- a/indexer_group_stages.py
++++ b/indexer_group_stages.py
+@@ -92,7 +92,11 @@
+     leaf_tiles = CANDIDATES_PER_LEAF // SCORE_TILE
+     extra_leaves = 0
+     leaf_multiple = 1
+-    if 3 * query_groups == 2 * SCORE_WORKERS:  # noqa: SIM114 - 保持原PyPTO显式Scalar分支
++    if query_groups == 1:
++        # A single live group can spread independent history leaves over all cores.
++        # Do not invent more nonempty leaves than the number of score tiles.
++        leaf_multiple = pl.min(tile_count, SCORE_WORKERS)
++    elif 3 * query_groups == 2 * SCORE_WORKERS:  # noqa: SIM114 - 保持原PyPTO显式Scalar分支
+         leaf_multiple = 3
+     elif 3 * query_groups == SCORE_WORKERS:
+         leaf_multiple = 3

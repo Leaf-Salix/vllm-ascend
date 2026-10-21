@@ -1,0 +1,9 @@
+--- a/signals.py
++++ b/signals.py
+@@ -50,5 +50,5 @@
+ ) -> pl.Tensor:
+     """等待该槽达到 expected，不清零；业务数据可见性由外层保证。"""
+     # 等待不清除信号，多个消费者可以独立等待同一个生产者。
+-    pl.system.signal_wait(signal, [offset], expected)
++    pl.system.signal_wait(signal, [offset], expected, backoff_ticks=150)
+     return signal

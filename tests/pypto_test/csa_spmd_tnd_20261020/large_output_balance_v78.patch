@@ -1,0 +1,10 @@
+--- a/policy.py
++++ b/policy.py
+@@ -231,6 +231,7 @@
+         # neither equal tile counts nor source-level balance proves speedup.
+         output_work_balance=(
+             single_request_leaves
++            or (long_history and group == 6 and 128 < tokens <= 256)
+             or (long_history and group == 6
+                 and EARLY_GEOMETRY_MIN_TOKENS <= tokens <= LOCAL_STATS_MAX_TOKENS)
+         ),

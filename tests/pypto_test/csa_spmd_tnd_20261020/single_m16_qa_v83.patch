@@ -1,0 +1,188 @@
+--- a/qkv_stages.py
++++ b/qkv_stages.py
+@@ -82,6 +82,8 @@
+ QR_M_TILE = 16
+ QR_N_TILE = 128
+ QR_N_BLOCKS = Q_LORA // QR_N_TILE
++QA_SINGLE_M16_N_TILE = QR_N_TILE // 2
++QA_SINGLE_M16_OUTPUT_WORKERS = Q_LORA // QA_SINGLE_M16_N_TILE
+ QR_K_TILE = 256
+ QUANT_TILE = 256
+ T_TILE = 8
+@@ -151,6 +153,7 @@
+     qa_fp32: pl.Tensor[[QA_ROWS_DYN, Q_LORA], pl.FP32],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
++    N_TILE: pl.constexpr = QR_N_TILE,
+ ):
+     """全局M16块按八个N128列任务分核；仅改变owner，不改变原尾块数学。
+ 
+@@ -161,16 +164,16 @@
+     """
+     tokens = pl.tensor.dim(x, 0)
+     m16_blocks = (tokens + QR_M_TILE - 1) // QR_M_TILE
+-    for logical_worker in pl.range(pl.max(worker_id, 0), QR_N_BLOCKS * m16_blocks, WORKERS):
+-        column = (logical_worker % QR_N_BLOCKS) * QR_N_TILE
+-        row = (logical_worker // QR_N_BLOCKS) * QR_M_TILE
+-        m16_acc = pl.create_tensor([QR_M_TILE, QR_N_TILE], dtype=pl.FP32)
++    for logical_worker in pl.range(pl.max(worker_id, 0), (Q_LORA // N_TILE) * m16_blocks, WORKERS):
++        column = (logical_worker % (Q_LORA // N_TILE)) * N_TILE
++        row = (logical_worker // (Q_LORA // N_TILE)) * QR_M_TILE
++        m16_acc = pl.create_tensor([QR_M_TILE, N_TILE], dtype=pl.FP32)
+         for k_block in pl.pipeline(D // QR_K_TILE, stage=2):
+             k0 = k_block * QR_K_TILE
+             valid_rows = pl.min(QR_M_TILE, tokens - row)
+             m16_x = pl.slice(x, [QR_M_TILE, QR_K_TILE], [row, k0],
+                              valid_shape=[valid_rows, QR_K_TILE])
+-            m16_weight = wq_a[column : column + QR_N_TILE, k0 : k0 + QR_K_TILE]
++            m16_weight = wq_a[column : column + N_TILE, k0 : k0 + QR_K_TILE]
+             m16_acc = pl.matmul_acc(m16_acc, m16_x, m16_weight, b_trans=True, init_cond=(k_block == 0))
+         qa_fp32 = pl.assemble(qa_fp32, m16_acc, [row, column])
+     return qa_fp32
+@@ -184,10 +187,15 @@
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+     QA_M16_PARALLEL: pl.constexpr = False,
++    QA_SINGLE_M16: pl.constexpr = False,
+ ):
+     """由外层 AIC 调用；按实际 T 选 M32/M64，不按固定 batch 生成入口。"""
+     tokens = pl.tensor.dim(x, 0)
+-    if QA_M16_PARALLEL:
++    if QA_SINGLE_M16:
++        qa_fp32 = _q_a_m16_parallel_worker(
++            x, wq_a, qa_fp32, worker_id, WORKERS, QA_SINGLE_M16_N_TILE
++        )
++    elif QA_M16_PARALLEL:
+         qa_fp32 = _q_a_m16_parallel_worker(x, wq_a, qa_fp32, worker_id, WORKERS)
+     elif tokens < QR_FIXED_SMALL_ROWS:
+         qa_fp32 = _q_a_worker(x, wq_a, qa_fp32, worker_id, WORKERS, QR_FIXED_SMALL_M_TILE)
+--- a/cube_schedule.py
++++ b/cube_schedule.py
+@@ -197,6 +197,7 @@
+     OUTPUT_GROUP_PIPELINE: pl.constexpr,
+     HC_ROW_DEPENDENCIES: pl.constexpr,
+     QA_M16_PARALLEL: pl.constexpr = False,
++    QA_SINGLE_M16: pl.constexpr = False,
+     COOPERATIVE_PREFIX: pl.constexpr = False,
+     SPLIT_SCORE_ROWS: pl.constexpr = False,
+     OUTPUT_WORK_BALANCE: pl.constexpr = False,
+@@ -270,7 +271,7 @@
+     )
+     # cluster 的 GM 合同显式保留原参数别名；q_a_stage 的动态 M 分支只写同一缓冲。
+     # Host仅在G6的原两M16尾块区间启用；T与全局M16任务数仍由device维度求得。
+-    qa = q_a_stage(normed, wq_a, qa, worker, GROUPS, QA_M16_PARALLEL)
++    qa = q_a_stage(normed, wq_a, qa, worker, GROUPS, QA_M16_PARALLEL, QA_SINGLE_M16)
+     signal = publish_phase(signal, PHASE_QA, worker, CORES, generation)
+     # 先准备Indexer压缩，再做Indexer query；这两条链决定长历史Score何时可启动。
+     # 独立KV投影填在等待query RoPE之前，随后发Hadamard，再做主Q_B。
+--- a/vector_schedule.py
++++ b/vector_schedule.py
+@@ -88,7 +88,7 @@
+ from .output_projection_a_stages import o_projection_group_quant_stage, o_projection_groups_quant_stage
+ from .output_projection_b_stages import o_dequant_hc_post_stage
+ from .phase_sync import begin_invocation, publish_phase, wait_producer, wait_row_owners
+-from .qkv_stages import q_r_stage
++from .qkv_stages import QA_SINGLE_M16_OUTPUT_WORKERS, QR_M_TILE, q_r_stage
+ from .query_projection_stages import q_dequant_rope_stage, q_rope_prepare_stage
+ from .runtime_abi import (
+     ATTN_PLAN_ROWS,
+@@ -325,6 +325,7 @@
+     ATTENTION_QUERY_METADATA: pl.constexpr,
+     HC_CONSUMER_REDUCE: pl.constexpr,
+     QA_M16_PARALLEL: pl.constexpr = False,
++    QA_SINGLE_M16: pl.constexpr = False,
+     COOPERATIVE_PREFIX: pl.constexpr = False,
+     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
+     LOCAL_ATTENTION_STATS: pl.constexpr = False,
+@@ -570,7 +571,13 @@
+         signal = publish_phase(signal, PHASE_COMB, core, CORES, generation)
+ 
+     # Q_A 每个 M 组有八个 N128 列块；不能只等每行的一个 owner。
+-    if QA_M16_PARALLEL:
++    if QA_SINGLE_M16:
++        # Every active row needs all sixteen N64 column owners.
++        qa_tasks = pl.min(
++            GROUPS, QA_SINGLE_M16_OUTPUT_WORKERS * ((tokens + QR_M_TILE - 1) // QR_M_TILE)
++        )
++        signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
++    elif QA_M16_PARALLEL:
+         # 与AIC同一constexpr：global M16块×八列，跨波次仍只等实际物理owner。
+         qa_tasks = pl.min(GROUPS, 8 * ((tokens + 15) // 16))
+         signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
+--- a/entry.py
++++ b/entry.py
+@@ -283,6 +283,7 @@
+     ATTENTION_QUERY_METADATA: pl.constexpr,
+     HC_CONSUMER_REDUCE: pl.constexpr,
+     QA_M16_PARALLEL: pl.constexpr = False,
++    QA_SINGLE_M16: pl.constexpr = False,
+     COOPERATIVE_PREFIX: pl.constexpr = False,
+     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
+     LOCAL_ATTENTION_STATS: pl.constexpr = False,
+@@ -381,6 +382,7 @@
+             OUTPUT_GROUP_PIPELINE,
+             HC_ROW_DEPENDENCIES,
+             QA_M16_PARALLEL,
++            QA_SINGLE_M16,
+             COOPERATIVE_PREFIX,
+             SPLIT_SCORE_ROWS,
+             OUTPUT_WORK_BALANCE,
+@@ -576,6 +578,7 @@
+             ATTENTION_QUERY_METADATA,
+             HC_CONSUMER_REDUCE,
+             QA_M16_PARALLEL,
++            QA_SINGLE_M16,
+             COOPERATIVE_PREFIX,
+             EARLY_ATTENTION_GEOMETRY,
+             LOCAL_ATTENTION_STATS,
+@@ -809,6 +812,7 @@
+     ATTENTION_QUERY_METADATA: pl.constexpr,
+     HC_CONSUMER_REDUCE: pl.constexpr,
+     QA_M16_PARALLEL: pl.constexpr = False,
++    QA_SINGLE_M16: pl.constexpr = False,
+     COOPERATIVE_PREFIX: pl.constexpr = False,
+     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
+     LOCAL_ATTENTION_STATS: pl.constexpr = False,
+@@ -1059,6 +1063,7 @@
+             ATTENTION_QUERY_METADATA,
+             HC_CONSUMER_REDUCE,
+             QA_M16_PARALLEL,
++            QA_SINGLE_M16,
+             COOPERATIVE_PREFIX,
+             EARLY_ATTENTION_GEOMETRY,
+             LOCAL_ATTENTION_STATS,
+--- a/policy.py
++++ b/policy.py
+@@ -99,6 +99,8 @@
+ SHORT_PREFETCH_HALF_SORT_LIMIT = 2048
+ # 沿已有QA的小M16并行区间边界，两个完整M16行块起再启用Score新流水。
+ SCORE_SPLIT_MIN_TOKENS = 32
++# One physical M16 row block; independent N64 output columns fill 16 AICs.
++SINGLE_M16_QA_MAX_TOKENS = 16
+ 
+ 
+ @dataclass(frozen=True)
+@@ -116,6 +118,7 @@
+     attention_query_metadata: bool = False
+     hc_consumer_reduce: bool = False
+     qa_m16_parallel: bool = False
++    qa_single_m16: bool = False
+     cooperative_prefix: bool = False
+     early_attention_geometry: bool = False
+     local_attention_stats: bool = False
+@@ -140,6 +143,7 @@
+             "ATTENTION_QUERY_METADATA": self.attention_query_metadata,
+             "HC_CONSUMER_REDUCE": self.hc_consumer_reduce,
+             "QA_M16_PARALLEL": self.qa_m16_parallel,
++            "QA_SINGLE_M16": self.qa_single_m16,
+             "COOPERATIVE_PREFIX": self.cooperative_prefix,
+             "EARLY_ATTENTION_GEOMETRY": self.early_attention_geometry,
+             "LOCAL_ATTENTION_STATS": self.local_attention_stats,
+@@ -200,6 +204,7 @@
+         ob_rows=ob_rows,
+         # 沿已有G6分界选择两M16尾块的并行；G2已观察回退，不按B4/B5白名单。
+         qa_m16_parallel=parallel_small_qa,
++        qa_single_m16=long_history and tokens <= SINGLE_M16_QA_MAX_TOKENS,
+         cooperative_prefix=True,
+         # 前置几何在小M16并行域及较大T区间有已测收益；中间单M32主体加尾块
+         # 的域先保留后置算法，避免把metadata放到RoPE关键路径。64表示至少

@@ -1,0 +1,193 @@
+--- a/policy.py
++++ b/policy.py
+@@ -122,6 +122,7 @@
+     scale_page_coalescing: bool = False
+     plan_physical_rows: bool = False
+     split_score_rows: bool = False
++    oa_small_supply: bool = False
+ 
+     def constexprs(self) -> dict[str, int | bool]:
+         return {
+@@ -145,6 +146,7 @@
+             "SCALE_PAGE_COALESCING": self.scale_page_coalescing,
+             "PLAN_PHYSICAL_ROWS": self.plan_physical_rows,
+             "SPLIT_SCORE_ROWS": self.split_score_rows,
++            "OA_SMALL_SUPPLY": self.oa_small_supply,
+         }
+ 
+ 
+@@ -223,4 +225,5 @@
+         # 前段资源区间；依据完整实测取舍，不把回退唯一归因于QA或假定最优。
+         # 实际有效query/长度/页表仍在device读取，不按B4/B8等测试点枚举。
+         split_score_rows=long_history and group == 6 and tokens >= SCORE_SPLIT_MIN_TOKENS,
++        oa_small_supply=requests == 1 and tokens <= 16,
+     )
+--- a/entry.py
++++ b/entry.py
+@@ -289,6 +289,7 @@
+     SCALE_PAGE_COALESCING: pl.constexpr = False,
+     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+     SPLIT_SCORE_ROWS: pl.constexpr = False,
++    OA_SMALL_SUPPLY: pl.constexpr = False,
+ ):
+     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
+     with pl.cluster(name_hint="dynamic_csa_full"):
+@@ -382,6 +383,7 @@
+             QA_M16_PARALLEL,
+             COOPERATIVE_PREFIX,
+             SPLIT_SCORE_ROWS,
++            OA_SMALL_SUPPLY,
+         )
+         (
+             x_fp32,
+@@ -813,6 +815,7 @@
+     SCALE_PAGE_COALESCING: pl.constexpr = False,
+     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+     SPLIT_SCORE_ROWS: pl.constexpr = False,
++    OA_SMALL_SUPPLY: pl.constexpr = False,
+ ):
+     # Native cache只作为一个根入参传入。两份Key是编排内的零拷贝描述符，
+     # 避免把“可写cache+部分重叠只读视图”当作独立外部入参触发Torch别名拒绝。
+@@ -1062,6 +1065,7 @@
+             SCALE_PAGE_COALESCING,
+             PLAN_PHYSICAL_ROWS,
+             SPLIT_SCORE_ROWS,
++            OA_SMALL_SUPPLY,
+         )
+     return (
+         x_fp32,
+--- a/cube_schedule.py
++++ b/cube_schedule.py
+@@ -33,6 +33,8 @@
+ """
+ 
+ import pypto.language as pl
++
++from .oa_small_supply import o_projection_a_small_supply
+ 
+ from .attention_stream_stages import attention_qk_pv_cube_stage
+ from .attention_dependencies import wait_attention_plan_rows
+@@ -192,6 +194,7 @@
+     QA_M16_PARALLEL: pl.constexpr = False,
+     COOPERATIVE_PREFIX: pl.constexpr = False,
+     SPLIT_SCORE_ROWS: pl.constexpr = False,
++    OA_SMALL_SUPPLY: pl.constexpr = False,
+ ):
+     # 恢复原分task五份流式权重的BYPASS；预定义incore使用函数属性表达。
+     # 当前PyPTO此属性只接受(参数序号,策略整数)，1表示CachePolicy.BYPASS。
+@@ -428,9 +431,14 @@
+             oa_first = oa_group * oa_per_group
+             oa_owned = worker + ((oa_first + GROUPS - 1 - worker) // GROUPS) * GROUPS
+             if oa_owned < oa_first + oa_per_group:
+-                o_r = o_projection_a_groups_stage_nz(
+-                    packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS, oa_group, oa_group + 1
+-                )
++                if OA_SMALL_SUPPLY:
++                    o_r = o_projection_a_small_supply(
++                        packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS, oa_group, oa_group + 1
++                    )
++                else:
++                    o_r = o_projection_a_groups_stage_nz(
++                        packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS, oa_group, oa_group + 1
++                    )
+                 signal = publish_phase(signal, PHASE_OA_GROUP_BASE + oa_group, worker, CORES, generation)
+         quant_per_group = (tokens + 31) // 32
+         # 本核自己的O_A全部完成后，即可处理已量化的O_B组，不再等无关组。
+--- a/oa_small_supply.py
++++ b/oa_small_supply.py
+@@ -0,0 +1,95 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Small-M O_A supply trial; selected only for one request and at most16 tokens."""
++
++import pypto.language as pl
++
++from .output_projection_a_stages import MM_ROWS_DYN, PACK_TOTAL_ROWS_DYN
++
++
++@pl.jit.inline(auto_scope=False)
++def o_projection_a_small_supply(
++    packed: pl.Tensor[[PACK_TOTAL_ROWS_DYN, 4096], pl.BF16],
++    weight: pl.Tensor[[8, 4096, 1024], pl.BF16, pl.NZ],
++    output: pl.InOut[pl.Tensor[[MM_ROWS_DYN, 8192], pl.FP32]],
++    tokens: pl.Scalar[pl.INDEX],
++    worker: pl.Scalar[pl.INDEX],
++    WORKERS: pl.constexpr,
++    A_COL_TILE: pl.constexpr,
++    group_begin: pl.Scalar[pl.INDEX],
++    group_end: pl.Scalar[pl.INDEX],
++):
++    """Same group/N owner and K order; every load/store keeps actual M valid."""
++    stride = pl.tensor.dim(packed, 0) // 8
++    first_group = group_begin * (1024 // A_COL_TILE)
++    limit = group_end * (1024 // A_COL_TILE)
++    first = worker + ((first_group + WORKERS - 1 - worker) // WORKERS) * WORKERS
++    for work in pl.range(pl.max(0, first), limit, WORKERS):
++        group = pl.max(0, work // (1024 // A_COL_TILE))
++        column = pl.max(0, work % (1024 // A_COL_TILE)) * A_COL_TILE
++        row = group * stride
++        oa_seed = pl.tile.create([16, A_COL_TILE], dtype=pl.FP32, target_memory=pl.MemorySpace.Acc)
++        oa_valid_seed = pl.set_validshape(oa_seed, tokens, A_COL_TILE)
++        # Mat windows are local to each iteration. Only the Acc is loop-carried.
++        for oa_pair, (oa_acc_iter,) in pl.range(4, init_values=(oa_valid_seed,)):
++            k0 = oa_pair * 1024
++            oa_x_first = pl.tile.load(packed, [row, k0], [16, 512], [tokens, 512],
++                                      target_memory=pl.MemorySpace.Mat)
++            oa_w_first = pl.tile.load(weight, [group, k0, column], [1, 512, A_COL_TILE],
++                                      [1, 512, A_COL_TILE], target_memory=pl.MemorySpace.Mat, cache=1)
++            oa_x_second = pl.tile.load(packed, [row, k0 + 512], [16, 512], [tokens, 512],
++                                       target_memory=pl.MemorySpace.Mat)
++            oa_w_second = pl.tile.load(weight, [group, k0 + 512, column], [1, 512, A_COL_TILE],
++                                       [1, 512, A_COL_TILE], target_memory=pl.MemorySpace.Mat, cache=1)
++            oa_weight_first = pl.tile.reshape(oa_w_first, [512, A_COL_TILE])
++            oa_l_first_0 = pl.tile.extract(oa_x_first, 0, 0,
++                [16, 128], target_memory=pl.MemorySpace.Left)
++            oa_r_first_0 = pl.tile.extract(oa_weight_first, 0, 0,
++                [128, A_COL_TILE], target_memory=pl.MemorySpace.Right)
++            oa_l_first_1 = pl.tile.extract(oa_x_first, 0, 128,
++                [16, 128], target_memory=pl.MemorySpace.Left)
++            oa_r_first_1 = pl.tile.extract(oa_weight_first, 128, 0,
++                [128, A_COL_TILE], target_memory=pl.MemorySpace.Right)
++            oa_acc_first_0 = pl.tile.matmul_acc(
++                oa_acc_iter, oa_l_first_0, oa_r_first_0, init_cond=(oa_pair == 0))
++            oa_acc_first_1 = pl.tile.matmul_acc(
++                oa_acc_first_0, oa_l_first_1, oa_r_first_1, init_cond=False)
++            oa_l_first_2 = pl.tile.extract(oa_x_first, 0, 256,
++                [16, 128], target_memory=pl.MemorySpace.Left)
++            oa_r_first_2 = pl.tile.extract(oa_weight_first, 256, 0,
++                [128, A_COL_TILE], target_memory=pl.MemorySpace.Right)
++            oa_acc_first_2 = pl.tile.matmul_acc(
++                oa_acc_first_1, oa_l_first_2, oa_r_first_2, init_cond=False)
++            oa_l_first_3 = pl.tile.extract(oa_x_first, 0, 384,
++                [16, 128], target_memory=pl.MemorySpace.Left)
++            oa_r_first_3 = pl.tile.extract(oa_weight_first, 384, 0,
++                [128, A_COL_TILE], target_memory=pl.MemorySpace.Right)
++            oa_acc_first_3 = pl.tile.matmul_acc(
++                oa_acc_first_2, oa_l_first_3, oa_r_first_3, init_cond=False)
++            oa_weight_second = pl.tile.reshape(oa_w_second, [512, A_COL_TILE])
++            oa_l_second_0 = pl.tile.extract(oa_x_second, 0, 0,
++                [16, 128], target_memory=pl.MemorySpace.Left)
++            oa_r_second_0 = pl.tile.extract(oa_weight_second, 0, 0,
++                [128, A_COL_TILE], target_memory=pl.MemorySpace.Right)
++            oa_l_second_1 = pl.tile.extract(oa_x_second, 0, 128,
++                [16, 128], target_memory=pl.MemorySpace.Left)
++            oa_r_second_1 = pl.tile.extract(oa_weight_second, 128, 0,
++                [128, A_COL_TILE], target_memory=pl.MemorySpace.Right)
++            oa_acc_second_0 = pl.tile.matmul_acc(
++                oa_acc_first_3, oa_l_second_0, oa_r_second_0, init_cond=False)
++            oa_acc_second_1 = pl.tile.matmul_acc(
++                oa_acc_second_0, oa_l_second_1, oa_r_second_1, init_cond=False)
++            oa_l_second_2 = pl.tile.extract(oa_x_second, 0, 256,
++                [16, 128], target_memory=pl.MemorySpace.Left)
++            oa_r_second_2 = pl.tile.extract(oa_weight_second, 256, 0,
++                [128, A_COL_TILE], target_memory=pl.MemorySpace.Right)
++            oa_acc_second_2 = pl.tile.matmul_acc(
++                oa_acc_second_1, oa_l_second_2, oa_r_second_2, init_cond=False)
++            oa_l_second_3 = pl.tile.extract(oa_x_second, 0, 384,
++                [16, 128], target_memory=pl.MemorySpace.Left)
++            oa_r_second_3 = pl.tile.extract(oa_weight_second, 384, 0,
++                [128, A_COL_TILE], target_memory=pl.MemorySpace.Right)
++            oa_acc_second_3 = pl.tile.matmul_acc(
++                oa_acc_second_2, oa_l_second_3, oa_r_second_3, init_cond=False)
++            oa_finished = pl.yield_(oa_acc_second_3)
++        pl.store(oa_finished, [0, group * 1024 + column], output)
++    return output

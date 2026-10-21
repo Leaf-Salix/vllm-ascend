@@ -1,0 +1,2309 @@
+--- a/projection_overlap_stages.py
++++ b/projection_overlap_stages.py
+@@ -76,9 +76,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def _query_hadamard_four_tokens(
+-    query_rope: pl.Tensor[[IDX_ROPE_HEAD_ROWS, 128], pl.BF16],
++    query_rope: pl.Tensor,
+     hadamard: pl.Tensor[[128, 128], pl.BF16],
+-    query_had: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]],
++    query_had: pl.InOut[pl.Tensor],
+     tokens: pl.Scalar[pl.INDEX],
+     worker: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+@@ -99,26 +99,26 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def projection_overlap_stage(
+-    normed: pl.Tensor[[T, 4096], pl.BF16],
++    normed: pl.Tensor,
+     main_wkv: pl.Tensor[[1024, 4096], pl.BF16],
+     main_wgate: pl.Tensor[[1024, 4096], pl.BF16],
+-    main_value: pl.InOut[pl.Tensor[[MPROJ, 1024], pl.FP32]],
+-    main_score: pl.InOut[pl.Tensor[[MPROJ, 1024], pl.FP32]],
++    main_value: pl.InOut[pl.Tensor],
++    main_score: pl.InOut[pl.Tensor],
+     weights_proj: pl.Tensor[[4096, 64], pl.BF16],
+-    weights_partial: pl.InOut[pl.Tensor[[WEIGHTS_PARTIAL_ROWS, 64], pl.FP32]],
+-    query_rope: pl.Tensor[[IDX_ROPE_HEAD_ROWS, 128], pl.BF16],
++    weights_partial: pl.InOut[pl.Tensor],
++    query_rope: pl.Tensor,
+     hadamard: pl.Tensor[[128, 128], pl.BF16],
+-    query_had: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]],
+-    qr_matmul: pl.Tensor[[QR_ROWS, 1024], pl.INT8],
++    query_had: pl.InOut[pl.Tensor],
++    qr_matmul: pl.Tensor,
+     wq_b: pl.Tensor[[1024, 32768], pl.INT8, QUANT_WEIGHT_LAYOUT],
+-    q_proj: pl.InOut[pl.Tensor[[QPROJ_ROWS, 32768], pl.INT32]],
+-    idx_lengths: pl.Tensor[[B], pl.INT32],
++    q_proj: pl.InOut[pl.Tensor],
++    idx_lengths: pl.Tensor,
+     idx_count: pl.Tensor[[1], pl.INT32],
+-    idx_normed: pl.Tensor[[ICPAD, 128], pl.BF16],
+-    idx_had: pl.InOut[pl.Tensor[[ICPAD, 128], pl.FP32]],
++    idx_normed: pl.Tensor,
++    idx_had: pl.InOut[pl.Tensor],
+     wkv: pl.Tensor[[4096, 512], pl.BF16],
+-    kv_fp32: pl.InOut[pl.Tensor[[KV_ROWS, 512], pl.FP32]],
+-    signal: pl.InOut[pl.Tensor[[WORDS], pl.INT32]],
++    kv_fp32: pl.InOut[pl.Tensor],
++    signal: pl.InOut[pl.Tensor],
+     worker: pl.Scalar[pl.INDEX],
+     generation: pl.Scalar[pl.INT32],
+     BRANCH_GROUPS: pl.constexpr,
+--- a/output_projection_a_stages.py
++++ b/output_projection_a_stages.py
+@@ -69,9 +69,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def o_projection_a_stage_nd(
+-    o_packed: pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16],
++    o_packed: pl.Tensor,
+     wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16],
+-    o_r_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]],
++    o_r_pad: pl.InOut[pl.Tensor],
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+@@ -112,9 +112,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def o_projection_a_groups_stage_nz(
+-    o_packed: pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16],
++    o_packed: pl.Tensor,
+     wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, pl.NZ],
+-    o_r_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]],
++    o_r_pad: pl.InOut[pl.Tensor],
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+@@ -165,9 +165,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def o_projection_a_stage_nz(
+-    o_packed: pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16],
++    o_packed: pl.Tensor,
+     wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, pl.NZ],
+-    o_r_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]],
++    o_r_pad: pl.InOut[pl.Tensor],
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+@@ -182,9 +182,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def o_projection_groups_quant_stage(
+-    o_r_pad: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32],
+-    o_r_i8_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.INT8]],
+-    act_scale_dq: pl.InOut[pl.Tensor[[O_GROUPS, SCALE_ROWS_DYN], pl.FP32]],
++    o_r_pad: pl.Tensor,
++    o_r_i8_pad: pl.InOut[pl.Tensor],
++    act_scale_dq: pl.InOut[pl.Tensor],
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+@@ -246,9 +246,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def o_projection_group_quant_stage(
+-    o_r_pad: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32],
+-    o_r_i8_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.INT8]],
+-    act_scale_dq: pl.InOut[pl.Tensor[[O_GROUPS, SCALE_ROWS_DYN], pl.FP32]],
++    o_r_pad: pl.Tensor,
++    o_r_i8_pad: pl.InOut[pl.Tensor],
++    act_scale_dq: pl.InOut[pl.Tensor],
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+--- a/indexer_topk_stages.py
++++ b/indexer_topk_stages.py
+@@ -59,7 +59,7 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def merge2_top512_pairs(
+-    pair_arena: pl.InOut[pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]],
++    pair_arena: pl.InOut[pl.Tensor],
+     left_slot: pl.Scalar[pl.INDEX],
+     right_slot: pl.Scalar[pl.INDEX],
+     output_slot: pl.Scalar[pl.INDEX],
+@@ -76,7 +76,7 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def merge_top512_roots(
+-    pair_arena: pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32],
++    pair_arena: pl.Tensor,
+     arena_base: pl.Scalar[pl.INDEX],
+     half_count: pl.Scalar[pl.INDEX],
+ ) -> pl.Tile:
+@@ -108,8 +108,8 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_topk_half_leaf(
+-    score_arena: pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32],
+-    pair_arena: pl.InOut[pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]],
++    score_arena: pl.Tensor,
++    pair_arena: pl.InOut[pl.Tensor],
+     score_row: pl.Scalar[pl.INDEX],
+     logical_begin: pl.Scalar[pl.INDEX],
+     valid_count: pl.Scalar[pl.INDEX],
+@@ -213,7 +213,7 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_topk_segment_pairs(
+-    score_arena: pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32],
++    score_arena: pl.Tensor,
+     score_row: pl.Scalar[pl.INDEX],
+     logical_begin: pl.Scalar[pl.INDEX],
+     valid_count: pl.Scalar[pl.INDEX],
+--- a/attention_plan_stages.py
++++ b/attention_plan_stages.py
+@@ -136,7 +136,7 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def compressed_pages_all_valid(
+-    table: pl.Tensor[[REQUESTS_DYN, COMPRESSED_COLUMNS_DYN], pl.INT32],
++    table: pl.Tensor,
+     request: pl.Scalar[pl.INDEX],
+     length: pl.Scalar[pl.INDEX],
+     physical_pages: pl.Scalar[pl.INDEX],
+@@ -182,11 +182,11 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def attention_geometry_prepare_stage(
+-    positions: pl.Tensor[[T_DYN], pl.INT64],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    compressed_table: pl.Tensor[[REQUESTS_DYN, COMPRESSED_COLUMNS_DYN], pl.INT32],
+-    indices: pl.InOut[pl.Tensor[[PLAN_CAP_DYN, TOPK], pl.INT32]],
++    positions: pl.Tensor,
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    compressed_table: pl.Tensor,
++    indices: pl.InOut[pl.Tensor],
+     compressed_pages: pl.Scalar[pl.INDEX],
+     worker: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+@@ -251,16 +251,16 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def attention_slot_plan_stage(
+-    topk: pl.Tensor[[T_DYN, TOPK], pl.INT32],
+-    positions: pl.Tensor[[T_DYN], pl.INT64],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    original_table: pl.Tensor[[REQUESTS_DYN, ORIGINAL_COLUMNS_DYN], pl.INT32],
+-    compressed_table: pl.Tensor[[REQUESTS_DYN, COMPRESSED_COLUMNS_DYN], pl.INT32],
+-    indices: pl.InOut[pl.Tensor[[PLAN_CAP_DYN, TOPK], pl.INT32]],
+-    bias: pl.InOut[pl.Tensor[[PLAN_CAP_DYN, BIAS_COLS], pl.FP32]],
+-    valid_blocks: pl.InOut[pl.Tensor[[PLAN_CAP_DYN, MASK_COLS], pl.INT32]],
+-    signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
++    topk: pl.Tensor,
++    positions: pl.Tensor,
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    original_table: pl.Tensor,
++    compressed_table: pl.Tensor,
++    indices: pl.InOut[pl.Tensor],
++    bias: pl.InOut[pl.Tensor],
++    valid_blocks: pl.InOut[pl.Tensor],
++    signals: pl.InOut[pl.Tensor],
+     generation: pl.Scalar[pl.INT32],
+     original_pages: pl.Scalar[pl.INDEX],
+     compressed_pages: pl.Scalar[pl.INDEX],
+@@ -498,10 +498,10 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def attention_query_geometry(
+-    positions: pl.Tensor[[T_DYN], pl.INT64],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    plan: pl.Tensor[[PLAN_CAP_DYN, MASK_COLS], pl.INT32],
++    positions: pl.Tensor,
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    plan: pl.Tensor,
+     query: pl.Scalar[pl.INDEX],
+     CACHE_QUERY_METADATA: pl.constexpr,
+ ):
+@@ -535,8 +535,8 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def attention_inverse_rope_sign_stage(
+-    sin: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
+-    signed_sin: pl.InOut[pl.Tensor[[ROPE_CAP_DYN, ROPE_DIM], pl.FP32]],
++    sin: pl.Tensor,
++    signed_sin: pl.InOut[pl.Tensor],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+--- a/request_geometry.py
++++ b/request_geometry.py
+@@ -37,8 +37,8 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def request_bounds(
+-    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    seq_lens: pl.Tensor[[REQUESTS_DYN], pl.INT32],
++    query_start_loc: pl.Tensor,
++    seq_lens: pl.Tensor,
+     request: pl.Scalar[pl.INDEX],
+     token_capacity: pl.Scalar[pl.INDEX],
+ ) -> tuple[pl.Scalar[pl.INDEX], pl.Scalar[pl.INDEX], pl.Scalar[pl.INT32]]:
+@@ -63,8 +63,8 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def query_request(
+-    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    seq_lens: pl.Tensor[[REQUESTS_DYN], pl.INT32],
++    query_start_loc: pl.Tensor,
++    seq_lens: pl.Tensor,
+     query: pl.Scalar[pl.INDEX],
+     token_capacity: pl.Scalar[pl.INDEX],
+ ) -> tuple[pl.Scalar[pl.INDEX], pl.Scalar[pl.INDEX], pl.Scalar[pl.INDEX], pl.Scalar[pl.INT32]]:
+@@ -95,8 +95,8 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def compression_geometry(
+-    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    seq_lens: pl.Tensor[[REQUESTS_DYN], pl.INT32],
++    query_start_loc: pl.Tensor,
++    seq_lens: pl.Tensor,
+     request: pl.Scalar[pl.INDEX],
+     token_capacity: pl.Scalar[pl.INDEX],
+ ) -> tuple[pl.Scalar[pl.INDEX], pl.Scalar[pl.INDEX], pl.Scalar[pl.INT32]]:
+--- a/indexer_score_stages.py
++++ b/indexer_score_stages.py
+@@ -112,18 +112,18 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def _indexer_score_cube_original(
+-    qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+-    coefficients: pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16],
+-    idx_kv_cache: pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+-    idx_kv_cache_shift64: pl.Tensor[[KEY64_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+-    idx_native_kv_cache: pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8],
+-    idx_block_table: pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32],
+-    position_ids: pl.Tensor[[TOKENS_DYN], pl.INT64],
+-    kv_seq_lens: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    offsets: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
++    qr_hadamard_i8: pl.Tensor,
++    coefficients: pl.Tensor,
++    idx_kv_cache: pl.Tensor,
++    idx_kv_cache_shift64: pl.Tensor,
++    idx_native_kv_cache: pl.Tensor,
++    idx_block_table: pl.Tensor,
++    position_ids: pl.Tensor,
++    kv_seq_lens: pl.Tensor,
++    bounds: pl.Tensor,
++    offsets: pl.Tensor,
+     plan: pl.Tensor[[PLAN_WORDS], pl.INT32],
+-    buf_score_transfer: pl.InOut[pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32]],
++    buf_score_transfer: pl.InOut[pl.Tensor],
+     buf_worker: pl.Scalar[pl.INDEX],
+     query_group_size: pl.constexpr,
+     qk_panel_cols: pl.constexpr,
+@@ -399,18 +399,18 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def _indexer_score_cube_split_store(
+-    qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+-    coefficients: pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16],
+-    idx_kv_cache: pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+-    idx_kv_cache_shift64: pl.Tensor[[KEY64_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+-    idx_native_kv_cache: pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8],
+-    idx_block_table: pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32],
+-    position_ids: pl.Tensor[[TOKENS_DYN], pl.INT64],
+-    kv_seq_lens: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    offsets: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
++    qr_hadamard_i8: pl.Tensor,
++    coefficients: pl.Tensor,
++    idx_kv_cache: pl.Tensor,
++    idx_kv_cache_shift64: pl.Tensor,
++    idx_native_kv_cache: pl.Tensor,
++    idx_block_table: pl.Tensor,
++    position_ids: pl.Tensor,
++    kv_seq_lens: pl.Tensor,
++    bounds: pl.Tensor,
++    offsets: pl.Tensor,
+     plan: pl.Tensor[[PLAN_WORDS], pl.INT32],
+-    buf_score_transfer: pl.InOut[pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32]],
++    buf_score_transfer: pl.InOut[pl.Tensor],
+     buf_worker: pl.Scalar[pl.INDEX],
+     query_group_size: pl.constexpr,
+     qk_panel_cols: pl.constexpr,
+@@ -762,18 +762,18 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_score_cube_stage(
+-    qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+-    coefficients: pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16],
+-    idx_kv_cache: pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+-    idx_kv_cache_shift64: pl.Tensor[[KEY64_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+-    idx_native_kv_cache: pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8],
+-    idx_block_table: pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32],
+-    position_ids: pl.Tensor[[TOKENS_DYN], pl.INT64],
+-    kv_seq_lens: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    offsets: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
++    qr_hadamard_i8: pl.Tensor,
++    coefficients: pl.Tensor,
++    idx_kv_cache: pl.Tensor,
++    idx_kv_cache_shift64: pl.Tensor,
++    idx_native_kv_cache: pl.Tensor,
++    idx_block_table: pl.Tensor,
++    position_ids: pl.Tensor,
++    kv_seq_lens: pl.Tensor,
++    bounds: pl.Tensor,
++    offsets: pl.Tensor,
+     plan: pl.Tensor[[PLAN_WORDS], pl.INT32],
+-    buf_score_transfer: pl.InOut[pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32]],
++    buf_score_transfer: pl.InOut[pl.Tensor],
+     buf_worker: pl.Scalar[pl.INDEX],
+     query_group_size: pl.constexpr,
+     qk_panel_cols: pl.constexpr,
+@@ -839,16 +839,16 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_score_vector_lane_stage(
+-    idx_native_kv_cache: pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8],
+-    idx_block_table: pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32],
+-    position_ids: pl.Tensor[[TOKENS_DYN], pl.INT64],
+-    kv_seq_lens: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    offsets: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
++    idx_native_kv_cache: pl.Tensor,
++    idx_block_table: pl.Tensor,
++    position_ids: pl.Tensor,
++    kv_seq_lens: pl.Tensor,
++    bounds: pl.Tensor,
++    offsets: pl.Tensor,
+     plan: pl.Tensor[[PLAN_WORDS], pl.INT32],
+-    buf_score_transfer: pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32],
+-    score_arena: pl.InOut[pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32]],
+-    pair_arena: pl.InOut[pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]],
++    buf_score_transfer: pl.Tensor,
++    score_arena: pl.InOut[pl.Tensor],
++    pair_arena: pl.InOut[pl.Tensor],
+     buf_score_lane: pl.Scalar[pl.INDEX],
+     buf_worker: pl.Scalar[pl.INDEX],
+     query_group_size: pl.constexpr,
+--- a/vector_schedule.py
++++ b/vector_schedule.py
+@@ -196,121 +196,121 @@
+ 
+ @pl.jit.incore
+ def vector_schedule(
+-    x: pl.Tensor[[T, 16384], pl.BF16],
++    x: pl.Tensor,
+     hc_scale: pl.Tensor[[3], pl.FP32],
+     hc_base: pl.Tensor[[24], pl.FP32],
+     hc_base_2d: pl.Tensor[[1, 24], pl.FP32],
+     norm_w: pl.Tensor[[4096], pl.BF16],
+     gamma_cq: pl.Tensor[[1024], pl.BF16],
+-    x_fp32: pl.InOut[pl.Tensor[[T, 16384], pl.FP32]],
+-    inv: pl.InOut[pl.Tensor[[P16, 1], pl.FP32]],
++    x_fp32: pl.InOut[pl.Tensor],
++    inv: pl.InOut[pl.Tensor],
+     widen_tail: pl.InOut[pl.Tensor[[8, 16384], pl.FP32]],
+-    partials: pl.Tensor[[PARTIAL, 32], pl.FP32],
+-    raw: pl.InOut[pl.Tensor[[P16, 32], pl.FP32]],
+-    pre: pl.InOut[pl.Tensor[[P16, 8], pl.FP32]],
+-    post: pl.InOut[pl.Tensor[[T, 4], pl.FP32]],
++    partials: pl.Tensor,
++    raw: pl.InOut[pl.Tensor],
++    pre: pl.InOut[pl.Tensor],
++    post: pl.InOut[pl.Tensor],
+     post_tail: pl.InOut[pl.Tensor[[8, 8], pl.FP32]],
+-    comb: pl.InOut[pl.Tensor[[T, 16], pl.FP32]],
++    comb: pl.InOut[pl.Tensor],
+     comb_tail: pl.InOut[pl.Tensor[[8, 32], pl.FP32]],
+-    mixed: pl.InOut[pl.Tensor[[P8, 4096], pl.BF16]],
+-    normed: pl.InOut[pl.Tensor[[T, 4096], pl.BF16]],
++    mixed: pl.InOut[pl.Tensor],
++    normed: pl.InOut[pl.Tensor],
+     norm_tail: pl.InOut[pl.Tensor[[8, 4096], pl.BF16]],
+-    qa: pl.Tensor[[P16, 1024], pl.FP32],
+-    qr: pl.InOut[pl.Tensor[[T, 1024], pl.INT8]],
+-    qr_scale: pl.InOut[pl.Tensor[[T, 1], pl.FP32]],
+-    qr_matmul: pl.InOut[pl.Tensor[[QR_ROWS, 1024], pl.INT8]],
+-    qr_scale_pad: pl.InOut[pl.Tensor[[P8, 1], pl.FP32]],
++    qa: pl.Tensor,
++    qr: pl.InOut[pl.Tensor],
++    qr_scale: pl.InOut[pl.Tensor],
++    qr_matmul: pl.InOut[pl.Tensor],
++    qr_scale_pad: pl.InOut[pl.Tensor],
+     wq_b_scale: pl.Tensor[[32768], pl.FP32],
+-    rope_cos: pl.Tensor[[T, 64], pl.FP32],
+-    rope_sin: pl.Tensor[[T, 64], pl.FP32],
+-    rope_signed: pl.InOut[pl.Tensor[[T, 64], pl.FP32]],
+-    rope_swap: pl.InOut[pl.Tensor[[T, 64], pl.INT32]],
+-    q_proj: pl.Tensor[[QPROJ_ROWS, 32768], pl.INT32],
+-    q_flat: pl.InOut[pl.Tensor[[T, 32768], pl.BF16]],
++    rope_cos: pl.Tensor,
++    rope_sin: pl.Tensor,
++    rope_signed: pl.InOut[pl.Tensor],
++    rope_swap: pl.InOut[pl.Tensor],
++    q_proj: pl.Tensor,
++    q_flat: pl.InOut[pl.Tensor],
+     gamma_ckv: pl.Tensor[[512], pl.BF16],
+-    kv_fp32: pl.Tensor[[KV_ROWS, 512], pl.FP32],
+-    kv: pl.InOut[pl.Tensor[[T, 512], pl.BF16]],
+-    native_slots: pl.Tensor[[T, 2], pl.INT32],
+-    cache_rows: pl.InOut[pl.Tensor[[CACHE_ROWS, 512], pl.BF16]],
+-    main_value: pl.Tensor[[MPROJ, 1024], pl.FP32],
+-    main_score: pl.Tensor[[MPROJ, 1024], pl.FP32],
+-    main_state: pl.InOut[pl.Tensor[[MSTATE_PAGES, MSTATE_ELEMS], pl.FP32]],
+-    main_state_table: pl.Tensor[[B, MTABLE_COLS], pl.INT32],
++    kv_fp32: pl.Tensor,
++    kv: pl.InOut[pl.Tensor],
++    native_slots: pl.Tensor,
++    cache_rows: pl.InOut[pl.Tensor],
++    main_value: pl.Tensor,
++    main_score: pl.Tensor,
++    main_state: pl.InOut[pl.Tensor],
++    main_state_table: pl.Tensor,
+     main_ape: pl.Tensor[[4, 1024], pl.FP32],
+-    positions: pl.Tensor[[T], pl.INT64],
+-    main_bounds: pl.Tensor[[MQ], pl.INT32],
+-    main_lengths: pl.Tensor[[B], pl.INT32],
+-    main_state_slots: pl.Tensor[[T, 2], pl.INT32],
+-    main_pooled: pl.InOut[pl.Tensor[[MPOOL, 512], pl.FP32]],
++    positions: pl.Tensor,
++    main_bounds: pl.Tensor,
++    main_lengths: pl.Tensor,
++    main_state_slots: pl.Tensor,
++    main_pooled: pl.InOut[pl.Tensor],
+     main_gamma: pl.Tensor[[512], pl.BF16],
+-    main_cos: pl.Tensor[[MC, 64], pl.FP32],
+-    main_sin: pl.Tensor[[MC, 64], pl.FP32],
+-    main_offsets: pl.InOut[pl.Tensor[[B], pl.INT32]],
++    main_cos: pl.Tensor,
++    main_sin: pl.Tensor,
++    main_offsets: pl.InOut[pl.Tensor],
+     main_count: pl.InOut[pl.Tensor[[1], pl.INT32]],
+-    main_slots: pl.Tensor[[MSLOTS, 2], pl.INT32],
+-    main_normed: pl.InOut[pl.Tensor[[MNORM, 512], pl.FP32]],
+-    main_debug: pl.InOut[pl.Tensor[[T, 512], pl.FP32]],
+-    main_cache: pl.InOut[pl.Tensor[[MCACHE_ROWS, 512], pl.BF16]],
+-    idx_value: pl.Tensor[[IPROJ, 256], pl.FP32],
+-    idx_score: pl.Tensor[[IPROJ, 256], pl.FP32],
+-    idx_state: pl.InOut[pl.Tensor[[ISTATE_PAGES, ISTATE_ELEMS], pl.FP32]],
+-    idx_state_table: pl.Tensor[[B, ITABLE_COLS], pl.INT32],
++    main_slots: pl.Tensor,
++    main_normed: pl.InOut[pl.Tensor],
++    main_debug: pl.InOut[pl.Tensor],
++    main_cache: pl.InOut[pl.Tensor],
++    idx_value: pl.Tensor,
++    idx_score: pl.Tensor,
++    idx_state: pl.InOut[pl.Tensor],
++    idx_state_table: pl.Tensor,
+     idx_ape: pl.Tensor[[4, 256], pl.FP32],
+-    idx_bounds: pl.Tensor[[IQ], pl.INT32],
+-    idx_lengths: pl.Tensor[[B], pl.INT32],
+-    idx_state_slots: pl.Tensor[[T, 2], pl.INT32],
+-    idx_pooled: pl.InOut[pl.Tensor[[IPOOL, 128], pl.FP32]],
++    idx_bounds: pl.Tensor,
++    idx_lengths: pl.Tensor,
++    idx_state_slots: pl.Tensor,
++    idx_pooled: pl.InOut[pl.Tensor],
+     idx_gamma: pl.Tensor[[128], pl.BF16],
+-    idx_cos: pl.Tensor[[IC, 64], pl.FP32],
+-    idx_sin: pl.Tensor[[IC, 64], pl.FP32],
+-    idx_offsets: pl.InOut[pl.Tensor[[B], pl.INT32]],
++    idx_cos: pl.Tensor,
++    idx_sin: pl.Tensor,
++    idx_offsets: pl.InOut[pl.Tensor],
+     idx_count: pl.InOut[pl.Tensor[[1], pl.INT32]],
+-    idx_slots: pl.Tensor[[ISLOTS, 2], pl.INT32],
+-    idx_normed: pl.InOut[pl.Tensor[[ICPAD, 128], pl.BF16]],
+-    idx_had: pl.Tensor[[ICPAD, 128], pl.FP32],
+-    idx_scales: pl.InOut[pl.Tensor[[ISCALES, 1], pl.FP32]],
+-    idx_debug: pl.InOut[pl.Tensor[[T, 128], pl.FP32]],
++    idx_slots: pl.Tensor,
++    idx_normed: pl.InOut[pl.Tensor],
++    idx_had: pl.Tensor,
++    idx_scales: pl.InOut[pl.Tensor],
++    idx_debug: pl.InOut[pl.Tensor],
+     idx_cache: pl.InOut[pl.Tensor[[ICACHE_PAGES, ICACHE_BYTES], pl.INT8]],
+-    original_table: pl.Tensor[[B, ORIGINAL_COLS], pl.INT32],
+-    compressed_table: pl.Tensor[[B, COMPRESSED_COLS], pl.INT32],
+-    indexer_table: pl.Tensor[[B, INDEXER_COLS], pl.INT32],
++    original_table: pl.Tensor,
++    compressed_table: pl.Tensor,
++    indexer_table: pl.Tensor,
+     idx_wq_b_scale: pl.Tensor[[8192], pl.FP32],
+-    idx_query_acc: pl.Tensor[[IDX_PROJ_ROWS, 8192], pl.INT32],
+-    idx_query_rope: pl.InOut[pl.Tensor[[IDX_ROPE_ROWS, 8192], pl.BF16]],
+-    idx_query_had: pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32],
+-    idx_query_i8: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.INT8]],
+-    idx_query_scale: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 1], pl.FP32]],
+-    idx_query_scale_heads: pl.Tensor[[IDX_SCALE_T_ROWS, 64], pl.FP32],
+-    weights_partial: pl.Tensor[[WEIGHTS_PARTIAL_ROWS, 64], pl.FP32],
+-    head_weights: pl.InOut[pl.Tensor[[WEIGHTS_ROWS, 64], pl.FP32]],
+-    group_offsets: pl.InOut[pl.Tensor[[GROUP_OFFSET_ROWS], pl.INT32]],
++    idx_query_acc: pl.Tensor,
++    idx_query_rope: pl.InOut[pl.Tensor],
++    idx_query_had: pl.Tensor,
++    idx_query_i8: pl.InOut[pl.Tensor],
++    idx_query_scale: pl.InOut[pl.Tensor],
++    idx_query_scale_heads: pl.Tensor,
++    weights_partial: pl.Tensor,
++    head_weights: pl.InOut[pl.Tensor],
++    group_offsets: pl.InOut[pl.Tensor],
+     group_plan: pl.InOut[pl.Tensor[[8], pl.INT32]],
+-    coefficients: pl.InOut[pl.Tensor[[COEFF_ROWS, COEFF_COLS], pl.FP16]],
+-    indexer_transfer: pl.Tensor[[INDEX_TRANSFER_ROWS, INDEX_TRANSFER_COLS], pl.FP32],
+-    score_arena: pl.InOut[pl.Tensor[[SCORE_ROWS, 8192], pl.FP32]],
+-    pair_arena: pl.InOut[pl.Tensor[[PAIR_ROWS, 1024], pl.FP32]],
+-    topk_scores: pl.InOut[pl.Tensor[[T, 512], pl.FP32]],
+-    topk_indices: pl.InOut[pl.Tensor[[T, 512], pl.INT32]],
+-    attention_indices: pl.InOut[pl.Tensor[[ATTN_PLAN_ROWS, 512], pl.INT32]],
+-    attention_bias: pl.InOut[pl.Tensor[[ATTN_PLAN_ROWS, 640], pl.FP32]],
+-    attention_mask: pl.InOut[pl.Tensor[[ATTN_PLAN_ROWS, 16], pl.INT32]],
+-    inverse_sin: pl.InOut[pl.Tensor[[T, 64], pl.FP32]],
++    coefficients: pl.InOut[pl.Tensor],
++    indexer_transfer: pl.Tensor,
++    score_arena: pl.InOut[pl.Tensor],
++    pair_arena: pl.InOut[pl.Tensor],
++    topk_scores: pl.InOut[pl.Tensor],
++    topk_indices: pl.InOut[pl.Tensor],
++    attention_indices: pl.InOut[pl.Tensor],
++    attention_bias: pl.InOut[pl.Tensor],
++    attention_mask: pl.InOut[pl.Tensor],
++    inverse_sin: pl.InOut[pl.Tensor],
+     attn_sink: pl.Tensor[[64, 1], pl.FP32],
+-    kv_ring: pl.InOut[pl.Tensor[[KV_RING_ROWS, 512], pl.BF16]],
+-    score_ring: pl.Tensor[[HEAD_RING_ROWS, 128], pl.FP32],
+-    probability_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 128], pl.BF16]],
+-    pv_ring: pl.Tensor[[HEAD_RING_ROWS, 512], pl.FP32],
+-    mi_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]],
+-    li_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]],
+-    packed: pl.InOut[pl.Tensor[[PACK_ROWS, 4096], pl.BF16]],
++    kv_ring: pl.InOut[pl.Tensor],
++    score_ring: pl.Tensor,
++    probability_ring: pl.InOut[pl.Tensor],
++    pv_ring: pl.Tensor,
++    mi_ring: pl.InOut[pl.Tensor],
++    li_ring: pl.InOut[pl.Tensor],
++    packed: pl.InOut[pl.Tensor],
+     ffts: pl.Tensor[[256], pl.INT64],
+-    o_r: pl.Tensor[[O_MM_ROWS, 8192], pl.FP32],
+-    o_quant: pl.InOut[pl.Tensor[[O_MM_ROWS, 8192], pl.INT8]],
+-    o_scales: pl.InOut[pl.Tensor[[8, O_SCALE_ROWS], pl.FP32]],
+-    o_partials: pl.Tensor[[O_MM_ROWS, 32768], pl.INT32],
++    o_r: pl.Tensor,
++    o_quant: pl.InOut[pl.Tensor],
++    o_scales: pl.InOut[pl.Tensor],
++    o_partials: pl.Tensor,
+     wo_b_scale: pl.Tensor[[4096], pl.FP32],
+-    output: pl.InOut[pl.Tensor[[T, 16384], pl.BF16]],
+-    signal: pl.InOut[pl.Tensor[[WORDS], pl.INT32]],
++    output: pl.InOut[pl.Tensor],
++    signal: pl.InOut[pl.Tensor],
+     QUERY_GROUP: pl.constexpr,
+     QK_PANEL: pl.constexpr,
+     SCORE_TILE: pl.constexpr,
+--- a/compressor_projection_stages.py
++++ b/compressor_projection_stages.py
+@@ -65,11 +65,11 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def compressor_project_stage(
+-    x: pl.Tensor[[T_DYN, D], pl.BF16],
++    x: pl.Tensor,
+     wkv: pl.Tensor[[CMP_OUT_DIM, D], pl.BF16],
+     wgate: pl.Tensor[[CMP_OUT_DIM, D], pl.BF16],
+-    kv_proj_pad: pl.Tensor[[MAIN_PAD_ROWS_DYN, CMP_OUT_DIM], pl.FP32],
+-    score_proj_pad: pl.Tensor[[MAIN_PAD_ROWS_DYN, CMP_OUT_DIM], pl.FP32],
++    kv_proj_pad: pl.Tensor,
++    score_proj_pad: pl.Tensor,
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+@@ -106,11 +106,11 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_compressor_project_stage(
+-    x: pl.Tensor[[T_DYN, D], pl.BF16],
++    x: pl.Tensor,
+     wkv: pl.Tensor[[INDEXER_OUT_DIM, D], pl.BF16],
+     wgate: pl.Tensor[[INDEXER_OUT_DIM, D], pl.BF16],
+-    kv_proj_pad: pl.Tensor[[INDEXER_PAD_ROWS_DYN, INDEXER_OUT_DIM], pl.FP32],
+-    score_proj_pad: pl.Tensor[[INDEXER_PAD_ROWS_DYN, INDEXER_OUT_DIM], pl.FP32],
++    kv_proj_pad: pl.Tensor,
++    score_proj_pad: pl.Tensor,
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+--- a/indexer_group_stages.py
++++ b/indexer_group_stages.py
+@@ -109,10 +109,10 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_group_plan_stage(
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    positions: pl.Tensor[[TOKENS_DYN], pl.INT64],
+-    offsets: pl.InOut[pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]],
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    positions: pl.Tensor,
++    offsets: pl.InOut[pl.Tensor],
+     plan: pl.InOut[pl.Tensor[[PLAN_WORDS], pl.INT32]],
+     tokens: pl.Scalar[pl.INDEX],
+     worker: pl.Scalar[pl.INDEX],
+@@ -182,9 +182,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_query_visibility(
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    positions: pl.Tensor[[TOKENS_DYN], pl.INT64],
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    positions: pl.Tensor,
+     request: pl.Scalar[pl.INDEX],
+     query: pl.Scalar[pl.INDEX],
+ ):
+@@ -205,10 +205,10 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_decode_group(
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    positions: pl.Tensor[[TOKENS_DYN], pl.INT64],
+-    offsets: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    positions: pl.Tensor,
++    offsets: pl.Tensor,
+     group: pl.Scalar[pl.INDEX],
+     GROUP_SIZE: pl.constexpr,
+ ):
+@@ -266,13 +266,13 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_head_coefficients_stage(
+-    scales: pl.Tensor[[SCALE_ROWS_DYN, HEADS], pl.FP32],
+-    weights: pl.Tensor[[WEIGHT_ROWS_DYN, HEADS], pl.FP32],
+-    positions: pl.Tensor[[TOKENS_DYN], pl.INT64],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    offsets: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
+-    coefficients: pl.InOut[pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16]],
++    scales: pl.Tensor,
++    weights: pl.Tensor,
++    positions: pl.Tensor,
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    offsets: pl.Tensor,
++    coefficients: pl.InOut[pl.Tensor],
+     worker: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+     GROUP_SIZE: pl.constexpr,
+--- a/attention_stream_stages.py
++++ b/attention_stream_stages.py
+@@ -128,12 +128,12 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def attention_qk_pv_cube_stage(
+-    q_flat: pl.Tensor[[Q_ROWS_DYN, HEAD_DIM], pl.BF16],
+-    valid_block_mask: pl.Tensor[[PLAN_CAP_DYN, 16], pl.INT32],
+-    kv_transfer: pl.Tensor[[KV_RING_ROWS_DYN, HEAD_DIM], pl.BF16],
+-    score_transfer: pl.InOut[pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.FP32]],
+-    probability_transfer: pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.BF16],
+-    pv_transfer: pl.InOut[pl.Tensor[[HEAD_RING_ROWS_DYN, HEAD_DIM], pl.FP32]],
++    q_flat: pl.Tensor,
++    valid_block_mask: pl.Tensor,
++    kv_transfer: pl.Tensor,
++    score_transfer: pl.InOut[pl.Tensor],
++    probability_transfer: pl.Tensor,
++    pv_transfer: pl.InOut[pl.Tensor],
+     ffts_workspace: pl.Tensor[[FFTS_WORDS], pl.INT64],
+     core_id: pl.Scalar[pl.INDEX],
+     CORE_GROUPS: pl.constexpr,
+@@ -216,26 +216,26 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def attention_qk_pv_vector_lane_stage(
+-    ori_kv_flat: pl.Tensor[[ORIGINAL_ROWS_DYN, HEAD_DIM], pl.BF16],
+-    cmp_kv_flat: pl.Tensor[[COMPRESSED_ROWS_DYN, HEAD_DIM], pl.BF16],
+-    ori_block_table: pl.Tensor[[REQUESTS_DYN, ORIGINAL_COLUMNS_DYN], pl.INT32],
+-    cmp_block_table: pl.Tensor[[REQUESTS_DYN, COMPRESSED_COLUMNS_DYN], pl.INT32],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    position_ids: pl.Tensor[[T_DYN], pl.INT64],
+-    cmp_sparse_indices: pl.Tensor[[PLAN_CAP_DYN, CMP_TOPK], pl.INT32],
+-    sparse_bias: pl.Tensor[[PLAN_CAP_DYN, 640], pl.FP32],
+-    valid_block_mask: pl.Tensor[[PLAN_CAP_DYN, 16], pl.INT32],
++    ori_kv_flat: pl.Tensor,
++    cmp_kv_flat: pl.Tensor,
++    ori_block_table: pl.Tensor,
++    cmp_block_table: pl.Tensor,
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    position_ids: pl.Tensor,
++    cmp_sparse_indices: pl.Tensor,
++    sparse_bias: pl.Tensor,
++    valid_block_mask: pl.Tensor,
+     attn_sink_col: pl.Tensor[[H, 1], pl.FP32],
+-    freqs_cos: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
+-    rope_sin_signed: pl.Tensor[[ROPE_CAP_DYN, ROPE_DIM], pl.FP32],
+-    kv_transfer: pl.InOut[pl.Tensor[[KV_RING_ROWS_DYN, HEAD_DIM], pl.BF16]],
+-    score_transfer: pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.FP32],
+-    probability_transfer: pl.InOut[pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.BF16]],
+-    pv_transfer: pl.Tensor[[HEAD_RING_ROWS_DYN, HEAD_DIM], pl.FP32],
+-    mi_transfer: pl.InOut[pl.Tensor[[HEAD_RING_ROWS_DYN, 1], pl.FP32]],
+-    li_transfer: pl.InOut[pl.Tensor[[HEAD_RING_ROWS_DYN, 1], pl.FP32]],
+-    o_packed_heads: pl.InOut[pl.Tensor[[PACK_ROWS_DYN, O_GROUP_IN], pl.BF16]],
++    freqs_cos: pl.Tensor,
++    rope_sin_signed: pl.Tensor,
++    kv_transfer: pl.InOut[pl.Tensor],
++    score_transfer: pl.Tensor,
++    probability_transfer: pl.InOut[pl.Tensor],
++    pv_transfer: pl.Tensor,
++    mi_transfer: pl.InOut[pl.Tensor],
++    li_transfer: pl.InOut[pl.Tensor],
++    o_packed_heads: pl.InOut[pl.Tensor],
+     ffts_workspace: pl.Tensor[[FFTS_WORDS], pl.INT64],
+     core_id: pl.Scalar[pl.INDEX],
+     lane_id: pl.Scalar[pl.INDEX],
+--- a/phase_sync.py
++++ b/phase_sync.py
+@@ -63,7 +63,7 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def begin_invocation(
+-    signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
++    signals: pl.InOut[pl.Tensor],
+     core_id: pl.Scalar[pl.INDEX],
+ ):
+     """每核从自己的阶段 0 槽取下一代；返回 Tensor 引用和 INT32 代际。
+@@ -82,7 +82,7 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def publish_phase(
+-    signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
++    signals: pl.InOut[pl.Tensor],
+     phase: pl.Scalar[pl.INDEX],
+     core_id: pl.Scalar[pl.INDEX],
+     participant_count: pl.Scalar[pl.INDEX],
+@@ -101,7 +101,7 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def wait_producer(
+-    signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
++    signals: pl.InOut[pl.Tensor],
+     phase: pl.Scalar[pl.INDEX],
+     producer_core: pl.Scalar[pl.INDEX],
+     participant_count: pl.Scalar[pl.INDEX],
+@@ -119,7 +119,7 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def wait_row_owners(
+-    signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
++    signals: pl.InOut[pl.Tensor],
+     phase: pl.Scalar[pl.INDEX],
+     participant_count: pl.Scalar[pl.INDEX],
+     generation: pl.Scalar[pl.INT32],
+--- a/indexer_compressor_output_stages.py
++++ b/indexer_compressor_output_stages.py
+@@ -70,15 +70,15 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_compressor_norm_rope_stage(
+-    pooled: pl.Tensor[[POOL_ROWS_DYN, HEAD_DIM], pl.FP32],
++    pooled: pl.Tensor,
+     norm_w: pl.Tensor[[HEAD_DIM], pl.BF16],
+-    cos: pl.Tensor[[COMPACT_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
+-    sin: pl.Tensor[[COMPACT_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
+-    positions: pl.Tensor[[T_DYN], pl.INT64],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    offsets: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    normed: pl.InOut[pl.Tensor[[COMPACT_PAD_ROWS_DYN, HEAD_DIM], pl.BF16]],
++    cos: pl.Tensor,
++    sin: pl.Tensor,
++    positions: pl.Tensor,
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    offsets: pl.Tensor,
++    normed: pl.InOut[pl.Tensor],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+@@ -175,9 +175,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_compressor_hadamard_stage(
+-    normed: pl.Tensor[[COMPACT_PAD_ROWS_DYN, HEAD_DIM], pl.BF16],
++    normed: pl.Tensor,
+     hadamard: pl.Tensor[[HEAD_DIM, HEAD_DIM], pl.BF16],
+-    output: pl.Tensor[[COMPACT_PAD_ROWS_DYN, HEAD_DIM], pl.FP32],
++    output: pl.Tensor,
+     valid_count: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+--- a/indexer_cache_stages.py
++++ b/indexer_cache_stages.py
+@@ -67,15 +67,15 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_compact_quant_cache_stage(
+-    values: pl.Tensor[[VALUE_ROWS_DYN, HEAD_DIM], pl.FP32],
+-    positions: pl.Tensor[[T_DYN], pl.INT64],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    offsets: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    slots: pl.Tensor[[SLOT_ROWS_DYN, 2], pl.INT32],
+-    scale_values: pl.InOut[pl.Tensor[[SCALE_ROWS_DYN, 1], pl.FP32]],
+-    kv_debug: pl.InOut[pl.Tensor[[T_DYN, HEAD_DIM], pl.FP32]],
+-    cache: pl.InOut[pl.Tensor[[CACHE_PAGES_DYN, CACHE_BYTES_DYN], pl.INT8]],
++    values: pl.Tensor,
++    positions: pl.Tensor,
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    offsets: pl.Tensor,
++    slots: pl.Tensor,
++    scale_values: pl.InOut[pl.Tensor],
++    kv_debug: pl.InOut[pl.Tensor],
++    cache: pl.InOut[pl.Tensor],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+@@ -147,13 +147,13 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_compact_scale_commit_stage(
+-    scale_values: pl.Tensor[[SCALE_ROWS_DYN, 1], pl.FP32],
+-    positions: pl.Tensor[[T_DYN], pl.INT64],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    offsets: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    slots: pl.Tensor[[SLOT_ROWS_DYN, 2], pl.INT32],
+-    cache: pl.InOut[pl.Tensor[[CACHE_PAGES_DYN, CACHE_BYTES_DYN], pl.INT8]],
++    scale_values: pl.Tensor,
++    positions: pl.Tensor,
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    offsets: pl.Tensor,
++    slots: pl.Tensor,
++    cache: pl.InOut[pl.Tensor],
+     worker_id: pl.Scalar[pl.INDEX],
+ ):
+     """唯一AIV worker0提交FP16 scale；调用前必须等所有量化写回可见。"""
+--- a/output_projection_b_stages.py
++++ b/output_projection_b_stages.py
+@@ -92,9 +92,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def _o_b_nd_groups_stage(
+-    o_r_i8_pad: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.INT8],
++    o_r_i8_pad: pl.Tensor,
+     wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
+-    partials: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * D], pl.INT32],
++    partials: pl.Tensor,
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+@@ -133,9 +133,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def _o_b_nz_groups_stage(
+-    o_r_i8_pad: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.INT8],
++    o_r_i8_pad: pl.Tensor,
+     wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
+-    partials: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * D], pl.INT32],
++    partials: pl.Tensor,
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+@@ -208,9 +208,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def o_b_stage(
+-    o_r_i8_pad: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.INT8],
++    o_r_i8_pad: pl.Tensor,
+     wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
+-    partials: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * D], pl.INT32]],
++    partials: pl.InOut[pl.Tensor],
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+@@ -264,13 +264,13 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def o_dequant_hc_post_stage(
+-    partials: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * D], pl.INT32],
+-    act_scale_dq: pl.Tensor[[O_GROUPS, SCALE_ROWS_DYN], pl.FP32],
++    partials: pl.Tensor,
++    act_scale_dq: pl.Tensor,
+     wo_b_scale: pl.Tensor[[D], pl.FP32],
+-    residual_flat: pl.Tensor[[T_DYN, HC_MULT * D], pl.BF16],
+-    post: pl.Tensor[[T_DYN, HC_MULT], pl.FP32],
+-    comb: pl.Tensor[[T_DYN, HC_MULT * HC_MULT], pl.FP32],
+-    out_flat: pl.Out[pl.Tensor[[T_DYN, HC_MULT * D], pl.BF16]],
++    residual_flat: pl.Tensor,
++    post: pl.Tensor,
++    comb: pl.Tensor,
++    out_flat: pl.Out[pl.Tensor],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+--- a/indexer_publish_stages.py
++++ b/indexer_publish_stages.py
+@@ -134,16 +134,16 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_pair_publish_stage(
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    positions: pl.Tensor[[TOKENS_DYN], pl.INT64],
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    positions: pl.Tensor,
+     plan: pl.Tensor[[PLAN_WORDS], pl.INT32],
+-    offsets: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
+-    attention_metadata: pl.Tensor[[PLAN_CAP_DYN, IDX_TOPK], pl.INT32],
+-    signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
+-    pair_arena: pl.InOut[pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]],
+-    topk_scores: pl.InOut[pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.FP32]],
+-    topk_indices: pl.InOut[pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.INT32]],
++    offsets: pl.Tensor,
++    attention_metadata: pl.Tensor,
++    signals: pl.InOut[pl.Tensor],
++    pair_arena: pl.InOut[pl.Tensor],
++    topk_scores: pl.InOut[pl.Tensor],
++    topk_indices: pl.InOut[pl.Tensor],
+     worker: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+     ROOTS_PER_LEAF: pl.constexpr,
+@@ -217,13 +217,13 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_single_leaf_publish_stage(
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    positions: pl.Tensor[[TOKENS_DYN], pl.INT64],
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    positions: pl.Tensor,
+     plan: pl.Tensor[[PLAN_WORDS], pl.INT32],
+-    score_arena: pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32],
+-    topk_scores: pl.InOut[pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.FP32]],
+-    topk_indices: pl.InOut[pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.INT32]],
++    score_arena: pl.Tensor,
++    topk_scores: pl.InOut[pl.Tensor],
++    topk_indices: pl.InOut[pl.Tensor],
+     worker: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+@@ -248,11 +248,11 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_topk_leaf_publish(
+-    score_arena: pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32],
++    score_arena: pl.Tensor,
+     query: pl.Scalar[pl.INDEX],
+     valid_count: pl.Scalar[pl.INDEX],
+-    topk_scores: pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.FP32],
+-    topk_indices: pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.INT32],
++    topk_scores: pl.Tensor,
++    topk_indices: pl.Tensor,
+ ) -> None:
+     """单叶排序数学原样迁移；只有调用方验证过的1..8192个候选才能进入。"""
+     # 2048及以下保持sort32后三级mrgsort；不足512的index单独填-1。
+--- a/indexer_query_stages.py
++++ b/indexer_query_stages.py
+@@ -80,9 +80,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_query_project_stage(
+-    qr: pl.Tensor[[T_DYN, Q_LORA], pl.INT8],
++    qr: pl.Tensor,
+     wq_b: pl.Tensor[[Q_LORA, IDX_N_HEADS * IDX_HEAD_DIM], pl.INT8],
+-    qr_acc_pad: pl.Tensor[[PROJ_ROWS_DYN, IDX_N_HEADS * IDX_HEAD_DIM], pl.INT32],
++    qr_acc_pad: pl.Tensor,
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+@@ -105,12 +105,12 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_query_dequant_rope_stage(
+-    qr_scale: pl.Tensor[[T_DYN, 1], pl.FP32],
++    qr_scale: pl.Tensor,
+     wq_b_scale: pl.Tensor[[IDX_N_HEADS * IDX_HEAD_DIM], pl.FP32],
+-    cos: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
+-    sin: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
+-    qr_acc_pad: pl.Tensor[[PROJ_ROWS_DYN, IDX_N_HEADS * IDX_HEAD_DIM], pl.INT32],
+-    qr_bf16_2d: pl.Tensor[[ROPE_ROWS_DYN, IDX_N_HEADS * IDX_HEAD_DIM], pl.BF16],
++    cos: pl.Tensor,
++    sin: pl.Tensor,
++    qr_acc_pad: pl.Tensor,
++    qr_bf16_2d: pl.Tensor,
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+@@ -199,9 +199,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_query_hadamard_stage(
+-    qr_bf16: pl.Tensor[[ROPE_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.BF16],
++    qr_bf16: pl.Tensor,
+     hadamard: pl.Tensor[[IDX_HEAD_DIM, IDX_HEAD_DIM], pl.BF16],
+-    qh_acc_gm: pl.Tensor[[HADAMARD_ROWS_DYN, IDX_HEAD_DIM], pl.FP32],
++    qh_acc_gm: pl.Tensor,
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+@@ -219,9 +219,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_query_quant_stage(
+-    qh_acc_gm: pl.Tensor[[HADAMARD_ROWS_DYN, IDX_HEAD_DIM], pl.FP32],
+-    qr_hadamard_i8: pl.Tensor[[QUANT_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+-    qr_hadamard_scale_dq: pl.Tensor[[SCALE_ROWS_DYN, 1], pl.FP32],
++    qh_acc_gm: pl.Tensor,
++    qr_hadamard_i8: pl.Tensor,
++    qr_hadamard_scale_dq: pl.Tensor,
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+@@ -257,9 +257,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_weights_project_stage(
+-    x: pl.Tensor[[T_DYN, D], pl.BF16],
++    x: pl.Tensor,
+     weights_proj: pl.Tensor[[D, IDX_N_HEADS], pl.BF16],
+-    weights_partial: pl.Tensor[[WEIGHTS_PARTIAL_ROWS_DYN, IDX_N_HEADS], pl.FP32],
++    weights_partial: pl.Tensor,
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+@@ -288,8 +288,8 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_weights_reduce_stage(
+-    weights_partial: pl.Tensor[[WEIGHTS_PARTIAL_ROWS_DYN, IDX_N_HEADS], pl.FP32],
+-    weights: pl.Tensor[[WEIGHTS_ROWS_DYN, IDX_N_HEADS], pl.FP32],
++    weights_partial: pl.Tensor,
++    weights: pl.Tensor,
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+--- a/indexer_scale_plan_stages.py
++++ b/indexer_scale_plan_stages.py
+@@ -52,13 +52,13 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_scale_page_plan_stage(
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    positions: pl.Tensor[[T_DYN], pl.INT64],
+-    compact_offsets: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    slots: pl.Tensor[[SLOT_ROWS_DYN, 2], pl.INT32],
+-    cache: pl.Tensor[[CACHE_PAGES_DYN, CACHE_BYTES_DYN], pl.INT8],
+-    workspace: pl.InOut[pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]],
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    positions: pl.Tensor,
++    compact_offsets: pl.Tensor,
++    slots: pl.Tensor,
++    cache: pl.Tensor,
++    workspace: pl.InOut[pl.Tensor],
+     scale_capacity: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+@@ -101,8 +101,8 @@
+ @pl.jit.inline(auto_scope=False)
+ def indexer_scale_page_commit_stage(
+     scale_values: pl.Tensor,
+-    workspace: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
+-    cache: pl.InOut[pl.Tensor[[CACHE_PAGES_DYN, CACHE_BYTES_DYN], pl.INT8]],
++    workspace: pl.Tensor,
++    cache: pl.InOut[pl.Tensor],
+     tokens: pl.Scalar[pl.INDEX],
+     requests: pl.Scalar[pl.INDEX],
+     worker: pl.Scalar[pl.INDEX],
+--- a/indexer_scale_layout_stages.py
++++ b/indexer_scale_layout_stages.py
+@@ -63,10 +63,10 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_scale_layout_plan_stage(
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    block_table: pl.Tensor[[REQUESTS_DYN, LAYOUT_TABLE_COLS], pl.INT32],
+-    workspace: pl.InOut[pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]],
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    block_table: pl.Tensor,
++    workspace: pl.InOut[pl.Tensor],
+     tokens: pl.Scalar[pl.INDEX],
+     physical_pages: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+--- a/cube_schedule.py
++++ b/cube_schedule.py
+@@ -124,60 +124,60 @@
+ def cube_schedule(
+     hc_fn: pl.Tensor[[24, 16384], pl.FP32],
+     wq_a: pl.Tensor[[1024, 4096], pl.BF16, BF16_WEIGHT_LAYOUT],
+-    x_fp32: pl.Tensor[[T, 16384], pl.FP32],
+-    partials: pl.InOut[pl.Tensor[[PARTIAL, 32], pl.FP32]],
+-    normed: pl.Tensor[[T, 4096], pl.BF16],
+-    qa: pl.InOut[pl.Tensor[[P16, 1024], pl.FP32]],
+-    qr: pl.Tensor[[T, 1024], pl.INT8],
+-    qr_matmul: pl.Tensor[[QR_ROWS, 1024], pl.INT8],
++    x_fp32: pl.Tensor,
++    partials: pl.InOut[pl.Tensor],
++    normed: pl.Tensor,
++    qa: pl.InOut[pl.Tensor],
++    qr: pl.Tensor,
++    qr_matmul: pl.Tensor,
+     wq_b: pl.Tensor[[1024, 32768], pl.INT8, QUANT_WEIGHT_LAYOUT],
+-    q_proj: pl.InOut[pl.Tensor[[QPROJ_ROWS, 32768], pl.INT32]],
++    q_proj: pl.InOut[pl.Tensor],
+     wkv: pl.Tensor[[4096, 512], pl.BF16],
+-    kv_fp32: pl.InOut[pl.Tensor[[KV_ROWS, 512], pl.FP32]],
++    kv_fp32: pl.InOut[pl.Tensor],
+     main_wkv: pl.Tensor[[1024, 4096], pl.BF16],
+     main_wgate: pl.Tensor[[1024, 4096], pl.BF16],
+-    main_value: pl.InOut[pl.Tensor[[MPROJ, 1024], pl.FP32]],
+-    main_score: pl.InOut[pl.Tensor[[MPROJ, 1024], pl.FP32]],
+-    positions: pl.Tensor[[T], pl.INT64],
++    main_value: pl.InOut[pl.Tensor],
++    main_score: pl.InOut[pl.Tensor],
++    positions: pl.Tensor,
+     idx_wkv: pl.Tensor[[256, 4096], pl.BF16],
+     idx_wgate: pl.Tensor[[256, 4096], pl.BF16],
+-    idx_value: pl.InOut[pl.Tensor[[IPROJ, 256], pl.FP32]],
+-    idx_score: pl.InOut[pl.Tensor[[IPROJ, 256], pl.FP32]],
+-    idx_bounds: pl.Tensor[[IQ], pl.INT32],
+-    idx_lengths: pl.Tensor[[B], pl.INT32],
++    idx_value: pl.InOut[pl.Tensor],
++    idx_score: pl.InOut[pl.Tensor],
++    idx_bounds: pl.Tensor,
++    idx_lengths: pl.Tensor,
+     idx_count: pl.Tensor[[1], pl.INT32],
+-    idx_normed: pl.Tensor[[ICPAD, 128], pl.BF16],
++    idx_normed: pl.Tensor,
+     hadamard: pl.Tensor[[128, 128], pl.BF16],
+-    idx_had: pl.InOut[pl.Tensor[[ICPAD, 128], pl.FP32]],
++    idx_had: pl.InOut[pl.Tensor],
+     idx_cache: pl.Tensor[[ICACHE_PAGES, ICACHE_BYTES], pl.INT8],
+-    q_heads: pl.Tensor[[QUERY_HEAD_ROWS, 512], pl.BF16],
+-    indexer_table: pl.Tensor[[B, INDEXER_COLS], pl.INT32],
++    q_heads: pl.Tensor,
++    indexer_table: pl.Tensor,
+     idx_wq_b: pl.Tensor[[1024, 8192], pl.INT8],
+-    idx_query_acc: pl.InOut[pl.Tensor[[IDX_PROJ_ROWS, 8192], pl.INT32]],
+-    idx_query_rope_heads: pl.Tensor[[IDX_ROPE_HEAD_ROWS, 128], pl.BF16],
+-    idx_query_had: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]],
+-    idx_query_i8: pl.Tensor[[IDX_HEAD_ROWS, 128], pl.INT8],
++    idx_query_acc: pl.InOut[pl.Tensor],
++    idx_query_rope_heads: pl.Tensor,
++    idx_query_had: pl.InOut[pl.Tensor],
++    idx_query_i8: pl.Tensor,
+     weights_proj: pl.Tensor[[4096, 64], pl.BF16],
+-    weights_partial: pl.InOut[pl.Tensor[[WEIGHTS_PARTIAL_ROWS, 64], pl.FP32]],
+-    group_offsets: pl.Tensor[[GROUP_OFFSET_ROWS], pl.INT32],
++    weights_partial: pl.InOut[pl.Tensor],
++    group_offsets: pl.Tensor,
+     group_plan: pl.Tensor[[8], pl.INT32],
+-    coefficients: pl.Tensor[[COEFF_ROWS, COEFF_COLS], pl.FP16],
+-    idx_key0: pl.Tensor[[KEY0_ROWS, 128], pl.INT8],
+-    idx_key64: pl.Tensor[[KEY64_ROWS, 128], pl.INT8],
+-    indexer_transfer: pl.InOut[pl.Tensor[[INDEX_TRANSFER_ROWS, INDEX_TRANSFER_COLS], pl.FP32]],
+-    attention_mask: pl.Tensor[[ATTN_PLAN_ROWS, 16], pl.INT32],
+-    kv_ring: pl.Tensor[[KV_RING_ROWS, 512], pl.BF16],
+-    score_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 128], pl.FP32]],
+-    probability_ring: pl.Tensor[[HEAD_RING_ROWS, 128], pl.BF16],
+-    pv_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 512], pl.FP32]],
+-    packed: pl.Tensor[[PACK_ROWS, 4096], pl.BF16],
++    coefficients: pl.Tensor,
++    idx_key0: pl.Tensor,
++    idx_key64: pl.Tensor,
++    indexer_transfer: pl.InOut[pl.Tensor],
++    attention_mask: pl.Tensor,
++    kv_ring: pl.Tensor,
++    score_ring: pl.InOut[pl.Tensor],
++    probability_ring: pl.Tensor,
++    pv_ring: pl.InOut[pl.Tensor],
++    packed: pl.Tensor,
+     ffts: pl.Tensor[[256], pl.INT64],
+     wo_a: pl.Tensor[[8, 4096, 1024], pl.BF16, BF16_WEIGHT_LAYOUT],
+-    o_r: pl.InOut[pl.Tensor[[O_MM_ROWS, 8192], pl.FP32]],
+-    o_quant: pl.Tensor[[O_MM_ROWS, 8192], pl.INT8],
++    o_r: pl.InOut[pl.Tensor],
++    o_quant: pl.Tensor,
+     wo_b: pl.Tensor[[8192, 4096], pl.INT8, QUANT_WEIGHT_LAYOUT],
+-    o_partials: pl.InOut[pl.Tensor[[O_MM_ROWS, 32768], pl.INT32]],
+-    signal: pl.InOut[pl.Tensor[[WORDS], pl.INT32]],
++    o_partials: pl.InOut[pl.Tensor],
++    signal: pl.InOut[pl.Tensor],
+     QUERY_GROUP: pl.constexpr,
+     QK_PANEL: pl.constexpr,
+     SCORE_TILE: pl.constexpr,
+--- a/attention_dependencies.py
++++ b/attention_dependencies.py
+@@ -45,7 +45,7 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def wait_indexer_query_roots(
+-    signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
++    signals: pl.InOut[pl.Tensor],
+     plan: pl.Tensor[[PLAN_WORDS], pl.INT32],
+     group: pl.Scalar[pl.INDEX],
+     local_query: pl.Scalar[pl.INDEX],
+@@ -80,7 +80,7 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def wait_attention_plan_rows(
+-    signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
++    signals: pl.InOut[pl.Tensor],
+     tokens: pl.Scalar[pl.INDEX],
+     core_group: pl.Scalar[pl.INDEX],
+     generation: pl.Scalar[pl.INT32],
+--- a/hc_stages.py
++++ b/hc_stages.py
+@@ -111,9 +111,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def hc_widen_rms_range(
+-    x: pl.Tensor[[T_DYN, HC_DIM], pl.BF16],
+-    x_fp32: pl.Out[pl.Tensor[[T_DYN, HC_DIM], pl.FP32]],
+-    inv_rms: pl.Out[pl.Tensor[[PAD_ROWS_DYN, 1], pl.FP32]],
++    x: pl.Tensor,
++    x_fp32: pl.Out[pl.Tensor],
++    inv_rms: pl.Out[pl.Tensor],
+     widen_tail: pl.InOut[pl.Tensor[[T_TILE, HC_DIM], pl.FP32]],
+     vector_worker: pl.Scalar[pl.INDEX],
+     vector_workers: pl.Scalar[pl.INDEX],
+@@ -169,9 +169,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def hc_project_range(
+-    x: pl.Tensor[[T_DYN, HC_DIM], pl.FP32],
++    x: pl.Tensor,
+     hc_fn: pl.Tensor[[MIX_HC, HC_DIM], pl.FP32],
+-    mixes_partials: pl.Out[pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32]],
++    mixes_partials: pl.Out[pl.Tensor],
+     group_worker: pl.Scalar[pl.INDEX],
+     group_workers: pl.Scalar[pl.INDEX],
+ ):
+@@ -208,8 +208,8 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def hc_reduce_range(
+-    mixes_partials: pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32],
+-    mixes_raw: pl.Out[pl.Tensor[[PAD_ROWS_DYN, MIX_PAD], pl.FP32]],
++    mixes_partials: pl.Tensor,
++    mixes_raw: pl.Out[pl.Tensor],
+     vector_worker: pl.Scalar[pl.INDEX],
+     vector_workers: pl.Scalar[pl.INDEX],
+ ):
+@@ -235,8 +235,8 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def hc_projection_piece(
+-    partials: pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32],
+-    raw: pl.Tensor[[PAD_ROWS_DYN, MIX_PAD], pl.FP32],
++    partials: pl.Tensor,
++    raw: pl.Tensor,
+     row: pl.Scalar[pl.INDEX],
+     valid_rows: pl.Scalar[pl.INDEX],
+     COLUMN: pl.constexpr,
+@@ -265,16 +265,16 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def hc_gates_range(
+-    inv_rms: pl.Tensor[[PAD_ROWS_DYN, 1], pl.FP32],
+-    mixes_raw: pl.Tensor[[PAD_ROWS_DYN, MIX_PAD], pl.FP32],
++    inv_rms: pl.Tensor,
++    mixes_raw: pl.Tensor,
+     hc_scale: pl.Tensor[[3], pl.FP32],
+     hc_base: pl.Tensor[[MIX_HC], pl.FP32],
+-    pre_val_store: pl.Out[pl.Tensor[[PAD_ROWS_DYN, HC_PAD], pl.FP32]],
+-    post: pl.Out[pl.Tensor[[T_DYN, HC_MULT], pl.FP32]],
++    pre_val_store: pl.Out[pl.Tensor],
++    post: pl.Out[pl.Tensor],
+     post_tail_store: pl.InOut[pl.Tensor[[T_TILE, HC_PAD], pl.FP32]],
+     vector_worker: pl.Scalar[pl.INDEX],
+     vector_workers: pl.Scalar[pl.INDEX],
+-    partials: pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32],
++    partials: pl.Tensor,
+     CONSUMER_REDUCE: pl.constexpr,
+ ):
+     """AIV：保留原 pre/post sigmoid、scale 乘法和 eps 顺序。
+@@ -325,15 +325,15 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def hc_comb_range(
+-    inv_rms: pl.Tensor[[PAD_ROWS_DYN, 1], pl.FP32],
+-    mixes_raw: pl.Tensor[[PAD_ROWS_DYN, MIX_PAD], pl.FP32],
++    inv_rms: pl.Tensor,
++    mixes_raw: pl.Tensor,
+     hc_scale: pl.Tensor[[3], pl.FP32],
+     hc_base_2d: pl.Tensor[[1, MIX_HC], pl.FP32],
+-    comb: pl.Out[pl.Tensor[[T_DYN, HC_MULT * HC_MULT], pl.FP32]],
++    comb: pl.Out[pl.Tensor],
+     comb_tail_store: pl.InOut[pl.Tensor[[COMB_T_TILE, HC_PAD * HC_MULT], pl.FP32]],
+     vector_worker: pl.Scalar[pl.INDEX],
+     vector_workers: pl.Scalar[pl.INDEX],
+-    partials: pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32],
++    partials: pl.Tensor,
+     CONSUMER_REDUCE: pl.constexpr,
+ ):
+     """AIV：CSA 原除法路径的二十轮 Sinkhorn，保持行列归约树。
+@@ -508,11 +508,11 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def hc_mix_norm_range(
+-    x: pl.Tensor[[T_DYN, HC_DIM], pl.FP32],
+-    pre_val_store: pl.Tensor[[PAD_ROWS_DYN, HC_PAD], pl.FP32],
++    x: pl.Tensor,
++    pre_val_store: pl.Tensor,
+     norm_w: pl.Tensor[[D], pl.BF16],
+-    x_mixed: pl.InOut[pl.Tensor[[MIX_ROWS_DYN, D], pl.BF16]],
+-    x_normed: pl.Out[pl.Tensor[[T_DYN, D], pl.BF16]],
++    x_mixed: pl.InOut[pl.Tensor],
++    x_normed: pl.Out[pl.Tensor],
+     x_normed_tail_store: pl.InOut[pl.Tensor[[T_TILE, D], pl.BF16]],
+     vector_worker: pl.Scalar[pl.INDEX],
+     vector_workers: pl.Scalar[pl.INDEX],
+--- a/vector_prefix_stages.py
++++ b/vector_prefix_stages.py
+@@ -82,22 +82,22 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_compressor_vector_stage(
+-    positions: pl.Tensor[[T], pl.INT64],
+-    idx_value: pl.Tensor[[IPROJ, 256], pl.FP32],
+-    idx_score: pl.Tensor[[IPROJ, 256], pl.FP32],
+-    idx_state: pl.InOut[pl.Tensor[[ISTATE_PAGES, ISTATE_ELEMS], pl.FP32]],
+-    idx_state_table: pl.Tensor[[B, ITABLE_COLS], pl.INT32],
++    positions: pl.Tensor,
++    idx_value: pl.Tensor,
++    idx_score: pl.Tensor,
++    idx_state: pl.InOut[pl.Tensor],
++    idx_state_table: pl.Tensor,
+     idx_ape: pl.Tensor[[4, 256], pl.FP32],
+-    idx_bounds: pl.Tensor[[IQ], pl.INT32],
+-    idx_lengths: pl.Tensor[[B], pl.INT32],
+-    idx_state_slots: pl.Tensor[[T, 2], pl.INT32],
+-    idx_pooled: pl.InOut[pl.Tensor[[IPOOL, 128], pl.FP32]],
++    idx_bounds: pl.Tensor,
++    idx_lengths: pl.Tensor,
++    idx_state_slots: pl.Tensor,
++    idx_pooled: pl.InOut[pl.Tensor],
+     idx_gamma: pl.Tensor[[128], pl.BF16],
+-    idx_cos: pl.Tensor[[IC, 64], pl.FP32],
+-    idx_sin: pl.Tensor[[IC, 64], pl.FP32],
+-    idx_offsets: pl.InOut[pl.Tensor[[B], pl.INT32]],
+-    idx_normed: pl.InOut[pl.Tensor[[ICPAD, 128], pl.BF16]],
+-    signal: pl.InOut[pl.Tensor[[WORDS], pl.INT32]],
++    idx_cos: pl.Tensor,
++    idx_sin: pl.Tensor,
++    idx_offsets: pl.InOut[pl.Tensor],
++    idx_normed: pl.InOut[pl.Tensor],
++    signal: pl.InOut[pl.Tensor],
+     tokens: pl.Scalar[pl.INDEX],
+     worker: pl.Scalar[pl.INDEX],
+     core: pl.Scalar[pl.INDEX],
+@@ -161,25 +161,25 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def main_compressor_vector_stage(
+-    main_value: pl.Tensor[[MPROJ, 1024], pl.FP32],
+-    main_score: pl.Tensor[[MPROJ, 1024], pl.FP32],
+-    main_state: pl.InOut[pl.Tensor[[MSTATE_PAGES, MSTATE_ELEMS], pl.FP32]],
+-    main_state_table: pl.Tensor[[B, MTABLE_COLS], pl.INT32],
++    main_value: pl.Tensor,
++    main_score: pl.Tensor,
++    main_state: pl.InOut[pl.Tensor],
++    main_state_table: pl.Tensor,
+     main_ape: pl.Tensor[[4, 1024], pl.FP32],
+-    positions: pl.Tensor[[T], pl.INT64],
+-    main_bounds: pl.Tensor[[MQ], pl.INT32],
+-    main_lengths: pl.Tensor[[B], pl.INT32],
+-    main_state_slots: pl.Tensor[[T, 2], pl.INT32],
+-    main_pooled: pl.InOut[pl.Tensor[[MPOOL, 512], pl.FP32]],
++    positions: pl.Tensor,
++    main_bounds: pl.Tensor,
++    main_lengths: pl.Tensor,
++    main_state_slots: pl.Tensor,
++    main_pooled: pl.InOut[pl.Tensor],
+     main_gamma: pl.Tensor[[512], pl.BF16],
+-    main_cos: pl.Tensor[[MC, 64], pl.FP32],
+-    main_sin: pl.Tensor[[MC, 64], pl.FP32],
+-    main_offsets: pl.InOut[pl.Tensor[[B], pl.INT32]],
+-    main_slots: pl.Tensor[[MSLOTS, 2], pl.INT32],
+-    main_normed: pl.InOut[pl.Tensor[[MNORM, 512], pl.FP32]],
+-    main_debug: pl.InOut[pl.Tensor[[T, 512], pl.FP32]],
+-    main_cache: pl.InOut[pl.Tensor[[MCACHE_ROWS, 512], pl.BF16]],
+-    signal: pl.InOut[pl.Tensor[[WORDS], pl.INT32]],
++    main_cos: pl.Tensor,
++    main_sin: pl.Tensor,
++    main_offsets: pl.InOut[pl.Tensor],
++    main_slots: pl.Tensor,
++    main_normed: pl.InOut[pl.Tensor],
++    main_debug: pl.InOut[pl.Tensor],
++    main_cache: pl.InOut[pl.Tensor],
++    signal: pl.InOut[pl.Tensor],
+     tokens: pl.Scalar[pl.INDEX],
+     worker: pl.Scalar[pl.INDEX],
+     core: pl.Scalar[pl.INDEX],
+@@ -243,15 +243,15 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def original_kv_vector_stage(
+-    rope_cos: pl.Tensor[[T, 64], pl.FP32],
+-    rope_signed: pl.InOut[pl.Tensor[[T, 64], pl.FP32]],
+-    rope_swap: pl.InOut[pl.Tensor[[T, 64], pl.INT32]],
++    rope_cos: pl.Tensor,
++    rope_signed: pl.InOut[pl.Tensor],
++    rope_swap: pl.InOut[pl.Tensor],
+     gamma_ckv: pl.Tensor[[512], pl.BF16],
+-    kv_fp32: pl.Tensor[[KV_ROWS, 512], pl.FP32],
+-    kv: pl.InOut[pl.Tensor[[T, 512], pl.BF16]],
+-    native_slots: pl.Tensor[[T, 2], pl.INT32],
+-    cache_rows: pl.InOut[pl.Tensor[[CACHE_ROWS, 512], pl.BF16]],
+-    signal: pl.InOut[pl.Tensor[[WORDS], pl.INT32]],
++    kv_fp32: pl.Tensor,
++    kv: pl.InOut[pl.Tensor],
++    native_slots: pl.Tensor,
++    cache_rows: pl.InOut[pl.Tensor],
++    signal: pl.InOut[pl.Tensor],
+     tokens: pl.Scalar[pl.INDEX],
+     worker: pl.Scalar[pl.INDEX],
+     core: pl.Scalar[pl.INDEX],
+--- a/kv_stages.py
++++ b/kv_stages.py
+@@ -84,9 +84,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def _kv_project_worker(
+-    x: pl.Tensor[[T_DYN, D], pl.BF16],
++    x: pl.Tensor,
+     wkv: pl.Tensor[[D, HEAD_DIM], pl.BF16],
+-    kv_fp32: pl.Tensor[[PAD_ROWS_DYN, HEAD_DIM], pl.FP32],
++    kv_fp32: pl.Tensor,
+     tile_base: pl.Scalar[pl.INDEX],
+     tile_rows: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+@@ -141,9 +141,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def kv_project_stage(
+-    x: pl.Tensor[[T_DYN, D], pl.BF16],
++    x: pl.Tensor,
+     wkv: pl.Tensor[[D, HEAD_DIM], pl.BF16],
+-    kv_fp32: pl.Tensor[[PAD_ROWS_DYN, HEAD_DIM], pl.FP32],
++    kv_fp32: pl.Tensor,
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+@@ -162,12 +162,12 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def kv_norm_rope_stage(
+-    kv_fp32: pl.Tensor[[PAD_ROWS_DYN, HEAD_DIM], pl.FP32],
++    kv_fp32: pl.Tensor,
+     gamma_ckv: pl.Tensor[[HEAD_DIM], pl.BF16],
+-    rope_cos_il: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
+-    rope_sin_signed: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
+-    rope_swap_idx: pl.Tensor[[T_DYN, ROPE_DIM], pl.INT32],
+-    kv: pl.Tensor[[T_DYN, HEAD_DIM], pl.BF16],
++    rope_cos_il: pl.Tensor,
++    rope_sin_signed: pl.Tensor,
++    rope_swap_idx: pl.Tensor,
++    kv: pl.Tensor,
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+--- a/cache_stages.py
++++ b/cache_stages.py
+@@ -52,9 +52,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def original_kv_writeback_stage(
+-    kv: pl.Tensor[[T_DYN, HEAD_DIM], pl.BF16],
+-    slots: pl.Tensor[[T_DYN, 2], pl.INT32],
+-    cache_rows: pl.InOut[pl.Tensor[[CACHE_ROWS_DYN, HEAD_DIM], pl.BF16]],
++    kv: pl.Tensor,
++    slots: pl.Tensor,
++    cache_rows: pl.InOut[pl.Tensor],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+--- a/query_projection_stages.py
++++ b/query_projection_stages.py
+@@ -91,8 +91,8 @@
+ @pl.jit.inline(auto_scope=False)
+ def _q_b_nd_stage(
+     wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
+-    qr_i8_matmul: pl.Tensor[[PAD_ROWS_DYN, Q_LORA], pl.INT8],
+-    q_proj_i32: pl.Tensor[[QPROJ_ROWS_DYN, H * HEAD_DIM], pl.INT32],
++    qr_i8_matmul: pl.Tensor,
++    q_proj_i32: pl.Tensor,
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+@@ -119,8 +119,8 @@
+ @pl.jit.inline(auto_scope=False)
+ def _q_b_nz_stage(
+     wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
+-    qr_i8_matmul: pl.Tensor[[PAD_ROWS_DYN, Q_LORA], pl.INT8],
+-    q_proj_i32: pl.Tensor[[QPROJ_ROWS_DYN, H * HEAD_DIM], pl.INT32],
++    qr_i8_matmul: pl.Tensor,
++    q_proj_i32: pl.Tensor,
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+@@ -158,12 +158,12 @@
+ @pl.jit.inline(auto_scope=False)
+ def q_dequant_rope_stage(
+     wq_b_scale: pl.Tensor[[H * HEAD_DIM], pl.FP32],
+-    rope_cos_il: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
+-    rope_sin_signed: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
+-    rope_swap_idx: pl.Tensor[[T_DYN, ROPE_DIM], pl.INT32],
+-    q_flat: pl.Tensor[[T_DYN, H * HEAD_DIM], pl.BF16],
+-    qr_scale_pad_store: pl.Tensor[[PAD_ROWS_DYN, 1], pl.FP32],
+-    q_proj_i32: pl.Tensor[[QPROJ_ROWS_DYN, H * HEAD_DIM], pl.INT32],
++    rope_cos_il: pl.Tensor,
++    rope_sin_signed: pl.Tensor,
++    rope_swap_idx: pl.Tensor,
++    q_flat: pl.Tensor,
++    qr_scale_pad_store: pl.Tensor,
++    q_proj_i32: pl.Tensor,
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+@@ -323,9 +323,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def q_rope_prepare_stage(
+-    rope_sin: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
+-    rope_sin_signed: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
+-    rope_swap_idx: pl.Tensor[[T_DYN, ROPE_DIM], pl.INT32],
++    rope_sin: pl.Tensor,
++    rope_sin_signed: pl.Tensor,
++    rope_swap_idx: pl.Tensor,
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+--- a/qkv_stages.py
++++ b/qkv_stages.py
+@@ -100,9 +100,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def _q_a_worker(
+-    x: pl.Tensor[[T_DYN, D], pl.BF16],
++    x: pl.Tensor,
+     wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
+-    qa_fp32: pl.Tensor[[QA_ROWS_DYN, Q_LORA], pl.FP32],
++    qa_fp32: pl.Tensor,
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+     DENSE_M: pl.constexpr,
+@@ -146,9 +146,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def _q_a_m16_parallel_worker(
+-    x: pl.Tensor[[T_DYN, D], pl.BF16],
++    x: pl.Tensor,
+     wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
+-    qa_fp32: pl.Tensor[[QA_ROWS_DYN, Q_LORA], pl.FP32],
++    qa_fp32: pl.Tensor,
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+@@ -178,9 +178,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def q_a_stage(
+-    x: pl.Tensor[[T_DYN, D], pl.BF16],
++    x: pl.Tensor,
+     wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
+-    qa_fp32: pl.Tensor[[QA_ROWS_DYN, Q_LORA], pl.FP32],
++    qa_fp32: pl.Tensor,
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+     QA_M16_PARALLEL: pl.constexpr = False,
+@@ -198,12 +198,12 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def q_r_stage(
+-    qa_fp32: pl.Tensor[[QA_ROWS_DYN, Q_LORA], pl.FP32],
++    qa_fp32: pl.Tensor,
+     gamma_cq: pl.Tensor[[Q_LORA], pl.BF16],
+-    qr: pl.Tensor[[T_DYN, Q_LORA], pl.INT8],
+-    qr_scale: pl.Tensor[[T_DYN, 1], pl.FP32],
+-    qr_i8_matmul: pl.Tensor[[MATMUL_ROWS_DYN, Q_LORA], pl.INT8],
+-    qr_scale_pad: pl.Tensor[[SCALE_ROWS_DYN, 1], pl.FP32],
++    qr: pl.Tensor,
++    qr_scale: pl.Tensor,
++    qr_i8_matmul: pl.Tensor,
++    qr_scale_pad: pl.Tensor,
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+--- a/metadata_stages.py
++++ b/metadata_stages.py
+@@ -63,9 +63,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def _scan_compact_offsets(
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    offsets: pl.Out[pl.Tensor[[REQUESTS_DYN], pl.INT32]],
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    offsets: pl.Out[pl.Tensor],
+     token_capacity: pl.Scalar[pl.INDEX],
+ ):
+     """只供指定的单写者内联，返回 offsets 别名和核内最终前缀 Scalar。"""
+@@ -86,9 +86,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def compact_offsets_stage(
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    offsets: pl.Out[pl.Tensor[[REQUESTS_DYN], pl.INT32]],
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    offsets: pl.Out[pl.Tensor],
+     token_capacity: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+ ):
+@@ -104,9 +104,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def compact_offsets_and_count_stage(
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    offsets: pl.Out[pl.Tensor[[REQUESTS_DYN], pl.INT32]],
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    offsets: pl.Out[pl.Tensor],
+     valid_count: pl.Out[pl.Tensor[[1], pl.INT32]],
+     token_capacity: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+@@ -127,12 +127,12 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def load_request_compact_rope_rows(
+-    cos: pl.Tensor[[COMPACT_ROWS_DYN, ROPE_DIM], pl.FP32],
+-    sin: pl.Tensor[[COMPACT_ROWS_DYN, ROPE_DIM], pl.FP32],
+-    positions: pl.Tensor[[T_DYN], pl.INT64],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    offsets: pl.Tensor[[REQUESTS_DYN], pl.INT32],
++    cos: pl.Tensor,
++    sin: pl.Tensor,
++    positions: pl.Tensor,
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    offsets: pl.Tensor,
+     request: pl.Scalar[pl.INDEX],
+     first: pl.Scalar[pl.INDEX],
+     rows: pl.Scalar[pl.INDEX],
+--- a/entry.py
++++ b/entry.py
+@@ -137,7 +137,7 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def _csa_core_group(
+-    x: pl.Tensor[[T, 16384], pl.BF16],
++    x: pl.Tensor,
+     hc_fn: pl.Tensor[[24, 16384], pl.FP32],
+     hc_scale: pl.Tensor[[3], pl.FP32],
+     hc_base: pl.Tensor[[24], pl.FP32],
+@@ -145,130 +145,130 @@
+     norm_w: pl.Tensor[[4096], pl.BF16],
+     wq_a: pl.Tensor[[1024, 4096], pl.BF16, BF16_WEIGHT_LAYOUT],
+     gamma_cq: pl.Tensor[[1024], pl.BF16],
+-    x_fp32: pl.InOut[pl.Tensor[[T, 16384], pl.FP32]],
+-    inv: pl.InOut[pl.Tensor[[P16, 1], pl.FP32]],
++    x_fp32: pl.InOut[pl.Tensor],
++    inv: pl.InOut[pl.Tensor],
+     widen_tail: pl.InOut[pl.Tensor[[8, 16384], pl.FP32]],
+-    partials: pl.InOut[pl.Tensor[[PARTIAL, 32], pl.FP32]],
+-    raw: pl.InOut[pl.Tensor[[P16, 32], pl.FP32]],
+-    pre: pl.InOut[pl.Tensor[[P16, 8], pl.FP32]],
+-    post: pl.InOut[pl.Tensor[[T, 4], pl.FP32]],
++    partials: pl.InOut[pl.Tensor],
++    raw: pl.InOut[pl.Tensor],
++    pre: pl.InOut[pl.Tensor],
++    post: pl.InOut[pl.Tensor],
+     post_tail: pl.InOut[pl.Tensor[[8, 8], pl.FP32]],
+-    comb: pl.InOut[pl.Tensor[[T, 16], pl.FP32]],
++    comb: pl.InOut[pl.Tensor],
+     comb_tail: pl.InOut[pl.Tensor[[8, 32], pl.FP32]],
+-    mixed: pl.InOut[pl.Tensor[[P8, 4096], pl.BF16]],
+-    normed: pl.InOut[pl.Tensor[[T, 4096], pl.BF16]],
++    mixed: pl.InOut[pl.Tensor],
++    normed: pl.InOut[pl.Tensor],
+     norm_tail: pl.InOut[pl.Tensor[[8, 4096], pl.BF16]],
+-    qa: pl.InOut[pl.Tensor[[P16, 1024], pl.FP32]],
+-    qr: pl.InOut[pl.Tensor[[T, 1024], pl.INT8]],
+-    qr_scale: pl.InOut[pl.Tensor[[T, 1], pl.FP32]],
+-    qr_matmul: pl.InOut[pl.Tensor[[QR_ROWS, 1024], pl.INT8]],
+-    qr_scale_pad: pl.InOut[pl.Tensor[[P8, 1], pl.FP32]],
++    qa: pl.InOut[pl.Tensor],
++    qr: pl.InOut[pl.Tensor],
++    qr_scale: pl.InOut[pl.Tensor],
++    qr_matmul: pl.InOut[pl.Tensor],
++    qr_scale_pad: pl.InOut[pl.Tensor],
+     wq_b: pl.Tensor[[1024, 32768], pl.INT8, QUANT_WEIGHT_LAYOUT],
+     wq_b_scale: pl.Tensor[[32768], pl.FP32],
+-    rope_cos: pl.Tensor[[T, 64], pl.FP32],
+-    rope_sin: pl.Tensor[[T, 64], pl.FP32],
+-    rope_signed: pl.InOut[pl.Tensor[[T, 64], pl.FP32]],
+-    rope_swap: pl.InOut[pl.Tensor[[T, 64], pl.INT32]],
+-    q_proj: pl.InOut[pl.Tensor[[QPROJ_ROWS, 32768], pl.INT32]],
+-    q_flat: pl.InOut[pl.Tensor[[T, 32768], pl.BF16]],
++    rope_cos: pl.Tensor,
++    rope_sin: pl.Tensor,
++    rope_signed: pl.InOut[pl.Tensor],
++    rope_swap: pl.InOut[pl.Tensor],
++    q_proj: pl.InOut[pl.Tensor],
++    q_flat: pl.InOut[pl.Tensor],
+     wkv: pl.Tensor[[4096, 512], pl.BF16],
+     gamma_ckv: pl.Tensor[[512], pl.BF16],
+-    kv_fp32: pl.InOut[pl.Tensor[[KV_ROWS, 512], pl.FP32]],
+-    kv: pl.InOut[pl.Tensor[[T, 512], pl.BF16]],
+-    native_slots: pl.Tensor[[T, 2], pl.INT32],
+-    cache_rows: pl.InOut[pl.Tensor[[CACHE_ROWS, 512], pl.BF16]],
++    kv_fp32: pl.InOut[pl.Tensor],
++    kv: pl.InOut[pl.Tensor],
++    native_slots: pl.Tensor,
++    cache_rows: pl.InOut[pl.Tensor],
+     main_wkv: pl.Tensor[[1024, 4096], pl.BF16],
+     main_wgate: pl.Tensor[[1024, 4096], pl.BF16],
+-    main_value: pl.InOut[pl.Tensor[[MPROJ, 1024], pl.FP32]],
+-    main_score: pl.InOut[pl.Tensor[[MPROJ, 1024], pl.FP32]],
+-    main_state: pl.InOut[pl.Tensor[[MSTATE_PAGES, MSTATE_ELEMS], pl.FP32]],
+-    main_state_table: pl.Tensor[[B, MTABLE_COLS], pl.INT32],
++    main_value: pl.InOut[pl.Tensor],
++    main_score: pl.InOut[pl.Tensor],
++    main_state: pl.InOut[pl.Tensor],
++    main_state_table: pl.Tensor,
+     main_ape: pl.Tensor[[4, 1024], pl.FP32],
+-    positions: pl.Tensor[[T], pl.INT64],
+-    main_bounds: pl.Tensor[[MQ], pl.INT32],
+-    main_lengths: pl.Tensor[[B], pl.INT32],
+-    main_state_slots: pl.Tensor[[T, 2], pl.INT32],
+-    main_pooled: pl.InOut[pl.Tensor[[MPOOL, 512], pl.FP32]],
++    positions: pl.Tensor,
++    main_bounds: pl.Tensor,
++    main_lengths: pl.Tensor,
++    main_state_slots: pl.Tensor,
++    main_pooled: pl.InOut[pl.Tensor],
+     main_gamma: pl.Tensor[[512], pl.BF16],
+-    main_cos: pl.Tensor[[MC, 64], pl.FP32],
+-    main_sin: pl.Tensor[[MC, 64], pl.FP32],
+-    main_offsets: pl.InOut[pl.Tensor[[B], pl.INT32]],
++    main_cos: pl.Tensor,
++    main_sin: pl.Tensor,
++    main_offsets: pl.InOut[pl.Tensor],
+     main_count: pl.InOut[pl.Tensor[[1], pl.INT32]],
+-    main_slots: pl.Tensor[[MSLOTS, 2], pl.INT32],
+-    main_normed: pl.InOut[pl.Tensor[[MNORM, 512], pl.FP32]],
+-    main_debug: pl.InOut[pl.Tensor[[T, 512], pl.FP32]],
+-    main_cache: pl.InOut[pl.Tensor[[MCACHE_ROWS, 512], pl.BF16]],
++    main_slots: pl.Tensor,
++    main_normed: pl.InOut[pl.Tensor],
++    main_debug: pl.InOut[pl.Tensor],
++    main_cache: pl.InOut[pl.Tensor],
+     idx_wkv: pl.Tensor[[256, 4096], pl.BF16],
+     idx_wgate: pl.Tensor[[256, 4096], pl.BF16],
+-    idx_value: pl.InOut[pl.Tensor[[IPROJ, 256], pl.FP32]],
+-    idx_score: pl.InOut[pl.Tensor[[IPROJ, 256], pl.FP32]],
+-    idx_state: pl.InOut[pl.Tensor[[ISTATE_PAGES, ISTATE_ELEMS], pl.FP32]],
+-    idx_state_table: pl.Tensor[[B, ITABLE_COLS], pl.INT32],
++    idx_value: pl.InOut[pl.Tensor],
++    idx_score: pl.InOut[pl.Tensor],
++    idx_state: pl.InOut[pl.Tensor],
++    idx_state_table: pl.Tensor,
+     idx_ape: pl.Tensor[[4, 256], pl.FP32],
+-    idx_bounds: pl.Tensor[[IQ], pl.INT32],
+-    idx_lengths: pl.Tensor[[B], pl.INT32],
+-    idx_state_slots: pl.Tensor[[T, 2], pl.INT32],
+-    idx_pooled: pl.InOut[pl.Tensor[[IPOOL, 128], pl.FP32]],
++    idx_bounds: pl.Tensor,
++    idx_lengths: pl.Tensor,
++    idx_state_slots: pl.Tensor,
++    idx_pooled: pl.InOut[pl.Tensor],
+     idx_gamma: pl.Tensor[[128], pl.BF16],
+-    idx_cos: pl.Tensor[[IC, 64], pl.FP32],
+-    idx_sin: pl.Tensor[[IC, 64], pl.FP32],
+-    idx_offsets: pl.InOut[pl.Tensor[[B], pl.INT32]],
++    idx_cos: pl.Tensor,
++    idx_sin: pl.Tensor,
++    idx_offsets: pl.InOut[pl.Tensor],
+     idx_count: pl.InOut[pl.Tensor[[1], pl.INT32]],
+-    idx_slots: pl.Tensor[[ISLOTS, 2], pl.INT32],
+-    idx_normed: pl.InOut[pl.Tensor[[ICPAD, 128], pl.BF16]],
++    idx_slots: pl.Tensor,
++    idx_normed: pl.InOut[pl.Tensor],
+     hadamard: pl.Tensor[[128, 128], pl.BF16],
+-    idx_had: pl.InOut[pl.Tensor[[ICPAD, 128], pl.FP32]],
+-    idx_scales: pl.InOut[pl.Tensor[[ISCALES, 1], pl.FP32]],
+-    idx_debug: pl.InOut[pl.Tensor[[T, 128], pl.FP32]],
++    idx_had: pl.InOut[pl.Tensor],
++    idx_scales: pl.InOut[pl.Tensor],
++    idx_debug: pl.InOut[pl.Tensor],
+     idx_cache: pl.InOut[pl.Tensor[[ICACHE_PAGES, ICACHE_BYTES], pl.INT8]],
+-    q_heads: pl.Tensor[[QUERY_HEAD_ROWS, 512], pl.BF16],
+-    original_table: pl.Tensor[[B, ORIGINAL_COLS], pl.INT32],
+-    compressed_table: pl.Tensor[[B, COMPRESSED_COLS], pl.INT32],
+-    indexer_table: pl.Tensor[[B, INDEXER_COLS], pl.INT32],
++    q_heads: pl.Tensor,
++    original_table: pl.Tensor,
++    compressed_table: pl.Tensor,
++    indexer_table: pl.Tensor,
+     idx_wq_b: pl.Tensor[[1024, 8192], pl.INT8],
+     idx_wq_b_scale: pl.Tensor[[8192], pl.FP32],
+-    idx_query_acc: pl.InOut[pl.Tensor[[IDX_PROJ_ROWS, 8192], pl.INT32]],
+-    idx_query_rope: pl.InOut[pl.Tensor[[IDX_ROPE_ROWS, 8192], pl.BF16]],
+-    idx_query_rope_heads: pl.Tensor[[IDX_ROPE_HEAD_ROWS, 128], pl.BF16],
+-    idx_query_had: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]],
+-    idx_query_i8: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.INT8]],
+-    idx_query_scale: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 1], pl.FP32]],
+-    idx_query_scale_heads: pl.Tensor[[IDX_SCALE_T_ROWS, 64], pl.FP32],
++    idx_query_acc: pl.InOut[pl.Tensor],
++    idx_query_rope: pl.InOut[pl.Tensor],
++    idx_query_rope_heads: pl.Tensor,
++    idx_query_had: pl.InOut[pl.Tensor],
++    idx_query_i8: pl.InOut[pl.Tensor],
++    idx_query_scale: pl.InOut[pl.Tensor],
++    idx_query_scale_heads: pl.Tensor,
+     weights_proj: pl.Tensor[[4096, 64], pl.BF16],
+-    weights_partial: pl.InOut[pl.Tensor[[WEIGHTS_PARTIAL_ROWS, 64], pl.FP32]],
+-    head_weights: pl.InOut[pl.Tensor[[WEIGHTS_ROWS, 64], pl.FP32]],
+-    group_offsets: pl.InOut[pl.Tensor[[GROUP_OFFSET_ROWS], pl.INT32]],
++    weights_partial: pl.InOut[pl.Tensor],
++    head_weights: pl.InOut[pl.Tensor],
++    group_offsets: pl.InOut[pl.Tensor],
+     group_plan: pl.InOut[pl.Tensor[[8], pl.INT32]],
+-    coefficients: pl.InOut[pl.Tensor[[COEFF_ROWS, COEFF_COLS], pl.FP16]],
+-    idx_key0: pl.Tensor[[KEY0_ROWS, 128], pl.INT8],
+-    idx_key64: pl.Tensor[[KEY64_ROWS, 128], pl.INT8],
+-    indexer_transfer: pl.InOut[pl.Tensor[[INDEX_TRANSFER_ROWS, INDEX_TRANSFER_COLS], pl.FP32]],
+-    score_arena: pl.InOut[pl.Tensor[[SCORE_ROWS, 8192], pl.FP32]],
+-    pair_arena: pl.InOut[pl.Tensor[[PAIR_ROWS, 1024], pl.FP32]],
+-    topk_scores: pl.InOut[pl.Tensor[[T, 512], pl.FP32]],
+-    topk_indices: pl.InOut[pl.Tensor[[T, 512], pl.INT32]],
+-    attention_indices: pl.InOut[pl.Tensor[[ATTN_PLAN_ROWS, 512], pl.INT32]],
+-    attention_bias: pl.InOut[pl.Tensor[[ATTN_PLAN_ROWS, 640], pl.FP32]],
+-    attention_mask: pl.InOut[pl.Tensor[[ATTN_PLAN_ROWS, 16], pl.INT32]],
+-    inverse_sin: pl.InOut[pl.Tensor[[T, 64], pl.FP32]],
++    coefficients: pl.InOut[pl.Tensor],
++    idx_key0: pl.Tensor,
++    idx_key64: pl.Tensor,
++    indexer_transfer: pl.InOut[pl.Tensor],
++    score_arena: pl.InOut[pl.Tensor],
++    pair_arena: pl.InOut[pl.Tensor],
++    topk_scores: pl.InOut[pl.Tensor],
++    topk_indices: pl.InOut[pl.Tensor],
++    attention_indices: pl.InOut[pl.Tensor],
++    attention_bias: pl.InOut[pl.Tensor],
++    attention_mask: pl.InOut[pl.Tensor],
++    inverse_sin: pl.InOut[pl.Tensor],
+     attn_sink: pl.Tensor[[64, 1], pl.FP32],
+-    kv_ring: pl.InOut[pl.Tensor[[KV_RING_ROWS, 512], pl.BF16]],
+-    score_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 128], pl.FP32]],
+-    probability_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 128], pl.BF16]],
+-    pv_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 512], pl.FP32]],
+-    mi_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]],
+-    li_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]],
+-    packed: pl.InOut[pl.Tensor[[PACK_ROWS, 4096], pl.BF16]],
++    kv_ring: pl.InOut[pl.Tensor],
++    score_ring: pl.InOut[pl.Tensor],
++    probability_ring: pl.InOut[pl.Tensor],
++    pv_ring: pl.InOut[pl.Tensor],
++    mi_ring: pl.InOut[pl.Tensor],
++    li_ring: pl.InOut[pl.Tensor],
++    packed: pl.InOut[pl.Tensor],
+     ffts: pl.Tensor[[256], pl.INT64],
+     wo_a: pl.Tensor[[8, 4096, 1024], pl.BF16, BF16_WEIGHT_LAYOUT],
+-    o_r: pl.InOut[pl.Tensor[[O_MM_ROWS, 8192], pl.FP32]],
+-    o_quant: pl.InOut[pl.Tensor[[O_MM_ROWS, 8192], pl.INT8]],
+-    o_scales: pl.InOut[pl.Tensor[[8, O_SCALE_ROWS], pl.FP32]],
++    o_r: pl.InOut[pl.Tensor],
++    o_quant: pl.InOut[pl.Tensor],
++    o_scales: pl.InOut[pl.Tensor],
+     wo_b: pl.Tensor[[8192, 4096], pl.INT8, QUANT_WEIGHT_LAYOUT],
+-    o_partials: pl.InOut[pl.Tensor[[O_MM_ROWS, 32768], pl.INT32]],
++    o_partials: pl.InOut[pl.Tensor],
+     wo_b_scale: pl.Tensor[[4096], pl.FP32],
+-    output: pl.InOut[pl.Tensor[[T, 16384], pl.BF16]],
+-    signal: pl.InOut[pl.Tensor[[WORDS], pl.INT32]],
++    output: pl.InOut[pl.Tensor],
++    signal: pl.InOut[pl.Tensor],
+     QUERY_GROUP: pl.constexpr,
+     QK_PANEL: pl.constexpr,
+     SCORE_TILE: pl.constexpr,
+@@ -663,7 +663,7 @@
+ 
+ @pl.jit
+ def decode_csa_spmd(
+-    x: pl.Tensor[[T, 16384], pl.BF16],
++    x: pl.Tensor,
+     hc_fn: pl.Tensor[[24, 16384], pl.FP32],
+     hc_scale: pl.Tensor[[3], pl.FP32],
+     hc_base: pl.Tensor[[24], pl.FP32],
+@@ -671,128 +671,128 @@
+     norm_w: pl.Tensor[[4096], pl.BF16],
+     wq_a: pl.Tensor[[1024, 4096], pl.BF16, BF16_WEIGHT_LAYOUT],
+     gamma_cq: pl.Tensor[[1024], pl.BF16],
+-    x_fp32: pl.InOut[pl.Tensor[[T, 16384], pl.FP32]],
+-    inv: pl.InOut[pl.Tensor[[P16, 1], pl.FP32]],
++    x_fp32: pl.InOut[pl.Tensor],
++    inv: pl.InOut[pl.Tensor],
+     widen_tail: pl.InOut[pl.Tensor[[8, 16384], pl.FP32]],
+-    partials: pl.InOut[pl.Tensor[[PARTIAL, 32], pl.FP32]],
+-    raw: pl.InOut[pl.Tensor[[P16, 32], pl.FP32]],
+-    pre: pl.InOut[pl.Tensor[[P16, 8], pl.FP32]],
+-    post: pl.InOut[pl.Tensor[[T, 4], pl.FP32]],
++    partials: pl.InOut[pl.Tensor],
++    raw: pl.InOut[pl.Tensor],
++    pre: pl.InOut[pl.Tensor],
++    post: pl.InOut[pl.Tensor],
+     post_tail: pl.InOut[pl.Tensor[[8, 8], pl.FP32]],
+-    comb: pl.InOut[pl.Tensor[[T, 16], pl.FP32]],
++    comb: pl.InOut[pl.Tensor],
+     comb_tail: pl.InOut[pl.Tensor[[8, 32], pl.FP32]],
+-    mixed: pl.InOut[pl.Tensor[[P8, 4096], pl.BF16]],
+-    normed: pl.InOut[pl.Tensor[[T, 4096], pl.BF16]],
++    mixed: pl.InOut[pl.Tensor],
++    normed: pl.InOut[pl.Tensor],
+     norm_tail: pl.InOut[pl.Tensor[[8, 4096], pl.BF16]],
+-    qa: pl.InOut[pl.Tensor[[P16, 1024], pl.FP32]],
+-    qr: pl.InOut[pl.Tensor[[T, 1024], pl.INT8]],
+-    qr_scale: pl.InOut[pl.Tensor[[T, 1], pl.FP32]],
+-    qr_matmul: pl.InOut[pl.Tensor[[QR_ROWS, 1024], pl.INT8]],
+-    qr_scale_pad: pl.InOut[pl.Tensor[[P8, 1], pl.FP32]],
++    qa: pl.InOut[pl.Tensor],
++    qr: pl.InOut[pl.Tensor],
++    qr_scale: pl.InOut[pl.Tensor],
++    qr_matmul: pl.InOut[pl.Tensor],
++    qr_scale_pad: pl.InOut[pl.Tensor],
+     wq_b: pl.Tensor[[1024, 32768], pl.INT8, QUANT_WEIGHT_LAYOUT],
+     wq_b_scale: pl.Tensor[[32768], pl.FP32],
+-    rope_cos: pl.Tensor[[T, 64], pl.FP32],
+-    rope_sin: pl.Tensor[[T, 64], pl.FP32],
+-    rope_signed: pl.InOut[pl.Tensor[[T, 64], pl.FP32]],
+-    rope_swap: pl.InOut[pl.Tensor[[T, 64], pl.INT32]],
+-    q_proj: pl.InOut[pl.Tensor[[QPROJ_ROWS, 32768], pl.INT32]],
+-    q_flat: pl.InOut[pl.Tensor[[T, 32768], pl.BF16]],
++    rope_cos: pl.Tensor,
++    rope_sin: pl.Tensor,
++    rope_signed: pl.InOut[pl.Tensor],
++    rope_swap: pl.InOut[pl.Tensor],
++    q_proj: pl.InOut[pl.Tensor],
++    q_flat: pl.InOut[pl.Tensor],
+     wkv: pl.Tensor[[4096, 512], pl.BF16],
+     gamma_ckv: pl.Tensor[[512], pl.BF16],
+-    kv_fp32: pl.InOut[pl.Tensor[[KV_ROWS, 512], pl.FP32]],
+-    kv: pl.InOut[pl.Tensor[[T, 512], pl.BF16]],
+-    native_slots: pl.Tensor[[T, 2], pl.INT32],
+-    cache_rows: pl.InOut[pl.Tensor[[CACHE_ROWS, 512], pl.BF16]],
++    kv_fp32: pl.InOut[pl.Tensor],
++    kv: pl.InOut[pl.Tensor],
++    native_slots: pl.Tensor,
++    cache_rows: pl.InOut[pl.Tensor],
+     main_wkv: pl.Tensor[[1024, 4096], pl.BF16],
+     main_wgate: pl.Tensor[[1024, 4096], pl.BF16],
+-    main_value: pl.InOut[pl.Tensor[[MPROJ, 1024], pl.FP32]],
+-    main_score: pl.InOut[pl.Tensor[[MPROJ, 1024], pl.FP32]],
+-    main_state: pl.InOut[pl.Tensor[[MSTATE_PAGES, MSTATE_ELEMS], pl.FP32]],
+-    main_state_table: pl.Tensor[[B, MTABLE_COLS], pl.INT32],
++    main_value: pl.InOut[pl.Tensor],
++    main_score: pl.InOut[pl.Tensor],
++    main_state: pl.InOut[pl.Tensor],
++    main_state_table: pl.Tensor,
+     main_ape: pl.Tensor[[4, 1024], pl.FP32],
+-    positions: pl.Tensor[[T], pl.INT64],
+-    main_bounds: pl.Tensor[[MQ], pl.INT32],
+-    main_lengths: pl.Tensor[[B], pl.INT32],
+-    main_state_slots: pl.Tensor[[T, 2], pl.INT32],
+-    main_pooled: pl.InOut[pl.Tensor[[MPOOL, 512], pl.FP32]],
++    positions: pl.Tensor,
++    main_bounds: pl.Tensor,
++    main_lengths: pl.Tensor,
++    main_state_slots: pl.Tensor,
++    main_pooled: pl.InOut[pl.Tensor],
+     main_gamma: pl.Tensor[[512], pl.BF16],
+-    main_cos: pl.Tensor[[MC, 64], pl.FP32],
+-    main_sin: pl.Tensor[[MC, 64], pl.FP32],
+-    main_offsets: pl.InOut[pl.Tensor[[B], pl.INT32]],
++    main_cos: pl.Tensor,
++    main_sin: pl.Tensor,
++    main_offsets: pl.InOut[pl.Tensor],
+     main_count: pl.InOut[pl.Tensor[[1], pl.INT32]],
+-    main_slots: pl.Tensor[[MSLOTS, 2], pl.INT32],
+-    main_normed: pl.InOut[pl.Tensor[[MNORM, 512], pl.FP32]],
+-    main_debug: pl.InOut[pl.Tensor[[T, 512], pl.FP32]],
+-    main_cache: pl.InOut[pl.Tensor[[MCACHE_ROWS, 512], pl.BF16]],
++    main_slots: pl.Tensor,
++    main_normed: pl.InOut[pl.Tensor],
++    main_debug: pl.InOut[pl.Tensor],
++    main_cache: pl.InOut[pl.Tensor],
+     idx_wkv: pl.Tensor[[256, 4096], pl.BF16],
+     idx_wgate: pl.Tensor[[256, 4096], pl.BF16],
+-    idx_value: pl.InOut[pl.Tensor[[IPROJ, 256], pl.FP32]],
+-    idx_score: pl.InOut[pl.Tensor[[IPROJ, 256], pl.FP32]],
+-    idx_state: pl.InOut[pl.Tensor[[ISTATE_PAGES, ISTATE_ELEMS], pl.FP32]],
+-    idx_state_table: pl.Tensor[[B, ITABLE_COLS], pl.INT32],
++    idx_value: pl.InOut[pl.Tensor],
++    idx_score: pl.InOut[pl.Tensor],
++    idx_state: pl.InOut[pl.Tensor],
++    idx_state_table: pl.Tensor,
+     idx_ape: pl.Tensor[[4, 256], pl.FP32],
+-    idx_bounds: pl.Tensor[[IQ], pl.INT32],
+-    idx_lengths: pl.Tensor[[B], pl.INT32],
+-    idx_state_slots: pl.Tensor[[T, 2], pl.INT32],
+-    idx_pooled: pl.InOut[pl.Tensor[[IPOOL, 128], pl.FP32]],
++    idx_bounds: pl.Tensor,
++    idx_lengths: pl.Tensor,
++    idx_state_slots: pl.Tensor,
++    idx_pooled: pl.InOut[pl.Tensor],
+     idx_gamma: pl.Tensor[[128], pl.BF16],
+-    idx_cos: pl.Tensor[[IC, 64], pl.FP32],
+-    idx_sin: pl.Tensor[[IC, 64], pl.FP32],
+-    idx_offsets: pl.InOut[pl.Tensor[[B], pl.INT32]],
++    idx_cos: pl.Tensor,
++    idx_sin: pl.Tensor,
++    idx_offsets: pl.InOut[pl.Tensor],
+     idx_count: pl.InOut[pl.Tensor[[1], pl.INT32]],
+-    idx_slots: pl.Tensor[[ISLOTS, 2], pl.INT32],
+-    idx_normed: pl.InOut[pl.Tensor[[ICPAD, 128], pl.BF16]],
++    idx_slots: pl.Tensor,
++    idx_normed: pl.InOut[pl.Tensor],
+     hadamard: pl.Tensor[[128, 128], pl.BF16],
+-    idx_had: pl.InOut[pl.Tensor[[ICPAD, 128], pl.FP32]],
+-    idx_scales: pl.InOut[pl.Tensor[[ISCALES, 1], pl.FP32]],
+-    idx_debug: pl.InOut[pl.Tensor[[T, 128], pl.FP32]],
++    idx_had: pl.InOut[pl.Tensor],
++    idx_scales: pl.InOut[pl.Tensor],
++    idx_debug: pl.InOut[pl.Tensor],
+     idx_cache: pl.InOut[pl.Tensor[[ICACHE_PAGES, ICACHE_BYTES], pl.INT8]],
+-    q_heads: pl.Tensor[[QUERY_HEAD_ROWS, 512], pl.BF16],
+-    original_table: pl.Tensor[[B, ORIGINAL_COLS], pl.INT32],
+-    compressed_table: pl.Tensor[[B, COMPRESSED_COLS], pl.INT32],
+-    indexer_table: pl.Tensor[[B, INDEXER_COLS], pl.INT32],
++    q_heads: pl.Tensor,
++    original_table: pl.Tensor,
++    compressed_table: pl.Tensor,
++    indexer_table: pl.Tensor,
+     idx_wq_b: pl.Tensor[[1024, 8192], pl.INT8],
+     idx_wq_b_scale: pl.Tensor[[8192], pl.FP32],
+-    idx_query_acc: pl.InOut[pl.Tensor[[IDX_PROJ_ROWS, 8192], pl.INT32]],
+-    idx_query_rope: pl.InOut[pl.Tensor[[IDX_ROPE_ROWS, 8192], pl.BF16]],
+-    idx_query_rope_heads: pl.Tensor[[IDX_ROPE_HEAD_ROWS, 128], pl.BF16],
+-    idx_query_had: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]],
+-    idx_query_i8: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.INT8]],
+-    idx_query_scale: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 1], pl.FP32]],
+-    idx_query_scale_heads: pl.Tensor[[IDX_SCALE_T_ROWS, 64], pl.FP32],
++    idx_query_acc: pl.InOut[pl.Tensor],
++    idx_query_rope: pl.InOut[pl.Tensor],
++    idx_query_rope_heads: pl.Tensor,
++    idx_query_had: pl.InOut[pl.Tensor],
++    idx_query_i8: pl.InOut[pl.Tensor],
++    idx_query_scale: pl.InOut[pl.Tensor],
++    idx_query_scale_heads: pl.Tensor,
+     weights_proj: pl.Tensor[[4096, 64], pl.BF16],
+-    weights_partial: pl.InOut[pl.Tensor[[WEIGHTS_PARTIAL_ROWS, 64], pl.FP32]],
+-    head_weights: pl.InOut[pl.Tensor[[WEIGHTS_ROWS, 64], pl.FP32]],
+-    group_offsets: pl.InOut[pl.Tensor[[GROUP_OFFSET_ROWS], pl.INT32]],
++    weights_partial: pl.InOut[pl.Tensor],
++    head_weights: pl.InOut[pl.Tensor],
++    group_offsets: pl.InOut[pl.Tensor],
+     group_plan: pl.InOut[pl.Tensor[[8], pl.INT32]],
+-    coefficients: pl.InOut[pl.Tensor[[COEFF_ROWS, COEFF_COLS], pl.FP16]],
+-    indexer_transfer: pl.InOut[pl.Tensor[[INDEX_TRANSFER_ROWS, INDEX_TRANSFER_COLS], pl.FP32]],
+-    score_arena: pl.InOut[pl.Tensor[[SCORE_ROWS, 8192], pl.FP32]],
+-    pair_arena: pl.InOut[pl.Tensor[[PAIR_ROWS, 1024], pl.FP32]],
+-    topk_scores: pl.InOut[pl.Tensor[[T, 512], pl.FP32]],
+-    topk_indices: pl.InOut[pl.Tensor[[T, 512], pl.INT32]],
+-    attention_indices: pl.InOut[pl.Tensor[[ATTN_PLAN_ROWS, 512], pl.INT32]],
+-    attention_bias: pl.InOut[pl.Tensor[[ATTN_PLAN_ROWS, 640], pl.FP32]],
+-    attention_mask: pl.InOut[pl.Tensor[[ATTN_PLAN_ROWS, 16], pl.INT32]],
+-    inverse_sin: pl.InOut[pl.Tensor[[T, 64], pl.FP32]],
++    coefficients: pl.InOut[pl.Tensor],
++    indexer_transfer: pl.InOut[pl.Tensor],
++    score_arena: pl.InOut[pl.Tensor],
++    pair_arena: pl.InOut[pl.Tensor],
++    topk_scores: pl.InOut[pl.Tensor],
++    topk_indices: pl.InOut[pl.Tensor],
++    attention_indices: pl.InOut[pl.Tensor],
++    attention_bias: pl.InOut[pl.Tensor],
++    attention_mask: pl.InOut[pl.Tensor],
++    inverse_sin: pl.InOut[pl.Tensor],
+     attn_sink: pl.Tensor[[64, 1], pl.FP32],
+-    kv_ring: pl.InOut[pl.Tensor[[KV_RING_ROWS, 512], pl.BF16]],
+-    score_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 128], pl.FP32]],
+-    probability_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 128], pl.BF16]],
+-    pv_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 512], pl.FP32]],
+-    mi_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]],
+-    li_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]],
+-    packed: pl.InOut[pl.Tensor[[PACK_ROWS, 4096], pl.BF16]],
++    kv_ring: pl.InOut[pl.Tensor],
++    score_ring: pl.InOut[pl.Tensor],
++    probability_ring: pl.InOut[pl.Tensor],
++    pv_ring: pl.InOut[pl.Tensor],
++    mi_ring: pl.InOut[pl.Tensor],
++    li_ring: pl.InOut[pl.Tensor],
++    packed: pl.InOut[pl.Tensor],
+     ffts: pl.Tensor[[256], pl.INT64],
+     wo_a: pl.Tensor[[8, 4096, 1024], pl.BF16, BF16_WEIGHT_LAYOUT],
+-    o_r: pl.InOut[pl.Tensor[[O_MM_ROWS, 8192], pl.FP32]],
+-    o_quant: pl.InOut[pl.Tensor[[O_MM_ROWS, 8192], pl.INT8]],
+-    o_scales: pl.InOut[pl.Tensor[[8, O_SCALE_ROWS], pl.FP32]],
++    o_r: pl.InOut[pl.Tensor],
++    o_quant: pl.InOut[pl.Tensor],
++    o_scales: pl.InOut[pl.Tensor],
+     wo_b: pl.Tensor[[8192, 4096], pl.INT8, QUANT_WEIGHT_LAYOUT],
+-    o_partials: pl.InOut[pl.Tensor[[O_MM_ROWS, 32768], pl.INT32]],
++    o_partials: pl.InOut[pl.Tensor],
+     wo_b_scale: pl.Tensor[[4096], pl.FP32],
+-    output: pl.InOut[pl.Tensor[[T, 16384], pl.BF16]],
+-    signal: pl.InOut[pl.Tensor[[WORDS], pl.INT32]],
++    output: pl.InOut[pl.Tensor],
++    signal: pl.InOut[pl.Tensor],
+     QUERY_GROUP: pl.constexpr,
+     QK_PANEL: pl.constexpr,
+     SCORE_TILE: pl.constexpr,
+--- a/compressor_pool_stages.py
++++ b/compressor_pool_stages.py
+@@ -77,15 +77,15 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def compressor_pool_stage(
+-    kv_proj: pl.Tensor[[PROJECTION_ROWS_DYN, OUT_DIM], pl.FP32],
+-    score_proj: pl.Tensor[[PROJECTION_ROWS_DYN, OUT_DIM], pl.FP32],
+-    state: pl.Tensor[[STATE_PAGES_DYN, STATE_ELEMENTS_DYN], pl.FP32],
+-    state_table: pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32],
++    kv_proj: pl.Tensor,
++    score_proj: pl.Tensor,
++    state: pl.Tensor,
++    state_table: pl.Tensor,
+     ape: pl.Tensor[[COMPRESS_RATIO, OUT_DIM], pl.FP32],
+-    positions: pl.Tensor[[T_DYN], pl.INT64],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    pooled: pl.InOut[pl.Tensor[[POOL_ROWS_DYN, HEAD_DIM], pl.FP32]],
++    positions: pl.Tensor,
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    pooled: pl.InOut[pl.Tensor],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+@@ -147,15 +147,15 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_compressor_pool_stage(
+-    kv_proj: pl.Tensor[[PROJECTION_ROWS_DYN, IDX_OUT_DIM], pl.FP32],
+-    score_proj: pl.Tensor[[PROJECTION_ROWS_DYN, IDX_OUT_DIM], pl.FP32],
+-    state: pl.Tensor[[STATE_PAGES_DYN, STATE_ELEMENTS_DYN], pl.FP32],
+-    state_table: pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32],
++    kv_proj: pl.Tensor,
++    score_proj: pl.Tensor,
++    state: pl.Tensor,
++    state_table: pl.Tensor,
+     ape: pl.Tensor[[COMPRESS_RATIO, IDX_OUT_DIM], pl.FP32],
+-    positions: pl.Tensor[[T_DYN], pl.INT64],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    pooled: pl.InOut[pl.Tensor[[POOL_ROWS_DYN, IDX_HEAD_DIM], pl.FP32]],
++    positions: pl.Tensor,
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    pooled: pl.InOut[pl.Tensor],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+@@ -215,14 +215,14 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def compressor_state_commit_stage(
+-    kv_proj: pl.Tensor[[PROJECTION_ROWS_DYN, OUT_DIM], pl.FP32],
+-    score_proj: pl.Tensor[[PROJECTION_ROWS_DYN, OUT_DIM], pl.FP32],
++    kv_proj: pl.Tensor,
++    score_proj: pl.Tensor,
+     ape: pl.Tensor[[COMPRESS_RATIO, OUT_DIM], pl.FP32],
+-    positions: pl.Tensor[[T_DYN], pl.INT64],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    state_slots: pl.Tensor[[T_DYN, 2], pl.INT32],
+-    state: pl.InOut[pl.Tensor[[STATE_PAGES_DYN, STATE_ELEMENTS_DYN], pl.FP32]],
++    positions: pl.Tensor,
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    state_slots: pl.Tensor,
++    state: pl.InOut[pl.Tensor],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+@@ -252,14 +252,14 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_compressor_state_commit_stage(
+-    kv_proj: pl.Tensor[[PROJECTION_ROWS_DYN, IDX_OUT_DIM], pl.FP32],
+-    score_proj: pl.Tensor[[PROJECTION_ROWS_DYN, IDX_OUT_DIM], pl.FP32],
++    kv_proj: pl.Tensor,
++    score_proj: pl.Tensor,
+     ape: pl.Tensor[[COMPRESS_RATIO, IDX_OUT_DIM], pl.FP32],
+-    positions: pl.Tensor[[T_DYN], pl.INT64],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    state_slots: pl.Tensor[[T_DYN, 2], pl.INT32],
+-    state: pl.InOut[pl.Tensor[[STATE_PAGES_DYN, STATE_ELEMENTS_DYN], pl.FP32]],
++    positions: pl.Tensor,
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    state_slots: pl.Tensor,
++    state: pl.InOut[pl.Tensor],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+--- a/compressor_output_stages.py
++++ b/compressor_output_stages.py
+@@ -59,18 +59,18 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def compressor_norm_rope_cache_stage(
+-    pooled_kv: pl.Tensor[[POOLED_ROWS_DYN, HEAD_DIM], pl.FP32],
++    pooled_kv: pl.Tensor,
+     norm_w: pl.Tensor[[HEAD_DIM], pl.BF16],
+-    cos: pl.Tensor[[COMPACT_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
+-    sin: pl.Tensor[[COMPACT_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
+-    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+-    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    positions: pl.Tensor[[T_DYN], pl.INT64],
+-    compact_offsets: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+-    compact_slots: pl.Tensor[[COMPACT_SLOT_ROWS_DYN, 2], pl.INT32],
+-    normed_kv: pl.InOut[pl.Tensor[[NORMED_ROWS_DYN, HEAD_DIM], pl.FP32]],
+-    kv_debug: pl.InOut[pl.Tensor[[T_DYN, HEAD_DIM], pl.FP32]],
+-    cache_flat: pl.InOut[pl.Tensor[[CACHE_ROWS_DYN, HEAD_DIM], pl.BF16]],
++    cos: pl.Tensor,
++    sin: pl.Tensor,
++    bounds: pl.Tensor,
++    lengths: pl.Tensor,
++    positions: pl.Tensor,
++    compact_offsets: pl.Tensor,
++    compact_slots: pl.Tensor,
++    normed_kv: pl.InOut[pl.Tensor],
++    kv_debug: pl.InOut[pl.Tensor],
++    cache_flat: pl.InOut[pl.Tensor],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):

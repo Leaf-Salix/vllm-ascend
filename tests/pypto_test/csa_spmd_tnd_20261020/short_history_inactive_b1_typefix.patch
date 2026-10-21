@@ -1,0 +1,17 @@
+--- a/indexer_score_stages.py
++++ b/indexer_score_stages.py
+@@ -923,12 +923,12 @@
+                 # 在共同作用域声明Tile以保持SSA作用域；只有B1初始化内容。
+                 # G6只保留未使用的描述符，不发射16KiB填充；不能假定full会被DCE删除。
+                 legacy_half_scores = pl.tile.create(
+-                    [TOPK_CANDIDATES_PER_LEAF // (2 * score_tile), score_tile], dtype=pl.FP32
++                    [TOPK_CANDIDATES_PER_LEAF // (2 * BUFFERED_LONG_SCORE_TILE), BUFFERED_LONG_SCORE_TILE], dtype=pl.FP32
+                 )
+                 if query_group_size == 2:
+                     # B1保留原完整半叶、同分规则和有效前缀；不用流式2048归并。
+                     legacy_half_scores = pl.tile.full(
+-                        [TOPK_CANDIDATES_PER_LEAF // (2 * score_tile), score_tile], dtype=pl.FP32, value=FP32_NEG_INF
++                        [TOPK_CANDIDATES_PER_LEAF // (2 * BUFFERED_LONG_SCORE_TILE), BUFFERED_LONG_SCORE_TILE], dtype=pl.FP32, value=FP32_NEG_INF
+                     )
+                 # G6仍按原流式2048候选处理，B1分支在下方单独保留整半叶。
+                 for single_step in pl.range(single_steps):

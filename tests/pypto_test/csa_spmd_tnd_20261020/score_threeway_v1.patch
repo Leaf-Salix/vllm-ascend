@@ -1,0 +1,273 @@
+--- a/indexer_score_stages.py
++++ b/indexer_score_stages.py
+@@ -118,6 +118,8 @@
+ BUFFERED_SCORE_SCALE = 1024.0
+ NATIVE_QLI_WEIGHT_ROWS = 16
+ SPLIT_QK_ROWS = 3 * IDX_N_HEADS  # 既有G6一半的数学M，非batch专用shape。
++TRIPLE_QK_ROWS = 2 * IDX_N_HEADS
++WIDE_WS_K_ROWS = 2 * IDX_N_HEADS
+ 
+ 
+ @pl.jit.inline(auto_scope=False)
+@@ -432,13 +434,7 @@
+     SCORE_READY_EVENT: pl.constexpr,
+     SCORE_CONSUMED_EVENT: pl.constexpr,
+ ):
+-    """长G6/N64：两半QK早FIX；原完整16行系数分K累加后一次写回。
+-
+-    本helper保留原group/leaf/device页检查、尾query安全填充和双槽协议。
+-    QK两份48KiB Acc及WS一份4KiB跨panel保留，各次init_cond=True重新初始化。
+-    两次WS按原K顺序累计到同一Acc，不能把两个三query结果分别写回。
+-    是否减少等待、保持舍入和产生完整收益，分别由代码审计与真机检查决定。
+-    """
++    """Three M128 QKs; retire QK1 before WS0, and QK2 FIX after WS0 issue."""
+     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
+     groups = pl.cast(pl.read(plan, [0]), pl.INDEX)
+     buf_max_leaves = pl.cast(pl.read(plan, [2]), pl.INDEX)
+@@ -451,8 +447,7 @@
+             bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
+         )
+         buf_logical_begin, buf_leaf_capacity, work_valid = indexer_leaf_range(
+-            buf_leaf, buf_leaf_tiles, buf_extra_leaves, buf_visible_count,
+-            balance_leaves, query_group_size,
++            buf_leaf, buf_leaf_tiles, buf_extra_leaves, buf_visible_count, balance_leaves, query_group_size
+         )
+         if work_valid > 0:
+             buf_cache_len = pl.cast(pl.read(kv_seq_lens, [buf_batch_idx]), pl.INDEX) // COMPRESS_RATIO
+@@ -490,33 +485,29 @@
+                 [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS],
+                 target_memory=pl.MemorySpace.Mat,
+             )
+-            # 两份query共48KiB Left，两份完整16行系数共12KiB Left。
+-            # 系数按K截成两半，仍保留六个query的原行号与零项，尾组语义不变。
+             split_query0 = pl.tile.extract(
+-                buf_query_vector, 0 * SPLIT_QK_ROWS, 0, [SPLIT_QK_ROWS, IDX_HEAD_DIM],
++                buf_query_vector, 0 * TRIPLE_QK_ROWS, 0, [TRIPLE_QK_ROWS, IDX_HEAD_DIM],
+                 target_memory=pl.MemorySpace.Left,
+             )
+             split_coefficient0 = pl.tile.extract(
+-                buf_coefficients_l1, 0, 0 * SPLIT_QK_ROWS, [NATIVE_QLI_WEIGHT_ROWS, SPLIT_QK_ROWS],
++                buf_coefficients_l1, 0, 0 * WIDE_WS_K_ROWS, [NATIVE_QLI_WEIGHT_ROWS, WIDE_WS_K_ROWS],
+                 target_memory=pl.MemorySpace.Left,
+             )
+-            split_qk_acc0 = pl.tile.create(
+-                [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.INT32, target_memory=pl.MemorySpace.Acc,
+-            )
+             split_query1 = pl.tile.extract(
+-                buf_query_vector, 1 * SPLIT_QK_ROWS, 0, [SPLIT_QK_ROWS, IDX_HEAD_DIM],
++                buf_query_vector, 1 * TRIPLE_QK_ROWS, 0, [TRIPLE_QK_ROWS, IDX_HEAD_DIM],
+                 target_memory=pl.MemorySpace.Left,
+             )
+             split_coefficient1 = pl.tile.extract(
+-                buf_coefficients_l1, 0, 1 * SPLIT_QK_ROWS, [NATIVE_QLI_WEIGHT_ROWS, SPLIT_QK_ROWS],
++                buf_coefficients_l1, 0, 1 * WIDE_WS_K_ROWS, [NATIVE_QLI_WEIGHT_ROWS, WIDE_WS_K_ROWS],
+                 target_memory=pl.MemorySpace.Left,
+             )
+-            split_qk_acc1 = pl.tile.create(
+-                [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.INT32, target_memory=pl.MemorySpace.Acc,
++            split_query2 = pl.tile.extract(
++                buf_query_vector, 2 * TRIPLE_QK_ROWS, 0, [TRIPLE_QK_ROWS, IDX_HEAD_DIM],
++                target_memory=pl.MemorySpace.Left,
+             )
+-            # 独立WS句柄避免FIX仍读QK时又被WS覆盖；实际地址必须审计。
+-            split_ws_acc = pl.tile.create(
+-                [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols], dtype=pl.FP32, target_memory=pl.MemorySpace.Acc,
++            split_coefficient2 = pl.tile.extract(
++                buf_coefficients_l1, 0, 2 * WIDE_WS_K_ROWS, [NATIVE_QLI_WEIGHT_ROWS, WIDE_WS_K_ROWS],
++                target_memory=pl.MemorySpace.Left,
+             )
+             # 双槽最多允许两份未消费分数；第2轮起等两个AIV的MTE2 ACK后才重用。
+             for buf_score_step in pl.range(buf_score_iters):
+@@ -526,11 +517,9 @@
+                 if balance_leaves:
+                     buf_score_begin = buf_score_step * score_tile
+                 buf_transfer_row = buf_worker * 2 * query_group_size + buf_score_step % 2 * query_group_size
+-                split_previous0 = pl.tile.create(
+-                    [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat,
+-                )
+-                split_previous1 = pl.tile.create(
+-                    [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat,
++                wide_previous = pl.tile.create(
++                    [query_group_size * IDX_N_HEADS, qk_panel_cols], dtype=pl.FP16,
++                    target_memory=pl.MemorySpace.Mat,
+                 )
+                 buf_current_key = pl.tile.create(
+                     [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+@@ -679,89 +668,80 @@
+                         buf_key_panel = buf_current_key
+                     else:
+                         buf_key_panel = buf_prefetched_key
+-                    split_current0 = pl.tile.create(
+-                        [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat,
+-                    )
+-                    split_current1 = pl.tile.create(
+-                        [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat,
++                    wide_current = pl.tile.create(
++                        [query_group_size * IDX_N_HEADS, qk_panel_cols], dtype=pl.FP16,
++                        target_memory=pl.MemorySpace.Mat,
++                    )
++                    triple_qk0 = pl.tile.matmul(split_query0, buf_key_panel)
++                    triple_qk1 = pl.tile.matmul(split_query1, buf_key_panel)
++                    wide_current = pl.tile.assemble(
++                        wide_current, triple_qk0, [0 * TRIPLE_QK_ROWS, 0],
++                        pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
++                    )
++                    triple_qk2 = pl.tile.matmul(split_query2, buf_key_panel)
++                    wide_current = pl.tile.assemble(
++                        wide_current, triple_qk1, [1 * TRIPLE_QK_ROWS, 0],
++                        pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
+                     )
+                     if buf_qk_panel > 0:
+-                        # 先备齐上一panel的两个24KiB Right；与两份8KiB Key
+-                        # 同时存在恰为64KiB，不额外创建第三份Key或WS全K Right。
+-                        split_right0 = pl.tile.extract(
+-                            split_previous0, 0, 0, [SPLIT_QK_ROWS, qk_panel_cols],
++                        wide_right0 = pl.tile.extract(
++                            wide_previous, 0 * WIDE_WS_K_ROWS, 0, [WIDE_WS_K_ROWS, qk_panel_cols],
+                             target_memory=pl.MemorySpace.Right,
+                         )
+-                        split_right1 = pl.tile.extract(
+-                            split_previous1, 0, 0, [SPLIT_QK_ROWS, qk_panel_cols],
++                        wide_ws0 = pl.tile.matmul(split_coefficient0, wide_right0)
++                        wide_current = pl.tile.assemble(
++                            wide_current, triple_qk2, [2 * TRIPLE_QK_ROWS, 0],
++                            pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
++                        )
++                        wide_right1 = pl.tile.extract(
++                            wide_previous, 1 * WIDE_WS_K_ROWS, 0, [WIDE_WS_K_ROWS, qk_panel_cols],
+                             target_memory=pl.MemorySpace.Right,
+                         )
+-                        split_qk0 = pl.tile.matmul_acc(
+-                            split_qk_acc0, split_query0, buf_key_panel, init_cond=True,
+-                        )
+-                        # 第一份FIX位于第二份QK之前；两份Acc明确独立才有重叠机会。
+-                        split_current0 = pl.tile.assemble(
+-                            split_current0, split_qk0, [0, 0],
++                        wide_ws1 = pl.tile.matmul_acc(
++                            wide_ws0, split_coefficient1, wide_right1,
++                        )
++                        wide_right2 = pl.tile.extract(
++                            wide_previous, 2 * WIDE_WS_K_ROWS, 0, [WIDE_WS_K_ROWS, qk_panel_cols],
++                            target_memory=pl.MemorySpace.Right,
++                        )
++                        wide_ws2 = pl.tile.matmul_acc(
++                            wide_ws1, split_coefficient2, wide_right2,
++                        )
++                        pl.store(
++                            pl.set_validshape(wide_ws2, query_group_size, qk_panel_cols),
++                            [buf_transfer_row, buf_panel_col - qk_panel_cols], buf_score_transfer,
++                        )
++                    else:
++                        wide_current = pl.tile.assemble(
++                            wide_current, triple_qk2, [2 * TRIPLE_QK_ROWS, 0],
+                             pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
+                         )
+-                        split_qk1 = pl.tile.matmul_acc(
+-                            split_qk_acc1, split_query1, buf_key_panel, init_cond=True,
+-                        )
+-                        # 第一份FIX位于第二份QK之前；两份Acc明确独立才有重叠机会。
+-                        split_current1 = pl.tile.assemble(
+-                            split_current1, split_qk1, [0, 0],
+-                            pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
+-                        )
+-                        split_ws_first = pl.tile.matmul_acc(
+-                            split_ws_acc, split_coefficient0, split_right0, init_cond=True,
+-                        )
+-                        split_ws_done = pl.tile.matmul_acc(
+-                            split_ws_first, split_coefficient1, split_right1,
+-                        )
+-                        # 每panel仅一次原六行写回，保留1024列FIFO布局和顺序。
+-                        pl.store(
+-                            pl.set_validshape(split_ws_done, query_group_size, qk_panel_cols),
+-                            [buf_transfer_row, buf_panel_col - qk_panel_cols], buf_score_transfer,
+-                        )
+-                    else:
+-                        split_qk0 = pl.tile.matmul_acc(
+-                            split_qk_acc0, split_query0, buf_key_panel, init_cond=True,
+-                        )
+-                        # 第一份FIX位于第二份QK之前；两份Acc明确独立才有重叠机会。
+-                        split_current0 = pl.tile.assemble(
+-                            split_current0, split_qk0, [0, 0],
+-                            pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
+-                        )
+-                        split_qk1 = pl.tile.matmul_acc(
+-                            split_qk_acc1, split_query1, buf_key_panel, init_cond=True,
+-                        )
+-                        # 第一份FIX位于第二份QK之前；两份Acc明确独立才有重叠机会。
+-                        split_current1 = pl.tile.assemble(
+-                            split_current1, split_qk1, [0, 0],
+-                            pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
+-                        )
+-                    split_previous0 = split_current0
+-                    split_previous1 = split_current1
++                    wide_previous = wide_current
+                     if key_prefetch_panels > 0:
+                         if key_prefetch_to_l0:
+                             if buf_qk_panel + 1 < score_tile // qk_panel_cols:
+                                 buf_current_key = buf_prefetched_key
+-                split_right0_last = pl.tile.extract(
+-                    split_previous0, 0, 0, [SPLIT_QK_ROWS, qk_panel_cols],
++                wide_right0_last = pl.tile.extract(
++                    wide_previous, 0 * WIDE_WS_K_ROWS, 0, [WIDE_WS_K_ROWS, qk_panel_cols],
+                     target_memory=pl.MemorySpace.Right,
+                 )
+-                split_right1_last = pl.tile.extract(
+-                    split_previous1, 0, 0, [SPLIT_QK_ROWS, qk_panel_cols],
++                wide_ws0_last = pl.tile.matmul(split_coefficient0, wide_right0_last)
++                wide_right1_last = pl.tile.extract(
++                    wide_previous, 1 * WIDE_WS_K_ROWS, 0, [WIDE_WS_K_ROWS, qk_panel_cols],
+                     target_memory=pl.MemorySpace.Right,
+                 )
+-                split_ws_first_last = pl.tile.matmul_acc(
+-                    split_ws_acc, split_coefficient0, split_right0_last, init_cond=True,
+-                )
+-                split_ws_done_last = pl.tile.matmul_acc(
+-                    split_ws_first_last, split_coefficient1, split_right1_last,
++                wide_ws1_last = pl.tile.matmul_acc(
++                    wide_ws0_last, split_coefficient1, wide_right1_last,
++                )
++                wide_right2_last = pl.tile.extract(
++                    wide_previous, 2 * WIDE_WS_K_ROWS, 0, [WIDE_WS_K_ROWS, qk_panel_cols],
++                    target_memory=pl.MemorySpace.Right,
++                )
++                wide_ws2_last = pl.tile.matmul_acc(
++                    wide_ws1_last, split_coefficient2, wide_right2_last,
+                 )
+                 pl.store(
+-                    pl.set_validshape(split_ws_done_last, query_group_size, qk_panel_cols),
++                    pl.set_validshape(wide_ws2_last, query_group_size, qk_panel_cols),
+                     [buf_transfer_row, score_tile - qk_panel_cols], buf_score_transfer,
+                 )
+                 pl.system.sync_set(SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC)
+@@ -798,7 +778,7 @@
+     SPLIT_SCORE_ROWS: pl.constexpr = False,
+ ):
+     """按已选长G6资源区间执行双QK早FIX；小域及其它组合保留原helper。"""
+-    if SPLIT_SCORE_ROWS and balance_leaves and query_group_size == 6 and qk_panel_cols == 64 and score_tile == 1024:
++    if SPLIT_SCORE_ROWS and balance_leaves and query_group_size == 6 and qk_panel_cols == 128 and score_tile == 1024:
+         result = _indexer_score_cube_split_store(
+             qr_hadamard_i8,
+             coefficients,
+@@ -814,7 +794,7 @@
+             buf_score_transfer,
+             buf_worker,
+             6,  # 此helper固定的数学资源合同；不是T/B/历史实值。
+-            64,  # 此helper固定的数学资源合同；不是T/B/历史实值。
++            128,  # 此helper固定的数学资源合同；不是T/B/历史实值。
+             1024,  # 此helper固定的数学资源合同；不是T/B/历史实值。
+             key_prefetch_panels,
+             key_prefetch_to_l0,
+--- a/policy.py
++++ b/policy.py
+@@ -187,9 +187,10 @@
+     )
+     ob_rows = 32 if tokens <= 32 else 96 if tokens <= 96 else 128
+     parallel_small_qa = group == 6 and 16 < tokens < 32
++    wide_score = long_history and group == 6 and tokens >= SCORE_SPLIT_MIN_TOKENS
+     return CSASPMDPolicy(
+         query_group=group,
+-        qk_panel=64 if group == 6 else 128,
++        qk_panel=128 if wide_score else 64 if group == 6 else 128,
+         score_tile=1024 if long_history else SHORT_SCORE_TILE,
+         prefetch=1 if long_history or short_key_prefetch else 0,
+         balanced=(long_history and group == 6) or single_request_leaves,
