@@ -1381,3 +1381,29 @@ WS阶段已提交136c7af6；推送前远端新增84751e34的Native B1归档，�
 用户随后明确“之后没让你push不要push”：后续仍阶段性本地commit，
 但push必须有新的明确指令，不能从上游设置或goal恢复推导持续授权。
 本条只保存到本地，不再执行push。
+
+### 2026-10-21：只读汇总八档五组现有性能，未重测
+
+按用户要求展示Native、BSH MPMD含AICPU、BSH MPMD纯incore L1、BSH
+SPMD、TND SPMD，以及(Native-TND)/TND百分比。仅读取仓库和另一会话的
+已有原始结果，未提交NPU任务、未编译、未执行或重测算子。
+
+Native七档沿用csa_five_way_latest_20261020，B1沿用csa_native_b1_20261021
+补充的632.75μs；均取30次Profiler全流设备跨度中位数，不替换成Event。
+MPMD使用已采用a658188c的MATRIX_qa_shape_gate_v1_shape_gate_v1完整八档，
+两列选择相同multitask_candidate角色：外层5次graph.replay Event含AICPU
+与运行时，L1取5次最早incore到最晚结束跨度。外层原表只写mean/min/max，
+本次从全部原始样本计算median，统一本表统计量，不挑单次最快值。
+
+BSH与TND SPMD两列取cohort_output_balance_v4_result的八档配对中位数，
+未采用QA/WS/Score新候选均不混入。逐档检查24份原始报告、样本数、
+S6/H/B、单task/72核与50MHz时钟、功能及无新增回归通过；计算与已存
+汇总相互核对。百分比另用Decimal从未舍入值独立计算，CSV与JSON一致。
+
+不同列来自不同测量轮次/工具链；前两列为外层、后三列为L1。末列是
+用户指定的跨口径比值，不能当作同口径整服务加速比；外层减L1也不是
+单独测得的纯AICPU开销。本报告不改变TND相对BSH八档10%的验收结论。
+
+结果five_way_existing_20261021.json保留每行原样本、来源路径及散列；
+复算入口collect_existing_five_way.py只做文件读取与CPU计算。下载CSV与
+样本索引位于downloads/csa_eight_cases_five_paths_20261021。仅本地提交，不push。
