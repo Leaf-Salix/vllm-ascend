@@ -1,0 +1,48 @@
+{
+  "formal_revision": "4d5b2ed9",
+  "adopted": false,
+  "experiments": [
+    {
+      "candidate": "output_flat_g8_v2",
+      "batches": [
+        1,
+        16,
+        28
+      ],
+      "mean_delta_us": [
+        6.18,
+        14.576,
+        37.2
+      ],
+      "max_delta_us": [
+        3.06,
+        12.9,
+        39.68
+      ],
+      "actual_output_tasks": "25 -> 4",
+      "evidence": "OUTPUT_FLAT_G8_FOCUS.json"
+    },
+    {
+      "candidate": "output_flat_g2_v1",
+      "batches": [
+        16,
+        28
+      ],
+      "mean_delta_us": [
+        16.928,
+        12.552
+      ],
+      "max_delta_us": [
+        24.0,
+        23.88
+      ],
+      "actual_output_tasks": "25 -> 13",
+      "evidence": "OUTPUT_FLAT_G2_FOCUS.json"
+    }
+  ],
+  "correctness": "所测S6及A/B输入/图/输出/TopK/score/cache/state/外部保护通过；B1另有长度/页表变化。ND仅保留生成适配，未设备验收；不代表真实S1/S5或模型token/DSpark",
+  "dependencies": "G2两档五窗所有quant与OB只有本批次前段单一父任务；没有额外全四批依赖。HCpost正常等待四个OB及原公共输入。",
+  "conclusion": "减派发不是免费收益；大批次全阶段屏障削弱按组重叠，G2也没有完整收益。前段时序同时有变化，不把全部差值归因尾段或纯AICPU。",
+  "next": "停止原样扫描组数及扩八档；正式保持原逐组输出。保留已通过但未采用的局部核内候选，后续优先不扩大消费者等待范围的内核改进。",
+  "goal_achieved": false
+}
