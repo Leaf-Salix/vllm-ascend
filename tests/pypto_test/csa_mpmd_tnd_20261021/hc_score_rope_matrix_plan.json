@@ -1,0 +1,54 @@
+{
+  "candidate": "v49_hc_score_indexer_rope",
+  "reference_commit": "84751e34cb1f27eff9e4d3fdf03f8495982f1cdf",
+  "toolchain": {
+    "release": "csa-shared-20261021-upstream-fixes",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-mpmd-upstream-20261021",
+      "commit": "e891351e305e1b8ac70ffb9ffe60a243fc0420dc"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_mpmd_tnd_20261021/upstream_refresh_20261021/manifest.json",
+    "validated_at": "2026-10-21T18:47:25+08:00"
+  },
+  "note": "统一组合v46 HC局部流水、v47真实live固定Score尺寸、v45 Indexer RoPE分组；从v38出发，未合入短档负向的Main重排。固定八档同卡同进程SPMD/MPMD交替五窗，不累加独立试验收益。",
+  "preparation": [
+    "python3 prepare_hc_pipeline.py v46_hc_prefix_pipeline v38_all_capacity_balanced_middle",
+    "python3 prepare_score_exact_live.py v48_hc_score_exact_live v46_hc_prefix_pipeline",
+    "python3 prepare_indexer_rope_groups.py v49_hc_score_indexer_rope v48_hc_score_exact_live"
+  ],
+  "results": {
+    "h131072_b1": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/hc_score_rope_v49_h131072_b1/result.json",
+    "h131072_b4": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/hc_score_rope_v49_h131072_b4/result.json",
+    "h131072_b8": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/hc_score_rope_v49_h131072_b8/result.json",
+    "h131072_b16": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/hc_score_rope_v49_h131072_b16/result.json",
+    "h131072_b24": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/hc_score_rope_v49_h131072_b24/result.json",
+    "h131072_b28": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/hc_score_rope_v49_h131072_b28/result.json",
+    "h8192_b16": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/hc_score_rope_v49_h8192_b16/result.json",
+    "h8192_b32": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/hc_score_rope_v49_h8192_b32/result.json"
+  },
+  "jobs": {
+    "h131072_b1": "task_20261022_064131_21172413857",
+    "h131072_b4": "task_20261022_064131_21176416593",
+    "h131072_b8": "task_20261022_064131_2118046410",
+    "h131072_b16": "task_20261022_064131_211844187",
+    "h131072_b24": "task_20261022_064131_2119528401",
+    "h131072_b28": "task_20261022_064131_21210614410",
+    "h8192_b16": "task_20261022_064131_21236726220",
+    "h8192_b32": "task_20261022_064131_21260416363"
+  }
+}
