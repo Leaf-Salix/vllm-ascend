@@ -813,3 +813,49 @@ query_contiguous_heads_v4_short_results.json。混长方向混合且幅度小，
 全部当前NPU/仿真/CPU任务已终态，current_state没有pending。本轮实际完成
 单生产者诊断、WS整链负例、Query三档正负结果与源码/资源审计，有实质进展，
 不存在重复外部阻塞；目标继续active，生产默认未变，未push。
+
+
+## 2026-10-22：Query独立分档已生成，启用/关闭完整代码与实测产物一致
+
+上一goal轮完成四个阶段commit、单生产者证据、WS完整负例及Query三档正负
+实测，属于实质进展。本轮再次核对goal active、Git干净、共享manifest仍为
+validated的同一版本，并用task-submit确认上轮两个最后任务均completed/exit0。
+继续九档等权G<=0.90目标，不缩为B16单点，不重新测已完成的三个v4试验。
+
+prepare_query_head_guard.py基于实测v4增加独立QUERY_CONTIGUOUS_HEADS，显式
+经过policy→decode→core_group→vector_schedule→Query helper。区间为既有
+long G6且64<=token容量<=96；实际T不整除8时仍执行整个原helper。未用
+LOCAL_ATTENTION_STATS等其它开关隐式控制新选择，修改它们不会改变该flag。
+没有新增环境变量、GM buffer、host metadata或公共SDK修改。暂为候选，未采用。
+
+四项CPU合同通过：枚举历史阈值、query上界、请求/容量和63/64/65/95/96/97
+等边界，旧policy各项不变；flag独立；实际转发完整；打开的数学与v4相同、
+关闭调用整个原helper，其它调度AST不变。相关三个脚本Ruff通过，格式修复
+后额外核对生成policy字节未变化，没有因代码格式重编已通过的候选。
+
+完整B16启用与短B32关闭CPU编译均成功。query_head_guard_codegen_audit.json
+直接绑定上轮实际设备产物，先核对实测spmd/original_spmd全部源与相应清单，
+再比较guard的C++、AIC/AIV packed wrappers、orchestration和compiled_meta。
+两侧五份产物均一致：C++只删除// pto:位置注释，运算、常数、地址、分支、
+同步保持；host/ABI metadata逐字相等。未把它扩大为ELF相同，未以此直接
+标记最终九档性能通过，最终组合仍须完整验收。
+
+本轮重读已定位cannbot ops的attention_schedule_slots_and_platform_handoffs
+（draft、未定位platform）：采用其中区分运行期未走分支与编译期实际消除的
+核查思路，并以本次生成代码作证；不照搬平台事件编号、mode4或PIPE_S示意。
+知识索引缺失的原限制保留，没有重建索引或更换共享工具链。
+
+已提交并确认running：
+- task_20261022_064744_56493329836：B16实际S4、query上界6，T64，五窗完整L1。
+- task_20261022_064745_5670722673：B16实际S5、query上界6，T80，五窗完整L1。
+- task_20261022_064818_59201812816：T72/R17 metadata矩阵，覆盖启用路径。
+- task_20261022_064819_5935356678：T65/R16 metadata矩阵，覆盖token尾行回退。
+
+最初尝试T80 metadata矩阵在提交前被原harness合同拒绝：该矩阵只支持
+41<=Tcap<=72，且request容量须能接收S1时全部dummy尾部。没有产生任务ID、
+没有占卡、没有放宽harness。改用T72/R17（6+ceil((72-6)/6)）覆盖开启路径；
+T65/R16合法且保留。T80仍由前述独立完整L1实际S5用例验证。此处只登记
+真实提交和已完成CPU证据，尚未预记任何新设备PASS或性能收益。
+
+当前无CPU任务，四项设备任务使用原句柄收取。生产默认未变、未push，
+完整九档10%尚未达成，goal继续active。

@@ -17,13 +17,33 @@
     "query_contiguous_heads_v4_b16"
   ],
   "next_steps": [
-    "Prepare an explicit independent QUERY_CONTIGUOUS_HEADS constexpr for the existing long-G6 capacity interval 64..96; retain runtime token-tail fallback; do not couple activation implicitly to attention flags",
-    "Verify enabled generated code against measured v4 and disabled code against v122; only then validate active boundaries such as T64/T80 and T65 fallback",
-    "Keep the three v4 results separate: B16 -1.35855% (5/5), mixed +0.30569% (2/5), short B32 +0.48159% (0/5)",
-    "Consider Score consumer/proof work before further producer-only changes; N64 WS pool alone has no full B16 L1 benefit",
-    "Compose only verified positives; ultimately complete nine equal-weight paired cases and affected state/service acceptance"
+    "Collect the four existing guarded Query boundary tasks, preserving all results and exact task IDs",
+    "If range passes, compose the guarded Query change with independently validated small positives, then measure the actual composition",
+    "Continue larger critical-path work toward the full nine-case 10% target; do not treat this narrow positive as completion",
+    "Review Score consumer proof/scale work before more producer-only changes; no shared SDK modification"
   ],
-  "pending_tasks": {},
+  "pending_tasks": {
+    "task_20261022_064744_56493329836": {
+      "candidate": "query_head_guard",
+      "case": "H131072 B16 actual S4 T64, query capacity6",
+      "scope": "full L1 five paired windows"
+    },
+    "task_20261022_064745_5670722673": {
+      "candidate": "query_head_guard",
+      "case": "H131072 B16 actual S5 T80, query capacity6",
+      "scope": "full L1 five paired windows"
+    },
+    "task_20261022_064818_59201812816": {
+      "candidate": "query_head_guard",
+      "case": "metadata matrix T72 R17",
+      "scope": "active Query path, same-address metadata and continuous states"
+    },
+    "task_20261022_064819_5935356678": {
+      "candidate": "query_head_guard",
+      "case": "metadata matrix T65 R16",
+      "scope": "original Query token-tail fallback, same-address metadata and continuous states"
+    }
+  },
   "pending_cpu": null,
   "log": "vllm_ascend/ops/pypto/CSA_SPMD_TND_NEXT_10PCT_LOG_20261022.md",
   "git_note": "Shared origin tracking ref changed externally to 059dab4a (reflog update by push at 02:06:49). This session did not fetch/push/rebase; local optimization commits preserved.",
