@@ -1,0 +1,49 @@
+{
+  "status": "本轮收尾后按用户要求暂停；总体目标未完成",
+  "formal_operator_revision": "4d5b2ed9",
+  "production_files_changed": false,
+  "shared_toolchain_changed": false,
+  "qa": {
+    "candidate": "qa_single_m16_v2",
+    "adopted": false,
+    "evidence": "MATRIX_qa_single_m16_v2_single_m16_v1.json",
+    "correctness": "八档四路A/B与五窗图通过；B1/T6和B2/T12同图长短切换及B2 padding通过；非整模型token验证",
+    "b1_full_l1_mean_us": {
+      "current": 381.168,
+      "candidate": 373.12
+    },
+    "b1_qa_group_mean_us": {
+      "current": 10.624,
+      "candidate": 8.432
+    },
+    "short_b16_full_l1_mean_us": {
+      "current": 656.112,
+      "candidate": 673.904
+    },
+    "weighted": {
+      "reduction_vs_original_pct": 6.4202019209589904,
+      "reduction_vs_spmd_pct": -2.5481524557461364,
+      "reduction_vs_current_pct": -0.03548478345335371
+    },
+    "reason": "保留B1核内与完整收益证据；其它关闭区间出现回退，短B16均值和最大值同时增加，当前包不采用",
+    "followup": "仅保存未执行入口编译策略草稿，用户恢复后再审阅与验证"
+  },
+  "ws": {
+    "candidate": "ws_interval_v2",
+    "adopted": false,
+    "evidence": "WS_INTERVAL_FOCUS.json",
+    "attention_audit": "WS_INTERVAL_ATTENTION_AUDIT.json",
+    "long_b16_score_aic_mean_us": {
+      "current": 194.241,
+      "candidate": 189.124
+    },
+    "long_b16_full_l1_mean_us": {
+      "current": 830.328,
+      "candidate": 857.232
+    },
+    "reason": "Score核内受益，未改数学的Attention却明显变慢；生成物/缓冲描述符/并发审查尚未确认根因，保留私有证据，不采用"
+  },
+  "task_state": "本轮8项QA性能、1项QA相邻边界和3项WS任务均已completed/exit0；不再启动测试",
+  "draft": "QA_SHAPE_GATE_DRAFT.json",
+  "scope": "单卡S6，固定CANN9.2/PyPTO/PTOAS/Simpler；完整HC_pre+norm+CSA+HC_post L1，非整模型"
+}
