@@ -1,0 +1,396 @@
+{
+  "candidate": "v29_output_group",
+  "control": "v28_prefix_concurrency",
+  "source": "frozen 84751e34 cube_schedule.py/vector_schedule.py output branch",
+  "adopted_in_production": false,
+  "decision": "局部输出MIX三档数值通过，长B16尾段与完整CSA改善；短B16尾段改善被前段退化抵消，B1完整基本持平。保留尾段核内收益，补齐八档后决定区间。",
+  "toolchain": {
+    "release": "csa-shared-20261021-upstream-fixes",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-mpmd-upstream-20261021",
+      "commit": "e891351e305e1b8ac70ffb9ffe60a243fc0420dc"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_mpmd_tnd_20261021/upstream_refresh_20261021/manifest.json",
+    "validated_at": "2026-10-21T18:47:25+08:00"
+  },
+  "cases": {
+    "h131072_b1": {
+      "task_id": "task_20261022_030723_194224710433",
+      "queue_terminal": "completed(exit=0)",
+      "result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/output_group_v29_h131072_b1/result.json",
+      "statistics_us": {
+        "spmd": {
+          "min": 359.5,
+          "mean": 364.972,
+          "max": 372.32,
+          "samples": [
+            372.32,
+            367.72,
+            359.68,
+            365.64,
+            359.5
+          ]
+        },
+        "mpmd_control": {
+          "min": 402.7,
+          "mean": 410.804,
+          "max": 416.74,
+          "samples": [
+            402.7,
+            404.58,
+            416.74,
+            415.26,
+            414.74
+          ]
+        },
+        "mpmd": {
+          "min": 394.8,
+          "mean": 409.52799999999996,
+          "max": 422.08,
+          "samples": [
+            422.08,
+            394.8,
+            407.34,
+            419.52,
+            403.9
+          ]
+        }
+      },
+      "ratio": 1.1220805979636794,
+      "candidate_over_control": 0.9968938958724842,
+      "checks": {
+        "spmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards_passed": 102,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards_passed": 102,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards_passed": 102,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        }
+      },
+      "output_tail_us": {
+        "mpmd": {
+          "min": 67.02000000000004,
+          "mean": 68.672,
+          "max": 70.66000000000003,
+          "samples": [
+            67.67999999999995,
+            68.74000000000001,
+            67.02000000000004,
+            69.25999999999999,
+            70.66000000000003
+          ],
+          "prefix_mean_us": 340.856
+        },
+        "mpmd_control": {
+          "min": 69.19999999999999,
+          "mean": 70.076,
+          "max": 72.32,
+          "samples": [
+            72.32,
+            69.38,
+            70.01999999999998,
+            69.45999999999998,
+            69.19999999999999
+          ],
+          "prefix_mean_us": 340.728
+        }
+      },
+      "stage_analysis": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/output_group_v29_h131072_b1/stages.json"
+    },
+    "h131072_b16": {
+      "task_id": "task_20261022_030723_194228924055",
+      "queue_terminal": "completed(exit=0)",
+      "result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/output_group_v29_h131072_b16/result.json",
+      "statistics_us": {
+        "spmd": {
+          "min": 719.36,
+          "mean": 723.66,
+          "max": 725.8,
+          "samples": [
+            725.8,
+            725.52,
+            725.26,
+            722.36,
+            719.36
+          ]
+        },
+        "mpmd_control": {
+          "min": 789.64,
+          "mean": 807.4159999999999,
+          "max": 825.56,
+          "samples": [
+            794.52,
+            825.56,
+            789.64,
+            803.86,
+            823.5
+          ]
+        },
+        "mpmd": {
+          "min": 773.78,
+          "mean": 791.196,
+          "max": 817.08,
+          "samples": [
+            810.3,
+            773.78,
+            817.08,
+            779.36,
+            775.46
+          ]
+        }
+      },
+      "ratio": 1.0933255948926293,
+      "candidate_over_control": 0.9799112229631318,
+      "checks": {
+        "spmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards_passed": 102,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards_passed": 102,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards_passed": 102,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        }
+      },
+      "output_tail_us": {
+        "mpmd": {
+          "min": 136.0,
+          "mean": 137.068,
+          "max": 139.34000000000003,
+          "samples": [
+            139.34000000000003,
+            136.19999999999993,
+            137.16000000000008,
+            136.64,
+            136.0
+          ],
+          "prefix_mean_us": 654.128
+        },
+        "mpmd_control": {
+          "min": 152.07999999999993,
+          "mean": 153.2,
+          "max": 154.08000000000004,
+          "samples": [
+            154.07999999999993,
+            154.08000000000004,
+            152.07999999999993,
+            153.26,
+            152.5
+          ],
+          "prefix_mean_us": 654.216
+        }
+      },
+      "stage_analysis": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/output_group_v29_h131072_b16/stages.json"
+    },
+    "h8192_b16": {
+      "task_id": "task_20261022_030723_194235622209",
+      "queue_terminal": "completed(exit=0)",
+      "result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/output_group_v29_h8192_b16/result.json",
+      "statistics_us": {
+        "spmd": {
+          "min": 561.56,
+          "mean": 566.788,
+          "max": 575.56,
+          "samples": [
+            575.56,
+            565.52,
+            561.56,
+            568.92,
+            562.38
+          ]
+        },
+        "mpmd_control": {
+          "min": 653.68,
+          "mean": 676.064,
+          "max": 695.94,
+          "samples": [
+            674.42,
+            653.68,
+            681.08,
+            675.2,
+            695.94
+          ]
+        },
+        "mpmd": {
+          "min": 666.14,
+          "mean": 676.38,
+          "max": 688.46,
+          "samples": [
+            666.32,
+            681.72,
+            666.14,
+            688.46,
+            679.26
+          ]
+        }
+      },
+      "ratio": 1.1933562460743699,
+      "candidate_over_control": 1.000467411369338,
+      "checks": {
+        "spmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards_passed": 102,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards_passed": 102,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards_passed": 102,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        }
+      },
+      "output_tail_us": {
+        "mpmd": {
+          "min": 139.03999999999996,
+          "mean": 143.81199999999998,
+          "max": 147.62,
+          "samples": [
+            147.62,
+            139.03999999999996,
+            145.89999999999998,
+            142.12,
+            144.38
+          ],
+          "prefix_mean_us": 532.568
+        },
+        "mpmd_control": {
+          "min": 156.77999999999997,
+          "mean": 160.39200000000002,
+          "max": 163.51999999999998,
+          "samples": [
+            156.77999999999997,
+            161.50000000000006,
+            163.51999999999998,
+            159.42000000000007,
+            160.74
+          ],
+          "prefix_mean_us": 515.672
+        }
+      },
+      "stage_analysis": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/output_group_v29_h8192_b16/stages.json"
+    }
+  }
+}
