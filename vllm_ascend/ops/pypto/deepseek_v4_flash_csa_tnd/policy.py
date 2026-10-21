@@ -24,6 +24,9 @@ SCORE_SPLIT_MIN_TOKENS = 32
 # 两个 M32 容量以内已验证删除空 worker 获益；更大容量保留原分工。
 # 128K B28 的完整 L1 回退，不能因局部少派空任务而全域采用。
 NONEMPTY_WORKER_MAX_TOKENS = 64
+# 实验：前段已重构成两条并行局部MIX，重新评估小容量；不是沿用旧v25融合结论。
+# 所有正容量启用；正式采用仍须按各容量完整L1验证，空调用由外层处理。
+FUSED_DAG_MIN_TOKENS = 1
 
 
 @dataclass(frozen=True)
@@ -45,6 +48,13 @@ class CSAMPMDPolicy:
     plan_physical_rows: bool = False
     split_score_rows: bool = False
     limit_empty_workers: bool = False
+    fused_dag: bool = True
+    hc_groups: int = 24
+    hc_row_tile: int = 8
+    idx_front_groups: int = 8
+    main_front_groups: int = 16
+    output_work_balance: bool = False
+    prefix_workers: int = 24
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -66,6 +76,14 @@ class CSAMPMDPolicy:
             "PLAN_PHYSICAL_ROWS": self.plan_physical_rows,
             "SPLIT_SCORE_ROWS": self.split_score_rows,
             "LIMIT_EMPTY_WORKERS": self.limit_empty_workers,
+            "FUSED_DAG": self.fused_dag,
+            "HC_GROUPS": self.hc_groups,
+            "HC_ROW_TILE": self.hc_row_tile,
+            "IDX_FRONT_GROUPS": self.idx_front_groups,
+            "MAIN_FRONT_GROUPS": self.main_front_groups,
+            "OUTPUT_WORK_BALANCE": self.output_work_balance,
+            "QUERY_WORKERS": self.prefix_workers,
+            "PREFIX_WORKERS": self.prefix_workers,
         }
 
 
@@ -105,7 +123,15 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
     single_request_leaves = requests == 1 and long_history and cache_rows <= 65536 and 5 <= max_query_tokens <= 6
     ob_rows = 32 if tokens <= 32 else 96 if tokens <= 96 else 128
     parallel_small_qa = group == 6 and 16 < tokens < 32
+    hc_groups = min(24, max(4, 4 * ((tokens + 15) // 16)))
+    hc_row_tile = next((tile for tile in (1, 2, 4, 8) if tokens <= 2 * hc_groups * tile), 8)
     return CSAMPMDPolicy(
+        hc_groups=hc_groups,
+        hc_row_tile=hc_row_tile,
+        output_work_balance=single_request_leaves
+        or (long_history and group == 6 and (EARLY_GEOMETRY_MIN_TOKENS <= tokens <= LOCAL_STATS_MAX_TOKENS)),
+        fused_dag=tokens >= FUSED_DAG_MIN_TOKENS,
+        prefix_workers=12 if tokens >= FUSED_DAG_MIN_TOKENS else 24,
         limit_empty_workers=tokens <= NONEMPTY_WORKER_MAX_TOKENS,
         query_group=group,
         qk_panel=64 if group == 6 else 128,

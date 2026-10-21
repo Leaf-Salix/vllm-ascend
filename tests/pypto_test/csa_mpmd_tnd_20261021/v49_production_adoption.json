@@ -1,0 +1,55 @@
+{
+  "candidate": "v49_hc_score_indexer_rope",
+  "evidence": "hc_score_rope_matrix.json",
+  "weighted_geomean": {
+    "G128": 0.9648959424087832,
+    "G8": 1.017087246341515,
+    "G": 0.9751154235528757,
+    "target": 0.9
+  },
+  "performance_goal_met": false,
+  "source_directory": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v49_hc_score_indexer_rope/operator",
+  "destination_directory": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd",
+  "changed_files": [
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/middle_plan_stages.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/query_group.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/hc_rows.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/indexer_score_stages.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/middle_phase.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/middle_dependencies.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/front_pipelines.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/binding.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/indexer_group_stages.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/hc_pipeline.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/query_phase_sync.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/indexer_query_stages.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/middle_publish_stages.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/middle_pipeline.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/query_signals.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/entry.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/policy.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/output_group.py"
+  ],
+  "formatting_only_ast_equal": true,
+  "remaining": [
+    "B1 S2/S3/S4 additional boundaries",
+    "same-address metadata and continuous-state",
+    "real vLLM TND 16-card validation",
+    "weighted G <= 0.90",
+    "B28 prefix scheduling tail"
+  ],
+  "unused_import_cleanup_preserves_function_ast": true,
+  "dead_orchestration_assignments_removed": {
+    "names": [
+      "output_quant_workers",
+      "post_workers"
+    ],
+    "assignments": 8,
+    "loaded_anywhere": false
+  },
+  "production_cpu_checks": {
+    "h131072_b16": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/v49_production_cpu_exports_h131072_b16/result.json",
+    "h8192_b32": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/v49_production_cpu_exports_h8192_b32/result.json"
+  },
+  "cleanup_correction": "首次CPU检查发现middle_phase被自动清理掉跨模块再导出，显式恢复GROUPS/VECTORS及三个phase helper后两分支编译通过；最终只移动导入到文件顶部。"
+}

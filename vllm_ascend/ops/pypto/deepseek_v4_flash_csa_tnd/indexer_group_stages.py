@@ -178,8 +178,7 @@ def indexer_group_plan_stage(
                 # B1把原每个8192叶的两个半叶独立调度，包含尾部空根。
                 # 末叶边界依赖各组实际visible，不能把全部半叶静态等分为4096。
                 leaf_tiles = pl.cast(CANDIDATES_PER_LEAF // (2 * SCORE_TILE), pl.INDEX)
-                leaves = 2 * pl.max((max_history + CANDIDATES_PER_LEAF - 1)
-                                    // CANDIDATES_PER_LEAF, 1)
+                leaves = 2 * pl.max((max_history + CANDIDATES_PER_LEAF - 1) // CANDIDATES_PER_LEAF, 1)
             else:
                 leaves, leaf_tiles, extra = indexer_long_leaf_plan(max_history, groups)
         pl.write(plan, [0], pl.cast(groups, pl.INT32))
@@ -245,22 +244,26 @@ def indexer_decode_group(
 
 
 @pl.jit.inline(auto_scope=False)
-def indexer_work_item(
-    item: pl.Scalar[pl.INDEX],
-    groups: pl.Scalar[pl.INDEX],
-    leaves: pl.Scalar[pl.INDEX],
-):
-    """少组时先铺满不同组，多组时同组连续叶；空输入返回-1而不除零。"""
+def indexer_work_item(item: pl.Scalar[pl.INDEX], groups: pl.Scalar[pl.INDEX], leaves: pl.Scalar[pl.INDEX]):
+    """少组时每叶轮换组起点，多组保留原分工；空输入不除零。
+
+    对固定leaf，group=(ordinal+leaf)%groups是全体组的循环置换，因此每个
+    (group,leaf)仍只执行一次。只改变worker归属和执行顺序，pair_arena仍按
+    原query/leaf写入，最终Top-K仍按原叶序合并。AIC和两个AIV共用此映射。
+
+    这里仅用于MPMD：后继由TMR等待整个Score task，不依赖单SPMD的原owner
+    通知公式。不能单独把这个helper搬回单SPMD而不同时修正其producer等待。
+    """
     group = pl.cast(-1, pl.INDEX)
     leaf = pl.cast(-1, pl.INDEX)
-    if groups > 0 and leaves > 0 and item >= 0 and item < groups * leaves:
+    if groups > 0 and leaves > 0 and (item >= 0) and (item < groups * leaves):
         if groups < SCORE_WORKERS:
-            group = item % groups
+            group = (item % groups + item // groups) % groups
             leaf = item // groups
         else:
             group = item // leaves
             leaf = item % leaves
-    return group, leaf
+    return (group, leaf)
 
 
 @pl.jit.inline(auto_scope=False)

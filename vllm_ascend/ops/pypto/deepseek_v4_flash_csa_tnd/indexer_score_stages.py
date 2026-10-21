@@ -461,392 +461,1974 @@ def _indexer_score_cube_split_store(
             balance_leaves,
             query_group_size,
         )
+        # 各live分支使用固定物理M，避免动态Acc行距问题；只跳过零系数对应的head。
+        # 六行FIFO、两半矩阵乘累加次序、ACK和排空保持原协议。
         if work_valid > 0:
-            buf_cache_len = pl.cast(pl.read(kv_seq_lens, [buf_batch_idx]), pl.INDEX) // COMPRESS_RATIO
-            buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
-            buf_tile_count = (buf_valid_count + score_tile - 1) // score_tile
-            buf_lane_span = pl.min(buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
-            buf_score_iters = (buf_lane_span + score_tile // 2 - 1) // (score_tile // 2)
-            buf_query_vector = pl.load(
-                qr_hadamard_i8,
-                [buf_query * IDX_N_HEADS, 0],
-                [query_group_size * IDX_N_HEADS, IDX_HEAD_DIM],
-                target_memory=pl.MemorySpace.Mat,
-                valid_shape=[buf_live * IDX_N_HEADS, IDX_HEAD_DIM],
-            )
-            # A3当前TINSERT(Acc→Mat)忽略紧凑L0C的动态行距：若QK仅算
-            # live*64行而物理M=G*64，每个16列分形之后都会读错源地址。
-            # 因此在L1安全补满M，再做完整QK。补齐行只复制本组首条有效
-            # query，绝不访问下一请求；对应head系数为0，整数点积/ReLU
-            # 均有限，补齐行不会影响任何真实query。无需Host分支或GM搬运。
-            buf_query_vector = pl.set_validshape(buf_query_vector, query_group_size * IDX_N_HEADS, IDX_HEAD_DIM)
-            for padding_lane in pl.unroll(query_group_size):
-                if padding_lane >= buf_live:
-                    buf_query_vector = pl.gather_row(
-                        buf_query_vector,
-                        qr_hadamard_i8,
-                        [padding_lane * IDX_N_HEADS, 0],
-                        [buf_query * IDX_N_HEADS, 0],
-                        [IDX_N_HEADS, IDX_HEAD_DIM],
+            if buf_live == 1:
+                live1_live_half_buf_cache_len = (
+                    pl.cast(pl.read(kv_seq_lens, [buf_batch_idx]), pl.INDEX) // COMPRESS_RATIO
+                )
+                live1_live_half_buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
+                live1_live_half_buf_tile_count = (live1_live_half_buf_valid_count + score_tile - 1) // score_tile
+                live1_live_half_buf_lane_span = pl.min(
+                    live1_live_half_buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2
+                )
+                live1_live_half_buf_score_iters = (live1_live_half_buf_lane_span + score_tile // 2 - 1) // (
+                    score_tile // 2
+                )
+                live1_live_half_buf_query_vector = pl.load(
+                    qr_hadamard_i8,
+                    [buf_query * IDX_N_HEADS, 0],
+                    [64, IDX_HEAD_DIM],
+                    target_memory=pl.MemorySpace.Mat,
+                    valid_shape=[buf_live * IDX_N_HEADS, IDX_HEAD_DIM],
+                )
+                live1_live_half_buf_query_vector = pl.set_validshape(live1_live_half_buf_query_vector, 64, IDX_HEAD_DIM)
+                for live1_live_half_padding_lane in pl.unroll(64 // IDX_N_HEADS):
+                    if live1_live_half_padding_lane >= buf_live:
+                        live1_live_half_buf_query_vector = pl.gather_row(
+                            live1_live_half_buf_query_vector,
+                            qr_hadamard_i8,
+                            [live1_live_half_padding_lane * IDX_N_HEADS, 0],
+                            [buf_query * IDX_N_HEADS, 0],
+                            [IDX_N_HEADS, IDX_HEAD_DIM],
+                        )
+                live1_live_half_buf_coefficients_l1 = pl.load(
+                    coefficients,
+                    [buf_group * NATIVE_QLI_WEIGHT_ROWS, 0],
+                    [NATIVE_QLI_WEIGHT_ROWS, 64],
+                    target_memory=pl.MemorySpace.Mat,
+                )
+                live1_live_half_split_query0 = pl.tile.extract(
+                    live1_live_half_buf_query_vector, 0 * 64, 0, [64, IDX_HEAD_DIM], target_memory=pl.MemorySpace.Left
+                )
+                live1_live_half_split_coefficient0 = pl.tile.extract(
+                    live1_live_half_buf_coefficients_l1,
+                    0,
+                    0 * 64,
+                    [NATIVE_QLI_WEIGHT_ROWS, 64],
+                    target_memory=pl.MemorySpace.Left,
+                )
+                live1_live_half_split_qk_acc0 = pl.tile.create(
+                    [64, qk_panel_cols], dtype=pl.INT32, target_memory=pl.MemorySpace.Acc
+                )
+                live1_live_half_split_ws_acc = pl.tile.create(
+                    [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols], dtype=pl.FP32, target_memory=pl.MemorySpace.Acc
+                )
+                for live1_live_half_buf_score_step in pl.range(live1_live_half_buf_score_iters):
+                    if live1_live_half_buf_score_step >= 2:
+                        pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+                    live1_live_half_buf_score_begin = live1_live_half_buf_score_step * (score_tile // 2)
+                    if balance_leaves:
+                        live1_live_half_buf_score_begin = live1_live_half_buf_score_step * score_tile
+                    live1_live_half_buf_transfer_row = (
+                        buf_worker * 2 * query_group_size + live1_live_half_buf_score_step % 2 * query_group_size
                     )
-            buf_coefficients_l1 = pl.load(
-                coefficients,
-                [buf_group * NATIVE_QLI_WEIGHT_ROWS, 0],
-                [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS],
-                target_memory=pl.MemorySpace.Mat,
-            )
-            # 两份query共48KiB Left，两份完整16行系数共12KiB Left。
-            # 系数按K截成两半，仍保留六个query的原行号与零项，尾组语义不变。
-            split_query0 = pl.tile.extract(
-                buf_query_vector,
-                0 * SPLIT_QK_ROWS,
-                0,
-                [SPLIT_QK_ROWS, IDX_HEAD_DIM],
-                target_memory=pl.MemorySpace.Left,
-            )
-            split_coefficient0 = pl.tile.extract(
-                buf_coefficients_l1,
-                0,
-                0 * SPLIT_QK_ROWS,
-                [NATIVE_QLI_WEIGHT_ROWS, SPLIT_QK_ROWS],
-                target_memory=pl.MemorySpace.Left,
-            )
-            split_qk_acc0 = pl.tile.create(
-                [SPLIT_QK_ROWS, qk_panel_cols],
-                dtype=pl.INT32,
-                target_memory=pl.MemorySpace.Acc,
-            )
-            split_query1 = pl.tile.extract(
-                buf_query_vector,
-                1 * SPLIT_QK_ROWS,
-                0,
-                [SPLIT_QK_ROWS, IDX_HEAD_DIM],
-                target_memory=pl.MemorySpace.Left,
-            )
-            split_coefficient1 = pl.tile.extract(
-                buf_coefficients_l1,
-                0,
-                1 * SPLIT_QK_ROWS,
-                [NATIVE_QLI_WEIGHT_ROWS, SPLIT_QK_ROWS],
-                target_memory=pl.MemorySpace.Left,
-            )
-            split_qk_acc1 = pl.tile.create(
-                [SPLIT_QK_ROWS, qk_panel_cols],
-                dtype=pl.INT32,
-                target_memory=pl.MemorySpace.Acc,
-            )
-            # 独立WS句柄避免FIX仍读QK时又被WS覆盖；实际地址必须审计。
-            split_ws_acc = pl.tile.create(
-                [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols],
-                dtype=pl.FP32,
-                target_memory=pl.MemorySpace.Acc,
-            )
-            # 双槽最多允许两份未消费分数；第2轮起等两个AIV的MTE2 ACK后才重用。
-            for buf_score_step in pl.range(buf_score_iters):
-                if buf_score_step >= 2:
-                    pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
-                buf_score_begin = buf_score_step * (score_tile // 2)
-                if balance_leaves:
-                    buf_score_begin = buf_score_step * score_tile
-                buf_transfer_row = buf_worker * 2 * query_group_size + buf_score_step % 2 * query_group_size
-                split_previous0 = pl.tile.create(
-                    [SPLIT_QK_ROWS, qk_panel_cols],
-                    dtype=pl.FP16,
-                    target_memory=pl.MemorySpace.Mat,
-                )
-                split_previous1 = pl.tile.create(
-                    [SPLIT_QK_ROWS, qk_panel_cols],
-                    dtype=pl.FP16,
-                    target_memory=pl.MemorySpace.Mat,
-                )
-                buf_current_key = pl.tile.create(
-                    [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
-                )
-                buf_prefetched_key = pl.tile.create(
-                    [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
-                )
-                buf_key_l1_pool = pl.tile.create(
-                    [2 * qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
-                )
-                if key_prefetch_panels > 0:
-                    buf_prime_col = 0
-                    for buf_prime_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
-                        buf_prime_key_row = (
-                            buf_logical_begin
-                            + buf_score_begin
-                            + buf_prime_col // (score_tile // 2) * buf_lane_span
-                            + buf_prime_col % (score_tile // 2)
-                            + buf_prime_key_page * BLOCK_SIZE
-                        )
-                        if balance_leaves:
-                            buf_prime_key_row = (
-                                buf_logical_begin + buf_score_begin + buf_prime_col + buf_prime_key_page * BLOCK_SIZE
-                            )
-                        buf_prime_safe_page = pl.min(
-                            buf_prime_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
-                        )
-                        if buf_prime_safe_page >= 0 and buf_prime_safe_page < pl.tensor.dim(idx_block_table, 1):
-                            buf_prime_physical_page = pl.cast(
-                                pl.read(idx_block_table, [buf_batch_idx, buf_prime_safe_page]), pl.INDEX
-                            )
-                            if buf_prime_physical_page >= 0 and buf_prime_physical_page < pl.tensor.dim(
-                                idx_native_kv_cache, 0
-                            ):
-                                buf_prime_native_byte = buf_prime_physical_page * native_page_bytes
-                                if buf_prime_native_byte % IDX_HEAD_DIM == 0:
-                                    buf_key_l1_pool = pl.gather_row(
-                                        buf_key_l1_pool,
-                                        idx_kv_cache,
-                                        [buf_prime_key_page * BLOCK_SIZE, 0],
-                                        [buf_prime_native_byte // IDX_HEAD_DIM, 0],
-                                        [BLOCK_SIZE, IDX_HEAD_DIM],
-                                    )
-                                else:
-                                    buf_key_l1_pool = pl.gather_row(
-                                        buf_key_l1_pool,
-                                        idx_kv_cache_shift64,
-                                        [buf_prime_key_page * BLOCK_SIZE, 0],
-                                        [buf_prime_native_byte // IDX_HEAD_DIM, 0],
-                                        [BLOCK_SIZE, IDX_HEAD_DIM],
-                                    )
-                    if key_prefetch_to_l0:
-                        buf_current_key = pl.tile.extract(
-                            pl.tile.transpose_view(buf_key_l1_pool),
-                            0,
-                            0,
-                            [IDX_HEAD_DIM, qk_panel_cols],
-                            target_memory=pl.MemorySpace.Right,
-                        )
-                # 固定panel顺序：本panel QK与前panel head归约同时存活，保留FP16舍入位置。
-                for buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
-                    buf_panel_col = buf_qk_panel * qk_panel_cols
-                    buf_load_col = (buf_qk_panel + key_prefetch_panels) * qk_panel_cols
-                    buf_load_slot = (buf_qk_panel + key_prefetch_panels) % 2 * qk_panel_cols
+                    live1_live_half_split_previous0 = pl.tile.create(
+                        [64, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                    )
+                    live1_live_half_buf_current_key = pl.tile.create(
+                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    )
+                    live1_live_half_buf_prefetched_key = pl.tile.create(
+                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    )
+                    live1_live_half_buf_key_l1_pool = pl.tile.create(
+                        [2 * qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                    )
                     if key_prefetch_panels > 0:
-                        if not key_prefetch_to_l0:
-                            buf_current_key = pl.tile.extract(
-                                pl.tile.transpose_view(buf_key_l1_pool),
-                                0,
-                                buf_qk_panel % 2 * qk_panel_cols,
-                                [IDX_HEAD_DIM, qk_panel_cols],
-                                target_memory=pl.MemorySpace.Right,
-                            )
-                    if buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols:
-                        buf_panel_keys = pl.tile.create(
-                            [qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
-                        )
-                        for buf_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
-                            buf_key_row = (
+                        live1_live_half_buf_prime_col = 0
+                        for live1_live_half_buf_prime_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                            live1_live_half_buf_prime_key_row = (
                                 buf_logical_begin
-                                + buf_score_begin
-                                + buf_load_col // (score_tile // 2) * buf_lane_span
-                                + buf_load_col % (score_tile // 2)
-                                + buf_key_page * BLOCK_SIZE
+                                + live1_live_half_buf_score_begin
+                                + live1_live_half_buf_prime_col // (score_tile // 2) * live1_live_half_buf_lane_span
+                                + live1_live_half_buf_prime_col % (score_tile // 2)
+                                + live1_live_half_buf_prime_key_page * BLOCK_SIZE
                             )
                             if balance_leaves:
-                                buf_key_row = (
-                                    buf_logical_begin + buf_score_begin + buf_load_col + buf_key_page * BLOCK_SIZE
+                                live1_live_half_buf_prime_key_row = (
+                                    buf_logical_begin
+                                    + live1_live_half_buf_score_begin
+                                    + live1_live_half_buf_prime_col
+                                    + live1_live_half_buf_prime_key_page * BLOCK_SIZE
                                 )
-                            buf_safe_page = pl.min(
-                                buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
+                            live1_live_half_buf_prime_safe_page = pl.min(
+                                live1_live_half_buf_prime_key_row // BLOCK_SIZE,
+                                pl.max((live1_live_half_buf_cache_len - 1) // BLOCK_SIZE, 0),
                             )
-                            if buf_safe_page >= 0 and buf_safe_page < pl.tensor.dim(idx_block_table, 1):
-                                buf_physical_page = pl.cast(
-                                    pl.read(idx_block_table, [buf_batch_idx, buf_safe_page]), pl.INDEX
+                            if (
+                                live1_live_half_buf_prime_safe_page >= 0
+                                and live1_live_half_buf_prime_safe_page < pl.tensor.dim(idx_block_table, 1)
+                            ):
+                                live1_live_half_buf_prime_physical_page = pl.cast(
+                                    pl.read(idx_block_table, [buf_batch_idx, live1_live_half_buf_prime_safe_page]),
+                                    pl.INDEX,
                                 )
-                                if buf_physical_page >= 0 and buf_physical_page < pl.tensor.dim(idx_native_kv_cache, 0):
-                                    buf_native_byte = buf_physical_page * native_page_bytes
-                                    if buf_native_byte % IDX_HEAD_DIM == 0:
-                                        if key_prefetch_panels > 0:
-                                            buf_key_l1_pool = pl.gather_row(
-                                                buf_key_l1_pool,
-                                                idx_kv_cache,
-                                                [buf_load_slot + buf_key_page * BLOCK_SIZE, 0],
-                                                [buf_native_byte // IDX_HEAD_DIM, 0],
-                                                [BLOCK_SIZE, IDX_HEAD_DIM],
-                                            )
-                                        else:
-                                            buf_panel_keys = pl.gather_row(
-                                                buf_panel_keys,
-                                                idx_kv_cache,
-                                                [buf_key_page * BLOCK_SIZE, 0],
-                                                [buf_native_byte // IDX_HEAD_DIM, 0],
-                                                [BLOCK_SIZE, IDX_HEAD_DIM],
-                                            )
-                                    elif key_prefetch_panels > 0:
-                                        buf_key_l1_pool = pl.gather_row(
-                                            buf_key_l1_pool,
-                                            idx_kv_cache_shift64,
-                                            [buf_load_slot + buf_key_page * BLOCK_SIZE, 0],
-                                            [buf_native_byte // IDX_HEAD_DIM, 0],
+                                if (
+                                    live1_live_half_buf_prime_physical_page >= 0
+                                    and live1_live_half_buf_prime_physical_page < pl.tensor.dim(idx_native_kv_cache, 0)
+                                ):
+                                    live1_live_half_buf_prime_native_byte = (
+                                        live1_live_half_buf_prime_physical_page * native_page_bytes
+                                    )
+                                    if live1_live_half_buf_prime_native_byte % IDX_HEAD_DIM == 0:
+                                        live1_live_half_buf_key_l1_pool = pl.gather_row(
+                                            live1_live_half_buf_key_l1_pool,
+                                            idx_kv_cache,
+                                            [live1_live_half_buf_prime_key_page * BLOCK_SIZE, 0],
+                                            [live1_live_half_buf_prime_native_byte // IDX_HEAD_DIM, 0],
                                             [BLOCK_SIZE, IDX_HEAD_DIM],
                                         )
                                     else:
-                                        buf_panel_keys = pl.gather_row(
-                                            buf_panel_keys,
+                                        live1_live_half_buf_key_l1_pool = pl.gather_row(
+                                            live1_live_half_buf_key_l1_pool,
                                             idx_kv_cache_shift64,
-                                            [buf_key_page * BLOCK_SIZE, 0],
-                                            [buf_native_byte // IDX_HEAD_DIM, 0],
+                                            [live1_live_half_buf_prime_key_page * BLOCK_SIZE, 0],
+                                            [live1_live_half_buf_prime_native_byte // IDX_HEAD_DIM, 0],
                                             [BLOCK_SIZE, IDX_HEAD_DIM],
                                         )
+                        if key_prefetch_to_l0:
+                            live1_live_half_buf_current_key = pl.tile.extract(
+                                pl.tile.transpose_view(live1_live_half_buf_key_l1_pool),
+                                0,
+                                0,
+                                [IDX_HEAD_DIM, qk_panel_cols],
+                                target_memory=pl.MemorySpace.Right,
+                            )
+                    for live1_live_half_buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
+                        live1_live_half_buf_panel_col = live1_live_half_buf_qk_panel * qk_panel_cols
+                        live1_live_half_buf_load_col = (
+                            live1_live_half_buf_qk_panel + key_prefetch_panels
+                        ) * qk_panel_cols
+                        live1_live_half_buf_load_slot = (
+                            (live1_live_half_buf_qk_panel + key_prefetch_panels) % 2 * qk_panel_cols
+                        )
                         if key_prefetch_panels > 0:
-                            if key_prefetch_to_l0:
-                                buf_prefetched_key = pl.tile.extract(
-                                    pl.tile.transpose_view(buf_key_l1_pool),
+                            if not key_prefetch_to_l0:
+                                live1_live_half_buf_current_key = pl.tile.extract(
+                                    pl.tile.transpose_view(live1_live_half_buf_key_l1_pool),
                                     0,
-                                    buf_load_slot,
+                                    live1_live_half_buf_qk_panel % 2 * qk_panel_cols,
                                     [IDX_HEAD_DIM, qk_panel_cols],
                                     target_memory=pl.MemorySpace.Right,
                                 )
-                        else:
-                            buf_prefetched_key = pl.tile.move(
-                                pl.tile.transpose_view(buf_panel_keys), target_memory=pl.MemorySpace.Right
+                        if live1_live_half_buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols:
+                            live1_live_half_buf_panel_keys = pl.tile.create(
+                                [qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
                             )
-                    if key_prefetch_panels > 0:
-                        buf_key_panel = buf_current_key
-                    else:
-                        buf_key_panel = buf_prefetched_key
-                    split_current0 = pl.tile.create(
-                        [SPLIT_QK_ROWS, qk_panel_cols],
-                        dtype=pl.FP16,
-                        target_memory=pl.MemorySpace.Mat,
+                            for live1_live_half_buf_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                                live1_live_half_buf_key_row = (
+                                    buf_logical_begin
+                                    + live1_live_half_buf_score_begin
+                                    + live1_live_half_buf_load_col // (score_tile // 2) * live1_live_half_buf_lane_span
+                                    + live1_live_half_buf_load_col % (score_tile // 2)
+                                    + live1_live_half_buf_key_page * BLOCK_SIZE
+                                )
+                                if balance_leaves:
+                                    live1_live_half_buf_key_row = (
+                                        buf_logical_begin
+                                        + live1_live_half_buf_score_begin
+                                        + live1_live_half_buf_load_col
+                                        + live1_live_half_buf_key_page * BLOCK_SIZE
+                                    )
+                                live1_live_half_buf_safe_page = pl.min(
+                                    live1_live_half_buf_key_row // BLOCK_SIZE,
+                                    pl.max((live1_live_half_buf_cache_len - 1) // BLOCK_SIZE, 0),
+                                )
+                                if live1_live_half_buf_safe_page >= 0 and live1_live_half_buf_safe_page < pl.tensor.dim(
+                                    idx_block_table, 1
+                                ):
+                                    live1_live_half_buf_physical_page = pl.cast(
+                                        pl.read(idx_block_table, [buf_batch_idx, live1_live_half_buf_safe_page]),
+                                        pl.INDEX,
+                                    )
+                                    if (
+                                        live1_live_half_buf_physical_page >= 0
+                                        and live1_live_half_buf_physical_page < pl.tensor.dim(idx_native_kv_cache, 0)
+                                    ):
+                                        live1_live_half_buf_native_byte = (
+                                            live1_live_half_buf_physical_page * native_page_bytes
+                                        )
+                                        if live1_live_half_buf_native_byte % IDX_HEAD_DIM == 0:
+                                            if key_prefetch_panels > 0:
+                                                live1_live_half_buf_key_l1_pool = pl.gather_row(
+                                                    live1_live_half_buf_key_l1_pool,
+                                                    idx_kv_cache,
+                                                    [
+                                                        live1_live_half_buf_load_slot
+                                                        + live1_live_half_buf_key_page * BLOCK_SIZE,
+                                                        0,
+                                                    ],
+                                                    [live1_live_half_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                    [BLOCK_SIZE, IDX_HEAD_DIM],
+                                                )
+                                            else:
+                                                live1_live_half_buf_panel_keys = pl.gather_row(
+                                                    live1_live_half_buf_panel_keys,
+                                                    idx_kv_cache,
+                                                    [live1_live_half_buf_key_page * BLOCK_SIZE, 0],
+                                                    [live1_live_half_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                    [BLOCK_SIZE, IDX_HEAD_DIM],
+                                                )
+                                        elif key_prefetch_panels > 0:
+                                            live1_live_half_buf_key_l1_pool = pl.gather_row(
+                                                live1_live_half_buf_key_l1_pool,
+                                                idx_kv_cache_shift64,
+                                                [
+                                                    live1_live_half_buf_load_slot
+                                                    + live1_live_half_buf_key_page * BLOCK_SIZE,
+                                                    0,
+                                                ],
+                                                [live1_live_half_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                                        else:
+                                            live1_live_half_buf_panel_keys = pl.gather_row(
+                                                live1_live_half_buf_panel_keys,
+                                                idx_kv_cache_shift64,
+                                                [live1_live_half_buf_key_page * BLOCK_SIZE, 0],
+                                                [live1_live_half_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                            if key_prefetch_panels > 0:
+                                if key_prefetch_to_l0:
+                                    live1_live_half_buf_prefetched_key = pl.tile.extract(
+                                        pl.tile.transpose_view(live1_live_half_buf_key_l1_pool),
+                                        0,
+                                        live1_live_half_buf_load_slot,
+                                        [IDX_HEAD_DIM, qk_panel_cols],
+                                        target_memory=pl.MemorySpace.Right,
+                                    )
+                            else:
+                                live1_live_half_buf_prefetched_key = pl.tile.move(
+                                    pl.tile.transpose_view(live1_live_half_buf_panel_keys),
+                                    target_memory=pl.MemorySpace.Right,
+                                )
+                        if key_prefetch_panels > 0:
+                            live1_live_half_buf_key_panel = live1_live_half_buf_current_key
+                        else:
+                            live1_live_half_buf_key_panel = live1_live_half_buf_prefetched_key
+                        live1_live_half_split_current0 = pl.tile.create(
+                            [64, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                        )
+                        if live1_live_half_buf_qk_panel > 0:
+                            live1_live_half_split_right0 = pl.tile.extract(
+                                live1_live_half_split_previous0,
+                                0,
+                                0,
+                                [64, qk_panel_cols],
+                                target_memory=pl.MemorySpace.Right,
+                            )
+                            live1_live_half_split_qk0 = pl.tile.matmul_acc(
+                                live1_live_half_split_qk_acc0,
+                                live1_live_half_split_query0,
+                                live1_live_half_buf_key_panel,
+                                init_cond=True,
+                            )
+                            live1_live_half_split_current0 = pl.tile.assemble(
+                                live1_live_half_split_current0,
+                                live1_live_half_split_qk0,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                            live1_live_half_split_ws_first = pl.tile.matmul_acc(
+                                live1_live_half_split_ws_acc,
+                                live1_live_half_split_coefficient0,
+                                live1_live_half_split_right0,
+                                init_cond=True,
+                            )
+                            pl.store(
+                                pl.set_validshape(live1_live_half_split_ws_first, query_group_size, qk_panel_cols),
+                                [live1_live_half_buf_transfer_row, live1_live_half_buf_panel_col - qk_panel_cols],
+                                buf_score_transfer,
+                            )
+                        else:
+                            live1_live_half_split_qk0 = pl.tile.matmul_acc(
+                                live1_live_half_split_qk_acc0,
+                                live1_live_half_split_query0,
+                                live1_live_half_buf_key_panel,
+                                init_cond=True,
+                            )
+                            live1_live_half_split_current0 = pl.tile.assemble(
+                                live1_live_half_split_current0,
+                                live1_live_half_split_qk0,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                        live1_live_half_split_previous0 = live1_live_half_split_current0
+                        if key_prefetch_panels > 0:
+                            if key_prefetch_to_l0:
+                                if live1_live_half_buf_qk_panel + 1 < score_tile // qk_panel_cols:
+                                    live1_live_half_buf_current_key = live1_live_half_buf_prefetched_key
+                    live1_live_half_split_right0_last = pl.tile.extract(
+                        live1_live_half_split_previous0, 0, 0, [64, qk_panel_cols], target_memory=pl.MemorySpace.Right
                     )
-                    split_current1 = pl.tile.create(
-                        [SPLIT_QK_ROWS, qk_panel_cols],
-                        dtype=pl.FP16,
-                        target_memory=pl.MemorySpace.Mat,
+                    live1_live_half_split_ws_first_last = pl.tile.matmul_acc(
+                        live1_live_half_split_ws_acc,
+                        live1_live_half_split_coefficient0,
+                        live1_live_half_split_right0_last,
+                        init_cond=True,
                     )
-                    if buf_qk_panel > 0:
-                        # 先备齐上一panel的两个24KiB Right；与两份8KiB Key
-                        # 同时存在恰为64KiB，不额外创建第三份Key或WS全K Right。
-                        split_right0 = pl.tile.extract(
-                            split_previous0,
-                            0,
-                            0,
-                            [SPLIT_QK_ROWS, qk_panel_cols],
-                            target_memory=pl.MemorySpace.Right,
+                    pl.store(
+                        pl.set_validshape(live1_live_half_split_ws_first_last, query_group_size, qk_panel_cols),
+                        [live1_live_half_buf_transfer_row, score_tile - qk_panel_cols],
+                        buf_score_transfer,
+                    )
+                    pl.system.sync_set(
+                        SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
+                    )
+                for live1_live_half_buf_score_drain in pl.range(pl.min(live1_live_half_buf_score_iters, 2)):
+                    pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+            elif buf_live == 2:
+                live2_live_half_buf_cache_len = (
+                    pl.cast(pl.read(kv_seq_lens, [buf_batch_idx]), pl.INDEX) // COMPRESS_RATIO
+                )
+                live2_live_half_buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
+                live2_live_half_buf_tile_count = (live2_live_half_buf_valid_count + score_tile - 1) // score_tile
+                live2_live_half_buf_lane_span = pl.min(
+                    live2_live_half_buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2
+                )
+                live2_live_half_buf_score_iters = (live2_live_half_buf_lane_span + score_tile // 2 - 1) // (
+                    score_tile // 2
+                )
+                live2_live_half_buf_query_vector = pl.load(
+                    qr_hadamard_i8,
+                    [buf_query * IDX_N_HEADS, 0],
+                    [128, IDX_HEAD_DIM],
+                    target_memory=pl.MemorySpace.Mat,
+                    valid_shape=[buf_live * IDX_N_HEADS, IDX_HEAD_DIM],
+                )
+                live2_live_half_buf_query_vector = pl.set_validshape(
+                    live2_live_half_buf_query_vector, 128, IDX_HEAD_DIM
+                )
+                for live2_live_half_padding_lane in pl.unroll(128 // IDX_N_HEADS):
+                    if live2_live_half_padding_lane >= buf_live:
+                        live2_live_half_buf_query_vector = pl.gather_row(
+                            live2_live_half_buf_query_vector,
+                            qr_hadamard_i8,
+                            [live2_live_half_padding_lane * IDX_N_HEADS, 0],
+                            [buf_query * IDX_N_HEADS, 0],
+                            [IDX_N_HEADS, IDX_HEAD_DIM],
                         )
-                        split_right1 = pl.tile.extract(
-                            split_previous1,
-                            0,
-                            0,
-                            [SPLIT_QK_ROWS, qk_panel_cols],
-                            target_memory=pl.MemorySpace.Right,
-                        )
-                        split_qk0 = pl.tile.matmul_acc(
-                            split_qk_acc0,
-                            split_query0,
-                            buf_key_panel,
-                            init_cond=True,
-                        )
-                        # 第一份FIX位于第二份QK之前；两份Acc明确独立才有重叠机会。
-                        split_current0 = pl.tile.assemble(
-                            split_current0,
-                            split_qk0,
-                            [0, 0],
-                            pre_quant=1.0 / BUFFERED_SCORE_SCALE,
-                            pre_relu=True,
-                        )
-                        split_qk1 = pl.tile.matmul_acc(
-                            split_qk_acc1,
-                            split_query1,
-                            buf_key_panel,
-                            init_cond=True,
-                        )
-                        # 第一份FIX位于第二份QK之前；两份Acc明确独立才有重叠机会。
-                        split_current1 = pl.tile.assemble(
-                            split_current1,
-                            split_qk1,
-                            [0, 0],
-                            pre_quant=1.0 / BUFFERED_SCORE_SCALE,
-                            pre_relu=True,
-                        )
-                        split_ws_first = pl.tile.matmul_acc(
-                            split_ws_acc,
-                            split_coefficient0,
-                            split_right0,
-                            init_cond=True,
-                        )
-                        split_ws_done = pl.tile.matmul_acc(
-                            split_ws_first,
-                            split_coefficient1,
-                            split_right1,
-                        )
-                        # 每panel仅一次原六行写回，保留1024列FIFO布局和顺序。
-                        pl.store(
-                            pl.set_validshape(split_ws_done, query_group_size, qk_panel_cols),
-                            [buf_transfer_row, buf_panel_col - qk_panel_cols],
-                            buf_score_transfer,
-                        )
-                    else:
-                        split_qk0 = pl.tile.matmul_acc(
-                            split_qk_acc0,
-                            split_query0,
-                            buf_key_panel,
-                            init_cond=True,
-                        )
-                        # 第一份FIX位于第二份QK之前；两份Acc明确独立才有重叠机会。
-                        split_current0 = pl.tile.assemble(
-                            split_current0,
-                            split_qk0,
-                            [0, 0],
-                            pre_quant=1.0 / BUFFERED_SCORE_SCALE,
-                            pre_relu=True,
-                        )
-                        split_qk1 = pl.tile.matmul_acc(
-                            split_qk_acc1,
-                            split_query1,
-                            buf_key_panel,
-                            init_cond=True,
-                        )
-                        # 第一份FIX位于第二份QK之前；两份Acc明确独立才有重叠机会。
-                        split_current1 = pl.tile.assemble(
-                            split_current1,
-                            split_qk1,
-                            [0, 0],
-                            pre_quant=1.0 / BUFFERED_SCORE_SCALE,
-                            pre_relu=True,
-                        )
-                    split_previous0 = split_current0
-                    split_previous1 = split_current1
+                live2_live_half_buf_coefficients_l1 = pl.load(
+                    coefficients,
+                    [buf_group * NATIVE_QLI_WEIGHT_ROWS, 0],
+                    [NATIVE_QLI_WEIGHT_ROWS, 128],
+                    target_memory=pl.MemorySpace.Mat,
+                )
+                live2_live_half_split_query0 = pl.tile.extract(
+                    live2_live_half_buf_query_vector, 0 * 128, 0, [128, IDX_HEAD_DIM], target_memory=pl.MemorySpace.Left
+                )
+                live2_live_half_split_coefficient0 = pl.tile.extract(
+                    live2_live_half_buf_coefficients_l1,
+                    0,
+                    0 * 128,
+                    [NATIVE_QLI_WEIGHT_ROWS, 128],
+                    target_memory=pl.MemorySpace.Left,
+                )
+                live2_live_half_split_qk_acc0 = pl.tile.create(
+                    [128, qk_panel_cols], dtype=pl.INT32, target_memory=pl.MemorySpace.Acc
+                )
+                live2_live_half_split_ws_acc = pl.tile.create(
+                    [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols], dtype=pl.FP32, target_memory=pl.MemorySpace.Acc
+                )
+                for live2_live_half_buf_score_step in pl.range(live2_live_half_buf_score_iters):
+                    if live2_live_half_buf_score_step >= 2:
+                        pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+                    live2_live_half_buf_score_begin = live2_live_half_buf_score_step * (score_tile // 2)
+                    if balance_leaves:
+                        live2_live_half_buf_score_begin = live2_live_half_buf_score_step * score_tile
+                    live2_live_half_buf_transfer_row = (
+                        buf_worker * 2 * query_group_size + live2_live_half_buf_score_step % 2 * query_group_size
+                    )
+                    live2_live_half_split_previous0 = pl.tile.create(
+                        [128, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                    )
+                    live2_live_half_buf_current_key = pl.tile.create(
+                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    )
+                    live2_live_half_buf_prefetched_key = pl.tile.create(
+                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    )
+                    live2_live_half_buf_key_l1_pool = pl.tile.create(
+                        [2 * qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                    )
                     if key_prefetch_panels > 0:
+                        live2_live_half_buf_prime_col = 0
+                        for live2_live_half_buf_prime_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                            live2_live_half_buf_prime_key_row = (
+                                buf_logical_begin
+                                + live2_live_half_buf_score_begin
+                                + live2_live_half_buf_prime_col // (score_tile // 2) * live2_live_half_buf_lane_span
+                                + live2_live_half_buf_prime_col % (score_tile // 2)
+                                + live2_live_half_buf_prime_key_page * BLOCK_SIZE
+                            )
+                            if balance_leaves:
+                                live2_live_half_buf_prime_key_row = (
+                                    buf_logical_begin
+                                    + live2_live_half_buf_score_begin
+                                    + live2_live_half_buf_prime_col
+                                    + live2_live_half_buf_prime_key_page * BLOCK_SIZE
+                                )
+                            live2_live_half_buf_prime_safe_page = pl.min(
+                                live2_live_half_buf_prime_key_row // BLOCK_SIZE,
+                                pl.max((live2_live_half_buf_cache_len - 1) // BLOCK_SIZE, 0),
+                            )
+                            if (
+                                live2_live_half_buf_prime_safe_page >= 0
+                                and live2_live_half_buf_prime_safe_page < pl.tensor.dim(idx_block_table, 1)
+                            ):
+                                live2_live_half_buf_prime_physical_page = pl.cast(
+                                    pl.read(idx_block_table, [buf_batch_idx, live2_live_half_buf_prime_safe_page]),
+                                    pl.INDEX,
+                                )
+                                if (
+                                    live2_live_half_buf_prime_physical_page >= 0
+                                    and live2_live_half_buf_prime_physical_page < pl.tensor.dim(idx_native_kv_cache, 0)
+                                ):
+                                    live2_live_half_buf_prime_native_byte = (
+                                        live2_live_half_buf_prime_physical_page * native_page_bytes
+                                    )
+                                    if live2_live_half_buf_prime_native_byte % IDX_HEAD_DIM == 0:
+                                        live2_live_half_buf_key_l1_pool = pl.gather_row(
+                                            live2_live_half_buf_key_l1_pool,
+                                            idx_kv_cache,
+                                            [live2_live_half_buf_prime_key_page * BLOCK_SIZE, 0],
+                                            [live2_live_half_buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                                    else:
+                                        live2_live_half_buf_key_l1_pool = pl.gather_row(
+                                            live2_live_half_buf_key_l1_pool,
+                                            idx_kv_cache_shift64,
+                                            [live2_live_half_buf_prime_key_page * BLOCK_SIZE, 0],
+                                            [live2_live_half_buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
                         if key_prefetch_to_l0:
-                            if buf_qk_panel + 1 < score_tile // qk_panel_cols:
-                                buf_current_key = buf_prefetched_key
-                split_right0_last = pl.tile.extract(
-                    split_previous0,
+                            live2_live_half_buf_current_key = pl.tile.extract(
+                                pl.tile.transpose_view(live2_live_half_buf_key_l1_pool),
+                                0,
+                                0,
+                                [IDX_HEAD_DIM, qk_panel_cols],
+                                target_memory=pl.MemorySpace.Right,
+                            )
+                    for live2_live_half_buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
+                        live2_live_half_buf_panel_col = live2_live_half_buf_qk_panel * qk_panel_cols
+                        live2_live_half_buf_load_col = (
+                            live2_live_half_buf_qk_panel + key_prefetch_panels
+                        ) * qk_panel_cols
+                        live2_live_half_buf_load_slot = (
+                            (live2_live_half_buf_qk_panel + key_prefetch_panels) % 2 * qk_panel_cols
+                        )
+                        if key_prefetch_panels > 0:
+                            if not key_prefetch_to_l0:
+                                live2_live_half_buf_current_key = pl.tile.extract(
+                                    pl.tile.transpose_view(live2_live_half_buf_key_l1_pool),
+                                    0,
+                                    live2_live_half_buf_qk_panel % 2 * qk_panel_cols,
+                                    [IDX_HEAD_DIM, qk_panel_cols],
+                                    target_memory=pl.MemorySpace.Right,
+                                )
+                        if live2_live_half_buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols:
+                            live2_live_half_buf_panel_keys = pl.tile.create(
+                                [qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                            )
+                            for live2_live_half_buf_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                                live2_live_half_buf_key_row = (
+                                    buf_logical_begin
+                                    + live2_live_half_buf_score_begin
+                                    + live2_live_half_buf_load_col // (score_tile // 2) * live2_live_half_buf_lane_span
+                                    + live2_live_half_buf_load_col % (score_tile // 2)
+                                    + live2_live_half_buf_key_page * BLOCK_SIZE
+                                )
+                                if balance_leaves:
+                                    live2_live_half_buf_key_row = (
+                                        buf_logical_begin
+                                        + live2_live_half_buf_score_begin
+                                        + live2_live_half_buf_load_col
+                                        + live2_live_half_buf_key_page * BLOCK_SIZE
+                                    )
+                                live2_live_half_buf_safe_page = pl.min(
+                                    live2_live_half_buf_key_row // BLOCK_SIZE,
+                                    pl.max((live2_live_half_buf_cache_len - 1) // BLOCK_SIZE, 0),
+                                )
+                                if live2_live_half_buf_safe_page >= 0 and live2_live_half_buf_safe_page < pl.tensor.dim(
+                                    idx_block_table, 1
+                                ):
+                                    live2_live_half_buf_physical_page = pl.cast(
+                                        pl.read(idx_block_table, [buf_batch_idx, live2_live_half_buf_safe_page]),
+                                        pl.INDEX,
+                                    )
+                                    if (
+                                        live2_live_half_buf_physical_page >= 0
+                                        and live2_live_half_buf_physical_page < pl.tensor.dim(idx_native_kv_cache, 0)
+                                    ):
+                                        live2_live_half_buf_native_byte = (
+                                            live2_live_half_buf_physical_page * native_page_bytes
+                                        )
+                                        if live2_live_half_buf_native_byte % IDX_HEAD_DIM == 0:
+                                            if key_prefetch_panels > 0:
+                                                live2_live_half_buf_key_l1_pool = pl.gather_row(
+                                                    live2_live_half_buf_key_l1_pool,
+                                                    idx_kv_cache,
+                                                    [
+                                                        live2_live_half_buf_load_slot
+                                                        + live2_live_half_buf_key_page * BLOCK_SIZE,
+                                                        0,
+                                                    ],
+                                                    [live2_live_half_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                    [BLOCK_SIZE, IDX_HEAD_DIM],
+                                                )
+                                            else:
+                                                live2_live_half_buf_panel_keys = pl.gather_row(
+                                                    live2_live_half_buf_panel_keys,
+                                                    idx_kv_cache,
+                                                    [live2_live_half_buf_key_page * BLOCK_SIZE, 0],
+                                                    [live2_live_half_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                    [BLOCK_SIZE, IDX_HEAD_DIM],
+                                                )
+                                        elif key_prefetch_panels > 0:
+                                            live2_live_half_buf_key_l1_pool = pl.gather_row(
+                                                live2_live_half_buf_key_l1_pool,
+                                                idx_kv_cache_shift64,
+                                                [
+                                                    live2_live_half_buf_load_slot
+                                                    + live2_live_half_buf_key_page * BLOCK_SIZE,
+                                                    0,
+                                                ],
+                                                [live2_live_half_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                                        else:
+                                            live2_live_half_buf_panel_keys = pl.gather_row(
+                                                live2_live_half_buf_panel_keys,
+                                                idx_kv_cache_shift64,
+                                                [live2_live_half_buf_key_page * BLOCK_SIZE, 0],
+                                                [live2_live_half_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                            if key_prefetch_panels > 0:
+                                if key_prefetch_to_l0:
+                                    live2_live_half_buf_prefetched_key = pl.tile.extract(
+                                        pl.tile.transpose_view(live2_live_half_buf_key_l1_pool),
+                                        0,
+                                        live2_live_half_buf_load_slot,
+                                        [IDX_HEAD_DIM, qk_panel_cols],
+                                        target_memory=pl.MemorySpace.Right,
+                                    )
+                            else:
+                                live2_live_half_buf_prefetched_key = pl.tile.move(
+                                    pl.tile.transpose_view(live2_live_half_buf_panel_keys),
+                                    target_memory=pl.MemorySpace.Right,
+                                )
+                        if key_prefetch_panels > 0:
+                            live2_live_half_buf_key_panel = live2_live_half_buf_current_key
+                        else:
+                            live2_live_half_buf_key_panel = live2_live_half_buf_prefetched_key
+                        live2_live_half_split_current0 = pl.tile.create(
+                            [128, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                        )
+                        if live2_live_half_buf_qk_panel > 0:
+                            live2_live_half_split_right0 = pl.tile.extract(
+                                live2_live_half_split_previous0,
+                                0,
+                                0,
+                                [128, qk_panel_cols],
+                                target_memory=pl.MemorySpace.Right,
+                            )
+                            live2_live_half_split_qk0 = pl.tile.matmul_acc(
+                                live2_live_half_split_qk_acc0,
+                                live2_live_half_split_query0,
+                                live2_live_half_buf_key_panel,
+                                init_cond=True,
+                            )
+                            live2_live_half_split_current0 = pl.tile.assemble(
+                                live2_live_half_split_current0,
+                                live2_live_half_split_qk0,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                            live2_live_half_split_ws_first = pl.tile.matmul_acc(
+                                live2_live_half_split_ws_acc,
+                                live2_live_half_split_coefficient0,
+                                live2_live_half_split_right0,
+                                init_cond=True,
+                            )
+                            pl.store(
+                                pl.set_validshape(live2_live_half_split_ws_first, query_group_size, qk_panel_cols),
+                                [live2_live_half_buf_transfer_row, live2_live_half_buf_panel_col - qk_panel_cols],
+                                buf_score_transfer,
+                            )
+                        else:
+                            live2_live_half_split_qk0 = pl.tile.matmul_acc(
+                                live2_live_half_split_qk_acc0,
+                                live2_live_half_split_query0,
+                                live2_live_half_buf_key_panel,
+                                init_cond=True,
+                            )
+                            live2_live_half_split_current0 = pl.tile.assemble(
+                                live2_live_half_split_current0,
+                                live2_live_half_split_qk0,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                        live2_live_half_split_previous0 = live2_live_half_split_current0
+                        if key_prefetch_panels > 0:
+                            if key_prefetch_to_l0:
+                                if live2_live_half_buf_qk_panel + 1 < score_tile // qk_panel_cols:
+                                    live2_live_half_buf_current_key = live2_live_half_buf_prefetched_key
+                    live2_live_half_split_right0_last = pl.tile.extract(
+                        live2_live_half_split_previous0, 0, 0, [128, qk_panel_cols], target_memory=pl.MemorySpace.Right
+                    )
+                    live2_live_half_split_ws_first_last = pl.tile.matmul_acc(
+                        live2_live_half_split_ws_acc,
+                        live2_live_half_split_coefficient0,
+                        live2_live_half_split_right0_last,
+                        init_cond=True,
+                    )
+                    pl.store(
+                        pl.set_validshape(live2_live_half_split_ws_first_last, query_group_size, qk_panel_cols),
+                        [live2_live_half_buf_transfer_row, score_tile - qk_panel_cols],
+                        buf_score_transfer,
+                    )
+                    pl.system.sync_set(
+                        SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
+                    )
+                for live2_live_half_buf_score_drain in pl.range(pl.min(live2_live_half_buf_score_iters, 2)):
+                    pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+            elif buf_live == 3:
+                live3_live_half_buf_cache_len = (
+                    pl.cast(pl.read(kv_seq_lens, [buf_batch_idx]), pl.INDEX) // COMPRESS_RATIO
+                )
+                live3_live_half_buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
+                live3_live_half_buf_tile_count = (live3_live_half_buf_valid_count + score_tile - 1) // score_tile
+                live3_live_half_buf_lane_span = pl.min(
+                    live3_live_half_buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2
+                )
+                live3_live_half_buf_score_iters = (live3_live_half_buf_lane_span + score_tile // 2 - 1) // (
+                    score_tile // 2
+                )
+                live3_live_half_buf_query_vector = pl.load(
+                    qr_hadamard_i8,
+                    [buf_query * IDX_N_HEADS, 0],
+                    [192, IDX_HEAD_DIM],
+                    target_memory=pl.MemorySpace.Mat,
+                    valid_shape=[buf_live * IDX_N_HEADS, IDX_HEAD_DIM],
+                )
+                live3_live_half_buf_query_vector = pl.set_validshape(
+                    live3_live_half_buf_query_vector, 192, IDX_HEAD_DIM
+                )
+                for live3_live_half_padding_lane in pl.unroll(192 // IDX_N_HEADS):
+                    if live3_live_half_padding_lane >= buf_live:
+                        live3_live_half_buf_query_vector = pl.gather_row(
+                            live3_live_half_buf_query_vector,
+                            qr_hadamard_i8,
+                            [live3_live_half_padding_lane * IDX_N_HEADS, 0],
+                            [buf_query * IDX_N_HEADS, 0],
+                            [IDX_N_HEADS, IDX_HEAD_DIM],
+                        )
+                live3_live_half_buf_coefficients_l1 = pl.load(
+                    coefficients,
+                    [buf_group * NATIVE_QLI_WEIGHT_ROWS, 0],
+                    [NATIVE_QLI_WEIGHT_ROWS, 192],
+                    target_memory=pl.MemorySpace.Mat,
+                )
+                live3_live_half_split_query0 = pl.tile.extract(
+                    live3_live_half_buf_query_vector, 0 * 192, 0, [192, IDX_HEAD_DIM], target_memory=pl.MemorySpace.Left
+                )
+                live3_live_half_split_coefficient0 = pl.tile.extract(
+                    live3_live_half_buf_coefficients_l1,
                     0,
+                    0 * 192,
+                    [NATIVE_QLI_WEIGHT_ROWS, 192],
+                    target_memory=pl.MemorySpace.Left,
+                )
+                live3_live_half_split_qk_acc0 = pl.tile.create(
+                    [192, qk_panel_cols], dtype=pl.INT32, target_memory=pl.MemorySpace.Acc
+                )
+                live3_live_half_split_ws_acc = pl.tile.create(
+                    [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols], dtype=pl.FP32, target_memory=pl.MemorySpace.Acc
+                )
+                for live3_live_half_buf_score_step in pl.range(live3_live_half_buf_score_iters):
+                    if live3_live_half_buf_score_step >= 2:
+                        pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+                    live3_live_half_buf_score_begin = live3_live_half_buf_score_step * (score_tile // 2)
+                    if balance_leaves:
+                        live3_live_half_buf_score_begin = live3_live_half_buf_score_step * score_tile
+                    live3_live_half_buf_transfer_row = (
+                        buf_worker * 2 * query_group_size + live3_live_half_buf_score_step % 2 * query_group_size
+                    )
+                    live3_live_half_split_previous0 = pl.tile.create(
+                        [192, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                    )
+                    live3_live_half_buf_current_key = pl.tile.create(
+                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    )
+                    live3_live_half_buf_prefetched_key = pl.tile.create(
+                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    )
+                    live3_live_half_buf_key_l1_pool = pl.tile.create(
+                        [2 * qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                    )
+                    if key_prefetch_panels > 0:
+                        live3_live_half_buf_prime_col = 0
+                        for live3_live_half_buf_prime_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                            live3_live_half_buf_prime_key_row = (
+                                buf_logical_begin
+                                + live3_live_half_buf_score_begin
+                                + live3_live_half_buf_prime_col // (score_tile // 2) * live3_live_half_buf_lane_span
+                                + live3_live_half_buf_prime_col % (score_tile // 2)
+                                + live3_live_half_buf_prime_key_page * BLOCK_SIZE
+                            )
+                            if balance_leaves:
+                                live3_live_half_buf_prime_key_row = (
+                                    buf_logical_begin
+                                    + live3_live_half_buf_score_begin
+                                    + live3_live_half_buf_prime_col
+                                    + live3_live_half_buf_prime_key_page * BLOCK_SIZE
+                                )
+                            live3_live_half_buf_prime_safe_page = pl.min(
+                                live3_live_half_buf_prime_key_row // BLOCK_SIZE,
+                                pl.max((live3_live_half_buf_cache_len - 1) // BLOCK_SIZE, 0),
+                            )
+                            if (
+                                live3_live_half_buf_prime_safe_page >= 0
+                                and live3_live_half_buf_prime_safe_page < pl.tensor.dim(idx_block_table, 1)
+                            ):
+                                live3_live_half_buf_prime_physical_page = pl.cast(
+                                    pl.read(idx_block_table, [buf_batch_idx, live3_live_half_buf_prime_safe_page]),
+                                    pl.INDEX,
+                                )
+                                if (
+                                    live3_live_half_buf_prime_physical_page >= 0
+                                    and live3_live_half_buf_prime_physical_page < pl.tensor.dim(idx_native_kv_cache, 0)
+                                ):
+                                    live3_live_half_buf_prime_native_byte = (
+                                        live3_live_half_buf_prime_physical_page * native_page_bytes
+                                    )
+                                    if live3_live_half_buf_prime_native_byte % IDX_HEAD_DIM == 0:
+                                        live3_live_half_buf_key_l1_pool = pl.gather_row(
+                                            live3_live_half_buf_key_l1_pool,
+                                            idx_kv_cache,
+                                            [live3_live_half_buf_prime_key_page * BLOCK_SIZE, 0],
+                                            [live3_live_half_buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                                    else:
+                                        live3_live_half_buf_key_l1_pool = pl.gather_row(
+                                            live3_live_half_buf_key_l1_pool,
+                                            idx_kv_cache_shift64,
+                                            [live3_live_half_buf_prime_key_page * BLOCK_SIZE, 0],
+                                            [live3_live_half_buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                        if key_prefetch_to_l0:
+                            live3_live_half_buf_current_key = pl.tile.extract(
+                                pl.tile.transpose_view(live3_live_half_buf_key_l1_pool),
+                                0,
+                                0,
+                                [IDX_HEAD_DIM, qk_panel_cols],
+                                target_memory=pl.MemorySpace.Right,
+                            )
+                    for live3_live_half_buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
+                        live3_live_half_buf_panel_col = live3_live_half_buf_qk_panel * qk_panel_cols
+                        live3_live_half_buf_load_col = (
+                            live3_live_half_buf_qk_panel + key_prefetch_panels
+                        ) * qk_panel_cols
+                        live3_live_half_buf_load_slot = (
+                            (live3_live_half_buf_qk_panel + key_prefetch_panels) % 2 * qk_panel_cols
+                        )
+                        if key_prefetch_panels > 0:
+                            if not key_prefetch_to_l0:
+                                live3_live_half_buf_current_key = pl.tile.extract(
+                                    pl.tile.transpose_view(live3_live_half_buf_key_l1_pool),
+                                    0,
+                                    live3_live_half_buf_qk_panel % 2 * qk_panel_cols,
+                                    [IDX_HEAD_DIM, qk_panel_cols],
+                                    target_memory=pl.MemorySpace.Right,
+                                )
+                        if live3_live_half_buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols:
+                            live3_live_half_buf_panel_keys = pl.tile.create(
+                                [qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                            )
+                            for live3_live_half_buf_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                                live3_live_half_buf_key_row = (
+                                    buf_logical_begin
+                                    + live3_live_half_buf_score_begin
+                                    + live3_live_half_buf_load_col // (score_tile // 2) * live3_live_half_buf_lane_span
+                                    + live3_live_half_buf_load_col % (score_tile // 2)
+                                    + live3_live_half_buf_key_page * BLOCK_SIZE
+                                )
+                                if balance_leaves:
+                                    live3_live_half_buf_key_row = (
+                                        buf_logical_begin
+                                        + live3_live_half_buf_score_begin
+                                        + live3_live_half_buf_load_col
+                                        + live3_live_half_buf_key_page * BLOCK_SIZE
+                                    )
+                                live3_live_half_buf_safe_page = pl.min(
+                                    live3_live_half_buf_key_row // BLOCK_SIZE,
+                                    pl.max((live3_live_half_buf_cache_len - 1) // BLOCK_SIZE, 0),
+                                )
+                                if live3_live_half_buf_safe_page >= 0 and live3_live_half_buf_safe_page < pl.tensor.dim(
+                                    idx_block_table, 1
+                                ):
+                                    live3_live_half_buf_physical_page = pl.cast(
+                                        pl.read(idx_block_table, [buf_batch_idx, live3_live_half_buf_safe_page]),
+                                        pl.INDEX,
+                                    )
+                                    if (
+                                        live3_live_half_buf_physical_page >= 0
+                                        and live3_live_half_buf_physical_page < pl.tensor.dim(idx_native_kv_cache, 0)
+                                    ):
+                                        live3_live_half_buf_native_byte = (
+                                            live3_live_half_buf_physical_page * native_page_bytes
+                                        )
+                                        if live3_live_half_buf_native_byte % IDX_HEAD_DIM == 0:
+                                            if key_prefetch_panels > 0:
+                                                live3_live_half_buf_key_l1_pool = pl.gather_row(
+                                                    live3_live_half_buf_key_l1_pool,
+                                                    idx_kv_cache,
+                                                    [
+                                                        live3_live_half_buf_load_slot
+                                                        + live3_live_half_buf_key_page * BLOCK_SIZE,
+                                                        0,
+                                                    ],
+                                                    [live3_live_half_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                    [BLOCK_SIZE, IDX_HEAD_DIM],
+                                                )
+                                            else:
+                                                live3_live_half_buf_panel_keys = pl.gather_row(
+                                                    live3_live_half_buf_panel_keys,
+                                                    idx_kv_cache,
+                                                    [live3_live_half_buf_key_page * BLOCK_SIZE, 0],
+                                                    [live3_live_half_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                    [BLOCK_SIZE, IDX_HEAD_DIM],
+                                                )
+                                        elif key_prefetch_panels > 0:
+                                            live3_live_half_buf_key_l1_pool = pl.gather_row(
+                                                live3_live_half_buf_key_l1_pool,
+                                                idx_kv_cache_shift64,
+                                                [
+                                                    live3_live_half_buf_load_slot
+                                                    + live3_live_half_buf_key_page * BLOCK_SIZE,
+                                                    0,
+                                                ],
+                                                [live3_live_half_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                                        else:
+                                            live3_live_half_buf_panel_keys = pl.gather_row(
+                                                live3_live_half_buf_panel_keys,
+                                                idx_kv_cache_shift64,
+                                                [live3_live_half_buf_key_page * BLOCK_SIZE, 0],
+                                                [live3_live_half_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                            if key_prefetch_panels > 0:
+                                if key_prefetch_to_l0:
+                                    live3_live_half_buf_prefetched_key = pl.tile.extract(
+                                        pl.tile.transpose_view(live3_live_half_buf_key_l1_pool),
+                                        0,
+                                        live3_live_half_buf_load_slot,
+                                        [IDX_HEAD_DIM, qk_panel_cols],
+                                        target_memory=pl.MemorySpace.Right,
+                                    )
+                            else:
+                                live3_live_half_buf_prefetched_key = pl.tile.move(
+                                    pl.tile.transpose_view(live3_live_half_buf_panel_keys),
+                                    target_memory=pl.MemorySpace.Right,
+                                )
+                        if key_prefetch_panels > 0:
+                            live3_live_half_buf_key_panel = live3_live_half_buf_current_key
+                        else:
+                            live3_live_half_buf_key_panel = live3_live_half_buf_prefetched_key
+                        live3_live_half_split_current0 = pl.tile.create(
+                            [192, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                        )
+                        if live3_live_half_buf_qk_panel > 0:
+                            live3_live_half_split_right0 = pl.tile.extract(
+                                live3_live_half_split_previous0,
+                                0,
+                                0,
+                                [192, qk_panel_cols],
+                                target_memory=pl.MemorySpace.Right,
+                            )
+                            live3_live_half_split_qk0 = pl.tile.matmul_acc(
+                                live3_live_half_split_qk_acc0,
+                                live3_live_half_split_query0,
+                                live3_live_half_buf_key_panel,
+                                init_cond=True,
+                            )
+                            live3_live_half_split_current0 = pl.tile.assemble(
+                                live3_live_half_split_current0,
+                                live3_live_half_split_qk0,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                            live3_live_half_split_ws_first = pl.tile.matmul_acc(
+                                live3_live_half_split_ws_acc,
+                                live3_live_half_split_coefficient0,
+                                live3_live_half_split_right0,
+                                init_cond=True,
+                            )
+                            pl.store(
+                                pl.set_validshape(live3_live_half_split_ws_first, query_group_size, qk_panel_cols),
+                                [live3_live_half_buf_transfer_row, live3_live_half_buf_panel_col - qk_panel_cols],
+                                buf_score_transfer,
+                            )
+                        else:
+                            live3_live_half_split_qk0 = pl.tile.matmul_acc(
+                                live3_live_half_split_qk_acc0,
+                                live3_live_half_split_query0,
+                                live3_live_half_buf_key_panel,
+                                init_cond=True,
+                            )
+                            live3_live_half_split_current0 = pl.tile.assemble(
+                                live3_live_half_split_current0,
+                                live3_live_half_split_qk0,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                        live3_live_half_split_previous0 = live3_live_half_split_current0
+                        if key_prefetch_panels > 0:
+                            if key_prefetch_to_l0:
+                                if live3_live_half_buf_qk_panel + 1 < score_tile // qk_panel_cols:
+                                    live3_live_half_buf_current_key = live3_live_half_buf_prefetched_key
+                    live3_live_half_split_right0_last = pl.tile.extract(
+                        live3_live_half_split_previous0, 0, 0, [192, qk_panel_cols], target_memory=pl.MemorySpace.Right
+                    )
+                    live3_live_half_split_ws_first_last = pl.tile.matmul_acc(
+                        live3_live_half_split_ws_acc,
+                        live3_live_half_split_coefficient0,
+                        live3_live_half_split_right0_last,
+                        init_cond=True,
+                    )
+                    pl.store(
+                        pl.set_validshape(live3_live_half_split_ws_first_last, query_group_size, qk_panel_cols),
+                        [live3_live_half_buf_transfer_row, score_tile - qk_panel_cols],
+                        buf_score_transfer,
+                    )
+                    pl.system.sync_set(
+                        SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
+                    )
+                for live3_live_half_buf_score_drain in pl.range(pl.min(live3_live_half_buf_score_iters, 2)):
+                    pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+            elif buf_live == 4:
+                live4_buf_cache_len = pl.cast(pl.read(kv_seq_lens, [buf_batch_idx]), pl.INDEX) // COMPRESS_RATIO
+                live4_buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
+                live4_buf_tile_count = (live4_buf_valid_count + score_tile - 1) // score_tile
+                live4_buf_lane_span = pl.min(live4_buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
+                live4_buf_score_iters = (live4_buf_lane_span + score_tile // 2 - 1) // (score_tile // 2)
+                live4_buf_query_vector = pl.load(
+                    qr_hadamard_i8,
+                    [buf_query * IDX_N_HEADS, 0],
+                    [query_group_size * IDX_N_HEADS, IDX_HEAD_DIM],
+                    target_memory=pl.MemorySpace.Mat,
+                    valid_shape=[buf_live * IDX_N_HEADS, IDX_HEAD_DIM],
+                )
+                live4_buf_query_vector = pl.set_validshape(
+                    live4_buf_query_vector, query_group_size * IDX_N_HEADS, IDX_HEAD_DIM
+                )
+                for live4_padding_lane in pl.unroll(query_group_size):
+                    if live4_padding_lane >= buf_live:
+                        live4_buf_query_vector = pl.gather_row(
+                            live4_buf_query_vector,
+                            qr_hadamard_i8,
+                            [live4_padding_lane * IDX_N_HEADS, 0],
+                            [buf_query * IDX_N_HEADS, 0],
+                            [IDX_N_HEADS, IDX_HEAD_DIM],
+                        )
+                live4_buf_coefficients_l1 = pl.load(
+                    coefficients,
+                    [buf_group * NATIVE_QLI_WEIGHT_ROWS, 0],
+                    [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS],
+                    target_memory=pl.MemorySpace.Mat,
+                )
+                live4_split_query0 = pl.tile.extract(
+                    live4_buf_query_vector,
+                    0 * SPLIT_QK_ROWS,
                     0,
-                    [SPLIT_QK_ROWS, qk_panel_cols],
-                    target_memory=pl.MemorySpace.Right,
+                    [SPLIT_QK_ROWS, IDX_HEAD_DIM],
+                    target_memory=pl.MemorySpace.Left,
                 )
-                split_right1_last = pl.tile.extract(
-                    split_previous1,
+                live4_split_coefficient0 = pl.tile.extract(
+                    live4_buf_coefficients_l1,
                     0,
+                    0 * SPLIT_QK_ROWS,
+                    [NATIVE_QLI_WEIGHT_ROWS, SPLIT_QK_ROWS],
+                    target_memory=pl.MemorySpace.Left,
+                )
+                live4_split_qk_acc0 = pl.tile.create(
+                    [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.INT32, target_memory=pl.MemorySpace.Acc
+                )
+                live4_split_query1 = pl.tile.extract(
+                    live4_buf_query_vector, 1 * SPLIT_QK_ROWS, 0, [64, IDX_HEAD_DIM], target_memory=pl.MemorySpace.Left
+                )
+                live4_split_coefficient1 = pl.tile.extract(
+                    live4_buf_coefficients_l1,
                     0,
-                    [SPLIT_QK_ROWS, qk_panel_cols],
-                    target_memory=pl.MemorySpace.Right,
+                    1 * SPLIT_QK_ROWS,
+                    [NATIVE_QLI_WEIGHT_ROWS, 64],
+                    target_memory=pl.MemorySpace.Left,
                 )
-                split_ws_first_last = pl.tile.matmul_acc(
-                    split_ws_acc,
-                    split_coefficient0,
-                    split_right0_last,
-                    init_cond=True,
+                live4_split_qk_acc1 = pl.tile.create(
+                    [64, qk_panel_cols], dtype=pl.INT32, target_memory=pl.MemorySpace.Acc
                 )
-                split_ws_done_last = pl.tile.matmul_acc(
-                    split_ws_first_last,
-                    split_coefficient1,
-                    split_right1_last,
+                live4_split_ws_acc = pl.tile.create(
+                    [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols], dtype=pl.FP32, target_memory=pl.MemorySpace.Acc
                 )
-                pl.store(
-                    pl.set_validshape(split_ws_done_last, query_group_size, qk_panel_cols),
-                    [buf_transfer_row, score_tile - qk_panel_cols],
-                    buf_score_transfer,
+                for live4_buf_score_step in pl.range(live4_buf_score_iters):
+                    if live4_buf_score_step >= 2:
+                        pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+                    live4_buf_score_begin = live4_buf_score_step * (score_tile // 2)
+                    if balance_leaves:
+                        live4_buf_score_begin = live4_buf_score_step * score_tile
+                    live4_buf_transfer_row = (
+                        buf_worker * 2 * query_group_size + live4_buf_score_step % 2 * query_group_size
+                    )
+                    live4_split_previous0 = pl.tile.create(
+                        [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                    )
+                    live4_split_previous1 = pl.tile.create(
+                        [64, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                    )
+                    live4_buf_current_key = pl.tile.create(
+                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    )
+                    live4_buf_prefetched_key = pl.tile.create(
+                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    )
+                    live4_buf_key_l1_pool = pl.tile.create(
+                        [2 * qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                    )
+                    if key_prefetch_panels > 0:
+                        live4_buf_prime_col = 0
+                        for live4_buf_prime_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                            live4_buf_prime_key_row = (
+                                buf_logical_begin
+                                + live4_buf_score_begin
+                                + live4_buf_prime_col // (score_tile // 2) * live4_buf_lane_span
+                                + live4_buf_prime_col % (score_tile // 2)
+                                + live4_buf_prime_key_page * BLOCK_SIZE
+                            )
+                            if balance_leaves:
+                                live4_buf_prime_key_row = (
+                                    buf_logical_begin
+                                    + live4_buf_score_begin
+                                    + live4_buf_prime_col
+                                    + live4_buf_prime_key_page * BLOCK_SIZE
+                                )
+                            live4_buf_prime_safe_page = pl.min(
+                                live4_buf_prime_key_row // BLOCK_SIZE,
+                                pl.max((live4_buf_cache_len - 1) // BLOCK_SIZE, 0),
+                            )
+                            if live4_buf_prime_safe_page >= 0 and live4_buf_prime_safe_page < pl.tensor.dim(
+                                idx_block_table, 1
+                            ):
+                                live4_buf_prime_physical_page = pl.cast(
+                                    pl.read(idx_block_table, [buf_batch_idx, live4_buf_prime_safe_page]), pl.INDEX
+                                )
+                                if live4_buf_prime_physical_page >= 0 and live4_buf_prime_physical_page < pl.tensor.dim(
+                                    idx_native_kv_cache, 0
+                                ):
+                                    live4_buf_prime_native_byte = live4_buf_prime_physical_page * native_page_bytes
+                                    if live4_buf_prime_native_byte % IDX_HEAD_DIM == 0:
+                                        live4_buf_key_l1_pool = pl.gather_row(
+                                            live4_buf_key_l1_pool,
+                                            idx_kv_cache,
+                                            [live4_buf_prime_key_page * BLOCK_SIZE, 0],
+                                            [live4_buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                                    else:
+                                        live4_buf_key_l1_pool = pl.gather_row(
+                                            live4_buf_key_l1_pool,
+                                            idx_kv_cache_shift64,
+                                            [live4_buf_prime_key_page * BLOCK_SIZE, 0],
+                                            [live4_buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                        if key_prefetch_to_l0:
+                            live4_buf_current_key = pl.tile.extract(
+                                pl.tile.transpose_view(live4_buf_key_l1_pool),
+                                0,
+                                0,
+                                [IDX_HEAD_DIM, qk_panel_cols],
+                                target_memory=pl.MemorySpace.Right,
+                            )
+                    for live4_buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
+                        live4_buf_panel_col = live4_buf_qk_panel * qk_panel_cols
+                        live4_buf_load_col = (live4_buf_qk_panel + key_prefetch_panels) * qk_panel_cols
+                        live4_buf_load_slot = (live4_buf_qk_panel + key_prefetch_panels) % 2 * qk_panel_cols
+                        if key_prefetch_panels > 0:
+                            if not key_prefetch_to_l0:
+                                live4_buf_current_key = pl.tile.extract(
+                                    pl.tile.transpose_view(live4_buf_key_l1_pool),
+                                    0,
+                                    live4_buf_qk_panel % 2 * qk_panel_cols,
+                                    [IDX_HEAD_DIM, qk_panel_cols],
+                                    target_memory=pl.MemorySpace.Right,
+                                )
+                        if live4_buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols:
+                            live4_buf_panel_keys = pl.tile.create(
+                                [qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                            )
+                            for live4_buf_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                                live4_buf_key_row = (
+                                    buf_logical_begin
+                                    + live4_buf_score_begin
+                                    + live4_buf_load_col // (score_tile // 2) * live4_buf_lane_span
+                                    + live4_buf_load_col % (score_tile // 2)
+                                    + live4_buf_key_page * BLOCK_SIZE
+                                )
+                                if balance_leaves:
+                                    live4_buf_key_row = (
+                                        buf_logical_begin
+                                        + live4_buf_score_begin
+                                        + live4_buf_load_col
+                                        + live4_buf_key_page * BLOCK_SIZE
+                                    )
+                                live4_buf_safe_page = pl.min(
+                                    live4_buf_key_row // BLOCK_SIZE, pl.max((live4_buf_cache_len - 1) // BLOCK_SIZE, 0)
+                                )
+                                if live4_buf_safe_page >= 0 and live4_buf_safe_page < pl.tensor.dim(idx_block_table, 1):
+                                    live4_buf_physical_page = pl.cast(
+                                        pl.read(idx_block_table, [buf_batch_idx, live4_buf_safe_page]), pl.INDEX
+                                    )
+                                    if live4_buf_physical_page >= 0 and live4_buf_physical_page < pl.tensor.dim(
+                                        idx_native_kv_cache, 0
+                                    ):
+                                        live4_buf_native_byte = live4_buf_physical_page * native_page_bytes
+                                        if live4_buf_native_byte % IDX_HEAD_DIM == 0:
+                                            if key_prefetch_panels > 0:
+                                                live4_buf_key_l1_pool = pl.gather_row(
+                                                    live4_buf_key_l1_pool,
+                                                    idx_kv_cache,
+                                                    [live4_buf_load_slot + live4_buf_key_page * BLOCK_SIZE, 0],
+                                                    [live4_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                    [BLOCK_SIZE, IDX_HEAD_DIM],
+                                                )
+                                            else:
+                                                live4_buf_panel_keys = pl.gather_row(
+                                                    live4_buf_panel_keys,
+                                                    idx_kv_cache,
+                                                    [live4_buf_key_page * BLOCK_SIZE, 0],
+                                                    [live4_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                    [BLOCK_SIZE, IDX_HEAD_DIM],
+                                                )
+                                        elif key_prefetch_panels > 0:
+                                            live4_buf_key_l1_pool = pl.gather_row(
+                                                live4_buf_key_l1_pool,
+                                                idx_kv_cache_shift64,
+                                                [live4_buf_load_slot + live4_buf_key_page * BLOCK_SIZE, 0],
+                                                [live4_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                                        else:
+                                            live4_buf_panel_keys = pl.gather_row(
+                                                live4_buf_panel_keys,
+                                                idx_kv_cache_shift64,
+                                                [live4_buf_key_page * BLOCK_SIZE, 0],
+                                                [live4_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                            if key_prefetch_panels > 0:
+                                if key_prefetch_to_l0:
+                                    live4_buf_prefetched_key = pl.tile.extract(
+                                        pl.tile.transpose_view(live4_buf_key_l1_pool),
+                                        0,
+                                        live4_buf_load_slot,
+                                        [IDX_HEAD_DIM, qk_panel_cols],
+                                        target_memory=pl.MemorySpace.Right,
+                                    )
+                            else:
+                                live4_buf_prefetched_key = pl.tile.move(
+                                    pl.tile.transpose_view(live4_buf_panel_keys), target_memory=pl.MemorySpace.Right
+                                )
+                        if key_prefetch_panels > 0:
+                            live4_buf_key_panel = live4_buf_current_key
+                        else:
+                            live4_buf_key_panel = live4_buf_prefetched_key
+                        live4_split_current0 = pl.tile.create(
+                            [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                        )
+                        live4_split_current1 = pl.tile.create(
+                            [64, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                        )
+                        if live4_buf_qk_panel > 0:
+                            live4_split_right0 = pl.tile.extract(
+                                live4_split_previous0,
+                                0,
+                                0,
+                                [SPLIT_QK_ROWS, qk_panel_cols],
+                                target_memory=pl.MemorySpace.Right,
+                            )
+                            live4_split_right1 = pl.tile.extract(
+                                live4_split_previous1, 0, 0, [64, qk_panel_cols], target_memory=pl.MemorySpace.Right
+                            )
+                            live4_split_qk0 = pl.tile.matmul_acc(
+                                live4_split_qk_acc0, live4_split_query0, live4_buf_key_panel, init_cond=True
+                            )
+                            live4_split_current0 = pl.tile.assemble(
+                                live4_split_current0,
+                                live4_split_qk0,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                            live4_split_qk1 = pl.tile.matmul_acc(
+                                live4_split_qk_acc1, live4_split_query1, live4_buf_key_panel, init_cond=True
+                            )
+                            live4_split_current1 = pl.tile.assemble(
+                                live4_split_current1,
+                                live4_split_qk1,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                            live4_split_ws_first = pl.tile.matmul_acc(
+                                live4_split_ws_acc, live4_split_coefficient0, live4_split_right0, init_cond=True
+                            )
+                            live4_split_ws_done = pl.tile.matmul_acc(
+                                live4_split_ws_first, live4_split_coefficient1, live4_split_right1
+                            )
+                            pl.store(
+                                pl.set_validshape(live4_split_ws_done, query_group_size, qk_panel_cols),
+                                [live4_buf_transfer_row, live4_buf_panel_col - qk_panel_cols],
+                                buf_score_transfer,
+                            )
+                        else:
+                            live4_split_qk0 = pl.tile.matmul_acc(
+                                live4_split_qk_acc0, live4_split_query0, live4_buf_key_panel, init_cond=True
+                            )
+                            live4_split_current0 = pl.tile.assemble(
+                                live4_split_current0,
+                                live4_split_qk0,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                            live4_split_qk1 = pl.tile.matmul_acc(
+                                live4_split_qk_acc1, live4_split_query1, live4_buf_key_panel, init_cond=True
+                            )
+                            live4_split_current1 = pl.tile.assemble(
+                                live4_split_current1,
+                                live4_split_qk1,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                        live4_split_previous0 = live4_split_current0
+                        live4_split_previous1 = live4_split_current1
+                        if key_prefetch_panels > 0:
+                            if key_prefetch_to_l0:
+                                if live4_buf_qk_panel + 1 < score_tile // qk_panel_cols:
+                                    live4_buf_current_key = live4_buf_prefetched_key
+                    live4_split_right0_last = pl.tile.extract(
+                        live4_split_previous0, 0, 0, [SPLIT_QK_ROWS, qk_panel_cols], target_memory=pl.MemorySpace.Right
+                    )
+                    live4_split_right1_last = pl.tile.extract(
+                        live4_split_previous1, 0, 0, [64, qk_panel_cols], target_memory=pl.MemorySpace.Right
+                    )
+                    live4_split_ws_first_last = pl.tile.matmul_acc(
+                        live4_split_ws_acc, live4_split_coefficient0, live4_split_right0_last, init_cond=True
+                    )
+                    live4_split_ws_done_last = pl.tile.matmul_acc(
+                        live4_split_ws_first_last, live4_split_coefficient1, live4_split_right1_last
+                    )
+                    pl.store(
+                        pl.set_validshape(live4_split_ws_done_last, query_group_size, qk_panel_cols),
+                        [live4_buf_transfer_row, score_tile - qk_panel_cols],
+                        buf_score_transfer,
+                    )
+                    pl.system.sync_set(
+                        SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
+                    )
+                for live4_buf_score_drain in pl.range(pl.min(live4_buf_score_iters, 2)):
+                    pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+            elif buf_live == 5:
+                live5_buf_cache_len = pl.cast(pl.read(kv_seq_lens, [buf_batch_idx]), pl.INDEX) // COMPRESS_RATIO
+                live5_buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
+                live5_buf_tile_count = (live5_buf_valid_count + score_tile - 1) // score_tile
+                live5_buf_lane_span = pl.min(live5_buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
+                live5_buf_score_iters = (live5_buf_lane_span + score_tile // 2 - 1) // (score_tile // 2)
+                live5_buf_query_vector = pl.load(
+                    qr_hadamard_i8,
+                    [buf_query * IDX_N_HEADS, 0],
+                    [query_group_size * IDX_N_HEADS, IDX_HEAD_DIM],
+                    target_memory=pl.MemorySpace.Mat,
+                    valid_shape=[buf_live * IDX_N_HEADS, IDX_HEAD_DIM],
                 )
-                pl.system.sync_set(SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC)
-            # 即使只有1轮也排空已发消息；下个leaf才能重新从slot0开始，不携带旧ACK。
-            for buf_score_drain in pl.range(pl.min(buf_score_iters, 2)):
-                pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+                live5_buf_query_vector = pl.set_validshape(
+                    live5_buf_query_vector, query_group_size * IDX_N_HEADS, IDX_HEAD_DIM
+                )
+                for live5_padding_lane in pl.unroll(query_group_size):
+                    if live5_padding_lane >= buf_live:
+                        live5_buf_query_vector = pl.gather_row(
+                            live5_buf_query_vector,
+                            qr_hadamard_i8,
+                            [live5_padding_lane * IDX_N_HEADS, 0],
+                            [buf_query * IDX_N_HEADS, 0],
+                            [IDX_N_HEADS, IDX_HEAD_DIM],
+                        )
+                live5_buf_coefficients_l1 = pl.load(
+                    coefficients,
+                    [buf_group * NATIVE_QLI_WEIGHT_ROWS, 0],
+                    [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS],
+                    target_memory=pl.MemorySpace.Mat,
+                )
+                live5_split_query0 = pl.tile.extract(
+                    live5_buf_query_vector,
+                    0 * SPLIT_QK_ROWS,
+                    0,
+                    [SPLIT_QK_ROWS, IDX_HEAD_DIM],
+                    target_memory=pl.MemorySpace.Left,
+                )
+                live5_split_coefficient0 = pl.tile.extract(
+                    live5_buf_coefficients_l1,
+                    0,
+                    0 * SPLIT_QK_ROWS,
+                    [NATIVE_QLI_WEIGHT_ROWS, SPLIT_QK_ROWS],
+                    target_memory=pl.MemorySpace.Left,
+                )
+                live5_split_qk_acc0 = pl.tile.create(
+                    [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.INT32, target_memory=pl.MemorySpace.Acc
+                )
+                live5_split_query1 = pl.tile.extract(
+                    live5_buf_query_vector, 1 * SPLIT_QK_ROWS, 0, [128, IDX_HEAD_DIM], target_memory=pl.MemorySpace.Left
+                )
+                live5_split_coefficient1 = pl.tile.extract(
+                    live5_buf_coefficients_l1,
+                    0,
+                    1 * SPLIT_QK_ROWS,
+                    [NATIVE_QLI_WEIGHT_ROWS, 128],
+                    target_memory=pl.MemorySpace.Left,
+                )
+                live5_split_qk_acc1 = pl.tile.create(
+                    [128, qk_panel_cols], dtype=pl.INT32, target_memory=pl.MemorySpace.Acc
+                )
+                live5_split_ws_acc = pl.tile.create(
+                    [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols], dtype=pl.FP32, target_memory=pl.MemorySpace.Acc
+                )
+                for live5_buf_score_step in pl.range(live5_buf_score_iters):
+                    if live5_buf_score_step >= 2:
+                        pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+                    live5_buf_score_begin = live5_buf_score_step * (score_tile // 2)
+                    if balance_leaves:
+                        live5_buf_score_begin = live5_buf_score_step * score_tile
+                    live5_buf_transfer_row = (
+                        buf_worker * 2 * query_group_size + live5_buf_score_step % 2 * query_group_size
+                    )
+                    live5_split_previous0 = pl.tile.create(
+                        [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                    )
+                    live5_split_previous1 = pl.tile.create(
+                        [128, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                    )
+                    live5_buf_current_key = pl.tile.create(
+                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    )
+                    live5_buf_prefetched_key = pl.tile.create(
+                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    )
+                    live5_buf_key_l1_pool = pl.tile.create(
+                        [2 * qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                    )
+                    if key_prefetch_panels > 0:
+                        live5_buf_prime_col = 0
+                        for live5_buf_prime_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                            live5_buf_prime_key_row = (
+                                buf_logical_begin
+                                + live5_buf_score_begin
+                                + live5_buf_prime_col // (score_tile // 2) * live5_buf_lane_span
+                                + live5_buf_prime_col % (score_tile // 2)
+                                + live5_buf_prime_key_page * BLOCK_SIZE
+                            )
+                            if balance_leaves:
+                                live5_buf_prime_key_row = (
+                                    buf_logical_begin
+                                    + live5_buf_score_begin
+                                    + live5_buf_prime_col
+                                    + live5_buf_prime_key_page * BLOCK_SIZE
+                                )
+                            live5_buf_prime_safe_page = pl.min(
+                                live5_buf_prime_key_row // BLOCK_SIZE,
+                                pl.max((live5_buf_cache_len - 1) // BLOCK_SIZE, 0),
+                            )
+                            if live5_buf_prime_safe_page >= 0 and live5_buf_prime_safe_page < pl.tensor.dim(
+                                idx_block_table, 1
+                            ):
+                                live5_buf_prime_physical_page = pl.cast(
+                                    pl.read(idx_block_table, [buf_batch_idx, live5_buf_prime_safe_page]), pl.INDEX
+                                )
+                                if live5_buf_prime_physical_page >= 0 and live5_buf_prime_physical_page < pl.tensor.dim(
+                                    idx_native_kv_cache, 0
+                                ):
+                                    live5_buf_prime_native_byte = live5_buf_prime_physical_page * native_page_bytes
+                                    if live5_buf_prime_native_byte % IDX_HEAD_DIM == 0:
+                                        live5_buf_key_l1_pool = pl.gather_row(
+                                            live5_buf_key_l1_pool,
+                                            idx_kv_cache,
+                                            [live5_buf_prime_key_page * BLOCK_SIZE, 0],
+                                            [live5_buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                                    else:
+                                        live5_buf_key_l1_pool = pl.gather_row(
+                                            live5_buf_key_l1_pool,
+                                            idx_kv_cache_shift64,
+                                            [live5_buf_prime_key_page * BLOCK_SIZE, 0],
+                                            [live5_buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                        if key_prefetch_to_l0:
+                            live5_buf_current_key = pl.tile.extract(
+                                pl.tile.transpose_view(live5_buf_key_l1_pool),
+                                0,
+                                0,
+                                [IDX_HEAD_DIM, qk_panel_cols],
+                                target_memory=pl.MemorySpace.Right,
+                            )
+                    for live5_buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
+                        live5_buf_panel_col = live5_buf_qk_panel * qk_panel_cols
+                        live5_buf_load_col = (live5_buf_qk_panel + key_prefetch_panels) * qk_panel_cols
+                        live5_buf_load_slot = (live5_buf_qk_panel + key_prefetch_panels) % 2 * qk_panel_cols
+                        if key_prefetch_panels > 0:
+                            if not key_prefetch_to_l0:
+                                live5_buf_current_key = pl.tile.extract(
+                                    pl.tile.transpose_view(live5_buf_key_l1_pool),
+                                    0,
+                                    live5_buf_qk_panel % 2 * qk_panel_cols,
+                                    [IDX_HEAD_DIM, qk_panel_cols],
+                                    target_memory=pl.MemorySpace.Right,
+                                )
+                        if live5_buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols:
+                            live5_buf_panel_keys = pl.tile.create(
+                                [qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                            )
+                            for live5_buf_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                                live5_buf_key_row = (
+                                    buf_logical_begin
+                                    + live5_buf_score_begin
+                                    + live5_buf_load_col // (score_tile // 2) * live5_buf_lane_span
+                                    + live5_buf_load_col % (score_tile // 2)
+                                    + live5_buf_key_page * BLOCK_SIZE
+                                )
+                                if balance_leaves:
+                                    live5_buf_key_row = (
+                                        buf_logical_begin
+                                        + live5_buf_score_begin
+                                        + live5_buf_load_col
+                                        + live5_buf_key_page * BLOCK_SIZE
+                                    )
+                                live5_buf_safe_page = pl.min(
+                                    live5_buf_key_row // BLOCK_SIZE, pl.max((live5_buf_cache_len - 1) // BLOCK_SIZE, 0)
+                                )
+                                if live5_buf_safe_page >= 0 and live5_buf_safe_page < pl.tensor.dim(idx_block_table, 1):
+                                    live5_buf_physical_page = pl.cast(
+                                        pl.read(idx_block_table, [buf_batch_idx, live5_buf_safe_page]), pl.INDEX
+                                    )
+                                    if live5_buf_physical_page >= 0 and live5_buf_physical_page < pl.tensor.dim(
+                                        idx_native_kv_cache, 0
+                                    ):
+                                        live5_buf_native_byte = live5_buf_physical_page * native_page_bytes
+                                        if live5_buf_native_byte % IDX_HEAD_DIM == 0:
+                                            if key_prefetch_panels > 0:
+                                                live5_buf_key_l1_pool = pl.gather_row(
+                                                    live5_buf_key_l1_pool,
+                                                    idx_kv_cache,
+                                                    [live5_buf_load_slot + live5_buf_key_page * BLOCK_SIZE, 0],
+                                                    [live5_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                    [BLOCK_SIZE, IDX_HEAD_DIM],
+                                                )
+                                            else:
+                                                live5_buf_panel_keys = pl.gather_row(
+                                                    live5_buf_panel_keys,
+                                                    idx_kv_cache,
+                                                    [live5_buf_key_page * BLOCK_SIZE, 0],
+                                                    [live5_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                    [BLOCK_SIZE, IDX_HEAD_DIM],
+                                                )
+                                        elif key_prefetch_panels > 0:
+                                            live5_buf_key_l1_pool = pl.gather_row(
+                                                live5_buf_key_l1_pool,
+                                                idx_kv_cache_shift64,
+                                                [live5_buf_load_slot + live5_buf_key_page * BLOCK_SIZE, 0],
+                                                [live5_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                                        else:
+                                            live5_buf_panel_keys = pl.gather_row(
+                                                live5_buf_panel_keys,
+                                                idx_kv_cache_shift64,
+                                                [live5_buf_key_page * BLOCK_SIZE, 0],
+                                                [live5_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                            if key_prefetch_panels > 0:
+                                if key_prefetch_to_l0:
+                                    live5_buf_prefetched_key = pl.tile.extract(
+                                        pl.tile.transpose_view(live5_buf_key_l1_pool),
+                                        0,
+                                        live5_buf_load_slot,
+                                        [IDX_HEAD_DIM, qk_panel_cols],
+                                        target_memory=pl.MemorySpace.Right,
+                                    )
+                            else:
+                                live5_buf_prefetched_key = pl.tile.move(
+                                    pl.tile.transpose_view(live5_buf_panel_keys), target_memory=pl.MemorySpace.Right
+                                )
+                        if key_prefetch_panels > 0:
+                            live5_buf_key_panel = live5_buf_current_key
+                        else:
+                            live5_buf_key_panel = live5_buf_prefetched_key
+                        live5_split_current0 = pl.tile.create(
+                            [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                        )
+                        live5_split_current1 = pl.tile.create(
+                            [128, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                        )
+                        if live5_buf_qk_panel > 0:
+                            live5_split_right0 = pl.tile.extract(
+                                live5_split_previous0,
+                                0,
+                                0,
+                                [SPLIT_QK_ROWS, qk_panel_cols],
+                                target_memory=pl.MemorySpace.Right,
+                            )
+                            live5_split_right1 = pl.tile.extract(
+                                live5_split_previous1, 0, 0, [128, qk_panel_cols], target_memory=pl.MemorySpace.Right
+                            )
+                            live5_split_qk0 = pl.tile.matmul_acc(
+                                live5_split_qk_acc0, live5_split_query0, live5_buf_key_panel, init_cond=True
+                            )
+                            live5_split_current0 = pl.tile.assemble(
+                                live5_split_current0,
+                                live5_split_qk0,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                            live5_split_qk1 = pl.tile.matmul_acc(
+                                live5_split_qk_acc1, live5_split_query1, live5_buf_key_panel, init_cond=True
+                            )
+                            live5_split_current1 = pl.tile.assemble(
+                                live5_split_current1,
+                                live5_split_qk1,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                            live5_split_ws_first = pl.tile.matmul_acc(
+                                live5_split_ws_acc, live5_split_coefficient0, live5_split_right0, init_cond=True
+                            )
+                            live5_split_ws_done = pl.tile.matmul_acc(
+                                live5_split_ws_first, live5_split_coefficient1, live5_split_right1
+                            )
+                            pl.store(
+                                pl.set_validshape(live5_split_ws_done, query_group_size, qk_panel_cols),
+                                [live5_buf_transfer_row, live5_buf_panel_col - qk_panel_cols],
+                                buf_score_transfer,
+                            )
+                        else:
+                            live5_split_qk0 = pl.tile.matmul_acc(
+                                live5_split_qk_acc0, live5_split_query0, live5_buf_key_panel, init_cond=True
+                            )
+                            live5_split_current0 = pl.tile.assemble(
+                                live5_split_current0,
+                                live5_split_qk0,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                            live5_split_qk1 = pl.tile.matmul_acc(
+                                live5_split_qk_acc1, live5_split_query1, live5_buf_key_panel, init_cond=True
+                            )
+                            live5_split_current1 = pl.tile.assemble(
+                                live5_split_current1,
+                                live5_split_qk1,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                        live5_split_previous0 = live5_split_current0
+                        live5_split_previous1 = live5_split_current1
+                        if key_prefetch_panels > 0:
+                            if key_prefetch_to_l0:
+                                if live5_buf_qk_panel + 1 < score_tile // qk_panel_cols:
+                                    live5_buf_current_key = live5_buf_prefetched_key
+                    live5_split_right0_last = pl.tile.extract(
+                        live5_split_previous0, 0, 0, [SPLIT_QK_ROWS, qk_panel_cols], target_memory=pl.MemorySpace.Right
+                    )
+                    live5_split_right1_last = pl.tile.extract(
+                        live5_split_previous1, 0, 0, [128, qk_panel_cols], target_memory=pl.MemorySpace.Right
+                    )
+                    live5_split_ws_first_last = pl.tile.matmul_acc(
+                        live5_split_ws_acc, live5_split_coefficient0, live5_split_right0_last, init_cond=True
+                    )
+                    live5_split_ws_done_last = pl.tile.matmul_acc(
+                        live5_split_ws_first_last, live5_split_coefficient1, live5_split_right1_last
+                    )
+                    pl.store(
+                        pl.set_validshape(live5_split_ws_done_last, query_group_size, qk_panel_cols),
+                        [live5_buf_transfer_row, score_tile - qk_panel_cols],
+                        buf_score_transfer,
+                    )
+                    pl.system.sync_set(
+                        SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
+                    )
+                for live5_buf_score_drain in pl.range(pl.min(live5_buf_score_iters, 2)):
+                    pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+            else:
+                live6_buf_cache_len = pl.cast(pl.read(kv_seq_lens, [buf_batch_idx]), pl.INDEX) // COMPRESS_RATIO
+                live6_buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
+                live6_buf_tile_count = (live6_buf_valid_count + score_tile - 1) // score_tile
+                live6_buf_lane_span = pl.min(live6_buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
+                live6_buf_score_iters = (live6_buf_lane_span + score_tile // 2 - 1) // (score_tile // 2)
+                live6_buf_query_vector = pl.load(
+                    qr_hadamard_i8,
+                    [buf_query * IDX_N_HEADS, 0],
+                    [query_group_size * IDX_N_HEADS, IDX_HEAD_DIM],
+                    target_memory=pl.MemorySpace.Mat,
+                    valid_shape=[buf_live * IDX_N_HEADS, IDX_HEAD_DIM],
+                )
+                live6_buf_query_vector = pl.set_validshape(
+                    live6_buf_query_vector, query_group_size * IDX_N_HEADS, IDX_HEAD_DIM
+                )
+                for live6_padding_lane in pl.unroll(query_group_size):
+                    if live6_padding_lane >= buf_live:
+                        live6_buf_query_vector = pl.gather_row(
+                            live6_buf_query_vector,
+                            qr_hadamard_i8,
+                            [live6_padding_lane * IDX_N_HEADS, 0],
+                            [buf_query * IDX_N_HEADS, 0],
+                            [IDX_N_HEADS, IDX_HEAD_DIM],
+                        )
+                live6_buf_coefficients_l1 = pl.load(
+                    coefficients,
+                    [buf_group * NATIVE_QLI_WEIGHT_ROWS, 0],
+                    [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS],
+                    target_memory=pl.MemorySpace.Mat,
+                )
+                live6_split_query0 = pl.tile.extract(
+                    live6_buf_query_vector,
+                    0 * SPLIT_QK_ROWS,
+                    0,
+                    [SPLIT_QK_ROWS, IDX_HEAD_DIM],
+                    target_memory=pl.MemorySpace.Left,
+                )
+                live6_split_coefficient0 = pl.tile.extract(
+                    live6_buf_coefficients_l1,
+                    0,
+                    0 * SPLIT_QK_ROWS,
+                    [NATIVE_QLI_WEIGHT_ROWS, SPLIT_QK_ROWS],
+                    target_memory=pl.MemorySpace.Left,
+                )
+                live6_split_qk_acc0 = pl.tile.create(
+                    [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.INT32, target_memory=pl.MemorySpace.Acc
+                )
+                live6_split_query1 = pl.tile.extract(
+                    live6_buf_query_vector,
+                    1 * SPLIT_QK_ROWS,
+                    0,
+                    [SPLIT_QK_ROWS, IDX_HEAD_DIM],
+                    target_memory=pl.MemorySpace.Left,
+                )
+                live6_split_coefficient1 = pl.tile.extract(
+                    live6_buf_coefficients_l1,
+                    0,
+                    1 * SPLIT_QK_ROWS,
+                    [NATIVE_QLI_WEIGHT_ROWS, SPLIT_QK_ROWS],
+                    target_memory=pl.MemorySpace.Left,
+                )
+                live6_split_qk_acc1 = pl.tile.create(
+                    [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.INT32, target_memory=pl.MemorySpace.Acc
+                )
+                live6_split_ws_acc = pl.tile.create(
+                    [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols], dtype=pl.FP32, target_memory=pl.MemorySpace.Acc
+                )
+                for live6_buf_score_step in pl.range(live6_buf_score_iters):
+                    if live6_buf_score_step >= 2:
+                        pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+                    live6_buf_score_begin = live6_buf_score_step * (score_tile // 2)
+                    if balance_leaves:
+                        live6_buf_score_begin = live6_buf_score_step * score_tile
+                    live6_buf_transfer_row = (
+                        buf_worker * 2 * query_group_size + live6_buf_score_step % 2 * query_group_size
+                    )
+                    live6_split_previous0 = pl.tile.create(
+                        [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                    )
+                    live6_split_previous1 = pl.tile.create(
+                        [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                    )
+                    live6_buf_current_key = pl.tile.create(
+                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    )
+                    live6_buf_prefetched_key = pl.tile.create(
+                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    )
+                    live6_buf_key_l1_pool = pl.tile.create(
+                        [2 * qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                    )
+                    if key_prefetch_panels > 0:
+                        live6_buf_prime_col = 0
+                        for live6_buf_prime_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                            live6_buf_prime_key_row = (
+                                buf_logical_begin
+                                + live6_buf_score_begin
+                                + live6_buf_prime_col // (score_tile // 2) * live6_buf_lane_span
+                                + live6_buf_prime_col % (score_tile // 2)
+                                + live6_buf_prime_key_page * BLOCK_SIZE
+                            )
+                            if balance_leaves:
+                                live6_buf_prime_key_row = (
+                                    buf_logical_begin
+                                    + live6_buf_score_begin
+                                    + live6_buf_prime_col
+                                    + live6_buf_prime_key_page * BLOCK_SIZE
+                                )
+                            live6_buf_prime_safe_page = pl.min(
+                                live6_buf_prime_key_row // BLOCK_SIZE,
+                                pl.max((live6_buf_cache_len - 1) // BLOCK_SIZE, 0),
+                            )
+                            if live6_buf_prime_safe_page >= 0 and live6_buf_prime_safe_page < pl.tensor.dim(
+                                idx_block_table, 1
+                            ):
+                                live6_buf_prime_physical_page = pl.cast(
+                                    pl.read(idx_block_table, [buf_batch_idx, live6_buf_prime_safe_page]), pl.INDEX
+                                )
+                                if live6_buf_prime_physical_page >= 0 and live6_buf_prime_physical_page < pl.tensor.dim(
+                                    idx_native_kv_cache, 0
+                                ):
+                                    live6_buf_prime_native_byte = live6_buf_prime_physical_page * native_page_bytes
+                                    if live6_buf_prime_native_byte % IDX_HEAD_DIM == 0:
+                                        live6_buf_key_l1_pool = pl.gather_row(
+                                            live6_buf_key_l1_pool,
+                                            idx_kv_cache,
+                                            [live6_buf_prime_key_page * BLOCK_SIZE, 0],
+                                            [live6_buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                                    else:
+                                        live6_buf_key_l1_pool = pl.gather_row(
+                                            live6_buf_key_l1_pool,
+                                            idx_kv_cache_shift64,
+                                            [live6_buf_prime_key_page * BLOCK_SIZE, 0],
+                                            [live6_buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                        if key_prefetch_to_l0:
+                            live6_buf_current_key = pl.tile.extract(
+                                pl.tile.transpose_view(live6_buf_key_l1_pool),
+                                0,
+                                0,
+                                [IDX_HEAD_DIM, qk_panel_cols],
+                                target_memory=pl.MemorySpace.Right,
+                            )
+                    for live6_buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
+                        live6_buf_panel_col = live6_buf_qk_panel * qk_panel_cols
+                        live6_buf_load_col = (live6_buf_qk_panel + key_prefetch_panels) * qk_panel_cols
+                        live6_buf_load_slot = (live6_buf_qk_panel + key_prefetch_panels) % 2 * qk_panel_cols
+                        if key_prefetch_panels > 0:
+                            if not key_prefetch_to_l0:
+                                live6_buf_current_key = pl.tile.extract(
+                                    pl.tile.transpose_view(live6_buf_key_l1_pool),
+                                    0,
+                                    live6_buf_qk_panel % 2 * qk_panel_cols,
+                                    [IDX_HEAD_DIM, qk_panel_cols],
+                                    target_memory=pl.MemorySpace.Right,
+                                )
+                        if live6_buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols:
+                            live6_buf_panel_keys = pl.tile.create(
+                                [qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                            )
+                            for live6_buf_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                                live6_buf_key_row = (
+                                    buf_logical_begin
+                                    + live6_buf_score_begin
+                                    + live6_buf_load_col // (score_tile // 2) * live6_buf_lane_span
+                                    + live6_buf_load_col % (score_tile // 2)
+                                    + live6_buf_key_page * BLOCK_SIZE
+                                )
+                                if balance_leaves:
+                                    live6_buf_key_row = (
+                                        buf_logical_begin
+                                        + live6_buf_score_begin
+                                        + live6_buf_load_col
+                                        + live6_buf_key_page * BLOCK_SIZE
+                                    )
+                                live6_buf_safe_page = pl.min(
+                                    live6_buf_key_row // BLOCK_SIZE, pl.max((live6_buf_cache_len - 1) // BLOCK_SIZE, 0)
+                                )
+                                if live6_buf_safe_page >= 0 and live6_buf_safe_page < pl.tensor.dim(idx_block_table, 1):
+                                    live6_buf_physical_page = pl.cast(
+                                        pl.read(idx_block_table, [buf_batch_idx, live6_buf_safe_page]), pl.INDEX
+                                    )
+                                    if live6_buf_physical_page >= 0 and live6_buf_physical_page < pl.tensor.dim(
+                                        idx_native_kv_cache, 0
+                                    ):
+                                        live6_buf_native_byte = live6_buf_physical_page * native_page_bytes
+                                        if live6_buf_native_byte % IDX_HEAD_DIM == 0:
+                                            if key_prefetch_panels > 0:
+                                                live6_buf_key_l1_pool = pl.gather_row(
+                                                    live6_buf_key_l1_pool,
+                                                    idx_kv_cache,
+                                                    [live6_buf_load_slot + live6_buf_key_page * BLOCK_SIZE, 0],
+                                                    [live6_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                    [BLOCK_SIZE, IDX_HEAD_DIM],
+                                                )
+                                            else:
+                                                live6_buf_panel_keys = pl.gather_row(
+                                                    live6_buf_panel_keys,
+                                                    idx_kv_cache,
+                                                    [live6_buf_key_page * BLOCK_SIZE, 0],
+                                                    [live6_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                    [BLOCK_SIZE, IDX_HEAD_DIM],
+                                                )
+                                        elif key_prefetch_panels > 0:
+                                            live6_buf_key_l1_pool = pl.gather_row(
+                                                live6_buf_key_l1_pool,
+                                                idx_kv_cache_shift64,
+                                                [live6_buf_load_slot + live6_buf_key_page * BLOCK_SIZE, 0],
+                                                [live6_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                                        else:
+                                            live6_buf_panel_keys = pl.gather_row(
+                                                live6_buf_panel_keys,
+                                                idx_kv_cache_shift64,
+                                                [live6_buf_key_page * BLOCK_SIZE, 0],
+                                                [live6_buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                            if key_prefetch_panels > 0:
+                                if key_prefetch_to_l0:
+                                    live6_buf_prefetched_key = pl.tile.extract(
+                                        pl.tile.transpose_view(live6_buf_key_l1_pool),
+                                        0,
+                                        live6_buf_load_slot,
+                                        [IDX_HEAD_DIM, qk_panel_cols],
+                                        target_memory=pl.MemorySpace.Right,
+                                    )
+                            else:
+                                live6_buf_prefetched_key = pl.tile.move(
+                                    pl.tile.transpose_view(live6_buf_panel_keys), target_memory=pl.MemorySpace.Right
+                                )
+                        if key_prefetch_panels > 0:
+                            live6_buf_key_panel = live6_buf_current_key
+                        else:
+                            live6_buf_key_panel = live6_buf_prefetched_key
+                        live6_split_current0 = pl.tile.create(
+                            [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                        )
+                        live6_split_current1 = pl.tile.create(
+                            [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                        )
+                        if live6_buf_qk_panel > 0:
+                            live6_split_right0 = pl.tile.extract(
+                                live6_split_previous0,
+                                0,
+                                0,
+                                [SPLIT_QK_ROWS, qk_panel_cols],
+                                target_memory=pl.MemorySpace.Right,
+                            )
+                            live6_split_right1 = pl.tile.extract(
+                                live6_split_previous1,
+                                0,
+                                0,
+                                [SPLIT_QK_ROWS, qk_panel_cols],
+                                target_memory=pl.MemorySpace.Right,
+                            )
+                            live6_split_qk0 = pl.tile.matmul_acc(
+                                live6_split_qk_acc0, live6_split_query0, live6_buf_key_panel, init_cond=True
+                            )
+                            live6_split_current0 = pl.tile.assemble(
+                                live6_split_current0,
+                                live6_split_qk0,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                            live6_split_qk1 = pl.tile.matmul_acc(
+                                live6_split_qk_acc1, live6_split_query1, live6_buf_key_panel, init_cond=True
+                            )
+                            live6_split_current1 = pl.tile.assemble(
+                                live6_split_current1,
+                                live6_split_qk1,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                            live6_split_ws_first = pl.tile.matmul_acc(
+                                live6_split_ws_acc, live6_split_coefficient0, live6_split_right0, init_cond=True
+                            )
+                            live6_split_ws_done = pl.tile.matmul_acc(
+                                live6_split_ws_first, live6_split_coefficient1, live6_split_right1
+                            )
+                            pl.store(
+                                pl.set_validshape(live6_split_ws_done, query_group_size, qk_panel_cols),
+                                [live6_buf_transfer_row, live6_buf_panel_col - qk_panel_cols],
+                                buf_score_transfer,
+                            )
+                        else:
+                            live6_split_qk0 = pl.tile.matmul_acc(
+                                live6_split_qk_acc0, live6_split_query0, live6_buf_key_panel, init_cond=True
+                            )
+                            live6_split_current0 = pl.tile.assemble(
+                                live6_split_current0,
+                                live6_split_qk0,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                            live6_split_qk1 = pl.tile.matmul_acc(
+                                live6_split_qk_acc1, live6_split_query1, live6_buf_key_panel, init_cond=True
+                            )
+                            live6_split_current1 = pl.tile.assemble(
+                                live6_split_current1,
+                                live6_split_qk1,
+                                [0, 0],
+                                pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                pre_relu=True,
+                            )
+                        live6_split_previous0 = live6_split_current0
+                        live6_split_previous1 = live6_split_current1
+                        if key_prefetch_panels > 0:
+                            if key_prefetch_to_l0:
+                                if live6_buf_qk_panel + 1 < score_tile // qk_panel_cols:
+                                    live6_buf_current_key = live6_buf_prefetched_key
+                    live6_split_right0_last = pl.tile.extract(
+                        live6_split_previous0, 0, 0, [SPLIT_QK_ROWS, qk_panel_cols], target_memory=pl.MemorySpace.Right
+                    )
+                    live6_split_right1_last = pl.tile.extract(
+                        live6_split_previous1, 0, 0, [SPLIT_QK_ROWS, qk_panel_cols], target_memory=pl.MemorySpace.Right
+                    )
+                    live6_split_ws_first_last = pl.tile.matmul_acc(
+                        live6_split_ws_acc, live6_split_coefficient0, live6_split_right0_last, init_cond=True
+                    )
+                    live6_split_ws_done_last = pl.tile.matmul_acc(
+                        live6_split_ws_first_last, live6_split_coefficient1, live6_split_right1_last
+                    )
+                    pl.store(
+                        pl.set_validshape(live6_split_ws_done_last, query_group_size, qk_panel_cols),
+                        [live6_buf_transfer_row, score_tile - qk_panel_cols],
+                        buf_score_transfer,
+                    )
+                    pl.system.sync_set(
+                        SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
+                    )
+                for live6_buf_score_drain in pl.range(pl.min(live6_buf_score_iters, 2)):
+                    pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
     return buf_score_transfer
 
 

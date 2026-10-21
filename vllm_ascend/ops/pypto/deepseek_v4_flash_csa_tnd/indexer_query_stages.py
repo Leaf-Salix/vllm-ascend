@@ -306,3 +306,97 @@ def indexer_weights_reduce_stage(
             w_sum = pl.add(w_sum, weights_partial[partial_r0 : partial_r0 + MM_ROW_TILE, :])
         weights[w_r0 : w_r0 + MM_ROW_TILE, :] = pl.mul(w_sum, WEIGHTS_SCALE)
     return weights
+
+
+@pl.jit.inline(auto_scope=False)
+def indexer_query_dequant_rope_wide_stage(
+    qr_scale: pl.Tensor[[T_DYN, 1], pl.FP32],
+    wq_b_scale: pl.Tensor[[IDX_N_HEADS * IDX_HEAD_DIM], pl.FP32],
+    cos: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
+    sin: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
+    qr_acc_pad: pl.Tensor[[PROJ_ROWS_DYN, IDX_N_HEADS * IDX_HEAD_DIM], pl.INT32],
+    qr_bf16_2d: pl.Tensor[[ROPE_ROWS_DYN, IDX_N_HEADS * IDX_HEAD_DIM], pl.BF16],
+    worker_id: pl.Scalar[pl.INDEX],
+    WORKERS: pl.constexpr,
+):
+    """AIV：等query INT32投影与QR scale，原反量化/RoPE后写BF16，外层发布供Hadamard消费。"""
+    bs = pl.tensor.dim(qr_scale, 0)
+    dq_rope_units = (bs + DEQUANT_T_TILE - 1) // DEQUANT_T_TILE * (IDX_N_HEADS // 8)
+    dq_rope_workers = pl.min(dq_rope_units, WORKERS)
+    if worker_id < dq_rope_workers:
+        dq_rope_worker = worker_id
+        flat_i = pl.tile.ci(0, [1, ROPE_HEAD_DIM], dtype=pl.INT32)
+        flat_tmp = pl.create_tile([1, ROPE_HEAD_DIM], dtype=pl.INT32)
+        flat_lane = pl.tile.rems(flat_i, 2, flat_tmp)
+        swap_row = pl.tile.adds(pl.tile.sub(flat_i, pl.tile.muls(flat_lane, 2)), IDX_NOPE_HEAD_DIM + 1)
+        swap_base = pl.create_tile([DEQUANT_T_TILE, ROPE_HEAD_DIM], dtype=pl.INT32)
+        swap_source = pl.col_expand(swap_base, swap_row)
+        row_offsets = pl.tile.muls(pl.tile.ci(0, [1, DEQUANT_T_TILE], dtype=pl.INT32), IDX_HEAD_DIM)
+        flat_swap = pl.reshape(
+            pl.row_expand_add(swap_source, pl.reshape(row_offsets, [DEQUANT_T_TILE, 1])),
+            [1, DEQUANT_T_TILE * ROPE_HEAD_DIM],
+        )
+        gather_tmp = pl.create_tile([1, DEQUANT_T_TILE * ROPE_HEAD_DIM], dtype=pl.INT32)
+        for dq_unit in pl.range(dq_rope_worker, dq_rope_units, dq_rope_workers):
+            hg = dq_unit % (IDX_N_HEADS // 8) * 8
+            dq_t0 = dq_unit // (IDX_N_HEADS // 8) * DEQUANT_T_TILE
+            if dq_t0 + DEQUANT_T_TILE <= bs:
+                qr_scale_tile = pl.load(qr_scale, [dq_t0, 0], [DEQUANT_T_TILE, 1])
+                cos_tile = pl.load(cos, [dq_t0, 0], [DEQUANT_T_TILE, ROPE_HEAD_DIM])
+                sin_tile = pl.load(sin, [dq_t0, 0], [DEQUANT_T_TILE, ROPE_HEAD_DIM])
+                for h_inner in pl.pipeline(8, stage=2):
+                    h0 = (hg + h_inner) * IDX_HEAD_DIM
+                    wq_scale = pl.reshape(pl.load(wq_b_scale, [h0], [IDX_HEAD_DIM]), [1, IDX_HEAD_DIM])
+                    acc_fp32 = pl.cast(
+                        pl.load(qr_acc_pad, [dq_t0, h0], [DEQUANT_T_TILE, IDX_HEAD_DIM]),
+                        target_type=pl.FP32,
+                        mode="none",
+                    )
+                    qr_dequant = pl.col_expand_mul(pl.row_expand_mul(acc_fp32, qr_scale_tile), wq_scale)
+                    qr_nope_bf16 = pl.cast(qr_dequant[:, 0:IDX_NOPE_HEAD_DIM], target_type=pl.BF16, mode="rint")
+                    qr_rope_slice = qr_dequant[:, IDX_NOPE_HEAD_DIM:IDX_HEAD_DIM]
+                    qr_swapped_flat = pl.tile.gather(
+                        pl.reshape(qr_dequant, [1, DEQUANT_T_TILE * IDX_HEAD_DIM]), flat_swap, gather_tmp
+                    )
+                    qr_swapped = pl.reshape(qr_swapped_flat, [DEQUANT_T_TILE, ROPE_HEAD_DIM])
+                    rope_rot = pl.add(pl.mul(qr_rope_slice, cos_tile), pl.mul(qr_swapped, sin_tile))
+                    rope_bf16 = pl.cast(rope_rot, target_type=pl.BF16, mode="rint")
+                    pl.store(qr_nope_bf16, [dq_t0, h0], qr_bf16_2d)
+                    pl.store(rope_bf16, [dq_t0, h0 + IDX_NOPE_HEAD_DIM], qr_bf16_2d)
+            else:
+                sw_ones = pl.full([DEQUANT_T_TILE, ROPE_HEAD_DIM], dtype=pl.FP32, value=1.0)
+                sw_index = pl.cast(pl.arange(0, [1, ROPE_HEAD_DIM], dtype=pl.INT32), target_type=pl.FP32)
+                sw_col = pl.col_expand_mul(sw_ones, sw_index)
+                sw_dup_f = pl.cast(
+                    pl.cast(pl.mul(sw_col, 0.5), target_type=pl.INT32, mode="trunc"), target_type=pl.FP32
+                )
+                sw_lane = pl.sub(sw_col, pl.mul(sw_dup_f, 2.0))
+                rope_swap_idx = pl.cast(pl.sub(pl.add(sw_col, 1.0), pl.mul(sw_lane, 2.0)), target_type=pl.INT32)
+                tail_swap_idx = rope_swap_idx[0:1, :]
+                for tail_t0 in pl.range(dq_t0, bs):
+                    tail_qr_scale_value = pl.read(qr_scale, [tail_t0, 0])
+                    tail_cos_tile = cos[tail_t0 : tail_t0 + 1, 0:ROPE_HEAD_DIM]
+                    tail_sin_tile = sin[tail_t0 : tail_t0 + 1, 0:ROPE_HEAD_DIM]
+                    for tail_h_inner in pl.pipeline(8, stage=2):
+                        tail_h0 = (hg + tail_h_inner) * IDX_HEAD_DIM
+                        tail_wq_scale = pl.reshape(wq_b_scale[tail_h0 : tail_h0 + IDX_HEAD_DIM], [1, IDX_HEAD_DIM])
+                        tail_acc_fp32 = pl.cast(
+                            qr_acc_pad[tail_t0 : tail_t0 + 1, tail_h0 : tail_h0 + IDX_HEAD_DIM],
+                            target_type=pl.FP32,
+                            mode="none",
+                        )
+                        tail_qr_dequant = pl.col_expand_mul(pl.mul(tail_acc_fp32, tail_qr_scale_value), tail_wq_scale)
+                        tail_qr_nope_bf16 = pl.cast(
+                            tail_qr_dequant[:, 0:IDX_NOPE_HEAD_DIM], target_type=pl.BF16, mode="rint"
+                        )
+                        tail_qr_rope_slice = tail_qr_dequant[:, IDX_NOPE_HEAD_DIM:IDX_HEAD_DIM]
+                        tail_qr_swapped = pl.gather(tail_qr_rope_slice, dim=-1, index=tail_swap_idx)
+                        tail_rope_rot = pl.add(
+                            pl.mul(tail_qr_rope_slice, tail_cos_tile), pl.mul(tail_qr_swapped, tail_sin_tile)
+                        )
+                        tail_rope_bf16 = pl.cast(tail_rope_rot, target_type=pl.BF16, mode="rint")
+                        qr_bf16_2d[tail_t0 : tail_t0 + 1, tail_h0 : tail_h0 + IDX_NOPE_HEAD_DIM] = tail_qr_nope_bf16
+                        qr_bf16_2d[tail_t0 : tail_t0 + 1, tail_h0 + IDX_NOPE_HEAD_DIM : tail_h0 + IDX_HEAD_DIM] = (
+                            tail_rope_bf16
+                        )
+    return qr_bf16_2d

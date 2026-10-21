@@ -16,6 +16,8 @@ import torch
 
 from vllm_ascend import envs
 
+from .middle_phase import SIGNAL_COUNT as MIDDLE_SIGNAL_COUNT
+from .output_group import OUTPUT_SIGNAL_COUNT
 from .policy import CSAMPMDPolicy, select_policy
 
 
@@ -193,8 +195,7 @@ class PreparedDynamicCSA:
             # 前缀+4*T组描述符，16项对齐后接48个scale链表头和4*T项地址描述符；
             # 启用连续页策略时尾部2*B项为(first_page,direction)，关闭时维持原容量。
             "group_offsets": (
-                (_pad(_pad(b + 1, 16) + 4 * t, 16) + 48 + 4 * t
-                 + (2 * b if self.policy.scale_page_coalescing else 0),),
+                (_pad(_pad(b + 1, 16) + 4 * t, 16) + 48 + 4 * t + (2 * b if self.policy.scale_page_coalescing else 0),),
                 torch.int32,
             ),
             "group_plan": ((8,), torch.int32),
@@ -214,6 +215,21 @@ class PreparedDynamicCSA:
             "li_ring": ((24 * 3 * 64, 1), torch.float32),
             "packed": ((8 * p128, 4096), torch.bfloat16),
             "ffts": ((256,), torch.int64),
+            "query_signal": ((1,), torch.int32),
+            "hc_signal": ((4 * 3 * self.policy.hc_groups * 128 if self.policy.fused_dag else 1,), torch.int32),
+            "middle_signal": (
+                (MIDDLE_SIGNAL_COUNT if self.policy.fused_dag and self.policy.balanced else 1,),
+                torch.int32,
+            ),
+            "idx_front_signal": (
+                (11 * 3 * self.policy.idx_front_groups * 128 if self.policy.fused_dag else 1,),
+                torch.int32,
+            ),
+            "main_front_signal": (
+                (6 * 3 * self.policy.main_front_groups * 128 if self.policy.fused_dag else 1,),
+                torch.int32,
+            ),
+            "output_signal": ((OUTPUT_SIGNAL_COUNT,), torch.int32),
             "o_r": ((mm, 8192), torch.float32),
             "o_quant": ((mm, 8192), torch.int8),
             "o_scales": ((8, p128), torch.float32),
@@ -229,6 +245,15 @@ class PreparedDynamicCSA:
             if value.shape != shape or value.dtype != dtype or value.device != device or not value.is_contiguous():
                 raise ValueError(f"allocator返回错误的工作区：{name}")
             self.buffers[name] = self.allocations[name] = value
+            if name in (
+                "hc_signal",
+                "middle_signal",
+                "query_signal",
+                "output_signal",
+                "idx_front_signal",
+                "main_front_signal",
+            ):
+                value.zero_()
         self.buffers.update(
             q_heads=self.buffers["q_flat"].view(t * 64, 512),
             idx_query_rope_heads=self.buffers["idx_query_rope"].view(p16 * 64, 128),
