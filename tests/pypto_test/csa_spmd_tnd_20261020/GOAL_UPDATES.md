@@ -81,3 +81,12 @@ L1首尾耗时降低至少10%理解，即候选耗时不超过BSH基线的90%。
 和失败结论。阶段提交使用详细中文说明和Signed-off-by；本轮未授权push。
 已快进到origin/dsv4-flash-pto-v0.25.1rc1的65f51175，再恢复全部TND改动；
 无冲突且原237项工作文件字节保持。原goal继续active，未缩小验收范围。
+
+## 2026-10-21：授权累计推送，指定目标上游，随后恢复优化
+
+用户明确要求将本会话累计commit推送，随后指定目标为
+`nalinaly/vllm-ascend` 的 `dsv4-flash-pto-v0.25.1rc1`，并要求worktree跟踪
+该上游。已将前六笔提交快进推送到aa2e2a41，远端哈希已核对；本地隔离
+分支feat/csa-spmd-tnd-20261020的upstream现为origin/dsv4-flash-pto-v0.25.1rc1。
+暂停时未继续优化，未提交的WS探针保留本地；用户随后将原goal恢复active。
+原TND与八档GM<=0.90验收范围、基线与数值约束继续有效。
