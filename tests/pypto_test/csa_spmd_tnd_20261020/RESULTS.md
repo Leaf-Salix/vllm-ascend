@@ -100,6 +100,8 @@ a241fa61 BSH静态形状修复；候选为O_A/O_B互补分工v4。B1/B16经完�
 | 8K/B16/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 631.92 | 634.28 | +0.37% | 不适用 | PASS | [结果](runs/short_hc_consumer_h8192_b16_s6_v81/result.json) |
 | 128K/B1/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 369.48 | 352.12 | -4.70% | 不适用 | PASS | [结果](runs/b1_output_prefix_s6_and_s1_s6_v81/result.json) |
 | 128K/B24/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 1016.18 | 1015.68 | -0.05% | 不适用 | PASS | [结果](runs/large_output_balance_h131072_b24_s6_v82/result.json) |
+| 128K/B1/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 367.30 | 361.62 | -1.55% | 不适用 | PASS | [结果](runs/single_m16_qa_b1_s6_and_s1_s6_v86/result.json) |
+| mixed [6, 6, 4] / 128K 独立工作区 | BSH150@a241fa61+静态形状修复 | 499.24 | 498.02 | -0.24% | 不适用 | PASS | [结果](runs/single_m16_qa_t16_mixed664_v86/result.json) |
 
 ## 任务与原始证据
 
@@ -209,8 +211,10 @@ a241fa61 BSH静态形状修复；候选为O_A/O_B互补分工v4。B1/B16经完�
 | `task_20261021_112147_186635723381` | [short_hc_consumer_h8192_b16_s6_v81](runs/short_hc_consumer_h8192_b16_s6_v81/result.json) | completed (exit=0) | complete | PASS |
 | `task_20261021_112239_19267186046` | [b1_output_prefix_s6_and_s1_s6_v81](runs/b1_output_prefix_s6_and_s1_s6_v81/result.json) | completed (exit=0) | complete | PASS |
 | `task_20261021_112912_227563513845` | [large_output_balance_h131072_b24_s6_v82](runs/large_output_balance_h131072_b24_s6_v82/result.json) | completed (exit=0) | complete | PASS |
-| `task_20261021_121214_66656511685` | [single_m16_qa_b1_s6_and_s1_s6_v86](runs/single_m16_qa_b1_s6_and_s1_s6_v86/result.json) | 未知 | 缺少结果 | 否 |
-| `task_20261021_121215_667954606` | [single_m16_qa_t16_mixed664_v86](runs/single_m16_qa_t16_mixed664_v86/result.json) | 未知 | 缺少结果 | 否 |
+| `task_20261021_121214_66656511685` | [single_m16_qa_b1_s6_and_s1_s6_v86](runs/single_m16_qa_b1_s6_and_s1_s6_v86/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_121215_667954606` | [single_m16_qa_t16_mixed664_v86](runs/single_m16_qa_t16_mixed664_v86/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_140935_275270122118` | [borrowed_score_stream_h131072_b16_s6_v90](runs/borrowed_score_stream_h131072_b16_s6_v90/result.json) | running | native_reference_ready | 否 |
+| `task_20261021_140935_275288020871` | [borrowed_score_owner_h131072_b28_s6_v90](runs/borrowed_score_owner_h131072_b28_s6_v90/result.json) | running | native_reference_ready | 否 |
 
 各任务完整命令和固定launcher SHA256见 `jobs.json`。
 Native超阈值元素、Top-K替换、cache/state及保护区明细仍在原始result.json；
