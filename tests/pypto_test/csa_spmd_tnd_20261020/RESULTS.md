@@ -12,20 +12,20 @@ B1 G6/24叶方案的v31随机输入收益已被v35同分TopK/输出回归否决�
 
 ## 最新完整八档
 
-a241fa61 BSH静态形状修复；候选为O_A/O_B互补分工v4。B1/B16经完整C++和Host orchestration等价证明复用，其余六档新测。该分档已进入本工作树，整体10%目标尚未达到。
-完整证据：[cohort_output_balance_v4_result.json](cohort_output_balance_v4_result.json)。
-等权GM(TND/BSH)=0.991928345，门槛0.90，
+a241fa61 BSH静态形状修复+150tick；候选为输出分工v4+短前缀TopK+短G2半叶UB。两个改变档位新测，六个完整C++/Host相同档位保留原成对五窗口；无跨轮择优。已采用，整体10%目标仍未达到。
+完整证据：[cohort_borrowed_combined_v106_result.json](cohort_borrowed_combined_v106_result.json)。
+等权GM(TND/BSH)=0.988089028，门槛0.90，
 性能验收为FAIL（未达标）。后续单项试验不替换本轮任一档。
 
 | 场景 | BSH µs | TND µs | 耗时变化 |
 | --- | ---: | ---: | ---: |
 | 128K/B1/S6 | 371.62 | 351.96 | -5.29% |
 | 128K/B4/S6 | 492.26 | 483.16 | -1.85% |
-| 128K/B8/S6 | 630.82 | 625.78 | -0.80% |
+| 128K/B8/S6 | 622.28 | 617.16 | -0.82% |
 | 128K/B16/S6 | 791.40 | 780.18 | -1.42% |
 | 128K/B24/S6 | 1008.46 | 1019.12 | +1.06% |
 | 128K/B28/S6 | 1162.84 | 1156.10 | -0.58% |
-| 8K/B16/S6 | 634.46 | 653.54 | +3.01% |
+| 8K/B16/S6 | 641.12 | 640.38 | -0.12% |
 | 8K/B32/S6 | 920.58 | 917.04 | -0.38% |
 
 ## 完整L1性能
@@ -110,6 +110,8 @@ a241fa61 BSH静态形状修复；候选为O_A/O_B互补分工v4。B1/B16经完�
 | 8K/B16/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 647.54 | 643.64 | -0.60% | 不适用 | PASS | [结果](runs/short_half_ub_h8192_b16_s6_v95/result.json) |
 | 128K/B28/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 1151.84 | 1152.62 | +0.07% | 不适用 | PASS | [结果](runs/topk_prefix_h131072_b28_s6_v99/result.json) |
 | 128K/B8/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 642.68 | 622.60 | -3.12% | 不适用 | PASS | [结果](runs/topk_prefix_h131072_b8_s6_v101/result.json) |
+| 128K/B8/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 622.28 | 617.16 | -0.82% | 不适用 | PASS | [结果](runs/cohort_borrowed_combined_h131072_b8_s6_v106/result.json) |
+| 8K/B16/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 641.12 | 640.38 | -0.12% | 不适用 | PASS | [结果](runs/cohort_borrowed_combined_h8192_b16_s6_v106/result.json) |
 
 ## 任务与原始证据
 
@@ -234,8 +236,8 @@ a241fa61 BSH静态形状修复；候选为O_A/O_B互补分工v4。B1/B16经完�
 | `task_20261021_155419_187365031349` | [short_half_ub_ties_device_v100b](runs/short_half_ub_ties_device_v100b/result.json) | completed (exit=0) | complete | PASS |
 | `task_20261021_160738_306213119230` | [topk_prefix_t41_r12_matrix_v103](runs/topk_prefix_t41_r12_matrix_v103/result.json) | completed (exit=0) | complete | PASS |
 | `task_20261021_162057_10868510136` | [topk_prefix_ties_device_v104](runs/topk_prefix_ties_device_v104/result.json) | completed (exit=0) | complete | PASS |
-| `task_20261021_162824_11408309460` | [cohort_borrowed_combined_h131072_b8_s6_v106](runs/cohort_borrowed_combined_h131072_b8_s6_v106/result.json) | running | original_spmd_attribution | 否 |
-| `task_20261021_162824_11409259262` | [cohort_borrowed_combined_h8192_b16_s6_v106](runs/cohort_borrowed_combined_h8192_b16_s6_v106/result.json) | running | original_spmd_attribution | 否 |
+| `task_20261021_162824_11408309460` | [cohort_borrowed_combined_h131072_b8_s6_v106](runs/cohort_borrowed_combined_h131072_b8_s6_v106/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_162824_11409259262` | [cohort_borrowed_combined_h8192_b16_s6_v106](runs/cohort_borrowed_combined_h8192_b16_s6_v106/result.json) | completed (exit=0) | complete | PASS |
 
 各任务完整命令和固定launcher SHA256见 `jobs.json`。
 Native超阈值元素、Top-K替换、cache/state及保护区明细仍在原始result.json；

@@ -1,0 +1,35 @@
+{
+  "reviewed_at": "2026-10-21T08:38:49.193721+00:00",
+  "sessions": {
+    "CSA-多task": {
+      "latest_reviewed": "2026-10-21T08:31:57.578Z",
+      "new_measures": [
+        "Remove definitely idle workers for independent task launches at token capacity<=64",
+        "TaskId dependency trial not adopted",
+        "Indexer query priority scheduling trial pending"
+      ],
+      "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/entry.py",
+      "source_sha256": "b5aa1a914cb2db6da31d26119aec58cd1ee9b33ed71206ffdecaa9a2f93fe651"
+    },
+    "接入vllm-ascend": {
+      "latest_reviewed": "2026-10-21T08:25:18.336Z",
+      "latest_work": "Issue-status audit; no newer accepted SPMD kernel identified"
+    }
+  },
+  "transfer_decisions": [
+    {
+      "measure": "Idle independent-task launch removal",
+      "decision": "Cannot copy per-task launch counts into one resident MIX24. Current TND already uses row-owner waits and striped no-work guards. Earlier active-prefix/output trial v81 offered no clear incremental benefit over accepted v4; retain evidence without unchanged rerun."
+    },
+    {
+      "measure": "Indexer query before Q_B, Q dequant after Indexer query RoPE",
+      "decision": "Current cube_schedule already emits idx_query_project before Q_B; vector_schedule completes Indexer RoPE before q_dequant_rope. No blind task dependency port; cooperative prefix is an existing distinct schedule."
+    },
+    {
+      "measure": "Exact TopK prefix and short G2 half-leaf UB",
+      "decision": "Adopted owncombinedv106 after current-device correctness and incremental performance; formalBSH eight-case GM0.988089028."
+    }
+  ],
+  "formal_bsh_baseline_changed": false,
+  "push_permitted": false
+}
