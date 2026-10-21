@@ -1,0 +1,755 @@
+{
+  "candidate": "v27_dag_capacity_gate",
+  "adopted_in_production": false,
+  "decision": "B1基本持平、B4仍慢2.11%；B24同路径轻微波动。保留分档结构供后续，尚不覆盖正式入口。",
+  "toolchain": {
+    "release": "csa-shared-20261021-upstream-fixes",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-mpmd-upstream-20261021",
+      "commit": "e891351e305e1b8ac70ffb9ffe60a243fc0420dc"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_mpmd_tnd_20261021/upstream_refresh_20261021/manifest.json",
+    "validated_at": "2026-10-21T18:47:25+08:00"
+  },
+  "scope": "三个代表场景的完整CSA L1/数值/图重放/采样后状态；不等于八档G或边界/连续状态/16卡验收",
+  "cases": {
+    "h131072_b1": {
+      "task_id": "task_20261022_024829_81309322960",
+      "queue_terminal": "completed(exit=0), confirmed 2026-10-22",
+      "result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/dag_capacity_gate_v27_h131072_b1/result.json",
+      "sources": {
+        "spmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/sources/84751e34/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd",
+        "mpmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v27_dag_capacity_gate/operator",
+        "mpmd_control": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v17_upstream_fixes/operator"
+      },
+      "policies": {
+        "spmd": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "COOPERATIVE_PREFIX": true,
+          "EARLY_ATTENTION_GEOMETRY": false,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": false,
+          "SPLIT_SCORE_ROWS": false,
+          "OUTPUT_WORK_BALANCE": true
+        },
+        "mpmd_control": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": false,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": false,
+          "SPLIT_SCORE_ROWS": false,
+          "LIMIT_EMPTY_WORKERS": true
+        },
+        "mpmd": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": false,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": false,
+          "SPLIT_SCORE_ROWS": false,
+          "LIMIT_EMPTY_WORKERS": true,
+          "FUSED_DAG": false
+        }
+      },
+      "statistics_us": {
+        "spmd": {
+          "min": 363.5,
+          "mean": 371.096,
+          "max": 378.46,
+          "samples": [
+            372.58,
+            372.38,
+            363.5,
+            368.56,
+            378.46
+          ]
+        },
+        "mpmd_control": {
+          "min": 411.26,
+          "mean": 423.1,
+          "max": 437.42,
+          "samples": [
+            419.76,
+            423.94,
+            437.42,
+            423.12,
+            411.26
+          ]
+        },
+        "mpmd": {
+          "min": 412.2,
+          "mean": 422.576,
+          "max": 430.14,
+          "samples": [
+            419.54,
+            430.14,
+            428.88,
+            412.2,
+            422.12
+          ]
+        }
+      },
+      "ratio": 1.1387242115247806,
+      "candidate_over_control": 0.9987615220987947,
+      "paired_candidate_minus_control_us": [
+        -0.22,
+        6.2,
+        -8.54,
+        -10.92,
+        10.86
+      ],
+      "checks": {
+        "spmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards_passed": 100,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards_passed": 100,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards_passed": 100,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        }
+      }
+    },
+    "h131072_b4": {
+      "task_id": "task_20261022_024829_8131383153",
+      "queue_terminal": "completed(exit=0), confirmed 2026-10-22",
+      "result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/dag_capacity_gate_v27_h131072_b4/result.json",
+      "sources": {
+        "spmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/sources/84751e34/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd",
+        "mpmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v27_dag_capacity_gate/operator",
+        "mpmd_control": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v17_upstream_fixes/operator"
+      },
+      "policies": {
+        "spmd": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "COOPERATIVE_PREFIX": true,
+          "EARLY_ATTENTION_GEOMETRY": false,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": false,
+          "SPLIT_SCORE_ROWS": false,
+          "OUTPUT_WORK_BALANCE": false
+        },
+        "mpmd_control": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": false,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": false,
+          "SPLIT_SCORE_ROWS": false,
+          "LIMIT_EMPTY_WORKERS": true
+        },
+        "mpmd": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": false,
+          "LOCAL_ATTENTION_STATS": false,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": false,
+          "SPLIT_SCORE_ROWS": false,
+          "LIMIT_EMPTY_WORKERS": true,
+          "FUSED_DAG": false
+        }
+      },
+      "statistics_us": {
+        "spmd": {
+          "min": 468.68,
+          "mean": 477.288,
+          "max": 488.84,
+          "samples": [
+            488.84,
+            478.66,
+            473.88,
+            476.38,
+            468.68
+          ]
+        },
+        "mpmd_control": {
+          "min": 522.68,
+          "mean": 532.26,
+          "max": 548.64,
+          "samples": [
+            528.64,
+            548.64,
+            528.26,
+            533.08,
+            522.68
+          ]
+        },
+        "mpmd": {
+          "min": 541.92,
+          "mean": 543.504,
+          "max": 544.46,
+          "samples": [
+            542.92,
+            541.92,
+            544.32,
+            543.9,
+            544.46
+          ]
+        }
+      },
+      "ratio": 1.1387338462312064,
+      "candidate_over_control": 1.0211250140908579,
+      "paired_candidate_minus_control_us": [
+        14.28,
+        -6.72,
+        16.06,
+        10.82,
+        21.78
+      ],
+      "checks": {
+        "spmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards_passed": 100,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards_passed": 100,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards_passed": 100,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        }
+      },
+      "l1_stage_source": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/dag_capacity_gate_v27_h131072_b4/stages.json",
+      "mean_stages": {
+        "mpmd": [
+          {
+            "name": "indexer_compressor_kv_score",
+            "begin_us": 50.36,
+            "end_us": 60.072,
+            "kinds": {
+              "aic": {
+                "min_us": 8.532,
+                "mean_us": 9.179,
+                "max_us": 9.700000000000001,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "indexer_scale_page_commit",
+            "begin_us": 187.40800000000002,
+            "end_us": 193.80800000000002,
+            "kinds": {
+              "aiv": {
+                "min_us": 2.776,
+                "mean_us": 4.840833333333333,
+                "max_us": 6.116,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "qproj_b",
+            "begin_us": 97.544,
+            "end_us": 133.012,
+            "kinds": {
+              "aic": {
+                "min_us": 29.024,
+                "mean_us": 32.1035,
+                "max_us": 35.1,
+                "instances": 24
+              }
+            }
+          },
+          {
+            "name": "index_score_topk",
+            "begin_us": 241.38400000000001,
+            "end_us": 366.08,
+            "kinds": {
+              "aic": {
+                "min_us": 56.728,
+                "mean_us": 69.9305,
+                "max_us": 113.188,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 64.58,
+                "mean_us": 82.94483333333334,
+                "max_us": 124.44,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "sparse_attn",
+            "begin_us": 393.248,
+            "end_us": 446.82800000000003,
+            "kinds": {
+              "aic": {
+                "min_us": 1.812,
+                "mean_us": 28.202166666666667,
+                "max_us": 49.428,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 9.272,
+                "mean_us": 34.20075,
+                "max_us": 53.096000000000004,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "oproj_a",
+            "begin_us": 449.136,
+            "end_us": 494.608,
+            "kinds": {
+              "aic": {
+                "min_us": 24.62,
+                "mean_us": 36.742,
+                "max_us": 45.312000000000005,
+                "instances": 24
+              }
+            }
+          },
+          {
+            "name": "hc_post",
+            "begin_us": 533.064,
+            "end_us": 543.504,
+            "kinds": {
+              "aiv": {
+                "min_us": 7.48,
+                "mean_us": 8.9195,
+                "max_us": 10.356,
+                "instances": 16
+              }
+            }
+          }
+        ],
+        "mpmd_control": [
+          {
+            "name": "indexer_compressor_kv_score",
+            "begin_us": 54.148,
+            "end_us": 63.824,
+            "kinds": {
+              "aic": {
+                "min_us": 8.164,
+                "mean_us": 8.859,
+                "max_us": 9.56,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "indexer_scale_page_commit",
+            "begin_us": 179.724,
+            "end_us": 185.812,
+            "kinds": {
+              "aiv": {
+                "min_us": 2.104,
+                "mean_us": 3.8555,
+                "max_us": 5.904,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "qproj_b",
+            "begin_us": 97.648,
+            "end_us": 129.372,
+            "kinds": {
+              "aic": {
+                "min_us": 24.596,
+                "mean_us": 28.084333333333333,
+                "max_us": 31.568,
+                "instances": 24
+              }
+            }
+          },
+          {
+            "name": "index_score_topk",
+            "begin_us": 236.656,
+            "end_us": 359.656,
+            "kinds": {
+              "aic": {
+                "min_us": 57.772,
+                "mean_us": 69.16133333333333,
+                "max_us": 111.176,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 65.276,
+                "mean_us": 81.56233333333334,
+                "max_us": 122.68,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "sparse_attn",
+            "begin_us": 386.008,
+            "end_us": 439.16,
+            "kinds": {
+              "aic": {
+                "min_us": 2.512,
+                "mean_us": 27.8445,
+                "max_us": 48.428,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 7.104,
+                "mean_us": 33.472500000000004,
+                "max_us": 52.88,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "oproj_a",
+            "begin_us": 441.156,
+            "end_us": 484.82,
+            "kinds": {
+              "aic": {
+                "min_us": 25.576,
+                "mean_us": 35.496500000000005,
+                "max_us": 43.504,
+                "instances": 24
+              }
+            }
+          },
+          {
+            "name": "hc_post",
+            "begin_us": 522.3000000000001,
+            "end_us": 532.26,
+            "kinds": {
+              "aiv": {
+                "min_us": 7.4719999999999995,
+                "mean_us": 8.668750000000001,
+                "max_us": 9.892000000000001,
+                "instances": 16
+              }
+            }
+          }
+        ]
+      }
+    },
+    "h131072_b24": {
+      "task_id": "task_20261022_024829_81317821559",
+      "queue_terminal": "completed(exit=0), confirmed 2026-10-22",
+      "result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/dag_capacity_gate_v27_h131072_b24/result.json",
+      "sources": {
+        "spmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/sources/84751e34/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd",
+        "mpmd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v27_dag_capacity_gate/operator",
+        "mpmd_control": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v25_score_leaf_rotation/operator"
+      },
+      "policies": {
+        "spmd": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 96,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "COOPERATIVE_PREFIX": true,
+          "EARLY_ATTENTION_GEOMETRY": true,
+          "LOCAL_ATTENTION_STATS": true,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": true,
+          "SPLIT_SCORE_ROWS": true,
+          "OUTPUT_WORK_BALANCE": true
+        },
+        "mpmd_control": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 96,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": true,
+          "LOCAL_ATTENTION_STATS": true,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": true,
+          "SPLIT_SCORE_ROWS": true,
+          "LIMIT_EMPTY_WORKERS": false
+        },
+        "mpmd": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 96,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false,
+          "EARLY_ATTENTION_GEOMETRY": true,
+          "LOCAL_ATTENTION_STATS": true,
+          "SCALE_PAGE_COALESCING": false,
+          "PLAN_PHYSICAL_ROWS": true,
+          "SPLIT_SCORE_ROWS": true,
+          "LIMIT_EMPTY_WORKERS": false,
+          "FUSED_DAG": true
+        }
+      },
+      "statistics_us": {
+        "spmd": {
+          "min": 830.28,
+          "mean": 835.584,
+          "max": 840.22,
+          "samples": [
+            836.6,
+            833.06,
+            830.28,
+            837.76,
+            840.22
+          ]
+        },
+        "mpmd_control": {
+          "min": 994.66,
+          "mean": 1001.256,
+          "max": 1010.96,
+          "samples": [
+            1006.84,
+            999.06,
+            994.66,
+            994.76,
+            1010.96
+          ]
+        },
+        "mpmd": {
+          "min": 997.04,
+          "mean": 1006.732,
+          "max": 1016.32,
+          "samples": [
+            1012.2,
+            997.04,
+            1005.52,
+            1002.58,
+            1016.32
+          ]
+        }
+      },
+      "ratio": 1.2048244102328431,
+      "candidate_over_control": 1.0054691307717507,
+      "paired_candidate_minus_control_us": [
+        5.36,
+        -2.02,
+        10.86,
+        7.82,
+        5.36
+      ],
+      "checks": {
+        "spmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards_passed": 101,
+          "tensors_passed": 9,
+          "all_bit_equal": true
+        }
+      }
+    }
+  }
+}
