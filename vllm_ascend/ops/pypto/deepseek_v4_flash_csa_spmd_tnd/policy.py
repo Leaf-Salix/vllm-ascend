@@ -101,6 +101,8 @@ SHORT_PREFETCH_HALF_SORT_LIMIT = 2048
 SCORE_SPLIT_MIN_TOKENS = 32
 # At most two query-group work items per each of the 24 physical groups.
 SHORT_HALF_SCORE_GROUP_LIMIT = 48
+# Two M256 query-Hadamard tiles cover the existing first M8 token block.
+TWO_HADAMARD_MAX_TOKENS = 8
 
 
 @dataclass(frozen=True)
@@ -127,6 +129,8 @@ class CSASPMDPolicy:
     output_work_balance: bool = False
     short_topk_prefix: bool = False
     short_half_score_ub: bool = False
+    qb_wide_n: bool = False
+    prefix_branch_groups: int = 4
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -153,6 +157,8 @@ class CSASPMDPolicy:
             "OUTPUT_WORK_BALANCE": self.output_work_balance,
             "SHORT_TOPK_PREFIX": self.short_topk_prefix,
             "SHORT_HALF_SCORE_UB": self.short_half_score_ub,
+            "QB_WIDE_N": self.qb_wide_n,
+            "PREFIX_BRANCH_GROUPS": self.prefix_branch_groups,
         }
 
 
@@ -204,6 +210,11 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         roots=1 if (long_history and group == 6) or single_request_leaves else 2,
         oa_cols=128 if tokens <= 96 else 256,
         ob_rows=ob_rows,
+        # Does not infer real query lengths; only the existing Host token-capacity tier.
+        # Keep the original Q_B in the small-M16 QA domain, which regressed in the paired test.
+        qb_wide_n=(long_history and tokens < EARLY_GEOMETRY_MIN_TOKENS
+                   and not parallel_small_qa),
+        prefix_branch_groups=2 if long_history and tokens <= TWO_HADAMARD_MAX_TOKENS else 4,
         # Host upper bound only; real mixed-query membership remains on device.
         short_half_score_ub=(not long_history and group == 2
                              and requests * ((max_query_tokens + 1) // 2)

@@ -21,3 +21,24 @@ def test_metadata_matrix_requires_future_history_capacity(b1, table_history, acc
 
 def test_ordinary_l1_does_not_require_matrix_capacity():
     validate_fixture_arguments(["--batch", "1", "--history", "131072", "--query-tokens", "6", "--l1-windows", "5"])
+
+
+@pytest.mark.parametrize(
+    "service_flag", ["--service-route", "--framework-graph", "--service-metadata-replay", "--service-timing"]
+)
+def test_metadata_matrix_and_service_must_use_separate_fixtures(service_flag):
+    arguments = [
+        "--batch",
+        "1",
+        "--history",
+        "131072",
+        "--query-tokens",
+        "6",
+        "--table-history",
+        "131200",
+        "--metadata-matrix",
+        "--b1-metadata-matrix",
+        service_flag,
+    ]
+    with pytest.raises(ValueError, match="独立fixture"):
+        validate_fixture_arguments(arguments)
