@@ -1,0 +1,131 @@
+{
+  "review_status": "PASS",
+  "scope": "最终报告和已有七份原始包的独立只读复核；无远端操作、无新设备测试",
+  "successful_cases": 7,
+  "raw_l1_windows": 35,
+  "matrix_precision_pass": false,
+  "b28": {
+    "observed_status": "completed (exit=1)",
+    "precision_gate": "candidate首次A输入对Native byte比较失败；未进入B及L1",
+    "raw_retrieved": true,
+    "failed_boundaries": [
+      "x_out",
+      "idx_topk"
+    ],
+    "output_different_elements": 1731,
+    "output_relative_l2": 7.13885310688056e-05,
+    "topk_different_positions": 88,
+    "all_six_cache_states_exact": true,
+    "CPU_summary": {
+      "topk_rows": [
+        86
+      ],
+      "output_rows": [
+        86,
+        103
+      ],
+      "output_row_differences": [
+        1343,
+        388
+      ],
+      "same_sorted_topk": true,
+      "same_members_per_adjacent_pair": false
+    },
+    "module_cause_known": false,
+    "large_tensor_independently_recomputed_locally": false,
+    "evidence_level": "独立重读本地失败raw及CPU分析脚本/摘要；大型tensor留远端，本agent未重新执行其tensor计算"
+  },
+  "findings": [
+    {
+      "id": "R1",
+      "status": "resolved",
+      "severity": "documentation",
+      "detail": "主报告“已测档位的精度门禁全部通过”应限定为已获得L1结果的七档，避免包含已测试失败的B28。"
+    },
+    {
+      "id": "R2",
+      "status": "resolved",
+      "severity": "reproduction",
+      "detail": "独立核验器从ROOT.parents[1]寻找本地checkout，README临时解包复现命令不可直接运行。应显式绑定随包FORMAL_CANDIDATE_SOURCES.json并做纯CPU解包复现。"
+    }
+  ],
+  "validated": {
+    "seven_archive_sha_and_result_medians": true,
+    "earlier_independent_full_raw_rechecks": true,
+    "screenshot_values_controlled_comparison": false,
+    "new_whole_model_token_test": false,
+    "s6_only_matrix_not_tnd_padding_requirement": true
+  },
+  "files": {
+    "report": {
+      "path": "vllm-ascend-nalinaly-tnd-20261008-codex/tests/pypto_test/DSV4_FLASH_CSA_TND_EIGHT_CASE_L1_20261021.md",
+      "sha256": "d3ddd4881c6d820f609cce1ab7992afe49f1bb5407d640506886a21c2efbcaa0"
+    },
+    "evidence_readme": {
+      "path": "vllm-ascend-nalinaly-tnd-20261008-codex/tests/pypto_test/evidence_tnd_precision/eight_l1_20261021/README.md",
+      "sha256": "70e5c460136d2a87f5ce0856d48acbf9f713b767ca1f637522f88a48715f55d4"
+    },
+    "seven_case_summary": {
+      "path": "reports/dsv4-tnd-eight-l1-20261021/INDEPENDENT_SEVEN_CASE_SUMMARY.json",
+      "sha256": "9d0400c4d1294ce9cfa70fe0be1532f89a7eaab0474806ac6cc2f4ac7f432d07"
+    },
+    "observed_b28_extract": {
+      "path": "reports/dsv4-tnd-eight-l1-20261021/OBSERVED_B28_FAILURE.txt",
+      "sha256": "e2c96a616a056a54cc839b176f92bbbd2e4ddbd6485d4e50608127e8ad3c3a8c"
+    },
+    "runs": {
+      "path": "reports/dsv4-tnd-eight-l1-20261021/RUNS.json",
+      "sha256": "683a927ee816a389e12b6cf7a6ebd54e9b93b45dc3a9b769a15e80e25f71eb83"
+    },
+    "independent_auditor": {
+      "path": "reports/dsv4-tnd-eight-l1-20261021/independent_recheck.py",
+      "sha256": "976021c962f3ac27b0f73b6633f38425f4f26fc9e340f08b48f0c30b93009ea5"
+    },
+    "b28_raw": {
+      "path": "reports/dsv4-tnd-eight-l1-20261021/eight-l1-128k-b28-v1-evidence.tar.gz",
+      "sha256": "45f9fd99245fa334a78cf2a51e1f667cc17ccb454a84e4025b8d500a097aa1da"
+    },
+    "b28_cpu_analysis": {
+      "path": "reports/dsv4-tnd-eight-l1-20261021/B28_CPU_DIFFERENCE.json",
+      "sha256": "5a70c055a9444f87c8ffc156da0d54e490350b41a276cfe43070bfa5a0c0056b"
+    },
+    "b28_cpu_script": {
+      "path": "reports/dsv4-tnd-eight-l1-20261021/inspect_b28_cpu.py",
+      "sha256": "3e1df8d408228cfbbd0afa028a3a6f76011a09a2f538146e9d687428236c3ef6"
+    },
+    "final_task_status": {
+      "path": "reports/dsv4-tnd-eight-l1-20261021/FINAL_TASK_STATUS.json",
+      "sha256": "1345b367e546b1cc9e0c978f609974d87a841a7722e8152d6cb4f00930080f58"
+    },
+    "task_durations": {
+      "path": "reports/dsv4-tnd-eight-l1-20261021/TASK_DURATIONS.json",
+      "sha256": "2579ad7e5a03debf19fe8314794b6404ffadb651ca8af46b7d56ca762523898e"
+    },
+    "portable_auditor_smoke": {
+      "path": "reports/dsv4-tnd-eight-l1-20261021/PORTABLE_AUDITOR_SMOKE.json",
+      "sha256": "5c3729ab2c46a531b0290e7bea73bb1006556b20f0a3afc4e6996325d1fa8a22"
+    }
+  },
+  "task_receipts": {
+    "all_eight_terminal_and_released": true,
+    "successful": 7,
+    "failed": 1,
+    "launcher_seconds": [
+      137,
+      142,
+      132,
+      147,
+      148,
+      157,
+      159,
+      143
+    ],
+    "computed_from_saved_START_END": true
+  },
+  "portable_auditor": {
+    "resolved_manifest_source": "ROOT / FORMAL_CANDIDATE_SOURCES.json",
+    "reported_temporary_directory_CPU_smoke_pass": true,
+    "no_source_gate_weakened": true
+  },
+  "remaining_blockers": []
+}
