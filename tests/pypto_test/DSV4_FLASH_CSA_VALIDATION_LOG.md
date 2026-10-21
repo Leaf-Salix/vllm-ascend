@@ -20297,3 +20297,80 @@ WS不合入：731–732节已证明核内受益、完整回退且根因未收口
 按用户“已动代码完成、有益保留”的补充要求，本轮将上述分档改动及结果一起
 提交，随后停止测试和优化，不自动push。
 [采用与验证状态](csa_multitask_backport_20261020/QA_SHAPE_GATE_STATUS.json)。
+
+
+## 735. 2026-10-21：TND MPMD 新阶段，冻结参考与真实混长验收集草案
+
+用户目标：以 `84751e34cb1f27eff9e4d3fdf03f8495982f1cdf` 的
+`deepseek_v4_flash_csa` 多 task DAG 为骨架，结合同提交 `deepseek_v4_flash_csa_spmd_tnd`
+的原生 TND 合同及已验证核内实现。新增 `deepseek_v4_flash_csa_tnd`；保留旧入口。
+用户再次明确：完整 CSA 不能实现成一个 SPMD。当前先只看完整 L1（首个 incore 开始至最后一个结束），
+不另加 L4 或整模型性能门槛；最终目标仍包含真实 vLLM 接入与 16 卡功能验证。
+
+冻结八档：128K B1/B4/B8/B16/B24/B28，8K B16/B32；组内等权几何平均，长短权重 0.8/0.2，
+MPMD/SPMD 综合比值须 ≤0.90。单卡、同进程、同输入初态、同工具链、五窗交替采样，记录 min/mean/max。
+源码和轻量证据位于 [csa_mpmd_tnd_20261021](csa_mpmd_tnd_20261021/)。
+`cases.json` 当前是待冻结 SPMD 设备验证的草案：B1 固定 S6；其他档使用固定混合 S1～S6、
+变长历史、真实 query_start_loc 与独立 dummy 请求/容量，绝不重排成统一 B×6。
+验证通过后冻结；若冻结后发现 测试场景 错误，先报告并确认，不能静默修改分母。
+
+### 参考优化与迁移核对
+
+| 参考能力 | 现有 BSH 多 task 情况 | 本轮处理与证据 |
+| --- | --- | --- |
+| HC widen/RMS、split-K、gates、norm、Sinkhorn 分工 | 已有独立 task，已验证 | 保留多 task 链；以冻结 TND 数学核对数值 |
+| Q_A、Q_R、Q_B、KV、量化和 RoPE | 已有独立投影/Vector task；QA 小 M16 分档已验证 | 保留独立调度与 Q_A 对主 Compressor 的优先关系 |
+| 两条 Compressor 共享前缀状态 | 现有 `T/B`、`token//6` 绑定固定 S6 | 移植 TND Q/L pooling、全读完再 commit、compact 元数据合同；两条 state 独立 |
+| Indexer 分组、叶计划与 Top-K | 固定 S6 导出请求；已有已验证长短 Score、NZ/FIX 优化 | 使用 TND 真实请求 group/leaf 计划，Score 保持局部 MIX，Top-K 独立 task |
+| scale 页所有权/连续布局证明 | 现有独立 metadata task | 在设备侧生成本轮计划，复用 Native interleaved cache，无入口拆分或 Host D2H |
+| Attention 页计划与 QK/PV | 固定 S6 寻址；已有独立 plan 和局部 MIX | 换成 TND 的真实 query owner、padding 与页检查；仍独立于 Indexer 与输出链 |
+| O_A、量化、O_B、HCpost | 独立 task；小 T HCpost 已验证 | 保留独立任务链；SPMD 的 OA/OB 同核互补分工不能不加分析地照搬 |
+| 单 SPMD GM phase 通知 | 为常驻 SPMD 跨核协作而设 | 跨 task 依赖交给 TMR；只保留 Score/Attention 自身 Cube/Vector FFTS 流水 |
+| TND v83/v87/v88/v89 等 CPU 候选 | 参考日志未给出正式采用的设备证据 | 不作为已验证优化直接采用 |
+
+工具链按参考 `native_toolchain_manifest.json`：PyPTO `65477973` + 原生 150tick 等补丁、
+PTOAS `b48c84eb` + 同配套补丁、Simpler `57e49923`，两侧使用同一实际副本；当前未修改 SDK。
+源级初版按 BSH 多 task 边界组织了 43 个 task scope，其中仅 Score 和 Attention 各自为局部 MIX。
+这只是待编译/设备验证的实现，不代表数值已通过，也没有性能达标结论。
+
+
+### 735.1：多 task 初版设备验证与场景冻结（首阶段）
+
+2026-10-21 完成首个独立 TND MPMD 路径。长/短策略 CPU 后端编译通过；生成编排含 43 处独立 runtime submit，
+只有 Score 与 Attention 各自使用 MIX，其余投影、Compressor、量化、cache 写回及 HCpost 独立调度。
+跨 task 已删除单 SPMD 的 GM phase/代际工作区与轮询，改用 Tensor/TaskId 依赖；数学内必要的 FFTS 保留。
+
+用户确认 ACLGraph 容量 padding 必须纳入测试，并要求后续中文称“测试场景”。核对 Native
+`model_runner_v1._pad_query_start_loc_for_fia` 后，在冻结前修正尾部表达：mixed 分支只追加一个失活请求，
+其 Q 区间可超过六行；实际请求仍 S1～S6，dummy 的 L=0、slots=-1。此前拆成多个 dummy 的结果仅保留为初验。
+只补测受影响的 128K B16/B24/B28、8K B16/B32，B1/B4/B8 的场景内容没有变化，复用原结果。
+
+`cases.json` v2 已冻结。容量 6/16/32/64/96/112 是本轮显式配置的单卡图分档，
+不表示所有 vLLM 部署都会自动选择这组档位；16 卡真实捕获配置另行记录。真实 query、历史、seed、
+活动量/容量、Native 页与状态初态规则均明确记录，之后不为优化分支修改场景。
+
+八档在 eager、图重放、性能采样后的输出、Top-K、scores、所有 cache/state 写区均与冻结 TND SPMD **逐 bit 一致**；
+写区之外的 Native 原存储、只读 metadata 与工作区首尾保护均通过。
+尚未完成 B1 S1～S6 边界集、真实连续状态推进和 16 卡模型验证，不能用本次结果代替。
+
+完整 L1 初始数据如下（μs，五窗交替配对，开启 L1 及 dep_gen）：
+
+| 场景 | SPMD min | SPMD mean | SPMD max | MPMD min | MPMD mean | MPMD max | MPMD/SPMD mean |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| h131072_b1 | 351.22 | 359.14 | 366.78 | 479.52 | 493.25 | 511.82 | 1.373399 |
+| h131072_b4 | 474.20 | 476.68 | 478.06 | 590.28 | 607.54 | 620.12 | 1.274532 |
+| h131072_b8 | 550.58 | 553.34 | 556.10 | 707.94 | 712.40 | 717.92 | 1.287438 |
+| h131072_b16 | 713.94 | 718.56 | 722.40 | 914.72 | 918.89 | 924.40 | 1.278791 |
+| h131072_b24 | 834.02 | 836.87 | 841.72 | 1080.60 | 1092.13 | 1108.46 | 1.305012 |
+| h131072_b28 | 967.84 | 982.52 | 989.94 | 1217.76 | 1226.36 | 1232.92 | 1.248182 |
+| h8192_b16 | 565.70 | 572.28 | 580.50 | 775.82 | 781.34 | 792.28 | 1.365294 |
+| h8192_b32 | 742.14 | 746.80 | 752.10 | 964.98 | 976.98 | 993.90 | 1.308216 |
+
+G128=1.293980，G8=1.336451，综合 G=1.302365；当前比冻结 SPMD 慢约 30.24%，**未达到 G≤0.90**。
+完整采样、逐张量误差/bit 检查及泳道路径见 [initial_evidence.json](csa_mpmd_tnd_20261021/initial_evidence.json)。
+此阶段提交解决功能迁移、可复现对照和测试合同，不宣称性能优化完成；未注册新 vLLM variant。
+
+下一步先排查初版差距：核对 dep_gen 是否扰动 AICPU 提交，再恢复 BSH 已有的权重缓存提示，
+根据泳道安排 Indexer 关键投影/Vector 链与 Q_B、KV、主 Compressor 的优先关系。当前 128K/B16
+初验泳道中 Score 约到 400μs 才启动，不能把整个差距直接归因于 Score 核内数学。
+所有后续取舍仍看同一冻结场景、同工具链下的完整 L1，而不是只看核内耗时。
