@@ -18,6 +18,9 @@ HERE = Path(__file__).resolve().parent
 HARNESS = HERE / "runs/score_owner_harness_v89"
 SOURCE = HERE / "runs/borrowed_score_owner_candidate_v88"
 
+if not HARNESS.is_dir() or not SOURCE.is_dir():
+    pytest.skip("Requires the local v88 candidate and generated v89 replay harness", allow_module_level=True)
+
 
 def module_from_file(name):
     spec = importlib.util.spec_from_file_location("score_replay_" + name, HARNESS / (name + ".py"))
