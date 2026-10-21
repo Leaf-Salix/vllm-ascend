@@ -112,6 +112,8 @@ a241fa61 BSH静态形状修复+150tick；候选为输出分工v4+短前缀TopK+�
 | 128K/B8/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 642.68 | 622.60 | -3.12% | 不适用 | PASS | [结果](runs/topk_prefix_h131072_b8_s6_v101/result.json) |
 | 128K/B8/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 622.28 | 617.16 | -0.82% | 不适用 | PASS | [结果](runs/cohort_borrowed_combined_h131072_b8_s6_v106/result.json) |
 | 8K/B16/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 641.12 | 640.38 | -0.12% | 不适用 | PASS | [结果](runs/cohort_borrowed_combined_h8192_b16_s6_v106/result.json) |
+| 128K/B1/S6 独立工作区 | TND combined v106 (incremental comparison only) | 366.50 | 355.42 | -3.02% | 不适用 | 未完成 | [结果](runs/qb_wide_b1_s6_and_s1_s6_v109/result.json) |
+| 128K/B8/S6 独立工作区 | TND combined v106 (incremental comparison only) | 613.56 | 609.60 | -0.65% | 不适用 | PASS | [结果](runs/qb_wide_h131072_b8_s6_v109/result.json) |
 
 ## 任务与原始证据
 
@@ -238,6 +240,8 @@ a241fa61 BSH静态形状修复+150tick；候选为输出分工v4+短前缀TopK+�
 | `task_20261021_162057_10868510136` | [topk_prefix_ties_device_v104](runs/topk_prefix_ties_device_v104/result.json) | completed (exit=0) | complete | PASS |
 | `task_20261021_162824_11408309460` | [cohort_borrowed_combined_h131072_b8_s6_v106](runs/cohort_borrowed_combined_h131072_b8_s6_v106/result.json) | completed (exit=0) | complete | PASS |
 | `task_20261021_162824_11409259262` | [cohort_borrowed_combined_h8192_b16_s6_v106](runs/cohort_borrowed_combined_h8192_b16_s6_v106/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_165204_1559193337` | [qb_wide_b1_s6_and_s1_s6_v109](runs/qb_wide_b1_s6_and_s1_s6_v109/result.json) | completed (exit=1) | tnd_metadata_and_continuous_state | 否 |
+| `task_20261021_165204_15601729493` | [qb_wide_h131072_b8_s6_v109](runs/qb_wide_h131072_b8_s6_v109/result.json) | completed (exit=0) | complete | PASS |
 
 各任务完整命令和固定launcher SHA256见 `jobs.json`。
 Native超阈值元素、Top-K替换、cache/state及保护区明细仍在原始result.json；

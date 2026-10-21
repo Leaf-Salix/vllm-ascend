@@ -1,0 +1,243 @@
+--- a/query_projection_stages.py
++++ b/query_projection_stages.py
+@@ -79,6 +79,11 @@
+ QPROJ_N_BLOCKS = H * HEAD_DIM // QPROJ_MM_N_TILE
+ QPROJ_PIPE_M_TILE = 128
+ QPROJ_PIPE_K_TILE = 256
++# Small-token Q_B experiment: one accumulator <=128KiB, each Right tile <=64KiB.
++QB_WIDE_M_TILE = 64
++QB_WIDE_N_TILE = 512
++QB_WIDE_K_TILE = 128
++QB_WIDE_N_BLOCKS = H * HEAD_DIM // QB_WIDE_N_TILE
+ Q_ROPE_T_TILE = 8
+ Q_ROPE_H_TILE = 4
+ Q_DEQUANT_WORKERS = 48
+@@ -96,6 +101,7 @@
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
++    QB_WIDE_N: pl.constexpr = False,
+ ):
+     """ND Q_B：显式 AIC 按列块条带领取，原 K 流水不变；调用前必须等待 QR。"""
+     qproj_worker = pl.max(worker_id, 0)
+@@ -117,6 +123,46 @@
+ 
+ 
+ @pl.jit.inline(auto_scope=False)
++def _q_b_nz_wide_stage(
++    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
++    qr_i8_matmul: pl.Tensor[[PAD_ROWS_DYN, Q_LORA], pl.INT8],
++    q_proj_i32: pl.Tensor[[QPROJ_ROWS_DYN, H * HEAD_DIM], pl.INT32],
++    tokens: pl.Scalar[pl.INDEX],
++    worker_id: pl.Scalar[pl.INDEX],
++    WORKERS: pl.constexpr,
++):
++    """NZ Q_B：显式 AIC 按列块条带领取，小容量 M64/N512/K128 流水；调用前必须等待 QR。"""
++    qproj_worker = pl.max(worker_id, 0)
++    qproj_t_matmul = (tokens + QB_WIDE_M_TILE - 1) // QB_WIDE_M_TILE * QB_WIDE_M_TILE
++    # 由实际 tokens 决定最后一个 M64，不能用较大的工作区容量延长循环。
++    for qproj_round in pl.range(0, (QB_WIDE_N_BLOCKS - qproj_worker + WORKERS - 1) // WORKERS):
++        # 用非负 worker+round*WORKERS 表达 NZ 列偏移，保留编译器的非负证明。
++        qproj_n_idx = qproj_worker + qproj_round * WORKERS
++        w_col0 = qproj_n_idx * QB_WIDE_N_TILE
++        for t0 in pl.range(0, qproj_t_matmul, QB_WIDE_M_TILE):
++            # 最后一盒不足64行时，用实际有效行约束载入及矩阵计算。
++            m_rows = pl.min(QB_WIDE_M_TILE, tokens - t0)
++            qr_first = pl.slice(
++                qr_i8_matmul, [QB_WIDE_M_TILE, QB_WIDE_K_TILE], [t0, 0], valid_shape=[m_rows, QB_WIDE_K_TILE]
++            )
++            wq_first = wq_b[0:QB_WIDE_K_TILE, w_col0 : w_col0 + QB_WIDE_N_TILE]
++            # 第一段 matmul 初始化 INT32 累加器，后七段按 K128 递增追加，INT32 点积无溢出。
++            col_acc = pl.matmul(qr_first, wq_first, out_dtype=pl.INT32)
++            for k0 in pl.pipeline(QB_WIDE_K_TILE, Q_LORA, QB_WIDE_K_TILE, stage=2):
++                qr_chunk = pl.slice(
++                    qr_i8_matmul,
++                    [QB_WIDE_M_TILE, QB_WIDE_K_TILE],
++                    [t0, k0],
++                    valid_shape=[m_rows, QB_WIDE_K_TILE],
++                )
++                wq_chunk = wq_b[k0 : k0 + QB_WIDE_K_TILE, w_col0 : w_col0 + QB_WIDE_N_TILE]
++                col_acc = pl.matmul_acc(col_acc, qr_chunk, wq_chunk)
++            q_proj_i32[t0 : t0 + QB_WIDE_M_TILE, w_col0 : w_col0 + QB_WIDE_N_TILE] = col_acc
++    return q_proj_i32
++
++
++
++@pl.jit.inline(auto_scope=False)
+ def _q_b_nz_stage(
+     wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
+     qr_i8_matmul: pl.Tensor[[PAD_ROWS_DYN, Q_LORA], pl.INT8],
+@@ -124,34 +170,40 @@
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
++    QB_WIDE_N: pl.constexpr = False,
+ ):
+     """NZ Q_B：显式 AIC 按列块条带领取，原 K 流水不变；调用前必须等待 QR。"""
+-    qproj_worker = pl.max(worker_id, 0)
+-    qproj_t_matmul = (tokens + QPROJ_PIPE_M_TILE - 1) // QPROJ_PIPE_M_TILE * QPROJ_PIPE_M_TILE
+-    # 由实际 tokens 决定最后一个 M128，不能用较大的工作区容量延长循环。
+-    for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + WORKERS - 1) // WORKERS):
+-        # 用非负 worker+round*WORKERS 表达 NZ 列偏移，保留编译器的非负证明。
+-        qproj_n_idx = qproj_worker + qproj_round * WORKERS
+-        w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
+-        for t0 in pl.range(0, qproj_t_matmul, QPROJ_PIPE_M_TILE):
+-            # 最后一盒不足128行时，用实际有效行约束载入及矩阵计算。
+-            m_rows = pl.min(QPROJ_PIPE_M_TILE, tokens - t0)
+-            qr_first = pl.slice(
+-                qr_i8_matmul, [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE], [t0, 0], valid_shape=[m_rows, QPROJ_PIPE_K_TILE]
+-            )
+-            wq_first = wq_b[0:QPROJ_PIPE_K_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
+-            # 第一段 matmul 初始化 INT32 累加器，后三段按 K256 原顺序追加。
+-            col_acc = pl.matmul(qr_first, wq_first, out_dtype=pl.INT32)
+-            for k0 in pl.pipeline(QPROJ_PIPE_K_TILE, Q_LORA, QPROJ_PIPE_K_TILE, stage=2):
+-                qr_chunk = pl.slice(
+-                    qr_i8_matmul,
+-                    [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE],
+-                    [t0, k0],
+-                    valid_shape=[m_rows, QPROJ_PIPE_K_TILE],
+-                )
+-                wq_chunk = wq_b[k0 : k0 + QPROJ_PIPE_K_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
+-                col_acc = pl.matmul_acc(col_acc, qr_chunk, wq_chunk)
+-            q_proj_i32[t0 : t0 + QPROJ_PIPE_M_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE] = col_acc
++    if QB_WIDE_N:
++        q_proj_i32 = _q_b_nz_wide_stage(
++            wq_b, qr_i8_matmul, q_proj_i32, tokens, worker_id, WORKERS
++        )
++    else:
++        qproj_worker = pl.max(worker_id, 0)
++        qproj_t_matmul = (tokens + QPROJ_PIPE_M_TILE - 1) // QPROJ_PIPE_M_TILE * QPROJ_PIPE_M_TILE
++        # 由实际 tokens 决定最后一个 M128，不能用较大的工作区容量延长循环。
++        for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + WORKERS - 1) // WORKERS):
++            # 用非负 worker+round*WORKERS 表达 NZ 列偏移，保留编译器的非负证明。
++            qproj_n_idx = qproj_worker + qproj_round * WORKERS
++            w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
++            for t0 in pl.range(0, qproj_t_matmul, QPROJ_PIPE_M_TILE):
++                # 最后一盒不足128行时，用实际有效行约束载入及矩阵计算。
++                m_rows = pl.min(QPROJ_PIPE_M_TILE, tokens - t0)
++                qr_first = pl.slice(
++                    qr_i8_matmul, [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE], [t0, 0], valid_shape=[m_rows, QPROJ_PIPE_K_TILE]
++                )
++                wq_first = wq_b[0:QPROJ_PIPE_K_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
++                # 第一段 matmul 初始化 INT32 累加器，后三段按 K256 原顺序追加。
++                col_acc = pl.matmul(qr_first, wq_first, out_dtype=pl.INT32)
++                for k0 in pl.pipeline(QPROJ_PIPE_K_TILE, Q_LORA, QPROJ_PIPE_K_TILE, stage=2):
++                    qr_chunk = pl.slice(
++                        qr_i8_matmul,
++                        [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE],
++                        [t0, k0],
++                        valid_shape=[m_rows, QPROJ_PIPE_K_TILE],
++                    )
++                    wq_chunk = wq_b[k0 : k0 + QPROJ_PIPE_K_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
++                    col_acc = pl.matmul_acc(col_acc, qr_chunk, wq_chunk)
++                q_proj_i32[t0 : t0 + QPROJ_PIPE_M_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE] = col_acc
+     return q_proj_i32
+ 
+ 
+--- a/cube_schedule.py
++++ b/cube_schedule.py
+@@ -200,6 +200,7 @@
+     COOPERATIVE_PREFIX: pl.constexpr = False,
+     SPLIT_SCORE_ROWS: pl.constexpr = False,
+     OUTPUT_WORK_BALANCE: pl.constexpr = False,
++    QB_WIDE_N: pl.constexpr = False,
+ ):
+     # 恢复原分task五份流式权重的BYPASS；预定义incore使用函数属性表达。
+     # 当前PyPTO此属性只接受(参数序号,策略整数)，1表示CachePolicy.BYPASS。
+@@ -312,6 +313,7 @@
+             weights_proj, weights_partial, idx_query_rope_heads, hadamard,
+             idx_query_had, qr_matmul, wq_b, q_proj, idx_lengths, idx_count,
+             idx_normed, idx_had, wkv, kv_fp32, signal, worker, generation, 4,
++            QB_WIDE_N,
+         )
+     else:
+         weights_partial = indexer_weights_project_stage(normed, weights_proj, weights_partial, worker, GROUPS)
+@@ -336,7 +338,7 @@
+         )
+         signal = publish_phase(signal, PHASE_IDX_QUERY_HAD, worker, CORES, generation)
+         # Q_B列块n归n%24；每个owner处理所有实际M128行块。返回原GM别名给cluster。
+-        q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, worker, GROUPS)
++        q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, worker, GROUPS, QB_WIDE_N)
+         signal = publish_phase(signal, PHASE_QB, worker, CORES, generation)
+ 
+         # 主QB之后优先完成已就绪的Indexer compact Hadamard，随后做独立主压缩。
+--- a/projection_overlap_stages.py
++++ b/projection_overlap_stages.py
+@@ -122,6 +122,7 @@
+     worker: pl.Scalar[pl.INDEX],
+     generation: pl.Scalar[pl.INT32],
+     BRANCH_GROUPS: pl.constexpr,
++    QB_WIDE_N: pl.constexpr = False,
+ ):
+     """0<R<24；Host只选择R，动态行数及所有输入依赖仍留在核内。"""
+     tokens = pl.tensor.dim(normed, 0)
+@@ -168,7 +169,7 @@
+         # 后部连续N个物理核对N取模是双射，既覆盖全部列块，也让NZ地址从
+         # 非负表达式构成。消费者等待全部Q_B实际生产者，不依赖置换前的编号。
+         qb_worker = worker % (GROUPS - BRANCH_GROUPS)
+-        q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, qb_worker, GROUPS - BRANCH_GROUPS)
++        q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, qb_worker, GROUPS - BRANCH_GROUPS, QB_WIDE_N)
+         signal = publish_phase(signal, PHASE_QB, worker, CORES, generation)
+     # 同一组24个KV逻辑worker做循环置换，保持全部M/N块唯一归属。常见的
+     # 最多12个非空worker落在Q_B一侧，不继续堆到Hadamard辅助核；即便
+--- a/entry.py
++++ b/entry.py
+@@ -292,6 +292,7 @@
+     OUTPUT_WORK_BALANCE: pl.constexpr = False,
+     SHORT_HALF_SCORE_UB: pl.constexpr = False,
+     SHORT_TOPK_PREFIX: pl.constexpr = False,
++    QB_WIDE_N: pl.constexpr = False,
+ ):
+     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
+     with pl.cluster(name_hint="dynamic_csa_full"):
+@@ -386,6 +387,7 @@
+             COOPERATIVE_PREFIX,
+             SPLIT_SCORE_ROWS,
+             OUTPUT_WORK_BALANCE,
++            QB_WIDE_N,
+         )
+         (
+             x_fp32,
+@@ -822,6 +824,7 @@
+     OUTPUT_WORK_BALANCE: pl.constexpr = False,
+     SHORT_HALF_SCORE_UB: pl.constexpr = False,
+     SHORT_TOPK_PREFIX: pl.constexpr = False,
++    QB_WIDE_N: pl.constexpr = False,
+ ):
+     # Native cache只作为一个根入参传入。两份Key是编排内的零拷贝描述符，
+     # 避免把“可写cache+部分重叠只读视图”当作独立外部入参触发Torch别名拒绝。
+@@ -1074,6 +1077,7 @@
+             OUTPUT_WORK_BALANCE,
+             SHORT_HALF_SCORE_UB,
+             SHORT_TOPK_PREFIX,
++            QB_WIDE_N,
+         )
+     return (
+         x_fp32,
+--- a/policy.py
++++ b/policy.py
+@@ -127,6 +127,7 @@
+     output_work_balance: bool = False
+     short_topk_prefix: bool = False
+     short_half_score_ub: bool = False
++    qb_wide_n: bool = False
+ 
+     def constexprs(self) -> dict[str, int | bool]:
+         return {
+@@ -153,6 +154,7 @@
+             "OUTPUT_WORK_BALANCE": self.output_work_balance,
+             "SHORT_TOPK_PREFIX": self.short_topk_prefix,
+             "SHORT_HALF_SCORE_UB": self.short_half_score_ub,
++            "QB_WIDE_N": self.qb_wide_n,
+         }
+ 
+ 
+@@ -204,6 +206,8 @@
+         roots=1 if (long_history and group == 6) or single_request_leaves else 2,
+         oa_cols=128 if tokens <= 96 else 256,
+         ob_rows=ob_rows,
++        # Does not infer real query lengths; only the existing Host token-capacity tier.
++        qb_wide_n=tokens < EARLY_GEOMETRY_MIN_TOKENS,
+         # Host upper bound only; real mixed-query membership remains on device.
+         short_half_score_ub=(not long_history and group == 2
+                              and requests * ((max_query_tokens + 1) // 2)

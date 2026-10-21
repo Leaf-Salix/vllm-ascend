@@ -23,8 +23,18 @@ def main():
     parser.add_argument("--unused-score-arena", action="store_true")
     args = parser.parse_args()
     source, reference, target = (p.resolve() for p in (args.harness, args.reference, args.output))
-    if reference != here / "runs/output_work_balance_native_candidate_v4":
-        raise ValueError("This probe's reference label is reserved for adopted output_balance v4")
+    if reference == here / "runs/output_work_balance_native_candidate_v4":
+        reference_kind = "adopted_tnd_output_balance_v4"
+        reference_label = "TND output_balance v4 (incremental comparison only)"
+    elif reference == here / "runs/borrowed_combined_candidate_v106":
+        reference_kind = "adopted_tnd_borrowed_combined_v106"
+        reference_label = "TND combined v106 (incremental comparison only)"
+        accepted = json.loads((here / "borrowed_combined_cleanup_v106.json").read_text())
+        for name, expected in accepted["source_manifest"].items():
+            if hashlib.sha256((reference / name).read_bytes()).hexdigest() != expected:
+                raise ValueError(f"Accepted combined-v106 source changed: {name}")
+    else:
+        raise ValueError("This probe's reference label is reserved for adopted output_balance v4 or combined v106")
     target.mkdir(parents=True, exist_ok=False)
     names = (
         "run_probe.py",
@@ -41,8 +51,8 @@ def main():
     frozen = target / "reference"
     shutil.copytree(reference, frozen, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     reference_info = {
-        "kind": "adopted_tnd_output_balance_v4",
-        "label": "TND output_balance v4 (incremental comparison only)",
+        "kind": reference_kind,
+        "label": reference_label,
         "source": str(reference),
         "frozen_source": str(frozen),
         "formal_bsh_gate_eligible": False,
