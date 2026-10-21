@@ -46,10 +46,21 @@ def main():
             evidence = json.loads((here / "runs" / case / "result.json").read_text())
             if not (evidence["passed"] and evidence["stage"] == "complete"):
                 raise ValueError(f"QB-wide reference requires completed correctness: {case}")
+    elif reference == here.parent / "csa_spmd_tnd_opt_20261022/runs/frozen_v122":
+        reference_kind = "frozen_tnd_v122"
+        reference_label = "Frozen TND v122 (nine-case incremental latency goal)"
+        reference_adopted = False
+        accepted = json.loads((here.parent / "csa_spmd_tnd_opt_20261022/frozen_v122.json").read_text())
+        actual = {
+            str(path.relative_to(reference)): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in reference.rglob("*.py")
+        }
+        if actual != accepted["files"]:
+            raise ValueError("Frozen v122 source differs from the permanent reference manifest")
     else:
         raise ValueError(
             "This probe's reference label is reserved for adopted output_balance v4, combined v106, "
-            "or the validated experimental QB-wide v108b"
+            "the validated experimental QB-wide v108b, or frozen TND v122"
         )
     target.mkdir(parents=True, exist_ok=False)
     names = (
