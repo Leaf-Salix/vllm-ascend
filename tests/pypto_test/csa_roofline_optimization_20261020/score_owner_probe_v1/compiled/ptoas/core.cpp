@@ -1,0 +1,428 @@
+#include "pto/pto-inst.hpp"
+using namespace pto;
+
+enum class PTOAutoSyncTailMode : int {
+  kBarrierAll = 0,
+  kSetWaitMte3ToSEvent0 = 1,
+};
+
+static AICORE inline void ptoas_auto_sync_tail(
+    PTOAutoSyncTailMode mode = PTOAutoSyncTailMode::kBarrierAll) {
+  switch (mode) {
+  case PTOAutoSyncTailMode::kSetWaitMte3ToSEvent0:
+    set_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
+    wait_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
+    break;
+  case PTOAutoSyncTailMode::kBarrierAll:
+  default:
+    pipe_barrier(PIPE_ALL);
+    break;
+  }
+}
+
+template <typename Ptr>
+static AICORE inline void PTOAS__DCCI_SINGLE_CACHE_LINE(Ptr ptr) {
+  dcci((__gm__ void*)ptr, cache_line_t::SINGLE_CACHE_LINE);
+}
+
+AICORE void core(__gm__ int32_t* v1, __gm__ int32_t* v2, __gm__ int32_t* v3, __gm__ int64_t* v4, int64_t v5, int64_t v6, int64_t v7) {
+  using T = float;
+
+  #if defined(__DAV_VEC__)
+  set_mask_norm();
+  set_vector_mask(-1, -1);
+  const int64_t v8 = 147;
+  const int32_t v9 = -1;
+  const int32_t v10 = 1073741824;
+  const int32_t v11 = 0;
+  // pto: %c1_index
+  const int64_t v12 = 1;
+  // pto: %c16_index
+  const int64_t v13 = 16;
+  // pto: %c4_index
+  const int64_t v14 = 4;
+  // pto: %c15_index
+  const int64_t v15 = 15;
+  // pto: %c48_index
+  const int64_t v16 = 48;
+  // pto: %c2_index
+  const int64_t v17 = 2;
+  // pto: %c0_index
+  const int64_t v18 = 0;
+  // pto: %c24_index
+  const int64_t v19 = 24;
+  // pto: %c72_index
+  const int64_t v20 = 72;
+  // pto: %c3_index
+  const int64_t v21 = 3;
+  // pto: %c5_index
+  const int64_t v22 = 5;
+  // pto: %c6_index
+  const int64_t v23 = 6;
+  // pto: %c32_index
+  const int64_t v24 = 32;
+  // pto: %c128_index
+  const int64_t v25 = 128;
+  // pto: %c256_index
+  const int64_t v26 = 256;
+  // pto: %c1024_index
+  const int64_t v27 = 1024;
+  // pto: %c1023_index
+  const int64_t v28 = 1023;
+  // pto: %c64_index
+  const int64_t v29 = 64;
+  // pto: %c20_index
+  const int64_t v30 = 20;
+  // pto: %c129_index
+  const int64_t v31 = 129;
+  // pto: %cn1_index
+  const int64_t v32 = -1;
+  // pto: %0, %1, %2
+  int64_t v33 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) (v6 / v13) * (uint64_t) v13) + (uint64_t) v13);
+  // pto: %3
+  int64_t v34 = (int64_t) ((uint64_t) v7 * (uint64_t) v14);
+  // pto: %4, %5, %6, %7, %9, %10, %12, %11
+  int64_t v35 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) ((uint64_t) ((int64_t) (uint64_t) v33 + (uint64_t) v34) + (uint64_t) v15) / v13) * (uint64_t) v13) + (uint64_t) v34) + (uint64_t) v16) + (uint64_t) ((int64_t) (uint64_t) v6 * (uint64_t) v17));
+  for (int64_t v36 = v18; v36 < v19; v36 += v12) {
+    // pto: %14
+    ;
+    int64_t v37 = (int64_t) ((uint64_t) v35 + (uint64_t) v36);
+    (v1)[v37] = v11;
+    // pto: %17
+    ;
+    int64_t v38 = (int64_t) ((uint64_t) v37 + (uint64_t) v19);
+    (v1)[v38] = v11;
+    // pto: %18
+    ;
+    int32_t v39 = (int32_t) v36;
+    // pto: %20
+    ;
+    int64_t v40 = (int64_t) ((uint64_t) v37 + (uint64_t) v16);
+    (v1)[v40] = v39;
+    // pto: %23
+    ;
+    int64_t v41 = (int64_t) ((uint64_t) v37 + (uint64_t) v20);
+    (v1)[v41] = v39;
+  }
+  // pto: %t__tile
+  int32_t v42 = (v2)[v18];
+  // pto: %24
+  int64_t v43 = (int64_t) v42;
+  // pto: %25
+  int32_t v44 = (v2)[v17];
+  // pto: %26
+  int64_t v45 = (int64_t) v44;
+  // pto: %27
+  int32_t v46 = (v2)[v21];
+  // pto: %28
+  int64_t v47 = (int64_t) v46;
+  // pto: %29
+  int32_t v48 = (v2)[v14];
+  // pto: %30
+  int64_t v49 = (int64_t) v48;
+  // pto: %31
+  int32_t v50 = (v2)[v22];
+  // pto: %32
+  int32_t v51 = (v2)[v23];
+  // pto: %33, %34, %35, %36, %37, %38, %39, %40, %41, %42, %43, %44, %45, %46, %47, %48, %49, %50, %51, %52, %53, %54, %55
+  if ((((((v43 >= v19 & v43 <= v16) & v45 > v18 & v45 <= v24) & v47 > v18 & v49 >= v18) & v49 < v45 & v7 > v25) & v7 <= v26 & (int64_t) v50 == v23) & (int64_t) v51 == v12) {
+    for (int64_t v52 = v18; v52 < v43; v52 += v12) {
+      // pto: %61, %60, %62, %59
+      ;
+      int32_t v53 = (v1)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v33 + (uint64_t) ((int64_t) (uint64_t) v52 * (uint64_t) v14)) + (uint64_t) v21)];
+      for (int64_t v54 = v18; v54 < v45; v54 += v12) {
+        // pto: %65
+        ;
+        int64_t v55 = v54 < v49 ? v54 : v49;
+        // pto: %70, %68, %69, %71
+        ;
+        int64_t v56 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) v47 + (uint64_t) ((int64_t) v54 < v49)) * (uint64_t) v27);
+        // pto: %63, %72, %64, %66, %67
+        ;
+        int64_t v57 = (int64_t) ((uint64_t) ((int64_t) v53) - (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v54 * (uint64_t) v47) + (uint64_t) v55) * (uint64_t) v27));
+        // pto: %73
+        ;
+        int64_t v58 = v57 < v56 ? v57 : v56;
+        // pto: %74
+        ;
+        int64_t v59 = v58 < v18 ? v18 : v58;
+        // pto: %77, %78, %79
+        ;
+        int64_t v60 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) v52 * (uint64_t) v45) + (uint64_t) v54) % v19;
+        // pto: %80, %81, %82
+        ;
+        int64_t v61 = v60 < v18 ? (int64_t) ((uint64_t) v60 + (uint64_t) v19) : v60;
+        // pto: %83
+        ;
+        int64_t v62 = (int64_t) ((uint64_t) v35 + (uint64_t) v61);
+        // pto: %old_inline797__tile
+        ;
+        int32_t v63 = (v1)[v62];
+        // pto: %85, %75, %76, %84
+        ;
+        int32_t v64 = (int32_t) ((uint32_t) v63 + (uint32_t) ((int32_t) (int64_t) ((uint64_t) v59 + (uint64_t) v28) / v27));
+        (v1)[v62] = v64;
+      };
+    };
+    // pto: %maximum_inline805__rv_v2
+    ;
+    int32_t v65;
+    // pto: %minimum_inline807__rv_v2
+    ;
+    int32_t v66;
+    v65 = v11;
+    v66 = v10;
+    for (int64_t v67 = v18; v67 < v19; v67 += v12) {
+      // pto: %89, %cost_inline789__tile
+      ;
+      int32_t v68 = (v1)[(int64_t) ((uint64_t) v35 + (uint64_t) v67)];
+      // pto: %90
+      ;
+      bool v69 = v65 < v68;
+      // pto: %90
+      ;
+      int32_t v70 = v69 ? v68 : v65;
+      // pto: %91
+      ;
+      bool v71 = v66 < v68;
+      // pto: %91
+      ;
+      int32_t v72 = v71 ? v66 : v68;
+      v65 = v70;
+      v66 = v72;
+    };
+    // pto: %92
+    ;
+    uint32_t v73 = (uint32_t) v65;
+    // pto: %92
+    ;
+    uint32_t v74 = (uint32_t) v66;
+    // pto: %92, %93, %94
+    ;
+    if ((int64_t) ((int32_t) v73 - v74) >= v17) {
+      // pto: %95
+      ;
+      int64_t v75 = v7 / v29;
+      // pto: %96
+      ;
+      int64_t v76 = (int64_t) ((uint64_t) v75 * (uint64_t) v29);
+      // pto: %101
+      ;
+      int64_t v77 = v75 < v21 ? v75 : v21;
+      for (int64_t v78 = v18; v78 < v19; v78 += v12) {
+        // pto: %102, %103
+        ;
+        int64_t v79 = (int64_t) ((uint64_t) v78 + (uint64_t) v30) % v19;
+        // pto: %104, %105, %106
+        ;
+        int64_t v80 = v79 < v18 ? (int64_t) ((uint64_t) v79 + (uint64_t) v19) : v79;
+        // pto: %108, %109
+        ;
+        // pto: %kv_rows_inline812__phi_v2
+        ;
+        int64_t v81;
+        if (v80 < (int64_t) ((uint64_t) v77 * (uint64_t) v14)) {
+          // pto: %110
+          ;
+          int64_t v82 = v80 % v77;
+          // pto: %111, %112, %113
+          ;
+          bool v83 = v82 < v18 ^ v77 < v18;
+          // pto: %114, %115, %116, %117
+          ;
+          int64_t v84 = v82 != v18 & v83 ? (int64_t) ((uint64_t) v82 + (uint64_t) v77) : v82;
+          // pto: %118
+          ;
+          int64_t v85 = (int64_t) ((uint64_t) v77 * (uint64_t) v29);
+          // pto: %119
+          ;
+          int64_t v86 = (int64_t) ((uint64_t) v77 * (uint64_t) v13);
+          // pto: %97, %98, %99, %125, %127, %126, %128, %129, %130
+          ;
+          int64_t v87 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) ((uint64_t) v7 + (uint64_t) v15) / v13) * (uint64_t) v13) - (uint64_t) v76) - (uint64_t) ((int64_t) (uint64_t) v84 * (uint64_t) v13)) + (uint64_t) v86) - (uint64_t) v12) / v86;
+          // pto: %131
+          ;
+          int64_t v88 = v87 < v18 ? v18 : v87;
+          // pto: %121, %120, %122, %123, %124, %132, %134, %133
+          ;
+          v81 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v76 - (uint64_t) ((int64_t) (uint64_t) v84 * (uint64_t) v29)) + (uint64_t) v85) - (uint64_t) v12) / v85) * (uint64_t) v29) + (uint64_t) ((int64_t) (uint64_t) v88 * (uint64_t) v13));
+        } else {
+          v81 = v18;
+        };
+        // pto: %136
+        ;
+        // pto: %qb_columns_inline798__phi_v2
+        ;
+        int64_t v89;
+        if (v78 >= v14) {
+          // pto: %137
+          ;
+          int64_t v90 = v78 % v30;
+          // pto: %141, %138, %142, %143, %144
+          ;
+          int64_t v91 = v90 != v18 & v90 < v18 ? (int64_t) ((uint64_t) v90 + (uint64_t) v30) : v90;
+          // pto: %147
+          ;
+          v89 = (int64_t) ((uint64_t) v8 - (uint64_t) v91) / v30;
+        } else {
+          v89 = v18;
+        };
+        // pto: %148
+        ;
+        uint64_t v92 = (uint64_t) v81;
+        // pto: %149
+        ;
+        uint64_t v93 = (uint64_t) v89;
+        // pto: %148, %149, %150
+        ;
+        int32_t v94 = (int32_t) ((int64_t) (uint64_t) ((int64_t) v92 * (uint64_t) v31) + v93);
+        // pto: %151
+        ;
+        int64_t v95 = (int64_t) ((uint64_t) v35 + (uint64_t) v78);
+        // pto: %152
+        ;
+        int64_t v96 = (int64_t) ((uint64_t) v95 + (uint64_t) v19);
+        (v1)[v96] = v94;
+        // pto: %155
+        ;
+        int64_t v97 = (int64_t) ((uint64_t) v95 + (uint64_t) v16);
+        (v1)[v97] = v9;
+        // pto: %158
+        ;
+        int64_t v98 = (int64_t) ((uint64_t) v95 + (uint64_t) v20);
+        (v1)[v98] = v9;
+      };
+      for (int64_t v99 = v18; v99 < v19; v99 += v12) {
+        // pto: %best_logical_inline781__rv_v2
+        ;
+        int32_t v100;
+        // pto: %best_logical_inline781__rv_v2
+        ;
+        int64_t v101;
+        // pto: %best_logical_inline781__rv_v2
+        ;
+        int64_t v102;
+        // pto: %best_logical_inline781__rv_v2
+        ;
+        int32_t v103;
+        v100 = v10;
+        v101 = v32;
+        v102 = v32;
+        v103 = v9;
+        for (int64_t v104 = v18; v104 < v19; v104 += v12) {
+          // pto: %164
+          ;
+          int64_t v105 = (int64_t) ((uint64_t) v35 + (uint64_t) v104);
+          // pto: %165, %163
+          ;
+          int32_t v106 = (v1)[(int64_t) ((uint64_t) v105 + (uint64_t) v16)];
+          // pto: %166, %167
+          ;
+          // pto: %best_physical_inline773__phi_v5
+          ;
+          int64_t v107;
+          // pto: %best_prefix_inline771__phi_v5
+          ;
+          int32_t v108;
+          if ((int64_t) v106 < v18) {
+            // pto: %169, %prefix_cost_inline769__tile
+            ;
+            int32_t v109 = (v1)[(int64_t) ((uint64_t) v105 + (uint64_t) v19)];
+            // pto: %170
+            ;
+            bool v110 = v103 < v109;
+            // pto: %best_physical_inline773__phi_v4
+            ;
+            int64_t v111 = v110 ? v104 : v102;
+            // pto: %best_prefix_inline771__phi_v4
+            ;
+            int32_t v112 = v110 ? v109 : v103;
+            v107 = v111;
+            v108 = v112;
+          } else {
+            v107 = v102;
+            v108 = v103;
+          };
+          // pto: %173, %171
+          ;
+          int32_t v113 = (v1)[(int64_t) ((uint64_t) v105 + (uint64_t) v20)];
+          // pto: %174, %175
+          ;
+          // pto: %best_cost_inline770__phi_v5
+          ;
+          int32_t v114;
+          // pto: %best_logical_inline781__phi_v5
+          ;
+          int64_t v115;
+          if ((int64_t) v113 < v18) {
+            // pto: %score_cost_inline772__tile
+            ;
+            int32_t v116 = (v1)[v105];
+            // pto: %177
+            ;
+            bool v117 = v116 < v100;
+            // pto: %best_cost_inline770__phi_v4
+            ;
+            int32_t v118 = v117 ? v116 : v100;
+            // pto: %best_logical_inline781__phi_v4
+            ;
+            int64_t v119 = v117 ? v104 : v101;
+            v114 = v118;
+            v115 = v119;
+          } else {
+            v114 = v100;
+            v115 = v101;
+          };
+          v100 = v114;
+          v101 = v115;
+          v102 = v107;
+          v103 = v108;
+        };
+        // pto: %178
+        ;
+        bool v120 = v102 >= v18;
+        // pto: %179
+        ;
+        bool v121 = v101 >= v18;
+        // pto: %180
+        ;
+        if (v120 & v121) {
+          // pto: %182
+          ;
+          uint64_t v122 = (uint64_t) v102;
+          // pto: %182, %183
+          ;
+          int64_t v123 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) v35 + v122) + (uint64_t) v16);
+          // pto: %181
+          ;
+          int32_t v124 = (int32_t) v101;
+          (v1)[v123] = v124;
+          // pto: %185
+          ;
+          uint64_t v125 = (uint64_t) v101;
+          // pto: %185, %186
+          ;
+          int64_t v126 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) v35 + v125) + (uint64_t) v20);
+          // pto: %184
+          ;
+          int32_t v127 = (int32_t) v102;
+          (v1)[v126] = v127;
+        };
+      };
+    };
+  }
+  pipe_barrier(PIPE_ALL);
+  dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+  pipe_barrier(PIPE_ALL);
+  dsb(DSB_DDR);
+  pipe_barrier(PIPE_ALL);
+  dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+  dsb((mem_dsb_t)0);
+  #endif // __DAV_VEC__
+
+  pipe_barrier(PIPE_ALL);
+  dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+  dsb((mem_dsb_t)0);
+  ptoas_auto_sync_tail(PTOAutoSyncTailMode::kBarrierAll);
+  return;
+}

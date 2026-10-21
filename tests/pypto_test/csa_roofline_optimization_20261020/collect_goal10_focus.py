@@ -23,6 +23,18 @@ EXPERIMENTS = (
     ("B1/原半叶", "B1_LEGACY_HALF_FULL_TASK.json", False),
     ("B1/半叶分数留UB", "B1_HALF_SCORE_RESIDENT_FULL_TASK.json", False),
     ("B1/正式源确认", "B1_FORMAL_CONFIRM_TASK.json", False),
+    ("连续scale读取", "SCALE_FOCUS_TASKS.json", False),
+    ("Score归属/未激活诊断", "SCORE_OWNER_FULL_TASK.json", False),
+    ("Score归属/实际重排", "SCORE_OWNER_ACTIVE_TASK.json", False),
+    ("Score归属/同址开关", "SCORE_OWNER_ABLATION_TASK.json", False),
+    ("Score归属/反向正常区", "SCORE_OWNER_REVERSE_TASK.json", True),
+    ("Score归属/B24回退", "SCORE_OWNER_BOUNDARY_TASK.json", False),
+    ("Score归属/均衡快速证明", "SCORE_OWNER_UNIFORM_TASKS.json", False),
+    ("WS列池与scale区间组合", "SCORE_STREAM_TASK.json", False),
+    ("WS列池与scale反向", "SCORE_STREAM_REVERSE_TASK.json", True),
+    ("B1/O_B M16", "B1_OB16_TASK.json", False),
+    ("两区间集成确认", "FOCUS_COMBINED_TASKS.json", False),
+    ("B24关闭区间反向", "FOCUS_COMBINED_B24_REVERSE_TASK.json", True),
 )
 
 
@@ -43,6 +55,13 @@ def main():
                        shared_scratch=task.get("shared_scratch", False),
                        source_freeze=task.get("source_freeze", "SHARED_SOURCE_GOAL10.json"),
                        adopted=False)
+            row["source_candidate"] = task.get("candidate")
+            row["source_reference"] = task.get("reference")
+            if label == "Score归属/未激活诊断":
+                row["adoption_blocker"] = "布尔true编码为-1，==1条件未成立；本轮没有重排，不能归因为重排收益。"
+                row["active_mapping"] = False
+            if label == "Score归属/同址开关":
+                row["reference_note"] = "同接口同容量身份映射诊断；不是原正式源码，不能当作正式改善量。"
             if label in ("B1/4K分叶", "B1/UB根同址", "B1/UB根独立"):
                 row["adoption_blocker"] = (
                     "H139264/S5 全同分边界失败；2560个Top-K索引及57510个输出元素不同。"
@@ -92,6 +111,7 @@ def main():
         "**4K分叶及UB根旧候选被同分精度回归拦住，表内性能不得当成可采用结果。**",
         "WS列池及原半叶修正版使用含新B1优化的多task快照，旧行保留原快照，不跨轮拼收益。", "",
         "“半叶分数留UB”的SPMD对照是已通过的原半叶GM版，其余行的具体参考见JSON。", "",
+        "Score归属的“未激活”行没有执行重排；“同址开关”参考是身份映射诊断源。两者均不直接代表采用收益。", "",
         "| 实验 | B | 多task | 对照SPMD | 候选SPMD | 相对多task提升 | 相对对照净省 |",
         "|---|---:|---:|---:|---:|---:|---:|",
     ]

@@ -1,0 +1,17 @@
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @kernel_entry(%src: !pto.ptr<i32>, %out: !pto.ptr<i32>) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %zero_i32 = arith.constant 0 : i32
+    %true = arith.constant true
+    %input = pto.load %src[%zero] : !pto.ptr<i32> -> i32
+    %condition = arith.cmpi sgt, %input, %zero_i32 : i32
+    %a = arith.index_cast %true : i1 to index
+    %b = arith.index_cast %condition : i1 to index
+    %constant_value = arith.index_cast %a : index to i32
+    %runtime_value = arith.index_cast %b : index to i32
+    pto.store %constant_value, %out[%zero] : !pto.ptr<i32>, i32
+    pto.store %runtime_value, %out[%one] : !pto.ptr<i32>, i32
+    return
+  }
+}

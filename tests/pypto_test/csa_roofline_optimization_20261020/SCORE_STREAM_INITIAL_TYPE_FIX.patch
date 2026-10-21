@@ -1,0 +1,56 @@
+--- v1
++++ v2
+@@ -719,22 +719,16 @@
+                         # 上一面板WS写入父池的一个列窗；列窗是地址别名，不搬Acc。
+                         # 两段K192保持原累加次序和一次初始化，未交换系数或FP16边界。
+                         split_ws_col = pl.max(buf_qk_panel - 1, 0) % WS_POOL_PANELS * qk_panel_cols
+-                        if WS_POOL_PANELS > 1:
+-                            split_ws_slot = pl.tile.slice(
+-                                split_ws_pool, [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols], [0, split_ws_col],
+-                            )
+-                        else:
+-                            split_ws_slot = split_ws_pool
++                        split_ws_slot = pl.tile.slice(
++                            split_ws_pool, [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols], [0, split_ws_col],
++                        )
+                         split_ws_first = pl.tile.matmul_acc(
+                             split_ws_slot, split_coefficient0, split_right0, init_cond=True,
+                         )
+                         split_ws_done = pl.tile.matmul_acc(
+                             split_ws_first, split_coefficient1, split_right1,
+                         )
+-                        if WS_POOL_PANELS > 1:
+-                            split_ws_pool = pl.tile.assemble(split_ws_pool, split_ws_done, [0, split_ws_col])
+-                        else:
+-                            split_ws_pool = split_ws_done
++                        split_ws_pool = pl.tile.assemble(split_ws_pool, split_ws_done, [0, split_ws_col])
+                         if buf_qk_panel % WS_POOL_PANELS == 0:
+                             # 当前QK8已提交，WS0..7完整后写原FIFO的前512列。
+                             # 下一轮覆盖pool列0仍须等本次FIX读完；不删除这条真依赖。
+@@ -776,22 +770,16 @@
+                     target_memory=pl.MemorySpace.Right,
+                 )
+                 split_ws_last_col = (WS_POOL_PANELS - 1) * qk_panel_cols
+-                if WS_POOL_PANELS > 1:
+-                    split_ws_last_slot = pl.tile.slice(
+-                        split_ws_pool, [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols], [0, split_ws_last_col],
+-                    )
+-                else:
+-                    split_ws_last_slot = split_ws_pool
++                split_ws_last_slot = pl.tile.slice(
++                    split_ws_pool, [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols], [0, split_ws_last_col],
++                )
+                 split_ws_first_last = pl.tile.matmul_acc(
+                     split_ws_last_slot, split_coefficient0, split_right0_last, init_cond=True,
+                 )
+                 split_ws_done_last = pl.tile.matmul_acc(
+                     split_ws_first_last, split_coefficient1, split_right1_last,
+                 )
+-                if WS_POOL_PANELS > 1:
+-                    split_ws_pool = pl.tile.assemble(split_ws_pool, split_ws_done_last, [0, split_ws_last_col])
+-                else:
+-                    split_ws_pool = split_ws_done_last
++                split_ws_pool = pl.tile.assemble(split_ws_pool, split_ws_done_last, [0, split_ws_last_col])
+                 # WS8..15全部覆盖后写后512列，随后才沿原协议发布整step READY。
+                 pl.store(
+                     pl.set_validshape(split_ws_pool, query_group_size, WS_POOL_PANELS * qk_panel_cols),

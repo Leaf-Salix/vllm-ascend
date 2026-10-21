@@ -20,10 +20,18 @@ ROOT_NAMES = {
     "ptoas_tmov_subview_issue_followup.md",
     "SOURCE_AFTER_B1_HALF.json",
     "SOURCE_AFTER_B1_HALF_V2.json",
+    "wire_score_owner.py", "pypto_bool_cast_issue_followup.md",
+    "run_b1_phase_diagnostic.py", "analyze_b1_current_phase.py",
+    "audit_focus_interval_ir.py", "FOCUS_INTERVAL_IR_AUDIT.json",
 }
 PREFIXES = (
     "goal10", "b1", "pair_direct", "prepare_b1", "prepare_pair_direct", "controls_goal10",
     "score_pool_goal10", "prepare_score_pool", "ptoas_pair_direct",
+    "scale_focus", "prepare_scale_focus", "score_owner", "controls_score_owner",
+    "controls_scale_focus", "scalar_bool", "ptoas_i1_cast", "score_stream",
+    "prepare_score_stream", "controls_score_stream", "run_score_owner",
+    "prepare_score_owner",
+    "focus_combined", "prepare_focus_combined",
 )
 SOURCE_NAMES = {
     "source_topk_pair_direct", "source_b1_leaf4k", "source_b1_root_resident",
@@ -31,6 +39,12 @@ SOURCE_NAMES = {
     "b1_root_query_regression",
     "source_after_b1_half",
     "source_after_b1_half_v2", "source_b1_half_score_resident_guarded",
+    "source_scale_focus", "source_score_owner_balance", "source_score_owner_identity",
+    "source_score_stream_interval",
+    "source_score_owner_uniform", "source_b1_ob16",
+    "source_score_owner_interval", "source_score_stream_guarded",
+    "source_score_owner_interval_guarded",
+    "source_focus_combined",
 }
 EXCLUDED_DIRS = {
     "build_output", "compile_cache", "cache", "dfx", "passes_dump", "__pycache__",

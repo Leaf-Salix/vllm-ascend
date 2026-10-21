@@ -1,0 +1,46 @@
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @casts(%arg0: !pto.ptr<i32>, %arg1: !pto.ptr<i32>, %arg2: !pto.ptr<f32>) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  %c1_index = arith.constant 1 : index
+  %c8_index = arith.constant 8 : index
+  %c4_index = arith.constant 4 : index
+  %c0_index = arith.constant 0 : index
+  %c2_index = arith.constant 2 : index
+  %c3_index = arith.constant 3 : index
+  %c5_index = arith.constant 5 : index
+  %src__ssa_v0_view = pto.make_tensor_view %arg0, shape = [%c1_index], strides = [%c1_index] {layout = #pto.layout<nd>} : !pto.tensor_view<?xi32> loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":15:1)
+  %ints__ssa_v0_view = pto.make_tensor_view %arg1, shape = [%c8_index], strides = [%c1_index] {layout = #pto.layout<nd>} : !pto.tensor_view<?xi32> loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":15:1)
+  %floats__ssa_v0_view = pto.make_tensor_view %arg2, shape = [%c4_index], strides = [%c1_index] {layout = #pto.layout<nd>} : !pto.tensor_view<?xf32> loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":15:1)
+  pto.cmo.cacheinvalid all #pto.address_space<gm> loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":17:5)
+  pto.fence.barrier_all #pto.fence_scope<gm> loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":18:5)
+  %value__tile = pto.load %arg0[%c0_index] : !pto.ptr<i32> -> i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":19:5)
+  %0 = arith.index_cast %value__tile : i32 to index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":20:5)
+  %1 = arith.cmpi slt, %c0_index, %0 : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":20:5)
+  %2 = arith.constant 1 : i1 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":21:5)
+  %3 = arith.index_cast %2 : i1 to index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":21:5)
+  %4 = arith.index_cast %1 : i1 to index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":22:5)
+  %5 = arith.constant 1 : i1 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":23:5)
+  %6 = arith.extsi %5 : i1 to i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":23:5)
+  pto.store %6, %arg1[%c0_index] : !pto.ptr<i32>, i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":23:5)
+  %7 = arith.constant 0 : i1 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":24:5)
+  %8 = arith.extsi %7 : i1 to i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":24:5)
+  pto.store %8, %arg1[%c1_index] : !pto.ptr<i32>, i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":24:5)
+  %9 = arith.constant 1 : i1 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":25:5)
+  %10 = arith.extsi %9 : i1 to i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":25:5)
+  pto.store %10, %arg1[%c2_index] : !pto.ptr<i32>, i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":25:5)
+  %11 = arith.extsi %1 : i1 to i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":26:5)
+  pto.store %11, %arg1[%c3_index] : !pto.ptr<i32>, i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":26:5)
+  %12 = arith.index_cast %3 : index to i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":27:5)
+  pto.store %12, %arg1[%c4_index] : !pto.ptr<i32>, i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":27:5)
+  %13 = arith.index_cast %4 : index to i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":28:5)
+  pto.store %13, %arg1[%c5_index] : !pto.ptr<i32>, i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":28:5)
+  %14 = arith.constant 1 : i1 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":29:5)
+  %15 = arith.sitofp %14 : i1 to f32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":29:5)
+  pto.store %15, %arg2[%c0_index] : !pto.ptr<f32>, f32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":29:5)
+  %16 = arith.sitofp %1 : i1 to f32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":30:5)
+  pto.store %16, %arg2[%c1_index] : !pto.ptr<f32>, f32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":30:5)
+  pto.barrier <PIPE_ALL> loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":31:5)
+  pto.cmo.cacheinvalid all #pto.address_space<gm> loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":32:5)
+  pto.fence.barrier_all #pto.fence_scope<gm> loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/scalar_bool_cast_probe.py":33:5)
+  return
+  }
+}
