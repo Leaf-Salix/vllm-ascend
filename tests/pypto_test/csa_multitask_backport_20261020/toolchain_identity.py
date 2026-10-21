@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""同进程各对照侧固定实际导入/编译路径；只记录一次Git版本，不做文件hash。"""
+"""固定实际导入/编译路径及构建产物stat；只记录一次Git版本，不做文件hash。"""
 
 import importlib
 import json
@@ -36,11 +36,23 @@ def snapshot():
     sdk_root = Path(KernelCompiler(platform="a2a3").project_root).resolve()
     if sdk_root != roots["simpler"]:
         raise RuntimeError(f"编译器实际Simpler SDK根目录不一致：{sdk_root}")
+    # 只读复用已验证隔离构建时，检测其它会话在配对期间重建了同一路径。
+    # 仅查询三个构建产物的文件元数据，不读文件内容或计算hash。
+    artifact_paths = {
+        "pypto_core": Path(loaded["pypto.pypto_core"]),
+        "task_interface": Path(loaded["_task_interface"]),
+        "ptoas": ptoas,
+    }
+    build_artifacts = {}
+    for name, path in artifact_paths.items():
+        info = path.stat()
+        build_artifacts[name] = dict(inode=info.st_ino, size=info.st_size, mtime_ns=info.st_mtime_ns)
     return dict(
         roots={k: str(v) for k, v in roots.items()},
         modules=loaded,
         ptoas_executable=str(ptoas),
         simpler_sdk_root=str(sdk_root),
+        build_artifacts=build_artifacts,
     )
 
 

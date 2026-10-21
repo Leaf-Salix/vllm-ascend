@@ -1,0 +1,87 @@
+{
+  "commit": "12089c06",
+  "formal_source_still": "a241fa61",
+  "scope": "仅采用独立WS+连续scale组合的已提交正反向证据，不将未收口B28归属混入",
+  "rows": [
+    {
+      "result": "tests/pypto_test/csa_roofline_optimization_20261020/score_stream_b16_full_v1/result.json",
+      "passed": true,
+      "full_csa_validated": true,
+      "graph_replay_validated": true,
+      "roles": {
+        "formal": "spmd_reference",
+        "candidate": "spmd_candidate"
+      },
+      "statistics": {
+        "formal": {
+          "samples_us": [
+            790.86,
+            794.12,
+            795.36,
+            794.5,
+            799.08
+          ],
+          "min_us": 790.86,
+          "mean_us": 794.784,
+          "max_us": 799.08,
+          "median_us": 794.5
+        },
+        "candidate": {
+          "samples_us": [
+            785.66,
+            777.72,
+            782.66,
+            795.58,
+            781.36
+          ],
+          "min_us": 777.72,
+          "mean_us": 784.596,
+          "max_us": 795.58,
+          "median_us": 782.66
+        }
+      }
+    },
+    {
+      "result": "tests/pypto_test/csa_roofline_optimization_20261020/score_stream_b16_reverse_v1/result.json",
+      "passed": true,
+      "full_csa_validated": true,
+      "graph_replay_validated": true,
+      "roles": {
+        "formal": "spmd_candidate",
+        "candidate": "spmd_reference"
+      },
+      "statistics": {
+        "formal": {
+          "samples_us": [
+            789.08,
+            796.04,
+            782.26,
+            792.24,
+            793.44
+          ],
+          "min_us": 782.26,
+          "mean_us": 790.612,
+          "max_us": 796.04,
+          "median_us": 792.24
+        },
+        "candidate": {
+          "samples_us": [
+            784.46,
+            784.34,
+            781.82,
+            771.36,
+            794.38
+          ],
+          "min_us": 771.36,
+          "mean_us": 783.272,
+          "max_us": 794.38,
+          "median_us": 784.34
+        }
+      }
+    }
+  ],
+  "source_report_statistic": "来源文档794.50→782.66和792.24→784.34是median；本任务一律另算min/mean/max",
+  "already_present": "现多task长G6已做连续scale批量读取，当前仅移植WS区间选择",
+  "old_multitask": "683节Top-K+WS B16 mean/max有益，B28回退；不同于混入成对Top-K的score_region_v3",
+  "ir_audit": "FOCUS_INTERVAL_IR_AUDIT的stream_enabled/disabled为true；整个文件passed=false，不扩大结论到owner分支"
+}

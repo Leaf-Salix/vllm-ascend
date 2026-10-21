@@ -1,0 +1,156 @@
+{
+  "candidate": "packed_capacity_static_v6",
+  "adopted": false,
+  "formal_revision": "4d5b2ed9",
+  "decision": "保留长档核内受益候选，暂不合入正式；8K/B16关闭缩容仍有均值代价",
+  "matrix": "MATRIX_packed_capacity_static_v6_static_v1.json",
+  "incore": "PACKED_STATIC_INCORE_PHASES.json",
+  "short_b16": [
+    {
+      "round": "primary",
+      "roles": {
+        "formal": "multitask_current",
+        "experimental_v6": "multitask_candidate"
+      },
+      "formal": {
+        "samples_us": [
+          649.98,
+          660.3,
+          644.98,
+          653.54,
+          644.78
+        ],
+        "min_us": 644.78,
+        "mean_us": 650.716,
+        "max_us": 660.3,
+        "median_us": 649.98
+      },
+      "experimental_v6": {
+        "samples_us": [
+          628.66,
+          649.84,
+          675.9,
+          647.82,
+          663.16
+        ],
+        "min_us": 628.66,
+        "mean_us": 653.076,
+        "max_us": 675.9,
+        "median_us": 649.84
+      },
+      "delta_mean_us": 2.3600000000000136,
+      "delta_max_us": 15.600000000000023
+    },
+    {
+      "round": "role_reversed",
+      "roles": {
+        "formal": "multitask_candidate",
+        "experimental_v6": "multitask_current"
+      },
+      "formal": {
+        "samples_us": [
+          671.88,
+          655.1,
+          658.86,
+          684.3,
+          660.3
+        ],
+        "min_us": 655.1,
+        "mean_us": 666.088,
+        "max_us": 684.3,
+        "median_us": 660.3
+      },
+      "experimental_v6": {
+        "samples_us": [
+          680.02,
+          668.36,
+          679.86,
+          683.68,
+          668.02
+        ],
+        "min_us": 668.02,
+        "mean_us": 675.9879999999999,
+        "max_us": 683.68,
+        "median_us": 679.86
+      },
+      "delta_mean_us": 9.899999999999977,
+      "delta_max_us": -0.6200000000000045
+    }
+  ],
+  "scope": "完整CSA L1五窗，保留每轮，不挑最佳值或混入dep_gen=False；多task保持不变",
+  "benefit": "启用缩容的长B1/B4/B8/B16 Attention AIC核内及完整均值均有收益",
+  "limitation": "短B16首轮mean+2.360/max+15.60，换角色后mean+9.900/max-0.62；原长尾未稳定复现但均值代价仍存在",
+  "capacity_boundary": {
+    "result": "runs/packed_capacity_static_v6/h131072_b21_static_context_switch_v2/result.json",
+    "passed": true,
+    "report": {
+      "passed": true,
+      "context_switch_history": 32765,
+      "same_graph_replays": 8,
+      "padding_exercised": true,
+      "zero_active_requests_validated": false,
+      "internal_scratch_guards_checked": false,
+      "mixed_query_validated": false,
+      "steps": [
+        {
+          "state": "A",
+          "active": 21,
+          "max_seq_len": 131078,
+          "passed": true,
+          "same_addresses": true
+        },
+        {
+          "state": "B",
+          "active": 21,
+          "max_seq_len": 131077,
+          "passed": true,
+          "same_addresses": true
+        },
+        {
+          "state": "A",
+          "active": 21,
+          "max_seq_len": 131078,
+          "passed": true,
+          "same_addresses": true
+        },
+        {
+          "state": "C",
+          "active": 21,
+          "max_seq_len": 32771,
+          "passed": true,
+          "same_addresses": true
+        },
+        {
+          "state": "A",
+          "active": 21,
+          "max_seq_len": 131078,
+          "passed": true,
+          "same_addresses": true
+        },
+        {
+          "state": "P20",
+          "active": 20,
+          "max_seq_len": 131078,
+          "passed": true,
+          "same_addresses": true
+        },
+        {
+          "state": "P1",
+          "active": 1,
+          "max_seq_len": 131078,
+          "passed": true,
+          "same_addresses": true
+        },
+        {
+          "state": "A",
+          "active": 21,
+          "max_seq_len": 131078,
+          "passed": true,
+          "same_addresses": true
+        }
+      ]
+    }
+  },
+  "correctness": "八档零容差状态/输出/score及精确索引通过，单卡S6；不声称Native bit、模型token/DSpark或实际S1/S5接口",
+  "next": "后续保留128行容量的核内收益，需减少未启用区间的编排/视图开销再考虑正式采用；不得把关闭路径生成码相同称为零运行开销"
+}

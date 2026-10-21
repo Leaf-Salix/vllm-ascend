@@ -1,0 +1,60 @@
+{
+  "source": "sources/topk_prefix_v1",
+  "source_donor": "c49ee5b2",
+  "baseline": "plan_workers_v1 / cc07f727",
+  "files": [
+    "topk_threshold_stages.py",
+    "decode_indexer.py"
+  ],
+  "algorithm_ast_and_import_symbols_equal": true,
+  "validation": "七档S6，B16/B8 metadata/padding，B5/T30碎片页与八次同图长短分支回放",
+  "numeric_change": false,
+  "adoption_reason": "五个128K档mean全部改善、七档max均降低；保持原长G6选择范围",
+  "retained_negative": "8K/B32 mean回退1.305%；实际短Score两核二进制相同，尚未唯一定位原因",
+  "scope_limit": "原多task入口限S6；非整模型token/DSpark验收",
+  "required_toolchain": {
+    "roots": {
+      "pypto": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-topk-compact-20261020",
+      "ptoas": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/ptoas-csa-topk-compact-20261020/build",
+      "simpler": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016"
+    },
+    "modules": {
+      "pypto": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-topk-compact-20261020/python/pypto/__init__.py",
+      "pypto.pypto_core": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-topk-compact-20261020/python/pypto/pypto_core.cpython-310-aarch64-linux-gnu.so",
+      "simpler": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/python/simpler/__init__.py",
+      "simpler_setup": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/simpler_setup/__init__.py",
+      "_task_interface": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/.venv/lib/python3.10/site-packages/_task_interface.cpython-310-aarch64-linux-gnu.so"
+    },
+    "ptoas_executable": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/ptoas-csa-topk-compact-20261020/build/bin/ptoas",
+    "simpler_sdk_root": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016",
+    "build_artifacts": {
+      "pypto_core": {
+        "inode": 370278916,
+        "size": 373824112,
+        "mtime_ns": 1792490664309945978
+      },
+      "task_interface": {
+        "inode": 318506600,
+        "size": 860688,
+        "mtime_ns": 1792117217938758768
+      },
+      "ptoas": {
+        "inode": 370540964,
+        "size": 33996912,
+        "mtime_ns": 1792503012153798600
+      }
+    },
+    "commits": {
+      "pypto": "65477973435f7d717ffaa7f602f4783ad5310417",
+      "ptoas": "b48c84ebfea88c58439181e76f5e00fd12950418",
+      "simpler": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    }
+  },
+  "shared_install_changed": false,
+  "performance_evidence": "MATRIX_topk_prefix_v1_topk_v1.json",
+  "weighted_reduction_vs_plan_pct": 1.0949768585649955,
+  "weighted_reduction_vs_spmd_pct": -0.7454191016364623,
+  "goal_complete": false,
+  "new_device_tests_for_formatting": false,
+  "pushed": false
+}

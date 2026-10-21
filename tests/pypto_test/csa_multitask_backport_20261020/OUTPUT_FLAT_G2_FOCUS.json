@@ -1,0 +1,1334 @@
+{
+  "candidate": "output_flat_g2_v1",
+  "adopted": false,
+  "scope": "同轮四路五窗L1；阶段span互有重叠，不能相加；fanin来自实际依赖图，非仅源码推断",
+  "rows": [
+    {
+      "batch": 16,
+      "history": 131072,
+      "result": "runs/output_flat_g2_v1/h131072_b16_pair_v1/result.json",
+      "l1_us": {
+        "multitask_original": {
+          "samples_us": [
+            864.5,
+            866.28,
+            876.7,
+            874.94,
+            856.66
+          ],
+          "min_us": 856.66,
+          "mean_us": 867.816,
+          "max_us": 876.7,
+          "median_us": 866.28
+        },
+        "multitask_current": {
+          "samples_us": [
+            834.94,
+            822.5,
+            818.3,
+            830.96,
+            809.74
+          ],
+          "min_us": 809.74,
+          "mean_us": 823.288,
+          "max_us": 834.94,
+          "median_us": 822.5
+        },
+        "multitask_candidate": {
+          "samples_us": [
+            832.86,
+            858.94,
+            836.7,
+            829.86,
+            842.72
+          ],
+          "min_us": 829.86,
+          "mean_us": 840.216,
+          "max_us": 858.94,
+          "median_us": 836.7
+        },
+        "single_spmd": {
+          "samples_us": [
+            787.88,
+            802.32,
+            792.94,
+            788.04,
+            792.98
+          ],
+          "min_us": 787.88,
+          "mean_us": 792.832,
+          "max_us": 802.32,
+          "median_us": 792.94
+        }
+      },
+      "phase_intervals": {
+        "multitask_candidate": {
+          "before_score": {
+            "min_us": 288.2,
+            "mean_us": 297.196,
+            "max_us": 316.82
+          },
+          "score_to_attention": {
+            "min_us": 237.8400000000001,
+            "mean_us": 239.99600000000004,
+            "max_us": 242.70000000000005
+          },
+          "attention_to_output": {
+            "min_us": 152.46000000000004,
+            "mean_us": 154.61599999999999,
+            "max_us": 157.39999999999998
+          },
+          "output_to_end": {
+            "min_us": 143.70000000000005,
+            "mean_us": 148.40799999999996,
+            "max_us": 154.2199999999999
+          }
+        },
+        "multitask_current": {
+          "before_score": {
+            "min_us": 269.68,
+            "mean_us": 287.848,
+            "max_us": 300.88
+          },
+          "score_to_attention": {
+            "min_us": 240.24000000000012,
+            "mean_us": 242.912,
+            "max_us": 244.4199999999999
+          },
+          "attention_to_output": {
+            "min_us": 145.65999999999997,
+            "mean_us": 147.58400000000003,
+            "max_us": 152.30000000000007
+          },
+          "output_to_end": {
+            "min_us": 141.91999999999996,
+            "mean_us": 144.944,
+            "max_us": 148.15999999999997
+          }
+        },
+        "multitask_original": {
+          "before_score": {
+            "min_us": 274.74,
+            "mean_us": 289.784,
+            "max_us": 300.14
+          },
+          "score_to_attention": {
+            "min_us": 261.16,
+            "mean_us": 265.3,
+            "max_us": 269.82000000000005
+          },
+          "attention_to_output": {
+            "min_us": 160.41999999999996,
+            "mean_us": 163.55999999999997,
+            "max_us": 168.26
+          },
+          "output_to_end": {
+            "min_us": 146.67999999999995,
+            "mean_us": 149.172,
+            "max_us": 154.44000000000005
+          }
+        }
+      },
+      "windows": [
+        {
+          "role": "multitask_candidate",
+          "full_l1_us": 832.86,
+          "active_task_count": 55,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 23.09999999999991,
+              "incore_mean_us": 28.2021875,
+              "incore_max_us": 32.69999999999993,
+              "span_us": 86.5
+            },
+            "quant": {
+              "task_count": 4,
+              "work_items": 24,
+              "incore_min_us": 7.100000000000023,
+              "incore_mean_us": 8.316666666666682,
+              "incore_max_us": 9.540000000000077,
+              "span_us": 57.66000000000008
+            },
+            "proj_b_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 8.720000000000027,
+              "incore_mean_us": 10.946249999999996,
+              "incore_max_us": 13.860000000000014,
+              "span_us": 55.0
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 48,
+              "incore_min_us": 20.460000000000036,
+              "incore_mean_us": 22.79083333333333,
+              "incore_max_us": 25.100000000000023,
+              "span_us": 25.24000000000001
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "edges": [
+            {
+              "task": "r3t2",
+              "name": "quant_1_spmd(r3t2)",
+              "parent": "r3t1"
+            },
+            {
+              "task": "r3t3",
+              "name": "_proj_b_mm_nz_kernel__2_spmd(r3t3)",
+              "parent": "r3t2"
+            },
+            {
+              "task": "r3t5",
+              "name": "quant_1_spmd(r3t5)",
+              "parent": "r3t4"
+            },
+            {
+              "task": "r3t6",
+              "name": "_proj_b_mm_nz_kernel__2_spmd(r3t6)",
+              "parent": "r3t5"
+            },
+            {
+              "task": "r3t8",
+              "name": "quant_1_spmd(r3t8)",
+              "parent": "r3t7"
+            },
+            {
+              "task": "r3t9",
+              "name": "_proj_b_mm_nz_kernel__2_spmd(r3t9)",
+              "parent": "r3t8"
+            },
+            {
+              "task": "r3t11",
+              "name": "quant_1_spmd(r3t11)",
+              "parent": "r3t10"
+            },
+            {
+              "task": "r3t12",
+              "name": "_proj_b_mm_nz_kernel__2_spmd(r3t12)",
+              "parent": "r3t11"
+            }
+          ],
+          "checked_dependency_edges": 8
+        },
+        {
+          "role": "multitask_current",
+          "full_l1_us": 834.94,
+          "active_task_count": 67,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 23.860000000000014,
+              "incore_mean_us": 27.96687500000001,
+              "incore_max_us": 31.379999999999995,
+              "span_us": 86.03999999999996
+            },
+            "quant": {
+              "task_count": 8,
+              "work_items": 24,
+              "incore_min_us": 6.360000000000014,
+              "incore_mean_us": 8.845833333333331,
+              "incore_max_us": 11.240000000000009,
+              "span_us": 65.01999999999998
+            },
+            "proj_b_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 8.019999999999982,
+              "incore_mean_us": 11.045624999999994,
+              "incore_max_us": 16.860000000000014,
+              "span_us": 59.77999999999997
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 48,
+              "incore_min_us": 21.019999999999982,
+              "incore_mean_us": 22.94374999999999,
+              "incore_max_us": 25.41999999999996,
+              "span_us": 25.600000000000023
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "edges": [
+            {
+              "task": "r3t2",
+              "name": "quant_1_spmd(r3t2)",
+              "parent": "r3t1"
+            },
+            {
+              "task": "r3t3",
+              "name": "_proj_b_mm_nz_kernel__2_spmd(r3t3)",
+              "parent": "r3t2"
+            },
+            {
+              "task": "r3t5",
+              "name": "quant_1_spmd(r3t5)",
+              "parent": "r3t4"
+            },
+            {
+              "task": "r3t6",
+              "name": "_proj_b_mm_nz_kernel__2_spmd(r3t6)",
+              "parent": "r3t5"
+            },
+            {
+              "task": "r3t8",
+              "name": "quant_1_spmd(r3t8)",
+              "parent": "r3t7"
+            },
+            {
+              "task": "r3t9",
+              "name": "_proj_b_mm_nz_kernel__2_spmd(r3t9)",
+              "parent": "r3t8"
+            },
+            {
+              "task": "r3t11",
+              "name": "quant_1_spmd(r3t11)",
+              "parent": "r3t10"
+            },
+            {
+              "task": "r3t12",
+              "name": "_proj_b_mm_nz_kernel__2_spmd(r3t12)",
+              "parent": "r3t11"
+            },
+            {
+              "task": "r3t14",
+              "name": "quant_1_spmd(r3t14)",
+              "parent": "r3t13"
+            },
+            {
+              "task": "r3t15",
+              "name": "_proj_b_mm_nz_kernel__2_spmd(r3t15)",
+              "parent": "r3t14"
+            },
+            {
+              "task": "r3t17",
+              "name": "quant_1_spmd(r3t17)",
+              "parent": "r3t16"
+            },
+            {
+              "task": "r3t18",
+              "name": "_proj_b_mm_nz_kernel__2_spmd(r3t18)",
+              "parent": "r3t17"
+            },
+            {
+              "task": "r3t20",
+              "name": "quant_1_spmd(r3t20)",
+              "parent": "r3t19"
+            },
+            {
+              "task": "r3t21",
+              "name": "_proj_b_mm_nz_kernel__2_spmd(r3t21)",
+              "parent": "r3t20"
+            },
+            {
+              "task": "r3t23",
+              "name": "quant_1_spmd(r3t23)",
+              "parent": "r3t22"
+            },
+            {
+              "task": "r3t24",
+              "name": "_proj_b_mm_nz_kernel__2_spmd(r3t24)",
+              "parent": "r3t23"
+            }
+          ],
+          "checked_dependency_edges": 16
+        },
+        {
+          "role": "multitask_current",
+          "full_l1_us": 822.5,
+          "active_task_count": 67,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 22.819999999999936,
+              "incore_mean_us": 27.064999999999998,
+              "incore_max_us": 30.25999999999999,
+              "span_us": 88.15999999999997
+            },
+            "quant": {
+              "task_count": 8,
+              "work_items": 24,
+              "incore_min_us": 6.480000000000018,
+              "incore_mean_us": 8.693333333333348,
+              "incore_max_us": 10.480000000000018,
+              "span_us": 62.84000000000003
+            },
+            "proj_b_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 8.139999999999986,
+              "incore_mean_us": 11.085624999999997,
+              "incore_max_us": 14.459999999999923,
+              "span_us": 57.01999999999998
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 48,
+              "incore_min_us": 21.200000000000045,
+              "incore_mean_us": 23.536666666666672,
+              "incore_max_us": 26.039999999999964,
+              "span_us": 26.299999999999955
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 16
+        },
+        {
+          "role": "multitask_candidate",
+          "full_l1_us": 858.94,
+          "active_task_count": 55,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 17.75999999999999,
+              "incore_mean_us": 25.82343750000002,
+              "incore_max_us": 30.519999999999982,
+              "span_us": 85.78000000000009
+            },
+            "quant": {
+              "task_count": 4,
+              "work_items": 24,
+              "incore_min_us": 5.699999999999932,
+              "incore_mean_us": 7.055000000000011,
+              "incore_max_us": 8.400000000000091,
+              "span_us": 33.780000000000086
+            },
+            "proj_b_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 8.259999999999991,
+              "incore_mean_us": 10.638437499999998,
+              "incore_max_us": 14.220000000000027,
+              "span_us": 43.799999999999955
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 48,
+              "incore_min_us": 21.0,
+              "incore_mean_us": 23.62333333333333,
+              "incore_max_us": 25.339999999999918,
+              "span_us": 25.979999999999905
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 8
+        },
+        {
+          "role": "multitask_candidate",
+          "full_l1_us": 836.7,
+          "active_task_count": 55,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 22.17999999999995,
+              "incore_mean_us": 27.725937499999997,
+              "incore_max_us": 32.67999999999995,
+              "span_us": 88.98000000000002
+            },
+            "quant": {
+              "task_count": 4,
+              "work_items": 24,
+              "incore_min_us": 5.659999999999968,
+              "incore_mean_us": 8.193333333333328,
+              "incore_max_us": 11.120000000000005,
+              "span_us": 59.879999999999995
+            },
+            "proj_b_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 7.920000000000073,
+              "incore_mean_us": 11.021874999999989,
+              "incore_max_us": 14.440000000000055,
+              "span_us": 66.62
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 48,
+              "incore_min_us": 21.339999999999918,
+              "incore_mean_us": 23.258333333333322,
+              "incore_max_us": 25.459999999999923,
+              "span_us": 25.639999999999986
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 8
+        },
+        {
+          "role": "multitask_current",
+          "full_l1_us": 818.3,
+          "active_task_count": 67,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 22.43999999999994,
+              "incore_mean_us": 27.286874999999995,
+              "incore_max_us": 30.980000000000018,
+              "span_us": 85.65999999999997
+            },
+            "quant": {
+              "task_count": 8,
+              "work_items": 24,
+              "incore_min_us": 7.300000000000068,
+              "incore_mean_us": 8.370000000000019,
+              "incore_max_us": 10.279999999999973,
+              "span_us": 61.039999999999964
+            },
+            "proj_b_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 8.440000000000055,
+              "incore_mean_us": 10.900000000000002,
+              "incore_max_us": 14.0,
+              "span_us": 54.69999999999993
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 48,
+              "incore_min_us": 21.360000000000014,
+              "incore_mean_us": 23.25916666666668,
+              "incore_max_us": 25.940000000000055,
+              "span_us": 26.100000000000023
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 16
+        },
+        {
+          "role": "multitask_candidate",
+          "full_l1_us": 829.86,
+          "active_task_count": 55,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 23.58000000000004,
+              "incore_mean_us": 27.788125000000008,
+              "incore_max_us": 30.40000000000009,
+              "span_us": 87.75999999999999
+            },
+            "quant": {
+              "task_count": 4,
+              "work_items": 24,
+              "incore_min_us": 5.8799999999999955,
+              "incore_mean_us": 8.657500000000004,
+              "incore_max_us": 10.539999999999964,
+              "span_us": 64.36000000000001
+            },
+            "proj_b_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 8.700000000000045,
+              "incore_mean_us": 11.510312500000008,
+              "incore_max_us": 16.74000000000001,
+              "span_us": 59.57999999999993
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 48,
+              "incore_min_us": 19.519999999999982,
+              "incore_mean_us": 22.2075,
+              "incore_max_us": 24.899999999999977,
+              "span_us": 25.120000000000005
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 8
+        },
+        {
+          "role": "multitask_current",
+          "full_l1_us": 830.96,
+          "active_task_count": 67,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 21.899999999999977,
+              "incore_mean_us": 26.559374999999996,
+              "incore_max_us": 30.620000000000005,
+              "span_us": 99.17999999999995
+            },
+            "quant": {
+              "task_count": 8,
+              "work_items": 24,
+              "incore_min_us": 6.139999999999986,
+              "incore_mean_us": 8.243333333333345,
+              "incore_max_us": 10.860000000000014,
+              "span_us": 73.0
+            },
+            "proj_b_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 7.739999999999895,
+              "incore_mean_us": 10.384374999999999,
+              "incore_max_us": 13.980000000000018,
+              "span_us": 64.53999999999996
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 48,
+              "incore_min_us": 21.300000000000068,
+              "incore_mean_us": 23.17833333333334,
+              "incore_max_us": 25.680000000000064,
+              "span_us": 25.91999999999996
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 16
+        },
+        {
+          "role": "multitask_candidate",
+          "full_l1_us": 842.72,
+          "active_task_count": 55,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 23.899999999999977,
+              "incore_mean_us": 28.165,
+              "incore_max_us": 32.33999999999992,
+              "span_us": 87.77999999999997
+            },
+            "quant": {
+              "task_count": 4,
+              "work_items": 24,
+              "incore_min_us": 5.560000000000059,
+              "incore_mean_us": 7.612499999999997,
+              "incore_max_us": 10.279999999999973,
+              "span_us": 59.360000000000014
+            },
+            "proj_b_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 7.600000000000023,
+              "incore_mean_us": 10.432499999999996,
+              "incore_max_us": 15.219999999999914,
+              "span_us": 68.18000000000006
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 48,
+              "incore_min_us": 20.899999999999977,
+              "incore_mean_us": 22.865,
+              "incore_max_us": 25.159999999999968,
+              "span_us": 25.339999999999918
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 8
+        },
+        {
+          "role": "multitask_current",
+          "full_l1_us": 809.74,
+          "active_task_count": 67,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 22.720000000000027,
+              "incore_mean_us": 27.340625000000003,
+              "incore_max_us": 30.100000000000023,
+              "span_us": 88.27999999999997
+            },
+            "quant": {
+              "task_count": 8,
+              "work_items": 24,
+              "incore_min_us": 5.720000000000027,
+              "incore_mean_us": 8.742500000000007,
+              "incore_max_us": 12.139999999999986,
+              "span_us": 67.0
+            },
+            "proj_b_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 8.580000000000041,
+              "incore_mean_us": 10.740624999999989,
+              "incore_max_us": 14.779999999999973,
+              "span_us": 56.24000000000001
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 48,
+              "incore_min_us": 20.720000000000027,
+              "incore_mean_us": 22.764166666666664,
+              "incore_max_us": 25.300000000000068,
+              "span_us": 25.480000000000018
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 16
+        }
+      ]
+    },
+    {
+      "batch": 28,
+      "history": 131072,
+      "result": "runs/output_flat_g2_v1/h131072_b28_pair_v1/result.json",
+      "l1_us": {
+        "multitask_original": {
+          "samples_us": [
+            1264.28,
+            1245.48,
+            1282.26,
+            1283.88,
+            1309.4
+          ],
+          "min_us": 1245.48,
+          "mean_us": 1277.06,
+          "max_us": 1309.4,
+          "median_us": 1282.26
+        },
+        "multitask_current": {
+          "samples_us": [
+            1190.84,
+            1187.2,
+            1168.16,
+            1195.26,
+            1194.36
+          ],
+          "min_us": 1168.16,
+          "mean_us": 1187.164,
+          "max_us": 1195.26,
+          "median_us": 1190.84
+        },
+        "multitask_candidate": {
+          "samples_us": [
+            1206.94,
+            1219.14,
+            1182.66,
+            1204.92,
+            1184.92
+          ],
+          "min_us": 1182.66,
+          "mean_us": 1199.7160000000001,
+          "max_us": 1219.14,
+          "median_us": 1204.92
+        },
+        "single_spmd": {
+          "samples_us": [
+            1154.56,
+            1159.54,
+            1156.92,
+            1166.7,
+            1164.94
+          ],
+          "min_us": 1154.56,
+          "mean_us": 1160.532,
+          "max_us": 1166.7,
+          "median_us": 1159.54
+        }
+      },
+      "phase_intervals": {
+        "multitask_candidate": {
+          "before_score": {
+            "min_us": 380.48,
+            "mean_us": 400.09200000000004,
+            "max_us": 423.40000000000003
+          },
+          "score_to_attention": {
+            "min_us": 389.56,
+            "mean_us": 390.74399999999997,
+            "max_us": 392.46000000000004
+          },
+          "attention_to_output": {
+            "min_us": 229.4000000000001,
+            "mean_us": 231.71599999999998,
+            "max_us": 233.99999999999977
+          },
+          "output_to_end": {
+            "min_us": 172.60000000000014,
+            "mean_us": 177.16400000000004,
+            "max_us": 179.51999999999998
+          }
+        },
+        "multitask_current": {
+          "before_score": {
+            "min_us": 375.94000000000005,
+            "mean_us": 391.036,
+            "max_us": 397.9800000000001
+          },
+          "score_to_attention": {
+            "min_us": 389.02000000000004,
+            "mean_us": 391.112,
+            "max_us": 392.06
+          },
+          "attention_to_output": {
+            "min_us": 232.9999999999999,
+            "mean_us": 235.59999999999997,
+            "max_us": 240.12000000000023
+          },
+          "output_to_end": {
+            "min_us": 166.75999999999988,
+            "mean_us": 169.416,
+            "max_us": 172.5999999999999
+          }
+        },
+        "multitask_original": {
+          "before_score": {
+            "min_us": 354.16,
+            "mean_us": 383.872,
+            "max_us": 417.34
+          },
+          "score_to_attention": {
+            "min_us": 443.38000000000005,
+            "mean_us": 445.892,
+            "max_us": 450.8200000000001
+          },
+          "attention_to_output": {
+            "min_us": 268.67999999999995,
+            "mean_us": 271.504,
+            "max_us": 275.74
+          },
+          "output_to_end": {
+            "min_us": 174.48000000000002,
+            "mean_us": 175.792,
+            "max_us": 176.92000000000007
+          }
+        }
+      },
+      "windows": [
+        {
+          "role": "multitask_candidate",
+          "full_l1_us": 1206.94,
+          "active_task_count": 55,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 17.160000000000082,
+              "incore_mean_us": 26.899062500000003,
+              "incore_max_us": 36.77999999999997,
+              "span_us": 92.0
+            },
+            "quant": {
+              "task_count": 4,
+              "work_items": 48,
+              "incore_min_us": 6.0,
+              "incore_mean_us": 6.869166666666691,
+              "incore_max_us": 7.879999999999882,
+              "span_us": 60.92000000000007
+            },
+            "proj_b_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 15.600000000000136,
+              "incore_mean_us": 17.2346875,
+              "incore_max_us": 19.720000000000027,
+              "span_us": 84.55999999999995
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 42,
+              "incore_min_us": 34.22000000000003,
+              "incore_mean_us": 36.24857142857144,
+              "incore_max_us": 37.940000000000055,
+              "span_us": 38.16000000000008
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "edges": [
+            {
+              "task": "r3t2",
+              "name": "quant_3_spmd(r3t2)",
+              "parent": "r3t1"
+            },
+            {
+              "task": "r3t3",
+              "name": "_proj_b_mm_nz_kernel__3_spmd(r3t3)",
+              "parent": "r3t2"
+            },
+            {
+              "task": "r3t5",
+              "name": "quant_3_spmd(r3t5)",
+              "parent": "r3t4"
+            },
+            {
+              "task": "r3t6",
+              "name": "_proj_b_mm_nz_kernel__3_spmd(r3t6)",
+              "parent": "r3t5"
+            },
+            {
+              "task": "r3t8",
+              "name": "quant_3_spmd(r3t8)",
+              "parent": "r3t7"
+            },
+            {
+              "task": "r3t9",
+              "name": "_proj_b_mm_nz_kernel__3_spmd(r3t9)",
+              "parent": "r3t8"
+            },
+            {
+              "task": "r3t11",
+              "name": "quant_3_spmd(r3t11)",
+              "parent": "r3t10"
+            },
+            {
+              "task": "r3t12",
+              "name": "_proj_b_mm_nz_kernel__3_spmd(r3t12)",
+              "parent": "r3t11"
+            }
+          ],
+          "checked_dependency_edges": 8
+        },
+        {
+          "role": "multitask_current",
+          "full_l1_us": 1190.84,
+          "active_task_count": 67,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 16.940000000000055,
+              "incore_mean_us": 26.680624999999985,
+              "incore_max_us": 36.299999999999955,
+              "span_us": 88.72000000000003
+            },
+            "quant": {
+              "task_count": 8,
+              "work_items": 48,
+              "incore_min_us": 5.660000000000082,
+              "incore_mean_us": 6.509999999999995,
+              "incore_max_us": 7.419999999999845,
+              "span_us": 63.74000000000001
+            },
+            "proj_b_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 15.480000000000018,
+              "incore_mean_us": 16.469062500000014,
+              "incore_max_us": 18.25999999999999,
+              "span_us": 74.8599999999999
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 42,
+              "incore_min_us": 33.61999999999989,
+              "incore_mean_us": 36.176190476190456,
+              "incore_max_us": 37.57999999999993,
+              "span_us": 37.919999999999845
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "edges": [
+            {
+              "task": "r3t2",
+              "name": "quant_3_spmd(r3t2)",
+              "parent": "r3t1"
+            },
+            {
+              "task": "r3t3",
+              "name": "_proj_b_mm_nz_kernel__3_spmd(r3t3)",
+              "parent": "r3t2"
+            },
+            {
+              "task": "r3t5",
+              "name": "quant_3_spmd(r3t5)",
+              "parent": "r3t4"
+            },
+            {
+              "task": "r3t6",
+              "name": "_proj_b_mm_nz_kernel__3_spmd(r3t6)",
+              "parent": "r3t5"
+            },
+            {
+              "task": "r3t8",
+              "name": "quant_3_spmd(r3t8)",
+              "parent": "r3t7"
+            },
+            {
+              "task": "r3t9",
+              "name": "_proj_b_mm_nz_kernel__3_spmd(r3t9)",
+              "parent": "r3t8"
+            },
+            {
+              "task": "r3t11",
+              "name": "quant_3_spmd(r3t11)",
+              "parent": "r3t10"
+            },
+            {
+              "task": "r3t12",
+              "name": "_proj_b_mm_nz_kernel__3_spmd(r3t12)",
+              "parent": "r3t11"
+            },
+            {
+              "task": "r3t14",
+              "name": "quant_3_spmd(r3t14)",
+              "parent": "r3t13"
+            },
+            {
+              "task": "r3t15",
+              "name": "_proj_b_mm_nz_kernel__3_spmd(r3t15)",
+              "parent": "r3t14"
+            },
+            {
+              "task": "r3t17",
+              "name": "quant_3_spmd(r3t17)",
+              "parent": "r3t16"
+            },
+            {
+              "task": "r3t18",
+              "name": "_proj_b_mm_nz_kernel__3_spmd(r3t18)",
+              "parent": "r3t17"
+            },
+            {
+              "task": "r3t20",
+              "name": "quant_3_spmd(r3t20)",
+              "parent": "r3t19"
+            },
+            {
+              "task": "r3t21",
+              "name": "_proj_b_mm_nz_kernel__3_spmd(r3t21)",
+              "parent": "r3t20"
+            },
+            {
+              "task": "r3t23",
+              "name": "quant_3_spmd(r3t23)",
+              "parent": "r3t22"
+            },
+            {
+              "task": "r3t24",
+              "name": "_proj_b_mm_nz_kernel__3_spmd(r3t24)",
+              "parent": "r3t23"
+            }
+          ],
+          "checked_dependency_edges": 16
+        },
+        {
+          "role": "multitask_current",
+          "full_l1_us": 1187.2,
+          "active_task_count": 67,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 17.039999999999964,
+              "incore_mean_us": 26.729687500000015,
+              "incore_max_us": 36.24000000000001,
+              "span_us": 87.24000000000001
+            },
+            "quant": {
+              "task_count": 8,
+              "work_items": 48,
+              "incore_min_us": 5.680000000000064,
+              "incore_mean_us": 6.644166666666668,
+              "incore_max_us": 7.420000000000073,
+              "span_us": 62.8599999999999
+            },
+            "proj_b_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 15.339999999999918,
+              "incore_mean_us": 16.4596875,
+              "incore_max_us": 19.88000000000011,
+              "span_us": 74.0
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 42,
+              "incore_min_us": 33.700000000000045,
+              "incore_mean_us": 35.898571428571415,
+              "incore_max_us": 37.5,
+              "span_us": 37.75999999999999
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 16
+        },
+        {
+          "role": "multitask_candidate",
+          "full_l1_us": 1219.14,
+          "active_task_count": 55,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 23.079999999999927,
+              "incore_mean_us": 27.484687500000025,
+              "incore_max_us": 32.819999999999936,
+              "span_us": 90.58000000000015
+            },
+            "quant": {
+              "task_count": 4,
+              "work_items": 48,
+              "incore_min_us": 6.059999999999945,
+              "incore_mean_us": 8.218750000000005,
+              "incore_max_us": 10.5,
+              "span_us": 65.51999999999998
+            },
+            "proj_b_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 15.580000000000155,
+              "incore_mean_us": 16.890624999999982,
+              "incore_max_us": 20.159999999999854,
+              "span_us": 76.27999999999997
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 42,
+              "incore_min_us": 35.1400000000001,
+              "incore_mean_us": 37.13238095238095,
+              "incore_max_us": 38.77999999999997,
+              "span_us": 39.16000000000008
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 8
+        },
+        {
+          "role": "multitask_candidate",
+          "full_l1_us": 1182.66,
+          "active_task_count": 55,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 17.039999999999964,
+              "incore_mean_us": 27.2753125,
+              "incore_max_us": 37.039999999999964,
+              "span_us": 86.58000000000015
+            },
+            "quant": {
+              "task_count": 4,
+              "work_items": 48,
+              "incore_min_us": 5.439999999999827,
+              "incore_mean_us": 6.678333333333285,
+              "incore_max_us": 7.960000000000036,
+              "span_us": 63.63999999999987
+            },
+            "proj_b_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 15.539999999999964,
+              "incore_mean_us": 16.579375000000017,
+              "incore_max_us": 18.24000000000001,
+              "span_us": 83.8599999999999
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 42,
+              "incore_min_us": 34.51999999999998,
+              "incore_mean_us": 36.313333333333325,
+              "incore_max_us": 38.27999999999997,
+              "span_us": 38.3599999999999
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 8
+        },
+        {
+          "role": "multitask_current",
+          "full_l1_us": 1168.16,
+          "active_task_count": 67,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 17.12000000000012,
+              "incore_mean_us": 26.802812500000016,
+              "incore_max_us": 35.88000000000011,
+              "span_us": 87.78000000000009
+            },
+            "quant": {
+              "task_count": 8,
+              "work_items": 48,
+              "incore_min_us": 5.660000000000082,
+              "incore_mean_us": 6.780833333333334,
+              "incore_max_us": 8.900000000000091,
+              "span_us": 66.20000000000005
+            },
+            "proj_b_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 15.600000000000136,
+              "incore_mean_us": 16.325000000000014,
+              "incore_max_us": 18.12000000000012,
+              "span_us": 71.96000000000004
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 42,
+              "incore_min_us": 33.74000000000001,
+              "incore_mean_us": 36.24857142857144,
+              "incore_max_us": 37.680000000000064,
+              "span_us": 38.11999999999989
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 16
+        },
+        {
+          "role": "multitask_candidate",
+          "full_l1_us": 1204.92,
+          "active_task_count": 55,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 17.139999999999873,
+              "incore_mean_us": 26.9596875,
+              "incore_max_us": 35.88000000000011,
+              "span_us": 88.55999999999995
+            },
+            "quant": {
+              "task_count": 4,
+              "work_items": 48,
+              "incore_min_us": 5.980000000000018,
+              "incore_mean_us": 6.874166666666677,
+              "incore_max_us": 7.759999999999991,
+              "span_us": 57.059999999999945
+            },
+            "proj_b_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 15.3599999999999,
+              "incore_mean_us": 17.448124999999983,
+              "incore_max_us": 20.339999999999918,
+              "span_us": 82.0
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 42,
+              "incore_min_us": 34.399999999999864,
+              "incore_mean_us": 36.544761904761884,
+              "incore_max_us": 38.16000000000008,
+              "span_us": 38.559999999999945
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 8
+        },
+        {
+          "role": "multitask_current",
+          "full_l1_us": 1195.26,
+          "active_task_count": 67,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 17.019999999999982,
+              "incore_mean_us": 26.646875000000026,
+              "incore_max_us": 35.1400000000001,
+              "span_us": 88.55999999999995
+            },
+            "quant": {
+              "task_count": 8,
+              "work_items": 48,
+              "incore_min_us": 5.519999999999982,
+              "incore_mean_us": 6.319583333333313,
+              "incore_max_us": 7.3599999999999,
+              "span_us": 66.30000000000018
+            },
+            "proj_b_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 15.1400000000001,
+              "incore_mean_us": 16.681562500000013,
+              "incore_max_us": 18.580000000000155,
+              "span_us": 77.76000000000022
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 42,
+              "incore_min_us": 33.59999999999991,
+              "incore_mean_us": 35.82904761904759,
+              "incore_max_us": 37.30000000000018,
+              "span_us": 37.57999999999993
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 16
+        },
+        {
+          "role": "multitask_candidate",
+          "full_l1_us": 1184.92,
+          "active_task_count": 55,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 16.960000000000036,
+              "incore_mean_us": 27.21062500000001,
+              "incore_max_us": 36.88000000000011,
+              "span_us": 92.94000000000005
+            },
+            "quant": {
+              "task_count": 4,
+              "work_items": 48,
+              "incore_min_us": 5.879999999999882,
+              "incore_mean_us": 6.893333333333335,
+              "incore_max_us": 8.279999999999973,
+              "span_us": 65.6400000000001
+            },
+            "proj_b_mm": {
+              "task_count": 4,
+              "work_items": 64,
+              "incore_min_us": 15.360000000000127,
+              "incore_mean_us": 16.971562500000005,
+              "incore_max_us": 19.460000000000036,
+              "span_us": 84.57999999999993
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 42,
+              "incore_min_us": 35.460000000000036,
+              "incore_mean_us": 37.27190476190476,
+              "incore_max_us": 38.75999999999999,
+              "span_us": 39.200000000000045
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 8
+        },
+        {
+          "role": "multitask_current",
+          "full_l1_us": 1194.36,
+          "active_task_count": 67,
+          "output_phases": {
+            "proj_a_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 16.779999999999973,
+              "incore_mean_us": 26.75999999999999,
+              "incore_max_us": 36.659999999999854,
+              "span_us": 96.2199999999998
+            },
+            "quant": {
+              "task_count": 8,
+              "work_items": 48,
+              "incore_min_us": 5.660000000000082,
+              "incore_mean_us": 6.370416666666661,
+              "incore_max_us": 7.380000000000109,
+              "span_us": 68.94000000000005
+            },
+            "proj_b_mm": {
+              "task_count": 8,
+              "work_items": 64,
+              "incore_min_us": 15.279999999999973,
+              "incore_mean_us": 16.645312499999985,
+              "incore_max_us": 18.40000000000009,
+              "span_us": 77.48000000000002
+            },
+            "proj_b_act_hc_post": {
+              "task_count": 1,
+              "work_items": 42,
+              "incore_min_us": 33.86000000000013,
+              "incore_mean_us": 36.13476190476192,
+              "incore_max_us": 38.27999999999997,
+              "span_us": 38.51999999999998
+            }
+          },
+          "each_quant_ob_has_only_own_stage_parent": true,
+          "checked_dependency_edges": 16
+        }
+      ]
+    }
+  ],
+  "dependency_detail": "全部五窗均逐边核对；只保留每个角色首窗的完整边列表，其他窗口保留检查数量和结论；原始依赖图在result对应目录"
+}

@@ -1,0 +1,424 @@
+{
+  "result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/query_score_v1/h131072_b28_fused_v1/result.json",
+  "passed": true,
+  "history": 131072,
+  "batch": 28,
+  "scope": "完整L1及共同QB结束到Attention首启区间；融合Score包含Q数学，不能当纯Score比速",
+  "dependency": "实际L1的每个融合Score实例必须包含QB生产者fanin",
+  "timestamp_note": "QB结束至Score首启差值单独记录；不将时间相近代替真实依赖证明",
+  "summaries": {
+    "multitask_current": {
+      "full_us": {
+        "samples_us": [
+          1200.66,
+          1189.18,
+          1180.5,
+          1195.44,
+          1210.22
+        ],
+        "min_us": 1180.5,
+        "mean_us": 1195.2,
+        "max_us": 1210.22
+      },
+      "qb_done_to_score_start_us": {
+        "samples_us": [
+          93.19999999999999,
+          90.69999999999999,
+          77.56,
+          84.98000000000002,
+          94.09999999999997
+        ],
+        "min_us": 77.56,
+        "mean_us": 88.10799999999999,
+        "max_us": 94.09999999999997
+      },
+      "qb_done_to_attention_start_us": {
+        "samples_us": [
+          486.73999999999995,
+          485.06,
+          473.32000000000005,
+          480.36,
+          488.96000000000004
+        ],
+        "min_us": 473.32000000000005,
+        "mean_us": 482.88800000000003,
+        "max_us": 488.96000000000004
+      }
+    },
+    "multitask_candidate": {
+      "full_us": {
+        "samples_us": [
+          1167.6399999999999,
+          1167.6,
+          1180.58,
+          1177.54,
+          1177.44
+        ],
+        "min_us": 1167.6,
+        "mean_us": 1174.1599999999999,
+        "max_us": 1180.58
+      },
+      "qb_done_to_score_start_us": {
+        "samples_us": [
+          49.06,
+          9.859999999999957,
+          86.32000000000005,
+          50.879999999999995,
+          89.56
+        ],
+        "min_us": 9.859999999999957,
+        "mean_us": 57.136,
+        "max_us": 89.56
+      },
+      "qb_done_to_attention_start_us": {
+        "samples_us": [
+          460.8,
+          428.78000000000003,
+          500.12000000000006,
+          464.59999999999997,
+          499.96000000000004
+        ],
+        "min_us": 428.78000000000003,
+        "mean_us": 470.85200000000003,
+        "max_us": 500.12000000000006
+      }
+    }
+  },
+  "windows": [
+    {
+      "side": "multitask_candidate",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/query_score_v1/h131072_b28_fused_v1/l1_00_multitask_candidate/swimlane.json",
+      "full_us": 1167.6399999999999,
+      "qb": {
+        "first_us": 212.56,
+        "last_us": 348.18,
+        "span_us": 135.62,
+        "records": 20
+      },
+      "standalone_q": null,
+      "score_includes_q": true,
+      "score": {
+        "first_us": 397.24,
+        "last_us": 758.08,
+        "span_us": 360.84000000000003,
+        "records": 72
+      },
+      "attention": {
+        "first_us": 808.98,
+        "last_us": 1047.64,
+        "span_us": 238.66000000000008,
+        "records": 72
+      },
+      "qb_producers": [
+        "r1t16"
+      ],
+      "qb_dependency_verified": true,
+      "qb_done_to_score_start_us": 49.06,
+      "qb_done_to_attention_start_us": 460.8
+    },
+    {
+      "side": "multitask_current",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/query_score_v1/h131072_b28_fused_v1/l1_00_multitask_current/swimlane.json",
+      "full_us": 1200.66,
+      "qb": {
+        "first_us": 207.54,
+        "last_us": 325.90000000000003,
+        "span_us": 118.36000000000004,
+        "records": 20
+      },
+      "standalone_q": {
+        "first_us": 347.56,
+        "last_us": 414.22,
+        "span_us": 66.66000000000003,
+        "records": 48
+      },
+      "score_includes_q": false,
+      "score": {
+        "first_us": 419.1,
+        "last_us": 764.62,
+        "span_us": 345.52,
+        "records": 72
+      },
+      "attention": {
+        "first_us": 812.64,
+        "last_us": 1052.0,
+        "span_us": 239.36,
+        "records": 72
+      },
+      "qb_producers": [
+        "r2t4"
+      ],
+      "qb_dependency_verified": false,
+      "qb_done_to_score_start_us": 93.19999999999999,
+      "qb_done_to_attention_start_us": 486.73999999999995
+    },
+    {
+      "side": "multitask_current",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/query_score_v1/h131072_b28_fused_v1/l1_01_multitask_current/swimlane.json",
+      "full_us": 1189.18,
+      "qb": {
+        "first_us": 185.3,
+        "last_us": 317.18,
+        "span_us": 131.88,
+        "records": 20
+      },
+      "standalone_q": {
+        "first_us": 338.88,
+        "last_us": 403.54,
+        "span_us": 64.66000000000003,
+        "records": 48
+      },
+      "score_includes_q": false,
+      "score": {
+        "first_us": 407.88,
+        "last_us": 754.1800000000001,
+        "span_us": 346.30000000000007,
+        "records": 72
+      },
+      "attention": {
+        "first_us": 802.24,
+        "last_us": 1037.32,
+        "span_us": 235.07999999999993,
+        "records": 72
+      },
+      "qb_producers": [
+        "r2t4"
+      ],
+      "qb_dependency_verified": false,
+      "qb_done_to_score_start_us": 90.69999999999999,
+      "qb_done_to_attention_start_us": 485.06
+    },
+    {
+      "side": "multitask_candidate",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/query_score_v1/h131072_b28_fused_v1/l1_01_multitask_candidate/swimlane.json",
+      "full_us": 1167.6,
+      "qb": {
+        "first_us": 217.3,
+        "last_us": 353.16,
+        "span_us": 135.86,
+        "records": 20
+      },
+      "standalone_q": null,
+      "score_includes_q": true,
+      "score": {
+        "first_us": 363.02,
+        "last_us": 730.32,
+        "span_us": 367.30000000000007,
+        "records": 72
+      },
+      "attention": {
+        "first_us": 781.94,
+        "last_us": 1018.0600000000001,
+        "span_us": 236.12,
+        "records": 72
+      },
+      "qb_producers": [
+        "r1t16"
+      ],
+      "qb_dependency_verified": true,
+      "qb_done_to_score_start_us": 9.859999999999957,
+      "qb_done_to_attention_start_us": 428.78000000000003
+    },
+    {
+      "side": "multitask_candidate",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/query_score_v1/h131072_b28_fused_v1/l1_02_multitask_candidate/swimlane.json",
+      "full_us": 1180.58,
+      "qb": {
+        "first_us": 205.32,
+        "last_us": 296.96,
+        "span_us": 91.63999999999999,
+        "records": 20
+      },
+      "standalone_q": null,
+      "score_includes_q": true,
+      "score": {
+        "first_us": 383.28000000000003,
+        "last_us": 746.0,
+        "span_us": 362.71999999999997,
+        "records": 72
+      },
+      "attention": {
+        "first_us": 797.08,
+        "last_us": 1030.22,
+        "span_us": 233.14,
+        "records": 72
+      },
+      "qb_producers": [
+        "r1t16"
+      ],
+      "qb_dependency_verified": true,
+      "qb_done_to_score_start_us": 86.32000000000005,
+      "qb_done_to_attention_start_us": 500.12000000000006
+    },
+    {
+      "side": "multitask_current",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/query_score_v1/h131072_b28_fused_v1/l1_02_multitask_current/swimlane.json",
+      "full_us": 1180.5,
+      "qb": {
+        "first_us": 192.20000000000002,
+        "last_us": 320.74,
+        "span_us": 128.54,
+        "records": 20
+      },
+      "standalone_q": {
+        "first_us": 325.6,
+        "last_us": 371.3,
+        "span_us": 45.69999999999999,
+        "records": 48
+      },
+      "score_includes_q": false,
+      "score": {
+        "first_us": 398.3,
+        "last_us": 743.34,
+        "span_us": 345.04,
+        "records": 72
+      },
+      "attention": {
+        "first_us": 794.0600000000001,
+        "last_us": 1031.06,
+        "span_us": 236.9999999999999,
+        "records": 72
+      },
+      "qb_producers": [
+        "r2t4"
+      ],
+      "qb_dependency_verified": false,
+      "qb_done_to_score_start_us": 77.56,
+      "qb_done_to_attention_start_us": 473.32000000000005
+    },
+    {
+      "side": "multitask_candidate",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/query_score_v1/h131072_b28_fused_v1/l1_03_multitask_candidate/swimlane.json",
+      "full_us": 1177.54,
+      "qb": {
+        "first_us": 213.5,
+        "last_us": 331.18,
+        "span_us": 117.68,
+        "records": 20
+      },
+      "standalone_q": null,
+      "score_includes_q": true,
+      "score": {
+        "first_us": 382.06,
+        "last_us": 744.46,
+        "span_us": 362.40000000000003,
+        "records": 72
+      },
+      "attention": {
+        "first_us": 795.78,
+        "last_us": 1030.14,
+        "span_us": 234.36000000000013,
+        "records": 72
+      },
+      "qb_producers": [
+        "r1t16"
+      ],
+      "qb_dependency_verified": true,
+      "qb_done_to_score_start_us": 50.879999999999995,
+      "qb_done_to_attention_start_us": 464.59999999999997
+    },
+    {
+      "side": "multitask_current",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/query_score_v1/h131072_b28_fused_v1/l1_03_multitask_current/swimlane.json",
+      "full_us": 1195.44,
+      "qb": {
+        "first_us": 180.68,
+        "last_us": 329.0,
+        "span_us": 148.32,
+        "records": 20
+      },
+      "standalone_q": {
+        "first_us": 341.92,
+        "last_us": 409.36,
+        "span_us": 67.44,
+        "records": 48
+      },
+      "score_includes_q": false,
+      "score": {
+        "first_us": 413.98,
+        "last_us": 760.58,
+        "span_us": 346.6,
+        "records": 72
+      },
+      "attention": {
+        "first_us": 809.36,
+        "last_us": 1046.6,
+        "span_us": 237.2399999999999,
+        "records": 72
+      },
+      "qb_producers": [
+        "r2t4"
+      ],
+      "qb_dependency_verified": false,
+      "qb_done_to_score_start_us": 84.98000000000002,
+      "qb_done_to_attention_start_us": 480.36
+    },
+    {
+      "side": "multitask_candidate",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/query_score_v1/h131072_b28_fused_v1/l1_04_multitask_candidate/swimlane.json",
+      "full_us": 1177.44,
+      "qb": {
+        "first_us": 212.48000000000002,
+        "last_us": 288.5,
+        "span_us": 76.01999999999998,
+        "records": 20
+      },
+      "standalone_q": null,
+      "score_includes_q": true,
+      "score": {
+        "first_us": 378.06,
+        "last_us": 738.22,
+        "span_us": 360.16,
+        "records": 72
+      },
+      "attention": {
+        "first_us": 788.46,
+        "last_us": 1026.5,
+        "span_us": 238.03999999999996,
+        "records": 72
+      },
+      "qb_producers": [
+        "r1t16"
+      ],
+      "qb_dependency_verified": true,
+      "qb_done_to_score_start_us": 89.56,
+      "qb_done_to_attention_start_us": 499.96000000000004
+    },
+    {
+      "side": "multitask_current",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/query_score_v1/h131072_b28_fused_v1/l1_04_multitask_current/swimlane.json",
+      "full_us": 1210.22,
+      "qb": {
+        "first_us": 219.86,
+        "last_us": 349.48,
+        "span_us": 129.62,
+        "records": 20
+      },
+      "standalone_q": {
+        "first_us": 371.74,
+        "last_us": 438.5,
+        "span_us": 66.75999999999999,
+        "records": 48
+      },
+      "score_includes_q": false,
+      "score": {
+        "first_us": 443.58,
+        "last_us": 792.32,
+        "span_us": 348.74000000000007,
+        "records": 72
+      },
+      "attention": {
+        "first_us": 838.44,
+        "last_us": 1076.28,
+        "span_us": 237.83999999999992,
+        "records": 72
+      },
+      "qb_producers": [
+        "r2t4"
+      ],
+      "qb_dependency_verified": false,
+      "qb_done_to_score_start_us": 94.09999999999997,
+      "qb_done_to_attention_start_us": 488.96000000000004
+    }
+  ]
+}

@@ -180,19 +180,39 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", default="score_split")
     parser.add_argument("--current", help="可选的已保留私有包；与原基线、候选和单SPMD同轮比较")
+    parser.add_argument(
+        "--spmd-reference",
+        choices=("spmd", "spmd_7061c112", "spmd_a241fa61", "spmd_a241fa61_half_shape_fix"),
+        default="spmd",
+        help="固定13259f92/100tick、7061c112/150tick或a241fa61/B1驻留UB；不混合汇总",
+    )
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--history", type=int, default=131072)
     parser.add_argument("--attempt", default="v1")
     parser.add_argument("--windows", type=int, default=5)
     parser.add_argument("--parse-only", action="store_true")
     parser.add_argument("--compile-only", action="store_true")
+    parser.add_argument("--compile-spmd-reference", action="store_true", help="CPU核对所选参考的策略类型与代码生成")
     parser.add_argument("--dump-final-ir", action="store_true", help="仅CPU失败诊断，保存一份最终IR")
     parser.add_argument("--compile-legacy-qr", action="store_true", help="仅CPU编译HCA使用的旧QR入口")
     parser.add_argument("--compile-layout-probe", action="store_true")
     parser.add_argument("--layout-probe", action="store_true", help="新页证明helper需测；相同helper已通过时不重复")
     parser.add_argument("--boundary-replay", action="store_true", help="单图metadata变化及Native补位，独立于性能")
+    parser.add_argument(
+        "--boundary-context-history",
+        type=int,
+        help="边界重放中另切换到此history，再恢复原值；不改冻结源码清单",
+    )
     parser.add_argument("--measure-outer", action="store_true", help="另采NPU event外层耗时，保持L1口径独立")
+    parser.add_argument(
+        "--dep-gen",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="默认保留历史依赖图采集；--no-dep-gen仅用于单独核对采集开销，仍保留L1时间戳",
+    )
     parser.add_argument("--functional-only", action="store_true", help="只做原多task/候选精确与A/B/A图检查")
+    parser.add_argument("--constant-indexer-history", action="store_true", help="仅功能模式：历史key为零制造严格同分")
+    parser.add_argument("--capture-level4", action="store_true", help="功能模式后补采一个L4诊断窗口，不进入性能表")
     parser.add_argument(
         "--candidate-wait-backoff",
         choices=("off", "cached100"),
@@ -204,6 +224,8 @@ def main():
     )
     parser.add_argument("--device", type=int)
     args = parser.parse_args()
+    if args.compile_spmd_reference and not args.compile_only:
+        raise ValueError("参考CPU编译必须同时使用--compile-only")
     if not args.candidate.isidentifier():
         raise ValueError("候选必须是标识符")
     from candidate_wait_probe import resolve_wait_policy
@@ -221,8 +243,15 @@ def main():
         raise ValueError("指定等待单元须同时启用--candidate-wait-backoff cached100")
     if args.functional_only and args.measure_outer:
         raise ValueError("功能用例不采外层或L1性能")
-    if args.boundary_replay and (args.batch < 2 or args.history < 2):
-        raise ValueError("metadata/padding用例要求batch>=2且history>=2")
+    if args.constant_indexer_history and not args.functional_only:
+        raise ValueError("同分边界只用于功能模式，不混入主性能数据")
+    if args.capture_level4 and (not args.functional_only or args.current or args.compile_only or args.parse_only):
+        raise ValueError("L4补采仅支持单一候选的functional-only设备模式")
+    if args.boundary_replay and (args.batch < 1 or args.history < 2):
+        raise ValueError("metadata用例要求batch>=1且history>=2；B1只验证长度/页表变化")
+    if args.boundary_context_history is not None:
+        if not args.boundary_replay or not 0 < args.boundary_context_history < args.history:
+            raise ValueError("--boundary-context-history要求边界重放且0<history<原history")
     if not args.candidate.isidentifier() or not args.attempt.isidentifier():
         raise ValueError("候选及attempt必须是标识符")
     if args.current and (not args.current.isidentifier() or args.current == args.candidate):
@@ -248,8 +277,31 @@ def main():
         performance_measured=False,
         query_tokens=6,
         indexer_page_pattern=args.indexer_page_pattern,
+        constant_indexer_history=args.constant_indexer_history,
         provenance=json.loads((HERE / "PROVENANCE.json").read_text()),
     )
+    # 初始来源清单保持原样；用户后来增加的测试范围单独记录。
+    report["requested_test_standard"] = json.loads((HERE / "CASE_STANDARD.json").read_text())
+    report["profiling"] = {
+        "chip_swimlane_level": 4 if args.capture_level4 else 1,
+        "dep_gen": args.dep_gen,
+    }
+    spmd_source = HERE / "sources" / args.spmd_reference
+    spmd_revision, spmd_wait_ticks = {
+        "spmd": ("13259f92", 100),
+        "spmd_7061c112": ("7061c112", 150),
+        "spmd_a241fa61": ("a241fa61", 150),
+        "spmd_a241fa61_half_shape_fix": ("a241fa61", 150),
+    }[args.spmd_reference]
+    report["spmd_reference"] = {
+        "source": str(spmd_source),
+        "source_commit": spmd_revision,
+        "backoff_ticks": spmd_wait_ticks,
+    }
+    if args.spmd_reference == "spmd_a241fa61_half_shape_fix":
+        report["spmd_reference"]["private_compatibility_patch"] = json.loads(
+            (spmd_source / "compatibility_patch.json").read_text()
+        )
     # 公共清单描述最初冻结，不能把其score_split标签当成后续候选的来源。
     report["provenance"]["initial_candidate"] = report["provenance"].pop("candidate", None)
     report["provenance"]["candidate"] = args.candidate
@@ -277,14 +329,14 @@ def main():
         original = load_multitask(HERE / "sources/baseline", "original")
         candidate_adapter = load_multitask(HERE / "sources" / args.candidate, "candidate")
         current_adapter = load_multitask(HERE / "sources" / args.current, "current") if args.current else None
-        donor = load_binding(HERE / "sources/spmd", "backport_reference")
+        donor = load_binding(spmd_source, "backport_reference")
 
         def candidate_compile_scope():
             if args.candidate_wait_backoff == "off":
                 return contextlib.nullcontext()
             return backoff_probe(
                 output / "candidate_wait_codegen",
-                HERE / "sources/spmd/wait_codegen.py",
+                spmd_source / "wait_codegen.py",
                 args.candidate_wait_units,
             )
 
@@ -296,7 +348,7 @@ def main():
             "atomic_add": os.environ["VLLM_ASCEND_PTO_CSA_ATOMIC_ADD"],
         }
         report["toolchain_identity"] = record()
-        report["shared_wait_source"] = str(HERE / "sources/spmd/wait_codegen.py")
+        report["shared_wait_source"] = str(spmd_source / "wait_codegen.py")
         if args.compile_layout_probe:
             from layout_probe import make_probe
 
@@ -322,11 +374,41 @@ def main():
             return
         if args.parse_only or args.compile_only:
             compile_entry = candidate_adapter.decode_csa_tp1_layer_test
+            select_constants = getattr(candidate_adapter, "csa_compile_constants", None)
+            compile_keywords = {} if select_constants is None else select_constants(args.batch * 6)
+            if select_constants is not None and not (args.compile_spmd_reference or args.compile_legacy_qr):
+                report["candidate_controls"] = compile_keywords
+                # 注册只解析前端IR，不初始化NPU；检查实际入口选择及TMR/HBG运行时ABI。
+                cpu_ops = candidate_adapter.CSAOperators.register(namespace="csa_shape_gate_cpu")
+                selected_op = cpu_ops.for_tokens(args.batch * 6)
+                default_names = [p.name for p in cpu_ops.attention._schema.arguments]
+                selected_names = [p.name for p in selected_op._schema.arguments]
+                hbg_op = candidate_adapter.HBGCSAOperators.register().attention
+                hbg_names = [p.name for p in hbg_op._schema.arguments]
+                if selected_names != default_names or hbg_names != [*default_names, "host_max_seq_len"]:
+                    raise AssertionError("入口分档不应改变TMR Tensor ABI或HBG Host scalar ABI")
+                report["registered_entry_abi"] = {
+                    "selected": str(selected_op),
+                    "tmr_parameters": default_names,
+                    "hbg_parameters": hbg_names,
+                    "device_execution": False,
+                }
+            if args.compile_spmd_reference:
+                compile_entry = importlib.import_module(donor.name + ".entry").decode_csa_spmd
+                compile_keywords = donor.select_policy(
+                    tokens=args.batch * 6,
+                    requests=args.batch,
+                    max_query_tokens=6,
+                    max_seq_len=args.history + 6,
+                ).constexprs()
+                report["compile_scope"] = "仅所选单SPMD参考的CPU编译，不构造设备输入或执行NPU"
+                report["reference_controls"] = compile_keywords
             if args.compile_legacy_qr:
                 from qr_compat_probe import make_probe
 
                 helper = importlib.import_module(candidate_adapter.__package__ + ".qkv_proj_rope").q_proj_qr
                 compile_entry = make_probe(helper)
+                compile_keywords = {}
                 report["compile_scope"] = "仅HCA旧七参数QR入口，未运行HCA设备计算"
             compile_entry._get_dep_graph()
             if args.compile_only:
@@ -340,11 +422,12 @@ def main():
                     artifact = compile_entry._resolve_kernel_artifact(
                         (),
                         {
+                            **compile_keywords,
                             "config": CompileOptions(
                                 platform="a2a3",
                                 output_dir=str(output / "kernel"),
                                 memory_planner=passes.MemoryPlanner.PYPTO,
-                            )
+                            ),
                         },
                         allow_signature_mode=True,
                     )
@@ -436,13 +519,17 @@ def main():
             scale = idx["views"][1]
             rows = torch.arange(scale.numel(), dtype=torch.int64, device=device)
             scale.copy_((0.00390625 + ((rows * 37) % 251).float() / 16384).to(scale.dtype).reshape(scale.shape))
+            if args.constant_indexer_history:
+                # 与来源的同分回归一致；当前key仍由完整CSA写回，guard继续检查。
+                idx["views"][0].zero_()
+                scale.fill_(0.00390625)
             idx["initial"] = idx["allocation"].cpu()
             pypto.torch.init(
                 device=device_id,
                 platform="a2a3",
                 runtime="tensormap_and_ringbuffer",
-                enable_chip_swimlane=1,
-                enable_dep_gen=True,
+                enable_chip_swimlane=4 if args.capture_level4 else 1,
+                enable_dep_gen=args.dep_gen,
                 output_dir=str(output / "dfx"),
                 **ring_sizing_kwargs(additional),
             )
@@ -493,19 +580,40 @@ def main():
                 report["stage"] = "layout_proof_validation"
                 save(output, report)
                 report["layout_probe"] = validate_layout(candidate_adapter, device, options)
+
+            def multitask_entry(adapter, role):
+                select_constants = getattr(adapter, "csa_compile_constants", None)
+                if select_constants is None:
+                    return lambda: adapter.decode_csa_tp1_layer_test(*call.core_args, config=options)
+                ops = adapter.CSAOperators.register(namespace=f"csa_backport_{role}", config=options)
+                bound_call = adapter.NativeCSACall(
+                    ops,
+                    weights,
+                    fixture["hidden"],
+                    fixture["positions"],
+                    groups,
+                    layer_name=layer.self_attn.dsa_attn.dsa_attn.layer_name,
+                    compact_metadata=fixture["compact"],
+                    buffers={name: call.args[name] for name in ("idx_topk_scores", "idx_topk", "x_out")},
+                )
+                if bound_call.param_names != call.param_names:
+                    raise AssertionError("入口分档不应改变原CSA运行时Tensor参数顺序")
+                report.setdefault("entry_dispatch", {})[role] = {
+                    "route": "CSAOperators.register + NativeCSACall",
+                    "constexpr": select_constants(tokens),
+                    "operator": str(ops.for_tokens(tokens)),
+                }
+                return bound_call
+
             entries = {
-                "multitask_original": lambda: original.decode_csa_tp1_layer_test(*call.core_args, config=options),
-                "multitask_candidate": lambda: candidate_adapter.decode_csa_tp1_layer_test(
-                    *call.core_args, config=options
-                ),
+                "multitask_original": multitask_entry(original, "multitask_original"),
+                "multitask_candidate": multitask_entry(candidate_adapter, "multitask_candidate"),
                 "single_spmd": lambda: spmd(config=options),
             }
             if current_adapter is not None:
                 entries = {
                     "multitask_original": entries["multitask_original"],
-                    "multitask_current": lambda: current_adapter.decode_csa_tp1_layer_test(
-                        *call.core_args, config=options
-                    ),
+                    "multitask_current": multitask_entry(current_adapter, "multitask_current"),
                     "multitask_candidate": entries["multitask_candidate"],
                     "single_spmd": entries["single_spmd"],
                 }
@@ -549,7 +657,12 @@ def main():
                     report["stage"] = f"compile_call_{side}_{label}"
                     save(output, report)
                     probe = (
-                        backoff_probe(output / "spmd_codegen", HERE / "sources/spmd/wait_codegen.py", "single_spmd")
+                        backoff_probe(
+                            output / "spmd_codegen",
+                            spmd_source / "wait_codegen.py",
+                            "single_spmd",
+                            expected_ticks=spmd_wait_ticks,
+                        )
                         if side == "single_spmd" and label == "A"
                         else contextlib.nullcontext()
                     )
@@ -581,12 +694,24 @@ def main():
                 report["functional_graph"] = functional_replay(entries, reset, verify, input_a)
                 report["spmd_protocol"] = None
                 report["spmd_reference_scope"] = "未运行SPMD；功能边界只对照迁移前多task"
+                if args.capture_level4:
+                    from capture_level4 import capture
+
+                    report["stage"] = "capture_level4"
+                    save(output, report)
+                    report["diagnostic_swimlane"] = capture(
+                        entry=entries["multitask_candidate"],
+                        reset=reset,
+                        verify=lambda: verify("multitask_candidate"),
+                        output=output,
+                        kernel_config=configs["multitask_candidate"],
+                    )
             else:
                 report["stage"] = "paired_l1"
                 save(output, report)
                 report["l1"] = profile(entries, reset, verify, output, configs, args.windows, args.measure_outer)
                 report["performance_measured"] = True
-                if has_scale_layout:
+                if has_scale_layout and args.dep_gen:
                     from layout_probe import verify_edges
 
                     first = next(w for w in report["l1"]["windows"] if w["side"] == "multitask_candidate")
@@ -597,6 +722,11 @@ def main():
                         and not report["layout_dependency"]["applicable"]
                     ):
                         raise AssertionError("长G6实际未执行布局证明task")
+                elif has_scale_layout:
+                    report["layout_dependency"] = {
+                        "collected": False,
+                        "reason": "本诊断关闭依赖图快照；不据本轮声称核对过实际fanin",
+                    }
                 signals = signal_view(spmd)
                 expected = spmd_calls + report["l1"]["replay_counts"]["single_spmd"]
                 report["spmd_protocol"] = bool(
@@ -626,7 +756,11 @@ def main():
                     output / "boundary_replay.json",
                     args.history,
                     args.batch,
-                    context_switch_history=manifest.get("context_switch_history") if manifest else None,
+                    context_switch_history=(
+                        args.boundary_context_history
+                        if args.boundary_context_history is not None
+                        else manifest.get("context_switch_history")
+                    ),
                 )
             report["actual_ptoas_invocations"] = check_ptoas_invocations(
                 output / "COMPILER_INVOCATIONS.jsonl", report["toolchain_identity"]

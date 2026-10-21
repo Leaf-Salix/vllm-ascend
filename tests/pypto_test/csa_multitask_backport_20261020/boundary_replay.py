@@ -43,7 +43,12 @@ def validate(
     }
     states = {"A": dict(inputs=original_inputs, allowed={n: g["allowed"] for n, g in groups.items()}, active=batch)}
     report = dict(
-        passed=False, scope="S6同址metadata及padding；不计性能", runtime="多task TMR，不使用单SPMD代际协议", steps=[]
+        passed=False,
+        scope="S6同址metadata及padding；B1只检查长度/页表变化，不计性能",
+        runtime="多task TMR，不使用单SPMD代际协议",
+        padding_exercised=batch > 1,
+        zero_active_requests_validated=False,
+        steps=[],
     )
     if context_switch_history is not None:
         if not 0 < context_switch_history < history:
@@ -147,7 +152,8 @@ def validate(
         for name, value in original_inputs.items():
             call.args[name].copy_(value)
         impl = layer.self_attn.dsa_attn.dsa_attn.impl
-        for active in dict.fromkeys((batch - 1, 1)):
+        padding_counts = dict.fromkeys((batch - 1, 1)) if batch > 1 else ()
+        for active in padding_counts:
             metadata = update_common(active)
             compact = {}
             for name, arguments in COMPACT_ARGUMENTS:
@@ -178,7 +184,9 @@ def validate(
         torch.npu.synchronize()
         reference_a = None
         labels = ["A", "B", "A"] + (["C", "A"] if "C" in states else [])
-        labels += [n for n in states if n.startswith("P")] + ["A"]
+        padding_labels = [n for n in states if n.startswith("P")]
+        if padding_labels:
+            labels += padding_labels + ["A"]
         for label in labels:
             active = states[label]["active"]
             reset(label)
@@ -209,6 +217,7 @@ def validate(
                 dict(
                     state=label,
                     active=active,
+                    max_seq_len=int(states[label]["inputs"]["kv_seq_lens"].max().item()),
                     passed=passed,
                     comparisons=checked,
                     guards=candidate_guards,

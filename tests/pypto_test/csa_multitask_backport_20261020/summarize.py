@@ -61,6 +61,7 @@ def summarize(path):
         "indexer_page_pattern": report.get("indexer_page_pattern", "original"),
         "batch": report["batch"],
         "history": report["history"],
+        "profiling": report.get("profiling", {"chip_swimlane_level": 1, "dep_gen": True}),
     }
     if not summary["passed"]:
         summary["error"] = report.get("error", "").splitlines()[-1:]
@@ -98,6 +99,15 @@ def summarize(path):
         summary["candidate_scope_change"] = (
             "候选Score AIV包含Top-K及信号等待；等待源码策略见candidate_wait_backoff和candidate_wait_codegen/audit.json"
         )
+    if report["candidate"].startswith("query_score"):
+        summary["candidate_scope_change"] = (
+            "长G6拆M的Score AIV包含Q反量化/RMS/RoPE；与原Score不能按等工作量相减，"
+            "完整CSA及QB结束到Attention首启另列；短档或小批仍是独立Q任务"
+        )
+        if (report.get("current") or "").startswith("query_score"):
+            summary["current_scope_change"] = (
+                "当前对照同样是未采用的Q融合候选，两者Score工作范围相同；原始多task的Score仍不含Q，不能混作同工作量对照"
+            )
     if report["candidate"].startswith(("output_groups", "hc_rows", "attention_rows")):
         summary["candidate_scope_change"] = (
             "局部MIX核内时间合并多个数学阶段与软等待；与原分离task不能按同名数学直接相减"

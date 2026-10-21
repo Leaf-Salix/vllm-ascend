@@ -1,0 +1,132 @@
+{
+  "candidate": "hc_post_workers_v1",
+  "baseline": "topk_prefix_v1 / 6ba55b45",
+  "donor": "13259f92/output_projection_b_stages.py:o_dequant_hc_post_stage",
+  "native_reference": "cann/cann-recipes-infer@6d060311ae75f6105fe4216e20566875da5a8838",
+  "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_o_proj.py",
+  "policy": "T<=48按一token一AIV且sync_start；原T96与T>48其余策略不变",
+  "algorithm_ast_equal": true,
+  "numeric_change": false,
+  "validation": "两档S6完整输出/索引/score/cache/state/保护区及图检查；B4六次边界同图回放",
+  "limitations": "非整模型token/DSpark验收；未为未改分支重测其余五档；S6入口限制未变",
+  "measurements": [
+    {
+      "batch": 4,
+      "result": "runs/hc_post_workers_v1/h131072_b4_workers_v1/result.json",
+      "full_csa_l1_us": {
+        "multitask_original": {
+          "samples_us": [
+            493.92,
+            493.64,
+            499.12,
+            499.78,
+            512.04
+          ],
+          "min_us": 493.64,
+          "mean_us": 499.7,
+          "max_us": 512.04,
+          "median_us": 499.12
+        },
+        "multitask_current": {
+          "samples_us": [
+            485.14,
+            503.28,
+            485.08,
+            494.24,
+            514.12
+          ],
+          "min_us": 485.08,
+          "mean_us": 496.372,
+          "max_us": 514.12,
+          "median_us": 494.24
+        },
+        "multitask_candidate": {
+          "samples_us": [
+            487.28,
+            475.24,
+            488.32,
+            469.62,
+            479.62
+          ],
+          "min_us": 469.62,
+          "mean_us": 480.016,
+          "max_us": 488.32,
+          "median_us": 479.62
+        },
+        "single_spmd": {
+          "samples_us": [
+            477.22,
+            474.64,
+            487.14,
+            475.88,
+            505.12
+          ],
+          "min_us": 474.64,
+          "mean_us": 484.0,
+          "max_us": 505.12,
+          "median_us": 477.22
+        }
+      }
+    },
+    {
+      "batch": 8,
+      "result": "runs/hc_post_workers_v1/h131072_b8_workers_v1/result.json",
+      "full_csa_l1_us": {
+        "multitask_original": {
+          "samples_us": [
+            628.4,
+            616.48,
+            631.56,
+            635.3,
+            633.6
+          ],
+          "min_us": 616.48,
+          "mean_us": 629.068,
+          "max_us": 635.3,
+          "median_us": 631.56
+        },
+        "multitask_current": {
+          "samples_us": [
+            623.0,
+            639.12,
+            610.16,
+            616.02,
+            636.86
+          ],
+          "min_us": 610.16,
+          "mean_us": 625.032,
+          "max_us": 639.12,
+          "median_us": 623.0
+        },
+        "multitask_candidate": {
+          "samples_us": [
+            612.54,
+            614.94,
+            624.68,
+            616.94,
+            597.98
+          ],
+          "min_us": 597.98,
+          "mean_us": 613.416,
+          "max_us": 624.68,
+          "median_us": 614.94
+        },
+        "single_spmd": {
+          "samples_us": [
+            623.38,
+            630.16,
+            627.02,
+            628.86,
+            635.34
+          ],
+          "min_us": 623.38,
+          "mean_us": 628.952,
+          "max_us": 635.34,
+          "median_us": 628.86
+        }
+      }
+    }
+  ],
+  "goal_complete": false,
+  "pushed": false
+}
