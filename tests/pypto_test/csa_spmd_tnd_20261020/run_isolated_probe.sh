@@ -27,5 +27,5 @@ exec python "$repo/tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py" \
     --workspace-root "$workspace" \
     --shared-toolchain \
     --vllm-root "$workspace/.cache/migration-v0.25.1rc1/vllm" \
-    "$here/run_isolated_probe.py" --probe-directory "$probe_directory" \
+    "$repo/tests/pypto_test/csa_spmd_tnd_20261020/run_isolated_probe.py" --probe-directory "$probe_directory" \
     --toolchain-manifest "$CSA_SHARED_TOOLCHAIN_MANIFEST" --output "$probe_output" "$@"

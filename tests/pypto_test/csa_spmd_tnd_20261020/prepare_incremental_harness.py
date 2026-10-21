@@ -47,8 +47,10 @@ def main():
             if not (evidence["passed"] and evidence["stage"] == "complete"):
                 raise ValueError(f"QB-wide reference requires completed correctness: {case}")
     else:
-        raise ValueError("This probe's reference label is reserved for adopted output_balance v4, combined v106, "
-                         "or the validated experimental QB-wide v108b")
+        raise ValueError(
+            "This probe's reference label is reserved for adopted output_balance v4, combined v106, "
+            "or the validated experimental QB-wide v108b"
+        )
     target.mkdir(parents=True, exist_ok=False)
     names = (
         "run_probe.py",
@@ -95,9 +97,15 @@ def main():
         for path in source.glob("*.py"):
             if path.name not in names:
                 shutil.copyfile(path, target / path.name)
-    text = replace_once(
-        text, "    baseline_source=${bsh_roots[2]}\n", f"    baseline_source={shlex.quote(str(frozen))}\n"
-    )
+    if "    baseline_source=${bsh_roots[2]}\n" in text:
+        text = replace_once(
+            text, "    baseline_source=${bsh_roots[2]}\n", f"    baseline_source={shlex.quote(str(frozen))}\n"
+        )
+    else:
+        # Shared-SDK launchers read only the historical BSH operator path.
+        text = replace_once(
+            text, "SOURCE_PATH\n)\n", f"SOURCE_PATH\n)\n    baseline_source={shlex.quote(str(frozen))}\n"
+        )
     text = replace_once(
         text,
         'source "$workspace/env-dsv4-0251rc1.sh"\n',

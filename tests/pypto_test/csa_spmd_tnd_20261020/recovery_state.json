@@ -1,5 +1,5 @@
 {
-  "goal": "active; original TND functional/service/graph/state requirements and eight-case GM(TND/BSH)<=0.90 retained",
+  "goal": "paused; user separately authorized only the requested 128K/B16 S6 versus balanced S1..6 measurement; no general optimization resume; no push",
   "vllm_worktree": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020",
   "production_tnd_performance_changes_adopted": [
     "Inherited a241fa61 B1 mathematics + native150 wait alignment only; not counted as relative BSH speedup",
@@ -23,14 +23,10 @@
   },
   "live_device_tasks": [
     {
-      "task_id": "task_20261021_200244_14437146776",
-      "case": "three_way_shared_b8_v116",
-      "status": "running"
-    },
-    {
-      "task_id": "task_20261021_200334_151444013048",
-      "case": "three_way_shared_b1_v117",
-      "status": "running"
+      "case": "requested_s6_mixed_b16_20261022_v124",
+      "task_id": "task_20261022_005219_338877432506",
+      "status": "pending",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/requested_s6_mixed_b16_20261022_v124"
     }
   ],
   "latest_completed": {
@@ -111,13 +107,16 @@
     "borrowed_combined_v107": "BothformalBSHjobs exit0 strictPASS; B8 622.28->617.16us,shortB16 641.12->640.38us. DeviceCPPmatchesCPU. Full8GM0.988089028 FAIL0.90. OriginalNative diffs retained. Otherthreads latestidlelaunch/TaskId changes inspected; no direct newSPMDport.",
     "qb_wide_v113": "B1initialS6exact/L1 PASS366.50->355.42us(-3.0232%,4/5); overalltaskFAILmissingtable_history, fixed separate6case matrixPASS. B8exit0 613.56->609.60us(-0.6454%,3/5),T41/R12matrix12PASS. B4exit0 487.38->489.72us(+0.4801%,2/5),excludeitsG6smallM16domain.",
     "prefix_two_v112": "Historical task completed exit0, S1-S6 passed; QB-wide reference 363.94 -> combined 359.02 us; not formal BSH acceptance",
-    "formal_qb_prefix_v114": "Historical two tasks completed exit0: B1 BSH352.66 -> TND359.14us negative; B8 BSH612.82 -> TND603.08us positive. Preserve all windows; full eight-case report unresolved."
+    "formal_qb_prefix_v114": "Historical two tasks completed exit0: B1 BSH352.66 -> TND359.14us negative; B8 BSH612.82 -> TND603.08us positive. Preserve all windows; full eight-case report unresolved.",
+    "three_way_shared_v117": "B8 candidate616.26/current640.50/BSH641.85us; B1candidate372.14/current370.30/BSH363.39us. Both exit0, allstrict/protocol PASS; B1S1-S6PASS. Diagnostic only.",
+    "masked_rope_v118": "FullB1 exact/graph/state/guards/protocol/S1-S6 PASS;currentv106376.22->371.58us(-1.2333%,4/5).39 helper tests passed in v121. v119/v120 launcher errors preserved.",
+    "shared_t41_v123": "task_20261021_205606_81859127914 completed exit0; result complete/passed; metadata and continuous-state matrix; no performance measured.",
+    "shared_t65_v123": "task_20261021_204517_18664022262 completed exit0; actual single-layer service, mixed T65, metadata replay and fallback checks passed; separate event timing only."
   },
   "critical_next_steps": [
-    "Collect the two existing live three-way tasks; never restart on observation timeout. Full-eight current-SDK acceptance and separate actual service/mixed replay remain pending.",
-    "Preserve historical v114 B1 negative and unfinished v115 failure; v116 fixes the test AST scope and adds all private allocation guards.",
-    "On new shared toolchain, establish fresh paired baselines for any final cohort; never mix historical private SDK results into new-version gains.",
-    "Continue functional/service/mixed-state coverage and eight equal S6 cases; original goal not achieved. Local signed-off commits only, no push."
+    "Collect only task_20261022_005219_338877432506; do not restart or resubmit while pending/running.",
+    "Report both workload latency reduction (T96 versus T56) and same-input TND versus original-SPMD kernel ratios; preserve Native differences and full L1 windows.",
+    "After this requested comparison, stop. The broad optimization goal remains paused; no new optimization or push."
   ],
   "native_toolchain_manifest": "Historical only: native_toolchain_manifest.json; old sources/results preserved, no longer selected for new tests",
   "current_bsh_baseline": "a241fa6178ddad24ced30e5a93d109dfb17f5b53 + local static inactive-B1 shape fix; bsh_baseline_a241fa61_short_typefix_manifest.json; original snapshots/FAIL preserved",
@@ -142,16 +141,27 @@
       "state": "completed_passed",
       "passed": 115,
       "log": "runs/shared_toolchain_sync_20261021/cpu.log"
+    },
+    "shared_combined_v122": {
+      "state": "completed_passed",
+      "cases": [
+        1,
+        8
+      ],
+      "logs": [
+        "runs/shared_combined_b1_cpu_v122.log",
+        "runs/shared_combined_b8_cpu_v122.log"
+      ]
     }
   },
-  "updated_at": "2026-10-21T12:07:51.081339+00:00",
+  "updated_at": "2026-10-22T00:53:33.068390+08:00",
   "latest_complete_cohort": {
-    "report": "cohort_borrowed_combined_v106_result.json",
-    "geometric_mean_ratio": 0.9880890281086612,
+    "report": "cohort_shared_combined_v122_result.json",
+    "geometric_mean_ratio": 1.0007191243527511,
     "threshold": 0.9,
     "passed": false,
-    "note": "Two changed cases freshly paired; six byte-equivalent executable/Host cases retain whole original paired windows.",
-    "scope_after_environment_sync": "Historical private-toolchain cohort only; not acceptance under shared release"
+    "release": "csa-shared-20261021-upstream-fixes",
+    "note": "All eight cases complete, all five paired windows retained; v122 remains a private candidate."
   },
   "next_device_task": null,
   "evidence": {
@@ -160,39 +170,65 @@
   },
   "device_tasks": [
     {
-      "task_id": "task_20261021_172027_32968638376",
-      "case": "prefix_two_b1_s6_and_s1_s6_v112",
-      "status": "completed",
-      "result_passed": true,
-      "result": "runs/prefix_two_b1_s6_and_s1_s6_v112/result.json",
-      "toolchain": "historical private toolchain; not shared release"
+      "case": "cohort_shared_h131072_b1_s6_v122",
+      "task_id": "task_20261021_203846_404840116514",
+      "status": "completed (exit=0)"
     },
     {
-      "task_id": "task_20261021_172852_366004875",
-      "case": "cohort_qb_prefix_h131072_b1_s6_v114",
-      "status": "completed",
-      "result_passed": true,
-      "result": "runs/cohort_qb_prefix_h131072_b1_s6_v114/result.json",
-      "toolchain": "historical private toolchain; not shared release"
+      "case": "cohort_shared_h131072_b8_s6_v122",
+      "task_id": "task_20261021_204022_412992528691",
+      "status": "completed (exit=0)"
     },
     {
-      "task_id": "task_20261021_172852_3699317933",
-      "case": "cohort_qb_prefix_h131072_b8_s6_v114",
-      "status": "completed",
-      "result_passed": true,
-      "result": "runs/cohort_qb_prefix_h131072_b8_s6_v114/result.json",
-      "toolchain": "historical private toolchain; not shared release"
+      "case": "shared_mixed_t65_service_v123",
+      "task_id": "task_20261021_204517_18664022262",
+      "status": "completed (exit=0)"
+    },
+    {
+      "case": "cohort_shared_h131072_b4_s6_v122",
+      "task_id": "task_20261021_204807_38533632236",
+      "status": "completed (exit=0)"
+    },
+    {
+      "case": "cohort_shared_h131072_b16_s6_v122",
+      "task_id": "task_20261021_204807_38554524015",
+      "status": "completed (exit=0)"
+    },
+    {
+      "case": "cohort_shared_h131072_b24_s6_v122",
+      "task_id": "task_20261021_204807_38580510438",
+      "status": "completed (exit=0)"
+    },
+    {
+      "case": "cohort_shared_h131072_b28_s6_v122",
+      "task_id": "task_20261021_204807_38590316691",
+      "status": "completed (exit=0)"
+    },
+    {
+      "case": "cohort_shared_h8192_b16_s6_v122",
+      "task_id": "task_20261021_204807_386117236",
+      "status": "completed (exit=0)"
+    },
+    {
+      "case": "cohort_shared_h8192_b32_s6_v122",
+      "task_id": "task_20261021_204807_386597714",
+      "status": "completed (exit=0)"
+    },
+    {
+      "case": "requested_s6_mixed_b16_20261022_v124",
+      "task_id": "task_20261022_005219_338877432506",
+      "status": "pending",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/requested_s6_mixed_b16_20261022_v124"
     }
   ],
   "next_actions": [
-    "Collect the two existing live three-way tasks; never restart on observation timeout. Full-eight current-SDK acceptance and separate actual service/mixed replay remain pending.",
-    "Preserve historical v114 B1 negative and unfinished v115 failure; v116 fixes the test AST scope and adds all private allocation guards.",
-    "On new shared toolchain, establish fresh paired baselines for any final cohort; never mix historical private SDK results into new-version gains.",
-    "Continue functional/service/mixed-state coverage and eight equal S6 cases; original goal not achieved. Local signed-off commits only, no push."
+    "Collect only task_20261022_005219_338877432506; do not restart or resubmit while pending/running.",
+    "Report both workload latency reduction (T96 versus T56) and same-input TND versus original-SPMD kernel ratios; preserve Native differences and full L1 windows.",
+    "After this requested comparison, stop. The broad optimization goal remains paused; no new optimization or push."
   ],
   "live_cpu_jobs": [],
   "pending_cleanup": null,
-  "current_work": "Shared SDK B1/B8 fullCPU compilation and resource audit PASS; three-way B1/B8 tasks running. First B1 combined service/matrix fixture rejected; corrected submission preserved under v117.",
+  "current_work": "Run requested two-shape comparison with frozen private v122, same reserved device and shared release. Do not modify or adopt operators. Previous v122 eight-case cohort and T65/T41 validations are complete.",
   "integration_base": "3c92ca84a9e69b3dfa09414e0e7fa7034cc80c08",
   "stage_commits": [
     {
@@ -272,7 +308,7 @@
       "scope": "Merge upstream shared test environment while preserving paused local work; local only"
     }
   ],
-  "previous_goal_turn_classification": "progress: upstream synchronized, public-toolchain worktree bug fixed,115CPU tests passed and local commits saved",
+  "previous_goal_turn_classification": "limited user-requested measurement while general goal is paused",
   "git_delivery": {
     "local_branch": "feat/csa-spmd-tnd-20261020",
     "upstream": "origin/dsv4-flash-pto-v0.25.1rc1",
@@ -284,13 +320,15 @@
   },
   "resumed_at": "2026-10-21T12:01:26.138561+00:00",
   "consecutive_blocked_turns_since_resume": 0,
-  "resume_note": "User explicitly set goal active after environment sync; continue from preserved v114/v115 work using shared toolchain",
-  "next_device_actions": "Collect the two existing live three-way tasks; never restart on observation timeout. Full-eight current-SDK acceptance and separate actual service/mixed replay remain pending.",
+  "resume_note": "Historical full-goal resume was superseded by user pause; latest request authorizes the two-case comparison only.",
+  "next_device_actions": "Collect only task_20261022_005219_338877432506; do not restart or resubmit while pending/running.",
   "adopted_candidate": "runs/borrowed_combined_candidate_v106",
   "shared_toolchain": {
     "manifest": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_shared_toolchain/manifest.json",
     "release": "csa-shared-20261021-upstream-fixes",
     "status": "validated",
     "sync_report": "shared_toolchain_sync_20261021.json"
-  }
+  },
+  "candidate_under_validation": "runs/shared_combined_candidate_v122",
+  "cohort_under_validation": null
 }

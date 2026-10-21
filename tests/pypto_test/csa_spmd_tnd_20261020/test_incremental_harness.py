@@ -32,14 +32,19 @@ def test_incremental_measurements_rejected_by_bsh_gate(tmp_path, marker):
 
 @pytest.mark.parametrize(
     "kind,version,expected_kind",
-    [("qa", "v93b", "adopted_tnd_output_balance_v4"),
-     ("ws", "v93b", "adopted_tnd_output_balance_v4"),
-     ("combined", "v108b", "adopted_tnd_borrowed_combined_v106"),
-     ("qb_wide", "v112", "validated_qb_wide_v108b")],
+    [
+        ("qa", "v93b", "adopted_tnd_output_balance_v4"),
+        ("ws", "v93b", "adopted_tnd_output_balance_v4"),
+        ("combined", "v108b", "adopted_tnd_borrowed_combined_v106"),
+        ("qb_wide", "v112", "validated_qb_wide_v108b"),
+        ("shared", "v118", "adopted_tnd_borrowed_combined_v106"),
+    ],
 )
 def test_actual_launcher_snapshot_uses_frozen_tnd_reference(tmp_path, kind, version, expected_kind):
     here = Path(__file__).resolve().parent
-    harness = here / f"runs/incremental_{kind}_harness_{version}"
+    harness = here / (
+        f"runs/incremental_shared_{version}" if kind == "shared" else f"runs/incremental_{kind}_harness_{version}"
+    )
     if not harness.exists():
         pytest.skip("Requires the local frozen incremental probe; skip is not device evidence")
     info = json.loads((here / (harness.name + ".json")).read_text())

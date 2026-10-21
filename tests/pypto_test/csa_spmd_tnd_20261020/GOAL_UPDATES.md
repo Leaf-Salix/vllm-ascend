@@ -100,3 +100,14 @@ L1首尾耗时降低至少10%理解，即候选耗时不超过BSH基线的90%。
 后续继续按阶段做本地commit，但每次push都需要用户新的明确指令。
 此前的一次推送授权、上游设置或goal恢复都不表示持续push授权。
 收到此指令时，先前已发出的推送已完成到25d0b2df；此后不再自动push。
+
+## 2026-10-21：同步公共测试环境后恢复原目标
+
+用户要求拉取最新代码及更新后的测试环境，随后显式将原 goal 恢复 active。
+工作区与仓库 AGENTS.md 明确三个 CSA 会话统一使用公共 PyPTO、PTOAS、Simpler。
+公共选择来自主检出 `tests/pypto_test/csa_shared_toolchain/manifest.json`；
+新测试使用 `--shared-toolchain`，不回到各会话旧 SDK 副本，也不原地重建发布的 SDK。
+
+当前公共发布 `csa-shared-20261021-upstream-fixes` 已 validated；历史私有工具链
+原始结果保留，但不能拼入新版本性能收益。源代码、服务、状态、混长及八档
+等权 GM≤0.90 的要求全部保留。只做本地阶段提交，恢复目标不代表重新授权 push。

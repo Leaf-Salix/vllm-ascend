@@ -8,9 +8,31 @@ import math
 from pathlib import Path
 from statistics import median
 
-EXPECTED_CASES = frozenset(
-    [(131072, batch) for batch in (1, 4, 8, 16, 24, 28)] + [(8192, batch) for batch in (16, 32)]
-)
+EXPECTED_CASES = frozenset([(131072, batch) for batch in (1, 4, 8, 16, 24, 28)] + [(8192, batch) for batch in (16, 32)])
+
+
+def shared_toolchain_fingerprint(snapshot, result):
+    """Compare published SDK metadata, without rescanning shared source/binaries."""
+    path = snapshot / "shared_toolchain_manifest.json"
+    if not path.exists():
+        return None
+    if (snapshot / "native_toolchain_manifest.json").exists():
+        raise ValueError("Ambiguous shared and historical toolchain manifests")
+    data = json.loads(path.read_text())
+    audit = result.get("toolchain_post_run_audit", {})
+    if not (
+        data.get("status") == "validated"
+        and data.get("release")
+        and audit.get("passed")
+        and audit.get("release") == data["release"]
+    ):
+        raise ValueError("Shared toolchain requires a validated release and matching post-run audit")
+    for name in ("pypto", "ptoas", "simpler"):
+        if not (data.get(name, {}).get("source") and len(data[name].get("commit", "")) == 40):
+            raise ValueError(f"Shared toolchain lacks source/revision for {name}")
+    if not data["ptoas"].get("build"):
+        raise ValueError("Shared toolchain lacks the selected PTOAS build")
+    return {"release": data["release"], "manifest_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
 def source_hashes(snapshot, prefix):
@@ -45,9 +67,9 @@ def apply_codegen_certificate(fingerprint, task_id, snapshot, result, certificat
             path = Path(proof[f"{side}_cpp"])
             if hashlib.sha256(path.read_bytes()).hexdigest() != proof[f"{side}_cpp_sha256"]:
                 raise ValueError(f"{task_id}: generated C++ changed after proof")
-            normalized.append("\n".join(
-                line for line in path.read_text().splitlines() if not line.lstrip().startswith("// pto:")
-            ))
+            normalized.append(
+                "\n".join(line for line in path.read_text().splitlines() if not line.lstrip().startswith("// pto:"))
+            )
         if normalized[0] != normalized[1]:
             raise ValueError(f"{task_id}: generated executable code differs")
         if proof.get("orchestration"):
@@ -136,11 +158,10 @@ def evaluate(jobs, selected, certificate=None):
             "native_toolchain": (
                 hashlib.sha256(native_manifest.read_bytes()).hexdigest() if native_manifest.exists() else None
             ),
+            "shared_toolchain": shared_toolchain_fingerprint(snapshot, result),
             "runtime_artifacts": result["runtime_artifacts"],
             "harness": {
-                key: value
-                for key, value in all_sources.items()
-                if not key.startswith(("spmd/", "original_spmd/"))
+                key: value for key, value in all_sources.items() if not key.startswith(("spmd/", "original_spmd/"))
             },
         }
         if not fingerprint["candidate"] or not fingerprint["baseline"]:
@@ -161,9 +182,7 @@ def evaluate(jobs, selected, certificate=None):
         "passed": geometric_mean <= 0.90,
         "cases": sorted(rows, key=lambda row: (-row["history"], row["batch"])),
         "fingerprint": fingerprints[0],
-        "reused_via_exact_codegen_proof": (
-            sorted(set(selected) & set(certificate["reused"])) if certificate else []
-        ),
+        "reused_via_exact_codegen_proof": (sorted(set(selected) & set(certificate["reused"])) if certificate else []),
     }
 
 
@@ -174,9 +193,7 @@ def main():
     parser.add_argument("--codegen-reuse-certificate", type=Path)
     args = parser.parse_args()
     here = Path(__file__).resolve().parent
-    certificate = (
-        json.loads(args.codegen_reuse_certificate.read_text()) if args.codegen_reuse_certificate else None
-    )
+    certificate = json.loads(args.codegen_reuse_certificate.read_text()) if args.codegen_reuse_certificate else None
     result = evaluate(json.loads((here / "jobs.json").read_text()), args.task_ids, certificate)
     if args.codegen_reuse_certificate:
         result["codegen_reuse_certificate_sha256"] = hashlib.sha256(
