@@ -1243,3 +1243,32 @@ v83b显式传原N128参数，两档完整编译通过，B16关闭路径C++与Hos
 后续每个可审阅的实现、验收、采用或否决阶段及时commit，不再等总目标
 完成后才保存成果。原始大产物和未采用源码留在本机，LOCAL_ARTIFACTS.json
 明确索引；Git保存代码、生成器、补丁及轻量证据，不上传权重/二进制。
+
+## 2026-10-21：三阶段commit后继续QA移植验证
+
+上一goal回合为progress：完成八档/局部分档/两会话审阅及三笔提交。
+本轮再次读取原goal及后续要求，保持完整TND与八档GM<=0.90目标。
+核对另一会话正式单SPMD仍a241fa61、相关目录无改动，不把新多task
+QA提交误认成BSH分母更新。v83b私有源码冻结，B1开启/B16关闭CPU已通过。
+v86 B1 task_20261021_121214_66656511685：先S6五窗，再S1～S6同址图；
+T16边界 task_20261021_121215_667954606：真实Q=[6,6,4]混长、无填充
+假BSH，完整严格对照与五窗L1。两任务待终态，不预记采用或收益。
+
+### v87：借入WS/scale的CPU资源与关闭路径通过
+
+QA两项v86任务的权威状态仍pending，尚无输出目录；队列维护关闭，16卡
+由其它作业占用。更正此前“已启动”的表述，不把已提交当作已执行，不
+杀其它任务、不重提相同任务。等待期间完成不占卡的两个CPU构建。
+
+WS/scale描述符根据实际binding规则同步调整：B16的SCALE_PAGE_COALESCING
+从false变true，group_offsets由848字增至880字；新增SCORE_WS_POOL_PANELS=8。
+B1只多编译常量1，容量与原策略完全相同。来源见borrowed_score_stream_descriptors_v87.json。
+
+v87完整B16/B1 CPU均通过。实际AllocMemoryAddr中三份Acc分别为
+[0,49152)、[49152,98304)、[98304,131072)，两份48KiB QK和32KiB WS
+恰好填满128KiB且不重叠。仍一个MIX、24组。B1关闭路径完整C++仅去整行
+pto调试注释后与v4相同，Host orchestration逐字相同。独立可复核脚本
+为audit_borrowed_score_stream.py，结果borrowed_score_stream_codegen_audit_v87.json。
+没有用CPU资源通过替代TND数值、动态页布局或完整L1设备验收。
+
+本CPU阶段及时提交；QA与WS候选仍不进入正式实现，整体10%目标未改变。
