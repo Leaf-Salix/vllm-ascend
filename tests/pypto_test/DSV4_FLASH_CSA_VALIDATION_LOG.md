@@ -20498,3 +20498,48 @@ helper及其GROUPS/VECTORS条带步长不变，分支在编译期消除。未采
 
 阶段状态：首个明确有益的分档调度改动完成；真实vLLM入口、B1边界及连续状态、16卡验证仍待做。
 v15的三条Indexer优先依赖正在单卡验证，尚未采用。
+
+
+### 735.7：Indexer优先与局部Vector融合完成单卡检查，输出逐组流水否决
+
+本节均为升级前同一工具链，不能与后续官方修复工具链跨版本计算收益。
+固定混长/尾部padding的128K/B16和8K/B16，同进程SPMD、MPMD控制、候选三组，
+五窗纯L1。六次运行均完成eager、图重放、采样后数值和保护检查。
+
+| 候选 | 场景 | MPMD控制 min/mean/max | 候选 min/mean/max | 同轮SPMD min/mean/max |
+| --- | --- | --- | --- | --- |
+| v15 Indexer query优先 | 128K/B16 | 889.02/916.13/947.02 | 905.00/908.72/915.20 | 739.30/743.74/747.36 |
+| v15 Indexer query优先 | 8K/B16 | 756.10/767.96/774.12 | 721.48/743.16/756.28 | 558.36/571.79/576.54 |
+| v16 同核Vector局部融合 | 128K/B16 | 892.80/905.55/919.26 | 859.34/889.02/911.70 | 728.66/733.16/737.70 |
+| v16 同核Vector局部融合 | 8K/B16 | 727.98/740.17/753.44 | 716.98/735.00/751.82 | 575.62/580.12/586.06 |
+| v12 输出逐组流水 | 128K/B16 | 896.42/909.84/919.68 | 914.50/920.67/925.20 | 719.70/728.56/737.78 |
+| v12 输出逐组流水 | 8K/B16 | 740.06/771.10/780.70 | 777.68/784.65/788.52 | 547.86/557.15/566.84 |
+
+单位μs。v15和v16控制均为已采用的v14，v12控制为原v8，不能将三轮串成累计提升。
+输出、Top-K、scores和cache/state均逐bit一致，保护检查通过。
+
+v15只增加三条Indexer query优先依赖：主Compressor与Q_B等query投影，Q反量化等query RoPE。
+长档mean降低0.808%、max降低31.82μs，短档mean降低3.229%；候选保留但尚未进入正式入口。
+v16将HC gates→mix norm、Indexer pool→norm RoPE、main pool→norm RoPE cache三对同owner
+Vector任务局部融合，43组减为40组；中间bar_all保证原GM写入可见，状态commit仍等整个pool组。
+长/短mean分别降低1.825%/0.699%；保留候选，后续在新工具链下联合检查，不把两项收益相加。
+
+更正735.5的v12状态：CPU范围证明问题已经定位并解决。外层parallel的组号非负事实在
+Simplify中消除了max保护，而OutlineIncore捕获标量后不再携带该范围；改用独立@pl.jit.incore
+入口、scope内单调用，并在incore内计算worker映射后，两份完整CPU编译及设备验证通过。
+但8组OA→quant→OB拆分增加task组数后，长/短完整mean分别回退1.190%/1.757%，因此不采用。
+这是一项已经完成且否决的性能尝试，不能继续标成仅CPU受阻。
+
+全部样本、数值汇总与原始证据链接见
+[priority_fusion_output_results.json](csa_mpmd_tnd_20261021/priority_fusion_output_results.json)。
+
+### 735.8：接入独立mpmd_tnd服务入口，CPU合同检查57项通过
+
+新增PTO_CSA_VARIANT=mpmd_tnd，仍保留performance及spmd_tnd入口。
+MPMD服务复用TND的Native绑定、图描述符、cache connector及回退生命周期，通过三个工厂钩子
+替换权重签名、资源策略和PreparedDynamicCSA实际提交；没有调用单SPMD数学入口。
+模型准备使用decode_csa_tnd根签名，仍限定NZ2、TMR、TP1及原有CSA模型路径。
+
+CPU合同测试对SPMD/MPMD两种variant检查真实custom-op分派、缓存工作区复用、图捕获重绑、
+Native回退和框架混合TND分档选择：57 passed（旧工具链，未占NPU）。Ruff通过。
+这只证明Python接入边界；真实模型、连续状态、16卡验证仍未完成，不能作为整模型通过依据。

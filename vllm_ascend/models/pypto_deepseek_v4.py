@@ -109,11 +109,12 @@ def prepare_csa_model(model):
     effective_mode = get_ascend_config().weight_nz_mode
     validate_weight_nz_mode(effective_mode)
     CSAServiceRuntime = importlib.import_module(f"{package}.service").CSAServiceRuntime
-    if selected_variant() == "spmd_tnd":
+    if selected_variant() in ("spmd_tnd", "mpmd_tnd"):
         if hbg:
-            raise ValueError("TND单SPMD首版使用tensormap_and_ringbuffer运行时")
+            raise ValueError("TND CSA使用tensormap_and_ringbuffer运行时")
         CSAOperators = None
-        root_function = importlib.import_module(f"{package}.entry").decode_csa_spmd
+        entry = importlib.import_module(f"{package}.entry")
+        root_function = entry.decode_csa_spmd if selected_variant() == "spmd_tnd" else entry.decode_csa_tnd
     else:
         adapter = importlib.import_module(f"{package}.native_adapter")
         CSAOperators = adapter.HBGCSAOperators if hbg else adapter.CSAOperators
@@ -123,6 +124,8 @@ def prepare_csa_model(model):
 
     if selected_variant() == "spmd_tnd":
         logger.info("PTO_CSA_SINGLE_SPMD_TND package=%s atomic_add=%d", package, ATOMIC_ADD)
+    elif selected_variant() == "mpmd_tnd":
+        logger.info("PTO_CSA_MULTITASK_TND package=%s atomic_add=%d", package, ATOMIC_ADD)
     else:
         reduction = importlib.import_module(f"{package}.qkv_proj_rope")
         logger.info(

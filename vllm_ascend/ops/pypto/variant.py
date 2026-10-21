@@ -10,6 +10,7 @@ import os
 
 _CSA_PACKAGE = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa"
 _CSA_TND_PACKAGE = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd"
+_CSA_MPMD_TND_PACKAGE = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd"
 _ENV = "PTO_CSA_VARIANT"
 
 
@@ -27,7 +28,12 @@ def csa_runtime() -> str:
 
 def selected_variant() -> str:
     """返回明确选择的实现，不将旧precision配置静默改名。"""
-    return "spmd_tnd" if variant_package() == _CSA_TND_PACKAGE else "performance"
+    package = variant_package()
+    if package == _CSA_TND_PACKAGE:
+        return "spmd_tnd"
+    if package == _CSA_MPMD_TND_PACKAGE:
+        return "mpmd_tnd"
+    return "performance"
 
 
 def variant_package() -> str:
@@ -44,6 +50,8 @@ def variant_package() -> str:
     value = envs.PTO_CSA_VARIANT.strip()
     if value.lower() == "spmd_tnd":
         return _CSA_TND_PACKAGE
+    if value.lower() == "mpmd_tnd":
+        return _CSA_MPMD_TND_PACKAGE
     if value.lower() in ("precision", "prec", "pkg:deepseek_v4_flash_dspark"):
         raise ValueError(
             f"{_ENV}={value!r}: CSA精度版已封存；请取消该配置或使用performance。"
@@ -55,7 +63,7 @@ def variant_package() -> str:
             raise ValueError(f"{_ENV}={value!r} 的包名不合法")
         return f"vllm_ascend.ops.pypto.{name}"
     if value.lower() not in ("performance", "perf"):
-        raise ValueError(f"{_ENV}只接受performance/perf、spmd_tnd或实验pkg:<name>，得到{value!r}")
+        raise ValueError(f"{_ENV}只接受performance/perf、spmd_tnd、mpmd_tnd或实验pkg:<name>，得到{value!r}")
     return _CSA_PACKAGE
 
 

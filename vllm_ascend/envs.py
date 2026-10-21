@@ -86,7 +86,7 @@ env_variables: dict[str, Callable[[], Any]] = {
     # 默认 0（性能实现真实 EP16 验证）；精度版已封存，不再根据variant改变默认值。
     # 仅接受 0/1，须在导入/编译算子前设置；不含敏感信息，不允许在 graph replay 期切换。
     "VLLM_ASCEND_PTO_CSA_ATOMIC_ADD": lambda: int(os.getenv("VLLM_ASCEND_PTO_CSA_ATOMIC_ADD", "0")),
-    # CSA默认performance/perf；spmd_tnd显式选择独立TND单SPMD实现。
+    # CSA默认performance/perf；spmd_tnd/mpmd_tnd显式选择TND单SPMD/多task实现。
     # pkg:<name>用于私有实验副本。
     # precision/prec已退役，初始化明确拒绝。非敏感配置，在导入/编译前固定。
     "PTO_CSA_VARIANT": lambda: os.getenv("PTO_CSA_VARIANT", "performance"),

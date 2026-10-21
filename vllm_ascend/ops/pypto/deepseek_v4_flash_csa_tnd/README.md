@@ -19,8 +19,9 @@ Host 只使用原有描述符，逐请求计划由设备 task 生成并计入完
 较大容量保留原分工。采用依据为固定八档消融及两条策略分支的集成验证，
 详见验证日志735.4～735.6；不能把候选组合估算视为最终八档达标结果。
 
-当前为独立算子验证阶段，尚未注册新的 vLLM variant。功能迁移与性能目标
-分别记录：初版具备多 task 路径，并不表示已超过冻结 SPMD 或达到 10% 目标。
+已注册独立 vLLM variant：`PTO_CSA_VARIANT=mpmd_tnd`，服务输入、图与回退
+合同复用 TND 路径，权重签名、策略和实际提交使用本包。CPU 合同检查已通过，
+真实整模型验证仍待完成；不表示已超过冻结 SPMD 或达到 10% 性能目标。
 进度与设备证据统一追加到
 [`DSV4_FLASH_CSA_VALIDATION_LOG.md`](../../../../tests/pypto_test/DSV4_FLASH_CSA_VALIDATION_LOG.md)。
 

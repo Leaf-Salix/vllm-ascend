@@ -18,7 +18,7 @@ def is_csa_model(config) -> bool:
 def is_tnd_csa_model(config) -> bool:
     return (
         MODEL_ARCHITECTURE in getattr(config.model_config.hf_config, "architectures", ())
-        and selected_variant() == "spmd_tnd"
+        and selected_variant() in ("spmd_tnd", "mpmd_tnd")
     )
 
 
@@ -104,11 +104,11 @@ def validate_configuration(config):
     if config.use_v2_model_runner:
         raise ValueError("PTO CSA service graph dispatch currently requires Model Runner V1")
     graph_mode = config.compilation_config.cudagraph_mode
-    if selected_variant() == "spmd_tnd":
+    if selected_variant() in ("spmd_tnd", "mpmd_tnd"):
         if get_ascend_config().weight_nz_mode != 2 or csa_runtime() != "tensormap_and_ringbuffer":
-            raise ValueError("TND单SPMD首版要求NZ2与tensormap_and_ringbuffer")
+            raise ValueError("TND CSA要求NZ2与tensormap_and_ringbuffer")
         if MODEL_ARCHITECTURE not in getattr(hf, "architectures", ()):
-            raise ValueError("TND单SPMD首版只接入PyptoCSA模型，不扩张HCA输入合同")
+            raise ValueError("TND CSA只接入PyptoCSA模型，不扩张HCA输入合同")
         # Native/空调用的捕获或容量/策略/地址变更由ACLGraphWrapper合同拒绝重放，
         # 再走正常服务分派。FULL_DECODE_ONLY的图档位仍遵循框架的原始选择。
     if graph_mode not in (CUDAGraphMode.NONE, CUDAGraphMode.FULL_DECODE_ONLY):
