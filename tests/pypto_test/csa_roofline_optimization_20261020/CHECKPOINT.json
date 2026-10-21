@@ -1,5 +1,5 @@
 {
-  "phase": "B1原半叶及UB分数已采用；正式源确认净省29.36us，G6额外初始化已清除",
+  "phase": "B16/B28组合完整集成通过；B24首轮混合，待反向判定后采用",
   "goal_complete": false,
   "formal_operator_changed": true,
   "push_performed": false,
@@ -9,7 +9,9 @@
     "isa_cpu_ties": "https://github.com/hw-native-sys/pto-isa/issues/364",
     "ptoas_precedence": "https://github.com/hw-native-sys/PTOAS/issues/1648",
     "ptoas_prefix_view": "https://github.com/hw-native-sys/PTOAS/issues/1649",
-    "pypto_nested_validshape": "https://github.com/hw-native-sys/pypto/issues/3087"
+    "pypto_nested_validshape": "https://github.com/hw-native-sys/pypto/issues/3087",
+    "ptoas_i1_cast": "https://github.com/hw-native-sys/PTOAS/issues/1652",
+    "pypto_bool_cast_followup": "https://github.com/hw-native-sys/pypto/issues/3063#issuecomment-6301892254"
   },
   "sort_tie_task": "task_20261020_172756_41138729719",
   "sort_tie_device_cases": 46,
@@ -33,12 +35,13 @@
     "incremental_log": "build_ptoas_v3_incremental.log"
   },
   "current_frontend": "compact_frontend_v5/result.json：新PyPTO已通过前端与分配，旧PTOAS按预期拒绝GE；不算完整编译PASS",
-  "attention_numerical_candidate_authorized": true,
+  "attention_numerical_candidate_authorized": false,
   "attention_implementation_started": true,
   "next": [
-    "继续优先B16/B28，并考察B1新半叶路径的逐页scale搬运；不能用旧失败候选直接覆盖正式源码",
-    "从source_after_b1_half_v2构造后续候选，保留B1原半叶、同分及UB路径；WS旧候选不能整目录覆盖",
-    "10%目标仍active，三重点档均未达成；不push"
+    "收B24反向同进程确认；未终态前不采用组合",
+    "通过后复制source_focus_combined的八个差异文件，做详细中文采用commit；不要push",
+    "若B24稳定退步，检查关闭映射的Scalar转换调度，避免复制大段数学或重测未变档",
+    "B1下一步优先O_A权重供给/K流水；用户DeepInfer布局问题已查清主链TH/TND，原goal未取消"
   ],
   "attention_cpu": "attention_cpu_b28_v5/result.json",
   "attention_device_task": "task_20261020_190632_268921518547",
@@ -94,7 +97,7 @@
     "ptoas": "https://github.com/hw-native-sys/PTOAS/issues/1650",
     "pypto": "https://github.com/hw-native-sys/pypto/issues/3085"
   },
-  "last_local_phase_commit": "8aca9c38",
+  "last_local_phase_commit": "a241fa61",
   "wait_backoff_tasks": "WAIT_BACKOFF_TASKS.json",
   "wait_backoff_design": "WAIT_BACKOFF_REVIEW.md",
   "wait_backoff_result": "WAIT_BACKOFF_PERFORMANCE.json",
@@ -143,5 +146,21 @@
   "b1_adopted": true,
   "b1_adoption": "B1_HALF_SCORE_ADOPTION.json",
   "current_formal_snapshot": "source_after_b1_half_v2",
-  "pending_device_tasks": []
+  "pending_device_tasks": [
+    "task_20261021_093728_23804715449"
+  ],
+  "formal_operator_changed_this_phase": false,
+  "pending_cpu_sessions": [],
+  "current_focus_candidates": {
+    "combined": "source_focus_combined",
+    "B16": "完整组合781.96→780.02us，4/5快；单独正反向与S5均通过",
+    "B28": "完整组合1166.02→1149.78us，5/5快；原正反向亦通过",
+    "B24": "关闭两项策略1026.98→1031.66us，2/5快，反向待完成",
+    "B1": "保持正式原半叶；O_B M16负例停止"
+  },
+  "score_owner_design": "SCORE_OWNER_DESIGN.md",
+  "score_stream_design": "SCORE_STREAM_DESIGN.md",
+  "b1_current_diagnostic": "B1_CURRENT_PHASE_ANALYSIS.json",
+  "b1_scale_decision": "比正式慢7.48us，0/5快，停止",
+  "scale_b16_result": "连续scale单项净省5.14us/3窗；与WS组合的正反向结果更明确"
 }

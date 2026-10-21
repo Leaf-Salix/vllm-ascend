@@ -1,0 +1,67 @@
+{
+  "reference": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/source_after_b1_half_v2",
+  "candidate": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/source_b1_ob16",
+  "changed_files": [
+    "policy.py"
+  ],
+  "policy_cases": [
+    {
+      "tokens": 1,
+      "requests": 1,
+      "capacity": 6,
+      "ob_rows": 16
+    },
+    {
+      "tokens": 5,
+      "requests": 1,
+      "capacity": 6,
+      "ob_rows": 16
+    },
+    {
+      "tokens": 6,
+      "requests": 1,
+      "capacity": 6,
+      "ob_rows": 16
+    },
+    {
+      "tokens": 16,
+      "requests": 1,
+      "capacity": 16,
+      "ob_rows": 16
+    },
+    {
+      "tokens": 17,
+      "requests": 1,
+      "capacity": 17,
+      "ob_rows": 32
+    },
+    {
+      "tokens": 16,
+      "requests": 16,
+      "capacity": 1,
+      "ob_rows": 32
+    },
+    {
+      "tokens": 24,
+      "requests": 4,
+      "capacity": 6,
+      "ob_rows": 32
+    },
+    {
+      "tokens": 96,
+      "requests": 16,
+      "capacity": 6,
+      "ob_rows": 96
+    },
+    {
+      "tokens": 168,
+      "requests": 28,
+      "capacity": 6,
+      "ob_rows": 128
+    }
+  ],
+  "adopted": false,
+  "device_verified": false,
+  "rationale": "全核阶段诊断提示输出后段值得检查；M32改M16减尾行，权重字节不变，不能预测耗时减半",
+  "stop_condition": "完整L1无收益或精度失败则停止，不扫描M8或改变整数累加/反量化次序"
+}

@@ -1,0 +1,24 @@
+
+✓ Conversion complete
+  Input:  tests/pypto_test/csa_roofline_optimization_20261020/focus_combined_b24_v1/source_matrix/l1_02_spmd_reference/chip_swimlane_records.json
+  Output: tests/pypto_test/csa_roofline_optimization_20261020/focus_combined_b24_v1/source_matrix/l1_02_spmd_reference/swimlane.json
+
+To visualize: Open https://ui.perfetto.dev/ and drag in tests/pypto_test/csa_roofline_optimization_20261020/focus_combined_b24_v1/source_matrix/l1_02_spmd_reference/swimlane.json
+
+============================================================================================================================================
+Task Statistics by Function
+  Source chip_swimlane_level: 1 (AICore timing only; recorded in chip_swimlane_records.json)
+  Exec = kernel time on AICore; Latency = dispatch->finish (incl. head OH + Exec + tail OH)
+  Head OH split (v3): Prop = NoC propagation (dispatch_ts→AICore receive); Local = dcci+ack (receive→start)
+============================================================================================================================================
+Func_ID  Func_Name    Count   Avg Exec(us)  Avg Latency(us)   Exec%   Avg Head OH(us)  Avg Tail OH(us)  Avg Prop(us)  Avg Local(us)
+--------------------------------------------------------------------------------------------------------------------------------------------
+0        cube_schedule    24         969.34                -       -                 -                -             -           3.62
+1        vector_schedule    48        1022.36                -       -                 -                -             -           3.83
+--------------------------------------------------------------------------------------------------------------------------------------------
+TOTAL                    72       72337.38                -
+
+AICore Observed Span: 1030.14 us (from earliest AICore receive to latest AICore end)
+==============================================================================================================
+
+Scheduler-overhead deep-dive: run sched_overhead_analysis manually with a separately-captured deps.json (--enable-dep-gen).
