@@ -44,7 +44,10 @@ def main():
         assert result["reference_commit"] == frozen["reference_commit"] == plan["reference_commit"]
         assert Path(result["sources"]["mpmd"]).resolve() == candidate_path
         assert result["scope"] == "full CSA L1" and not result["enable_dep_gen"]
-        for side in ("spmd", "mpmd"):
+        sides = ["spmd", "mpmd"]
+        if "mpmd_control" in result["statistics_us"]:
+            sides.append("mpmd_control")
+        for side in sides:
             samples = result["statistics_us"][side]["samples"]
             windows = [window["incore_span_us"] for window in result["windows"] if window["side"] == side]
             assert len(samples) == 5 and windows == samples
@@ -87,6 +90,25 @@ def main():
         }
         report["performance_gate_met"] = overall <= 0.9
         report["status"] = "complete"
+        controls = {row["extra_control_source"] for row in report["rows"]}
+        if len(controls) == 1 and all("mpmd_control" in row["statistics_us"] for row in report["rows"]):
+            # 额外控制必须是同一个不可变包；每档的样本/数值/保护已在上面验证。
+            # 旧矩阵混用v17/v23等不同控制时，禁止生成这一汇总。
+            control_logs = {
+                history: statistics.mean(
+                    math.log(row["statistics_us"]["mpmd_control"]["mean"] / row["statistics_us"]["spmd"]["mean"])
+                    for row in report["rows"]
+                    if row["history_label"] == history
+                )
+                for history in (131072, 8192)
+            }
+            control_g = math.exp(0.8 * control_logs[131072] + 0.2 * control_logs[8192])
+            report["same_round_control_weighted_geomean"] = {
+                "G128": math.exp(control_logs[131072]),
+                "G8": math.exp(control_logs[8192]),
+                "G": control_g,
+            }
+            report["candidate_over_control_weighted_geomean"] = overall / control_g
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     print("| 场景 | SPMD min | SPMD mean | SPMD max | MPMD min | MPMD mean | MPMD max | MPMD/SPMD mean |")
     print("|---|---:|---:|---:|---:|---:|---:|---:|")
