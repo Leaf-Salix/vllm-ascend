@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TND MPMD 的初始资源策略，数值分档取自冻结参考 84751e34。
+"""TND MPMD 的资源策略，数值分档取自冻结参考 84751e34。
 
 输入仅为已有 Tensor/Native 描述符，不回读设备 Q/L。QUERY_GROUP 是
 每请求内部数学 tile 上限，不表示请求等长，也不能用它反算请求数。
@@ -21,6 +21,9 @@ SHORT_SCORE_TILE = 768
 SHORT_PREFETCH_HALF_SORT_LIMIT = 2048
 # 沿已有QA的小M16并行区间边界，两个完整M16行块起再启用Score新流水。
 SCORE_SPLIT_MIN_TOKENS = 32
+# 两个 M32 容量以内已验证删除空 worker 获益；更大容量保留原分工。
+# 128K B28 的完整 L1 回退，不能因局部少派空任务而全域采用。
+NONEMPTY_WORKER_MAX_TOKENS = 64
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,7 @@ class CSAMPMDPolicy:
     scale_page_coalescing: bool = False
     plan_physical_rows: bool = False
     split_score_rows: bool = False
+    limit_empty_workers: bool = False
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -61,6 +65,7 @@ class CSAMPMDPolicy:
             "SCALE_PAGE_COALESCING": self.scale_page_coalescing,
             "PLAN_PHYSICAL_ROWS": self.plan_physical_rows,
             "SPLIT_SCORE_ROWS": self.split_score_rows,
+            "LIMIT_EMPTY_WORKERS": self.limit_empty_workers,
         }
 
 
@@ -73,7 +78,7 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         raise ValueError("token容量超过请求容量×query上界；请绑定Native同一档描述符")
     cache_rows = max_seq_len // 4
     if cache_rows < 2048:
-        raise NotImplementedError("完整动态SPMD的小历史Vector Score路径尚未接入")
+        raise NotImplementedError("TND 多 task 的短历史 Vector Score 路径尚未接入")
     if cache_rows > 262144:
         raise ValueError("当前TopK工作区合同最多支持262144个压缩候选")
     long_history = cache_rows > 8192
@@ -101,6 +106,7 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
     ob_rows = 32 if tokens <= 32 else 96 if tokens <= 96 else 128
     parallel_small_qa = group == 6 and 16 < tokens < 32
     return CSAMPMDPolicy(
+        limit_empty_workers=tokens <= NONEMPTY_WORKER_MAX_TOKENS,
         query_group=group,
         qk_panel=64 if group == 6 else 128,
         score_tile=1024 if long_history else SHORT_SCORE_TILE,

@@ -22,7 +22,16 @@ from .compressor_pool_stages import (
     indexer_compressor_pool_stage,
     indexer_compressor_state_commit_stage,
 )
-from .compressor_projection_stages import compressor_project_stage, indexer_compressor_project_stage
+from .compressor_projection_stages import (
+    CMP_M_TILE,
+    CMP_N_TILE,
+    CMP_OUT_DIM,
+    INDEXER_M_TILE,
+    INDEXER_N_TILE,
+    INDEXER_OUT_DIM,
+    compressor_project_stage,
+    indexer_compressor_project_stage,
+)
 from .hc_stages import (
     hc_comb_range,
     hc_gates_range,
@@ -32,10 +41,27 @@ from .hc_stages import (
     hc_widen_rms_range,
 )
 from .indexer_cache_stages import indexer_compact_quant_cache_stage
-from .indexer_compressor_output_stages import indexer_compressor_hadamard_stage, indexer_compressor_norm_rope_stage
+from .indexer_compressor_output_stages import (
+    HEAD_DIM as COMPACT_HEAD_DIM,
+)
+from .indexer_compressor_output_stages import (
+    OUT_TILE as COMPACT_HAD_COL_TILE,
+)
+from .indexer_compressor_output_stages import (
+    RMS_PAD_TILE as COMPACT_HAD_ROW_TILE,
+)
+from .indexer_compressor_output_stages import (
+    indexer_compressor_hadamard_stage,
+    indexer_compressor_norm_rope_stage,
+)
 from .indexer_group_stages import indexer_group_plan_stage, indexer_head_coefficients_stage
 from .indexer_publish_stages import indexer_pair_publish_stage
 from .indexer_query_stages import (
+    DEQUANT_T_TILE,
+    DQ_ROPE_H_TILE,
+    IDX_N_HEADS,
+    MM_ROW_TILE,
+    WEIGHTS_OK,
     indexer_query_dequant_rope_stage,
     indexer_query_hadamard_stage,
     indexer_query_project_stage,
@@ -46,11 +72,34 @@ from .indexer_query_stages import (
 from .indexer_scale_layout_stages import indexer_scale_layout_plan_stage
 from .indexer_scale_plan_stages import indexer_scale_page_commit_stage, indexer_scale_page_plan_stage
 from .indexer_score_stages import indexer_score_cube_stage, indexer_score_vector_lane_stage
-from .kv_stages import kv_norm_rope_stage, kv_project_stage
+from .kv_stages import (
+    HEAD_DIM as KV_HEAD_DIM,
+)
+from .kv_stages import (
+    KV_N_TILE,
+    KV_OM,
+    kv_norm_rope_stage,
+    kv_project_stage,
+)
 from .metadata_stages import compact_offsets_and_count_stage
-from .output_projection_a_stages import o_projection_a_stage_nz, o_projection_group_quant_stage
+from .output_projection_a_stages import (
+    O_GROUPS,
+    QUANT_TASK_T_TILE,
+    o_projection_a_stage_nz,
+    o_projection_group_quant_stage,
+)
 from .output_projection_b_stages import o_b_stage, o_dequant_hc_post_stage
-from .qkv_stages import BF16_WEIGHT_LAYOUT, q_a_stage, q_r_stage
+from .qkv_stages import (
+    BF16_WEIGHT_LAYOUT,
+    QR_DENSE_M_TILE,
+    QR_FIXED_M_GROUPS,
+    QR_FIXED_SMALL_M_TILE,
+    QR_FIXED_SMALL_ROWS,
+    QR_M_TILE,
+    QR_N_BLOCKS,
+    q_a_stage,
+    q_r_stage,
+)
 from .query_projection_stages import QUANT_WEIGHT_LAYOUT, q_b_stage, q_dequant_rope_stage, q_rope_prepare_stage
 from .runtime_abi import (
     ATTN_PLAN_ROWS,
@@ -588,6 +637,7 @@ def decode_csa_tnd(
     SCALE_PAGE_COALESCING: pl.constexpr = False,
     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
     SPLIT_SCORE_ROWS: pl.constexpr = False,
+    LIMIT_EMPTY_WORKERS: pl.constexpr = False,
 ):
     tokens = pl.tensor.dim(x, 0)
     requests = pl.tensor.dim(idx_lengths, 0)
@@ -603,6 +653,45 @@ def decode_csa_tnd(
     key_shifted = cache_flat[64 : 64 + ((pages * page_bytes - 64) // 128) * 128]
     idx_key0 = pl.reshape(key_prefix, [pages * page_bytes // 128, 128])
     idx_key64 = pl.reshape(key_shifted, [(pages * page_bytes - 64) // 128, 128])
+
+    # 小容量域删除确定无工作的 worker；大容量保留已测的原整组分工。
+    # 只改变 launch，不改变 helper 内的 GROUPS/VECTORS 条带步长和数学。
+    qa_workers = GROUPS
+    idx_project_workers = GROUPS
+    idx_hadamard_workers = GROUPS
+    query_rope_workers = VECTORS
+    query_hadamard_workers = GROUPS
+    weight_workers = GROUPS
+    main_project_workers = GROUPS
+    kv_workers = GROUPS
+    output_quant_workers = VECTORS
+    post_workers = VECTORS
+    if LIMIT_EMPTY_WORKERS:
+        if QA_M16_PARALLEL:
+            qa_units = QR_N_BLOCKS * ((tokens + QR_M_TILE - 1) // QR_M_TILE)
+        elif tokens < QR_FIXED_SMALL_ROWS:
+            qa_units = QR_N_BLOCKS * pl.min(QR_FIXED_M_GROUPS, pl.max(1, tokens // QR_FIXED_SMALL_M_TILE))
+        else:
+            qa_units = QR_N_BLOCKS * pl.min(QR_FIXED_M_GROUPS, pl.max(1, tokens // QR_DENSE_M_TILE))
+        qa_workers = pl.min(GROUPS, qa_units)
+        idx_project_workers = pl.min(
+            GROUPS, (INDEXER_OUT_DIM // INDEXER_N_TILE) * ((tokens + INDEXER_M_TILE - 1) // INDEXER_M_TILE)
+        )
+        # compact 有效行数来自设备；这里只用已有容量作保守上界，不回读计数。
+        compact_hadamard_units = (COMPACT_HEAD_DIM // COMPACT_HAD_COL_TILE) * (
+            (pl.tensor.dim(idx_normed, 0) + COMPACT_HAD_ROW_TILE - 1) // COMPACT_HAD_ROW_TILE
+        )
+        idx_hadamard_workers = pl.min(GROUPS, compact_hadamard_units)
+        query_rope_workers = pl.min(
+            VECTORS, (IDX_N_HEADS // DQ_ROPE_H_TILE) * ((tokens + DEQUANT_T_TILE - 1) // DEQUANT_T_TILE)
+        )
+        query_hadamard_workers = pl.min(GROUPS, tokens)
+        weight_workers = pl.min(GROUPS, WEIGHTS_OK * ((tokens + MM_ROW_TILE - 1) // MM_ROW_TILE))
+        main_project_workers = pl.min(GROUPS, (CMP_OUT_DIM // CMP_N_TILE) * ((tokens + CMP_M_TILE - 1) // CMP_M_TILE))
+        # 每个分段最多 KV_OM 个 M group，每组 HEAD_DIM/KV_N_TILE 个工作项。
+        kv_workers = (KV_HEAD_DIM // KV_N_TILE) * KV_OM
+        output_quant_workers = pl.min(VECTORS, O_GROUPS * ((tokens + QUANT_TASK_T_TILE - 1) // QUANT_TASK_T_TILE))
+        post_workers = pl.min(VECTORS, tokens)
 
     # HC 前段沿用 BSH MPMD 的 widen → split-K → reduce/gates → norm/comb 分工。
     with pl.spmd(
@@ -720,10 +809,12 @@ def decode_csa_tnd(
                 PLAN_PHYSICAL_ROWS,
             )
 
-    with pl.spmd(GROUPS, name_hint="qproj_a", allow_early_resolve=True, sync_start=True) as qa_tid:
+    with pl.spmd(qa_workers, name_hint="qproj_a", allow_early_resolve=True, sync_start=True) as qa_tid:
         qa = q_a_stage(normed, wq_a, qa, pl.tile.get_block_idx(), GROUPS, QA_M16_PARALLEL)
 
-    with pl.spmd(GROUPS, name_hint="indexer_compressor_kv_score", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(
+        idx_project_workers, name_hint="indexer_compressor_kv_score", allow_early_resolve=True, sync_start=True
+    ):
         (idx_value, idx_score) = indexer_compressor_project_stage(
             normed, idx_wkv, idx_wgate, idx_value, idx_score, pl.tile.get_block_idx(), GROUPS
         )
@@ -793,7 +884,9 @@ def decode_csa_tnd(
             VECTORS,
         )
 
-    with pl.spmd(GROUPS, name_hint="indexer_compressor_hadamard", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(
+        idx_hadamard_workers, name_hint="indexer_compressor_hadamard", allow_early_resolve=True, sync_start=True
+    ):
         compact_count = pl.cast(pl.read(idx_count, [0]), pl.INDEX)
         idx_had = indexer_compressor_hadamard_stage(
             idx_normed, hadamard, idx_had, compact_count, pl.tile.get_block_idx(), GROUPS
@@ -802,7 +895,7 @@ def decode_csa_tnd(
     with pl.spmd(GROUPS, name_hint="indexer_query_proj", allow_early_resolve=True, sync_start=True):
         idx_query_acc = indexer_query_project_stage(qr, idx_wq_b, idx_query_acc, pl.tile.get_block_idx(), GROUPS)
 
-    with pl.spmd(VECTORS, name_hint="indexer_query_rope", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(query_rope_workers, name_hint="indexer_query_rope", allow_early_resolve=True, sync_start=True):
         idx_query_rope = indexer_query_dequant_rope_stage(
             qr_scale,
             idx_wq_b_scale,
@@ -814,7 +907,7 @@ def decode_csa_tnd(
             VECTORS,
         )
 
-    with pl.spmd(GROUPS, name_hint="indexer_query_hadamard", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(query_hadamard_workers, name_hint="indexer_query_hadamard", allow_early_resolve=True, sync_start=True):
         idx_query_had = indexer_query_hadamard_stage(
             idx_query_rope_heads, hadamard, idx_query_had, tokens, pl.tile.get_block_idx(), GROUPS
         )
@@ -824,7 +917,7 @@ def decode_csa_tnd(
             idx_query_had, idx_query_i8, idx_query_scale, tokens, pl.tile.get_block_idx(), VECTORS
         )
 
-    with pl.spmd(GROUPS, name_hint="indexer_weights_proj", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(weight_workers, name_hint="indexer_weights_proj", allow_early_resolve=True, sync_start=True):
         weights_partial = indexer_weights_project_stage(
             normed, weights_proj, weights_partial, pl.tile.get_block_idx(), GROUPS
         )
@@ -879,7 +972,9 @@ def decode_csa_tnd(
             idx_scales, group_offsets, idx_cache, tokens, requests, pl.tile.get_block_idx(), VECTORS
         )
 
-    with pl.spmd(GROUPS, name_hint="compressor_kv_score", allow_early_resolve=True, sync_start=True, deps=[qa_tid]):
+    with pl.spmd(
+        main_project_workers, name_hint="compressor_kv_score", allow_early_resolve=True, sync_start=True, deps=[qa_tid]
+    ):
         (main_value, main_score) = compressor_project_stage(
             normed, main_wkv, main_wgate, main_value, main_score, pl.tile.get_block_idx(), GROUPS
         )
@@ -953,7 +1048,7 @@ def decode_csa_tnd(
             wq_b_scale, rope_cos, rope_signed, rope_swap, q_flat, qr_scale_pad, q_proj, pl.tile.get_block_idx(), VECTORS
         )
 
-    with pl.spmd(GROUPS, name_hint="kv_proj", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(kv_workers, name_hint="kv_proj", allow_early_resolve=True, sync_start=True):
         kv_fp32 = kv_project_stage(normed, wkv, kv_fp32, pl.tile.get_block_idx(), GROUPS)
 
     with pl.spmd(
@@ -1084,7 +1179,7 @@ def decode_csa_tnd(
     with pl.spmd(GROUPS, name_hint="oproj_a", allow_early_resolve=True, sync_start=True, deps=[attn_tid]):
         o_r = o_projection_a_stage_nz(packed, wo_a, o_r, tokens, pl.tile.get_block_idx(), GROUPS, OA_COLS)
 
-    with pl.spmd(VECTORS, name_hint="oproj_quant", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(output_quant_workers, name_hint="oproj_quant", allow_early_resolve=True, sync_start=True):
         (o_quant, o_scales) = o_projection_group_quant_stage(
             o_r, o_quant, o_scales, tokens, pl.tile.get_block_idx(), VECTORS, OB_ROWS
         )
@@ -1092,7 +1187,7 @@ def decode_csa_tnd(
     with pl.spmd(GROUPS, name_hint="oproj_b", allow_early_resolve=True, sync_start=True):
         o_partials = o_b_stage(o_quant, wo_b, o_partials, tokens, pl.tile.get_block_idx(), GROUPS, OB_ROWS)
 
-    with pl.spmd(VECTORS, name_hint="hc_post", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(post_workers, name_hint="hc_post", allow_early_resolve=True, sync_start=True):
         output = o_dequant_hc_post_stage(
             o_partials, o_scales, wo_b_scale, x, post, comb, output, pl.tile.get_block_idx(), VECTORS
         )
