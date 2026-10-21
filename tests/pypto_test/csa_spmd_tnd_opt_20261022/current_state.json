@@ -13,18 +13,24 @@
     "combined_v1",
     "b1_sort_unused_fills",
     "main_vector_late",
-    "front_partition_i8_v2_mixed_only"
+    "front_partition_i8_v2_mixed_only",
+    "query_contiguous_heads_v4_b16"
   ],
   "next_steps": [
-    "Collect Query contiguous-head v4 B16 task using the same handle; preserve strict output/TopK/cache/state/graph and full-L1 checks",
-    "If positive, validate mixed/T-tail and choose affected resource-domain cases; otherwise stop tile-orientation path without blind sweeps",
-    "Do not expand N64 WS pool: isolated producer improved but B16 full L1 did not",
+    "Collect the two existing Query contiguous-head v4 mixed/short-B32 tasks; no resubmission or window cherry-picking",
+    "If benefit survives, cover affected T-tail, graph metadata and service boundaries before combination",
+    "Review Score consumer pressure before further producer-only changes; WS pooling alone has no B16 full-L1 benefit",
     "Compose only verified positives; ultimately complete nine equal-weight cases and affected acceptance"
   ],
   "pending_tasks": {
-    "task_20261022_062222_1899330389": {
+    "task_20261022_063040_245239019924": {
       "candidate": "query_contiguous_heads_v4",
-      "case": "H131072 B16 S6",
+      "case": "H131072 B16 fixed mixed T56",
+      "scope": "full L1 five paired windows"
+    },
+    "task_20261022_063041_24714692920": {
+      "candidate": "query_contiguous_heads_v4",
+      "case": "H8192 B32 S6 T192",
       "scope": "full L1 five paired windows"
     }
   },
