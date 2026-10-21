@@ -20615,3 +20615,42 @@ PTOAS完整构建仍在进行。尚未开始新工具链的NPU计时，未将旧
 [device_validation.json](csa_mpmd_tnd_20261021/upstream_refresh_20261021/device_validation.json)。
 这轮完成工具链统一和兼容验证，不能跨版本计算性能收益。八档G≤0.90目标、B1边界/连续状态
 及真实16卡整模型验证仍未完成。后续在公共版本上继续检查v15/v16组合，保留多task架构。
+
+
+### 735.11：组合前驱优先与同owner融合；局部query链完成CPU编译，保存推送检查点
+
+统一工具链后，将已单独检查的v15/v16合为v18：三个同owner的Vector阶段融合，
+中间bar_all保留原写回可见性；Indexer query投影/RoPE优先于主Compressor与Q_B相关任务。
+任务scope从43降到40，state commit仍等待整个pool组结束，不改变任何数学或Native存储。
+以正式v17为控制，同进程冻结SPMD、控制、候选三组、五窗纯L1：
+
+| 场景 | 冻结SPMD min/mean/max | 正式MPMD控制 min/mean/max | v18组合 min/mean/max | mean变化 |
+| --- | --- | --- | --- | --- |
+| 128K/B16 | 720.88 / 724.700 / 726.94 | 884.06 / 907.764 / 928.94 | 884.94 / 900.248 / 915.82 | -0.828% |
+| 8K/B16 | 559.82 / 572.972 / 583.30 | 727.48 / 745.788 / 760.72 | 734.86 / 743.220 / 756.88 | -0.344% |
+
+单位μs。三侧eager、图、采样后输出/Top-K/scores/cache-state均逐bit一致，保护检查通过。
+结果尚不足以完成八档采用验收，v18保留为候选，未覆盖正式入口。此处是完整CSA收益；
+融合task的核内净收益尚未单独隔离，不把少3个scope等同于核内加速。
+
+v17长B16已有五窗L1与该次实际生成的43条静态submit顺序核对后，Score平均在392.83μs
+开始、595.38μs结束。前置query链存在多段明显调度间隔；例如query投影236.15→262.04μs、
+RoPE297.03→314.24μs、Hadamard330.31→336.98μs、量化354.31→368.51μs。
+这些是同次轨迹的阶段首尾，不累加并发耗时，也不把所有间隔都认定为AICPU计算耗时。
+
+据此准备v19：仅将Indexer query投影、RoPE、Hadamard、量化、系数生成合为一个局部MIX，
+保留36个可独立调度task；不是完整单SPMD。复用冻结参考的数学及150tick阶段完成协议，
+信号只在该局部MIX内部使用，外部依赖继续交给TMR。增加184320字节独占信号工作区，
+仅首次准备时清零，各调用由全部24AIC/48AIV共同推进代际，不增加Host逐请求metadata。
+
+首次CPU编译在后继Score遇到BF16/INT8错配，定位为新wrapper的InOut参数顺序与返回顺序
+不一致。对齐JIT调用边界的参数/返回顺序后，128K/B16完整CPU后端编译通过。
+截至本节，v19未做设备验证、未有性能结论，也未接入正式实现；工作区必须顺序独占。
+
+两档全部采样与检查汇总见
+[priority_fusion_query_chain.json](csa_mpmd_tnd_20261021/priority_fusion_query_chain.json)。
+`prepare_priority_fusion.py`从正式实现生成v18，`prepare_query_group.py`在指定候选上生成局部链，
+生成后执行Ruff整理再冻结；实验包与大输出不提交。共享SDK没有继续修改。
+
+按用户要求提交并推送当前检查点。Ruff/格式与git diff --check通过；执行format.sh ci时，
+当前环境缺少pre-commit而退出，不能声称完整仓库格式检查通过。八档10%及16卡目标仍未完成。
