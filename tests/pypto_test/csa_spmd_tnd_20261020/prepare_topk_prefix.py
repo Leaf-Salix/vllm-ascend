@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Borrow accepted exact TopK pruning without replacing TND geometry or schedules."""
 
+import argparse
 import ast
 import difflib
 import hashlib
@@ -29,12 +30,19 @@ def algorithm(text):
 def main():
     here = Path(__file__).resolve().parent
     repo = here.parents[2]
-    origin = repo / "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", type=Path, default=repo / "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd")
+    parser.add_argument("--output", type=Path, default=here / "runs/topk_prefix_candidate_v97")
+    parser.add_argument("--label", default="topk_prefix_v97")
+    parser.add_argument("--small-domain", action="store_true")
+    args = parser.parse_args()
+    origin = args.source.resolve()
     other = here.parents[4] / "vllm-ascend-dsv4-pto-0251rc1"
     donor = other / "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/topk_threshold_stages.py"
     earlier = other / "tests/pypto_test/csa_roofline_optimization_20261020/source_topk_payload/topk_threshold_stages.py"
     assert algorithm(donor.read_text()) == algorithm(earlier.read_text()), "Donor algorithm changed after measurement"
-    target = here / "runs/topk_prefix_candidate_v97"
+    target = args.output.resolve()
+    assert not target.exists(), "Never overwrite an existing candidate"
     originals = {
         name: (origin / name).read_text()
         for name in ("indexer_score_stages.py", "entry.py", "vector_schedule.py", "policy.py")
@@ -106,6 +114,13 @@ def main():
         "        # Candidate only: reuse the existing G6 resource boundary; real retention is device-side.\n"
         "        short_topk_prefix=long_history and group == 6 and tokens >= SCORE_SPLIT_MIN_TOKENS,\n",
     )
+    if args.small_domain:
+        text = replace_once(
+            text,
+            "        short_topk_prefix=long_history and group == 6 and tokens >= SCORE_SPLIT_MIN_TOKENS,\n",
+            "        short_topk_prefix=(long_history and group == 6\n"
+            "                           and SCORE_SPLIT_MIN_TOKENS <= tokens < EARLY_GEOMETRY_MIN_TOKENS),\n",
+        )
     revised["policy.py"] = text
     helper = donor.read_text()
     doc = ast.parse(helper).body[0]
@@ -140,17 +155,23 @@ def main():
     jobs = {row["task_id"]: row for row in json.loads((here / "jobs.json").read_text())}
     cohort = json.loads((here / "cohort_output_balance_v4.json").read_text())
     descriptors = []
-    for batch, history, active in ((28, 131072, True), (4, 131072, False), (1, 131072, False), (16, 8192, False)):
+    for batch, history, active in (
+        (28, 131072, not args.small_domain), (8, 131072, True),
+        (4, 131072, False), (1, 131072, False), (16, 8192, False),
+    ):
         task = next(row["task_id"] for row in cohort["cases"] if (row["history"], row["batch"]) == (history, batch))
         desc = json.loads((Path(jobs[task]["output"]) / "buffer_descriptors.json").read_text())
         selected = policy.select_policy(tokens=batch * 6, requests=batch, max_query_tokens=6, max_seq_len=history + 6)
         assert selected.short_topk_prefix == active
         desc["policy"] = selected.constexprs()
-        path = here / "compile_descriptors" / f"topk_prefix_h{history}_b{batch}_v97.json"
+        path = here / "compile_descriptors" / f"{args.label}_h{history}_b{batch}.json"
+        assert not path.exists(), path
         path.write_text(json.dumps(desc, indent=2) + "\n")
         descriptors.append({"path": str(path), "active": active, "batch": batch, "history": history})
     report = {
         "source": str(target),
+        "base_source": str(origin),
+        "small_domain": args.small_domain,
         "donor": str(donor),
         "donor_algorithm_ast_equal": True,
         "donor_sha256": hashlib.sha256(donor.read_bytes()).hexdigest(),
@@ -171,8 +192,8 @@ def main():
         ],
         "next": "Full active/disabled CPU and exact ties; first B28 paired against adopted TND",
     }
-    (here / "topk_prefix_v97.json").write_text(json.dumps(report, indent=2) + "\n")
-    (here / "topk_prefix_v97.patch").write_text("".join(patch))
+    (here / f"{args.label}.json").write_text(json.dumps(report, indent=2) + "\n")
+    (here / f"{args.label}.patch").write_text("".join(patch))
     print(target)
 
 

@@ -233,7 +233,9 @@ a241fa61 BSH静态形状修复；候选为O_A/O_B互补分工v4。B1/B16经完�
 | `task_20261021_154139_748519735` | [topk_prefix_h131072_b8_s6_v101](runs/topk_prefix_h131072_b8_s6_v101/result.json) | completed (exit=0) | complete | PASS |
 | `task_20261021_155419_187365031349` | [short_half_ub_ties_device_v100b](runs/short_half_ub_ties_device_v100b/result.json) | completed (exit=0) | complete | PASS |
 | `task_20261021_160738_306213119230` | [topk_prefix_t41_r12_matrix_v103](runs/topk_prefix_t41_r12_matrix_v103/result.json) | completed (exit=0) | complete | PASS |
-| `task_20261021_162057_10868510136` | [topk_prefix_ties_device_v104](runs/topk_prefix_ties_device_v104/result.json) | submitted | complete | 否 |
+| `task_20261021_162057_10868510136` | [topk_prefix_ties_device_v104](runs/topk_prefix_ties_device_v104/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_162824_11408309460` | [cohort_borrowed_combined_h131072_b8_s6_v106](runs/cohort_borrowed_combined_h131072_b8_s6_v106/result.json) | running | original_spmd_attribution | 否 |
+| `task_20261021_162824_11409259262` | [cohort_borrowed_combined_h8192_b16_s6_v106](runs/cohort_borrowed_combined_h8192_b16_s6_v106/result.json) | running | original_spmd_attribution | 否 |
 
 各任务完整命令和固定launcher SHA256见 `jobs.json`。
 Native超阈值元素、Top-K替换、cache/state及保护区明细仍在原始result.json；
