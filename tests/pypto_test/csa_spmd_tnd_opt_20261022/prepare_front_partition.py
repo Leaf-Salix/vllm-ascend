@@ -126,7 +126,7 @@ def cube_region(source, nonnegative_qb=False):
     return result
 
 
-def vector_region(source):
+def vector_region(source, balance_query=False):
     idx = {"VECTORS": "FRONT_INDEX_VECTORS", "COOPERATIVE_PREFIX": "True"}
     main = {"VECTORS": "FRONT_MAIN_VECTORS", "worker": "worker - FRONT_INDEX_VECTORS", "COOPERATIVE_PREFIX": "True"}
     a = "".join(publish(p) for p in ("PHASE_MAIN_POOL", "PHASE_MAIN_COMMIT", "PHASE_MAIN_OUTPUT", "PHASE_QUERY"))
@@ -171,7 +171,9 @@ def vector_region(source):
     b += "signal = wait_row_owners(signal, PHASE_META, CORES, generation, planner, 1, 1, VECTORS, GROUPS, 1)\n"
     b += call_statement(source, "main_compressor_vector_stage", main, "front_main_compressor_vector_stage")
     b += wait("PHASE_QB", "128", "FRONT_MAIN_GROUPS", "FRONT_INDEX_GROUPS")
-    b += call_statement(source, "q_dequant_rope_stage", main) + publish("PHASE_QUERY")
+    b += call_statement(
+        source, "q_dequant_rope_stage", main, "front_q_dequant_rope_stage" if balance_query else None
+    ) + publish("PHASE_QUERY")
     return "if worker < FRONT_INDEX_VECTORS:\n" + textwrap.indent(a, "    ") + "else:\n" + textwrap.indent(b, "    ")
 
 
@@ -204,7 +206,7 @@ def add_imports(source, imports):
     return "".join(lines)
 
 
-def build(reference, groups, nonnegative_qb=False):
+def build(reference, groups, nonnegative_qb=False, balance_query=False):
     cube = (reference / "cube_schedule.py").read_text()
     vector = (reference / "vector_schedule.py").read_text()
     cfn, vfn = function(cube, "cube_schedule"), function(vector, "vector_schedule")
@@ -250,7 +252,7 @@ def build(reference, groups, nonnegative_qb=False):
     lines[main_wait.lineno - 1 : main_wait.end_lineno] = [
         "    if " + GUARD + ":\n" + textwrap.indent(new, "        ") + "    else:\n" + textwrap.indent(old, "    ")
     ]
-    new_vector = replace_region("".join(lines), vstart, vend, vector_region(vector))
+    new_vector = replace_region("".join(lines), vstart, vend, vector_region(vector, balance_query))
     new_cube = replace_region(cube, cstart, cend, cube_region(cube, nonnegative_qb))
     constants = ["FRONT_INDEX_GROUPS", "FRONT_INDEX_VECTORS", "FRONT_MAIN_GROUPS", "FRONT_MAIN_VECTORS"]
     new_cube = add_imports(
@@ -270,11 +272,20 @@ def build(reference, groups, nonnegative_qb=False):
             ],
         },
     )
-    return {
+    result = {
         "cube_schedule.py": new_cube,
         "vector_schedule.py": new_vector,
         "vector_prefix_stages.py": forked_helpers((reference / "vector_prefix_stages.py").read_text(), groups),
     }
+    if balance_query:
+        query = (reference / "query_projection_stages.py").read_text()
+        clone = Names({"Q_DEQUANT_WORKERS": "WORKERS"}).visit(copy.deepcopy(function(query, "q_dequant_rope_stage")))
+        clone.name = "front_q_dequant_rope_stage"
+        result["query_projection_stages.py"] = query + "\n\n" + ast.unparse(ast.fix_missing_locations(clone)) + "\n"
+        result["vector_schedule.py"] = add_imports(
+            result["vector_schedule.py"], {"query_projection_stages": ["front_q_dequant_rope_stage"]}
+        )
+    return result
 
 
 def main():
@@ -282,13 +293,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--index-groups", type=int, choices=(4, 8, 12), default=8)
     parser.add_argument("--nonnegative-qb", action="store_true")
+    parser.add_argument("--balance-query", action="store_true")
     args = parser.parse_args()
+    if args.balance_query and not args.nonnegative_qb:
+        parser.error("--balance-query requires --nonnegative-qb")
     reference = here / "runs/frozen_v122"
     expected = json.loads((here / "frozen_v122.json").read_text())["files"]
     assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in reference.glob("*.py")} == expected
-    revised = build(reference, args.index_groups, args.nonnegative_qb)
+    revised = build(reference, args.index_groups, args.nonnegative_qb, args.balance_query)
     name = f"front_partition_i{args.index_groups}"
-    if args.nonnegative_qb:
+    if args.balance_query:
+        name += "_v3"
+    elif args.nonnegative_qb:
         name += "_v2"
     target = here / "runs" / name
     shutil.copytree(reference, target, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
@@ -302,6 +318,7 @@ def main():
         "device_execution": False,
         "index_groups": args.index_groups,
         "nonnegative_qb": args.nonnegative_qb,
+        "query_groups_follow_actual_workers": args.balance_query,
         "guard": GUARD,
         "change": "single MIX, disjoint front roles after shared QA/QR; original downstream Score/Attention/output",
         "preserved": [
