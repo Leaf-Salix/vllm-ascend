@@ -217,6 +217,7 @@ def validate(
                 dict(
                     state=label,
                     active=active,
+                    max_seq_len=int(states[label]["inputs"]["kv_seq_lens"].max().item()),
                     passed=passed,
                     comparisons=checked,
                     guards=candidate_guards,

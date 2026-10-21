@@ -198,7 +198,18 @@ def main():
     parser.add_argument("--compile-layout-probe", action="store_true")
     parser.add_argument("--layout-probe", action="store_true", help="新页证明helper需测；相同helper已通过时不重复")
     parser.add_argument("--boundary-replay", action="store_true", help="单图metadata变化及Native补位，独立于性能")
+    parser.add_argument(
+        "--boundary-context-history",
+        type=int,
+        help="边界重放中另切换到此history，再恢复原值；不改冻结源码清单",
+    )
     parser.add_argument("--measure-outer", action="store_true", help="另采NPU event外层耗时，保持L1口径独立")
+    parser.add_argument(
+        "--dep-gen",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="默认保留历史依赖图采集；--no-dep-gen仅用于单独核对采集开销，仍保留L1时间戳",
+    )
     parser.add_argument("--functional-only", action="store_true", help="只做原多task/候选精确与A/B/A图检查")
     parser.add_argument("--constant-indexer-history", action="store_true", help="仅功能模式：历史key为零制造严格同分")
     parser.add_argument("--capture-level4", action="store_true", help="功能模式后补采一个L4诊断窗口，不进入性能表")
@@ -238,6 +249,9 @@ def main():
         raise ValueError("L4补采仅支持单一候选的functional-only设备模式")
     if args.boundary_replay and (args.batch < 1 or args.history < 2):
         raise ValueError("metadata用例要求batch>=1且history>=2；B1只验证长度/页表变化")
+    if args.boundary_context_history is not None:
+        if not args.boundary_replay or not 0 < args.boundary_context_history < args.history:
+            raise ValueError("--boundary-context-history要求边界重放且0<history<原history")
     if not args.candidate.isidentifier() or not args.attempt.isidentifier():
         raise ValueError("候选及attempt必须是标识符")
     if args.current and (not args.current.isidentifier() or args.current == args.candidate):
@@ -268,6 +282,10 @@ def main():
     )
     # 初始来源清单保持原样；用户后来增加的测试范围单独记录。
     report["requested_test_standard"] = json.loads((HERE / "CASE_STANDARD.json").read_text())
+    report["profiling"] = {
+        "chip_swimlane_level": 4 if args.capture_level4 else 1,
+        "dep_gen": args.dep_gen,
+    }
     spmd_source = HERE / "sources" / args.spmd_reference
     spmd_revision, spmd_wait_ticks = {
         "spmd": ("13259f92", 100),
@@ -492,7 +510,7 @@ def main():
                 platform="a2a3",
                 runtime="tensormap_and_ringbuffer",
                 enable_chip_swimlane=4 if args.capture_level4 else 1,
-                enable_dep_gen=True,
+                enable_dep_gen=args.dep_gen,
                 output_dir=str(output / "dfx"),
                 **ring_sizing_kwargs(additional),
             )
@@ -653,7 +671,7 @@ def main():
                 save(output, report)
                 report["l1"] = profile(entries, reset, verify, output, configs, args.windows, args.measure_outer)
                 report["performance_measured"] = True
-                if has_scale_layout:
+                if has_scale_layout and args.dep_gen:
                     from layout_probe import verify_edges
 
                     first = next(w for w in report["l1"]["windows"] if w["side"] == "multitask_candidate")
@@ -664,6 +682,11 @@ def main():
                         and not report["layout_dependency"]["applicable"]
                     ):
                         raise AssertionError("长G6实际未执行布局证明task")
+                elif has_scale_layout:
+                    report["layout_dependency"] = {
+                        "collected": False,
+                        "reason": "本诊断关闭依赖图快照；不据本轮声称核对过实际fanin",
+                    }
                 signals = signal_view(spmd)
                 expected = spmd_calls + report["l1"]["replay_counts"]["single_spmd"]
                 report["spmd_protocol"] = bool(
@@ -693,7 +716,11 @@ def main():
                     output / "boundary_replay.json",
                     args.history,
                     args.batch,
-                    context_switch_history=manifest.get("context_switch_history") if manifest else None,
+                    context_switch_history=(
+                        args.boundary_context_history
+                        if args.boundary_context_history is not None
+                        else manifest.get("context_switch_history")
+                    ),
                 )
             report["actual_ptoas_invocations"] = check_ptoas_invocations(
                 output / "COMPILER_INVOCATIONS.jsonl", report["toolchain_identity"]

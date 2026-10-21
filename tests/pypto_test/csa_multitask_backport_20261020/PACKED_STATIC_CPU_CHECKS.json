@@ -1,0 +1,26 @@
+[
+  {
+    "candidate": "packed_capacity_static_v4",
+    "cpu_passed": false,
+    "error": [
+      "ParserTypeError: Cannot reassign 'o_packed_heads_full' with a different type: was pl.Tensor[[3072, 4096], pl.BF16], got pl.Tensor[[1024, 4096], pl.BF16]"
+    ],
+    "result": "runs/packed_capacity_static_v4/cpu_preflight_v1/result.json",
+    "reproduce_flag": "--no-constexpr-specialization"
+  },
+  {
+    "candidate": "packed_capacity_static_v5",
+    "cpu_passed": true,
+    "error": [],
+    "result": "runs/packed_capacity_static_v5/cpu_preflight_v1/result.json",
+    "reproduce_flag": "--capture-stride-scalar",
+    "remaining_issue": "普通编排Scalar被捕获为额外入参，尚未满足常量关闭路径"
+  },
+  {
+    "candidate": "packed_capacity_static_v6",
+    "cpu_passed": true,
+    "error": [],
+    "result": "runs/packed_capacity_static_v6/cpu_preflight_v1/result.json",
+    "codegen": "PACKED_STATIC_CONST_CODEGEN.json"
+  }
+]

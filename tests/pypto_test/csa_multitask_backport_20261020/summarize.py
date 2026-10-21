@@ -61,6 +61,7 @@ def summarize(path):
         "indexer_page_pattern": report.get("indexer_page_pattern", "original"),
         "batch": report["batch"],
         "history": report["history"],
+        "profiling": report.get("profiling", {"chip_swimlane_level": 1, "dep_gen": True}),
     }
     if not summary["passed"]:
         summary["error"] = report.get("error", "").splitlines()[-1:]
