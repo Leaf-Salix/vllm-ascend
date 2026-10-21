@@ -22,6 +22,8 @@ REFERENCE_KIND = "frozen_tnd_v122"
 
 def case_measurement(result, reference_files):
     reference = result.get("comparison_reference", {})
+    if result.get("phase_clock") or reference.get("diagnostic_phase_clock"):
+        raise ValueError("Instrumented phase clocks cannot be performance-gate evidence")
     if reference.get("kind") != REFERENCE_KIND or reference.get("files") != reference_files:
         raise ValueError("Expected the exact frozen_tnd_v122 reference, not BSH or another TND")
     audit = result.get("bsh_wait_policy_audit", {})  # Historical harness field name, both sides now TND.
