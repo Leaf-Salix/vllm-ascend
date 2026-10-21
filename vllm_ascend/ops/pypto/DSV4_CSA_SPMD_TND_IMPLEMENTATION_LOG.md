@@ -1309,3 +1309,37 @@ query/lane的根等待实际writer；置换必须双射且两表互逆。刻意�
 本阶段及时commit，正式八档仍为v4的GM0.991928345，10%目标未达到。
 同时整理recovery_state中旧v47/未采用/禁止commit等过期下一步描述，
 原内容保存在recovery_historical_before_v88.json，不改任何历史测量。
+
+### v89：独立大T映射回放探针，20项CPU检查通过
+
+上一goal回合为progress：移植Score候选、两档CPU编译与归属/等待审计，
+已提交7e119834。本回合再次读原goal与后续要求；原两QA任务权威状态
+仍pending，未将排队视为运行，也未重复提交。另一会话已采用BSH仍a241fa61。
+
+发现原run_probe只接受legacy或64字活跃writer表，会拒绝Score新96字表。
+因此在runs/score_owner_harness_v89冻结独立探针，不改已排队QA使用的
+公共脚本。新增计时外诊断逐项核对设备Score步数、前段KV/QB工作排序、
+置换和逆置换；用独立枚举与排序检查，未知长度/错误代价/错误逆表均拒绝。
+这不是生产D2H，也不用于决定核分工，L1计时文件逐字不变。
+
+大T矩阵捕获B28/S6、T容量168、请求容量32，随后计划9个metadata场景：
+28请求的S1～S6、28请求混长/混历史/碎片页、23请求身份路径、28请求恢复
+并换升序页；再执行4步连续decode，包含请求反转、删除、增加新ID和
+重新激活旧ID。全部沿用真实Native builder和原数值/保护区检查。
+小Q下允许Native Q末端小于T容量，其余行没有请求归属；dummy仍每槽
+最多6行且seq_len=0，不把实际query补成B×6。该新增大T夹具尚待设备验收。
+
+为验证实际映射重写，回放时保留上一轮group_offsets，仅该表不再填37；
+其它原scratch保护、代次信号、精度和cache/state连续性检查保持原样。
+每个场景要求实际group数正确，指定场景必须命中非身份/身份路径，不能
+以关闭分支通过冒充核置换验收。Native独立连续state参考仍保留。
+
+20项CPU测试通过：合法/负数BOOL映射、7种损坏表拒绝、legacy长度严格性、
+5项提交入口、原检查AST/计时文件等价、9+4场景容量与分支前检。日志
+runs/score_owner_harness_cpu_v89.log，轻量结果score_owner_harness_cpu_v89.json。
+这些不代表13个设备replay已通过，不替代真机精度/同步/图或性能。
+
+pending_device_plan_v89.json保存下一步命令，未提交。先分别评估WS B16和
+Score B28的原S6档；Score正式八档仍用请求容量28，独立图矩阵容量32不
+混入性能门槛。只有候选首轮通过且值得采用，才执行其新增动态矩阵。
+本阶段继续及时提交；原八档GM0.991928345/0.90未达标，goal保持active。

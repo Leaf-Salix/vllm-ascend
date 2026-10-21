@@ -1,0 +1,231 @@
+--- a/run_probe.py
++++ b/run_probe.py
+@@ -55,7 +55,12 @@
+         "active_owners": [owner for owner, head in enumerate(heads) if head >= 0],
+     }
+     legacy_words = scale_base + 48 + 4 * tokens + (2 * requests if entry.policy.scale_page_coalescing else 0)
+-    if plan.numel() == legacy_words + 64:
++    if getattr(entry.policy, "score_prefix_balance", False):
++        from score_owner_diagnostics import inspect_score_owner_plan
++
++        owner_base = scale_base + 48 + 4 * tokens + 2 * requests
++        result["score_owner_permutation"] = inspect_score_owner_plan(entry, plan, owner_base)
++    elif plan.numel() == legacy_words + 64:
+         count = int(plan[legacy_words])
+         if not 0 <= count <= 48:
+             raise AssertionError(f"Active scale-writer count outside [0,48]: {count}")
+--- a/metadata_matrix.py
++++ b/metadata_matrix.py
+@@ -40,13 +40,12 @@
+     root = candidate.native
+     capacity = fixture["tokens"]
+     requests = fixture["request_capacity"]
+-    if b1_only and (capacity != 6 or requests != 1 or fixture["query_lengths"] != [6]):
+-        raise ValueError("B1矩阵入口要求一个S6请求，T容量6，请求容量1")
+-    required_requests = 6 + (capacity - 6 + 5) // 6
+-    if not b1_only and (
+-        not 41 <= capacity <= 72 or requests != required_requests or fixture["query_lengths"] != [6] * 6
+-    ):
+-        raise ValueError("本矩阵需6个S6请求及足够槽位：6 + ceil((T容量 - 6) / 6)，覆盖S1的dummy尾部")
++    if b1_only or continuous_only:
++        raise ValueError("本独立矩阵需完整大T检查，不接受B1或跳过metadata模式")
++    if (capacity, requests, fixture["query_lengths"]) != (168, 32, [6] * 28):
++        raise ValueError("需B28/S6、T容量168、请求容量32的初始捕获输入")
++    if not getattr(candidate.policy, "score_prefix_balance", False):
++        raise ValueError("本矩阵必须实际编译Score重分配路径")
+     if table_history is None or table_history < history + 128:
+         raise ValueError("本矩阵需至少history+128的固定页表容量")
+     addresses = {name: tensor.data_ptr() for name, tensor in candidate.buffers.items()}
+@@ -62,7 +61,7 @@
+     def save():
+         output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+ 
+-    def new_case(queries, histories, owners=None, reverse=False):
++    def new_case(queries, histories, owners=None, reverse=False, page_pattern="original"):
+         case = make_fixture(
+             config,
+             layer.self_attn,
+@@ -77,7 +76,10 @@
+             request_capacity=requests,
+             page_owners=owners,
+             reverse_pages=reverse,
+-            allow_unassigned_tail=b1_only,
++            # Native capacity may exceed Q[-1]; remaining rows have no request owner.
++            # Dummy rows still consume at most six tokens and retain seq_len=0.
++            allow_unassigned_tail=True,
++            indexer_page_pattern=page_pattern,
+         )
+         case["hidden"].copy_(fixture["hidden"])
+         groups = {name: (case["metadata"][group["prefix"]], group["views"]) for name, group in case["groups"].items()}
+@@ -176,7 +178,8 @@
+     def candidate_run(case, before, expected, graph):
+         load(case, before)
+         for name, value in candidate.allocations.items():
+-            if name not in ("signal", "ffts"):
++            # Keep the prior map to test active -> identity -> active rewrites.
++            if name not in ("signal", "ffts", "group_offsets"):
+                 value.fill_(37)
+         old_generation = candidate.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)[0, :, 0]
+         graph.replay()
+@@ -222,21 +225,18 @@
+     graph = torch.npu.NPUGraph()
+     with torch.npu.graph(graph):
+         candidate(config=options)
+-    if b1_only:
+-        cases = [(f"b1_s{q}_tail_capacity6", [q], [history + q % 4], False) for q in range(1, 7)]
+-    else:
+-        cases = [(f"uniform_s{q}", [q] * 6, [history + r for r in range(6)], False) for q in range(1, 7)]
+-        cases.extend(
+-            [
+-                ("mixed_261", [2, 6, 1], [history + 3, history + 7, history + 11], True),
+-                ("mixed_123456", [1, 2, 3, 4, 5, 6], [history + r * 3 for r in range(6)], False),
+-            ]
+-        )
+-    if continuous_only:
+-        cases = []
+-        result["metadata_cases_skipped"] = "已完成的独立metadata矩阵不重跑；本次聚焦连续状态故障"
+-    for name, queries, histories, reverse in cases:
+-        case = new_case(queries, histories, reverse=reverse)
++    cases = [(f"uniform_s{q}", [q] * 28, [history + r % 4 for r in range(28)], False, "original")
++             for q in range(1, 7)]
++    cases.extend([
++        ("mixed_123456_histories", [1, 2, 3, 4, 5, 6] * 4 + [2, 6, 1, 5],
++         [8192 if r % 5 == 0 else 65536 if r % 5 == 1 else history + r % 4 for r in range(28)],
++         True, "fragmented_history"),
++        ("few_groups_identity", [6] * 23, [history] * 23, False, "original"),
++        ("active_again_ascending", [6] * 26 + [4, 3], [history + r % 4 for r in range(28)],
++         False, "ascending_history"),
++    ])
++    for name, queries, histories, reverse, page_pattern in cases:
++        case = new_case(queries, histories, reverse=reverse, page_pattern=page_pattern)
+         load(case, initial)
+         baseline(config=options)
+         torch.npu.synchronize()
+@@ -251,26 +251,28 @@
+             baseline_guards=baseline_guards,
+         )
+         checked["passed"] &= all(value["status"] == "PASS" for value in baseline_guards.values())
++        mapping = checked["scale_writer_plan"]["score_owner_permutation"]
++        checked["passed"] &= mapping["groups"] == len(queries)
++        if name == "few_groups_identity":
++            checked["passed"] &= mapping["identity"]
++        if name in ("uniform_s6", "active_again_ascending"):
++            checked["passed"] &= not mapping["identity"]
++        checked["indexer_page_pattern"] = page_pattern
++        checked["mapping_workspace_preserved_between_replays"] = True
+         result["metadata_cases"].append(checked)
+         save()
+         if not checked["passed"]:
+             return result
+ 
+-    if b1_only:
+-        result["passed"] = all(row["passed"] for row in result["metadata_cases"])
+-        result["scope"] = "B1同址图S1～S6，T容量6且Q末端为实际长度；无dummy请求吸收尾部"
+-        save()
+-        return result
+-
+     # Request IDs own stable physical pages, while row order and membership change.
+     # Each branch loads its last produced state, not fixture.initial.
+     old_cache, new_cache, native_cache = dict(initial), dict(initial), dict(initial)
+-    history_by_id = {request: history + request for request in range(7)}
++    history_by_id = {request: history + request for request in range(30)}
+     steps = [
+-        ([0, 1, 2, 3, 4, 5], [2, 6, 1, 4, 3, 5]),
+-        ([0, 1, 2, 3, 4, 5], [1, 2, 3, 4, 5, 6]),
+-        ([5, 0, 4, 1], [3, 6, 1, 2]),
+-        ([1, 6, 5, 0, 4], [4, 2, 1, 5, 3]),
++        (list(range(28)), [1, 2, 3, 4, 5, 6] * 4 + [2, 6, 1, 5]),
++        (list(reversed(range(28))), [6] * 26 + [4, 3]),
++        (list(range(23)), [2, 6, 1, 4, 3, 5] * 3 + [2, 6, 1, 4, 3]),
++        ([27, 28, 29] + list(range(25)), [6] * 26 + [5, 4]),
+     ]
+     original_qli = torch.ops._C_ascend.npu_vllm_quant_lightning_indexer
+     native_topk = {}
+@@ -353,6 +355,13 @@
+             checked["passed"] &= all(
+                 value["status"] == "PASS" for value in (*baseline_guards.values(), *native_guards.values())
+             )
++            mapping = checked["scale_writer_plan"]["score_owner_permutation"]
++            checked["passed"] &= mapping["groups"] == len(ids)
++            if len(ids) < 24:
++                checked["passed"] &= mapping["identity"]
++            else:
++                checked["passed"] &= not mapping["identity"]
++            checked["mapping_workspace_preserved_between_replays"] = True
+             result["continuous_steps"].append(checked)
+             save()
+             if not checked["passed"]:
+@@ -364,6 +373,7 @@
+     finally:
+         torch.ops._C_ascend.npu_vllm_quant_lightning_indexer = original_qli
+     result["passed"] = True
++    result["scope"] = "T168/Bcap32；28活动组和23组身份路径同址切换；含无请求归属尾部"
+     result["current_step"] = {"phase": "complete"}
+     result["same_graph_replays"] = len(cases) + len(steps)
+     save()
+--- a/submit_probe.py
++++ b/submit_probe.py
+@@ -29,18 +29,10 @@
+     token_capacity = args.token_capacity if args.token_capacity is not None else sum(queries)
+     request_capacity = args.request_capacity if args.request_capacity is not None else args.batch
+     if args.metadata_matrix:
+-        if args.b1_metadata_matrix:
+-            valid = (args.batch, queries, token_capacity, request_capacity) == (1, [6], 6, 1)
+-            expected = "B1、S6、T容量6、请求容量1"
+-        else:
+-            # The uniform S1 case leaves capacity-6 padding tokens. Each
+-            # dummy request can absorb at most six, in addition to six active.
+-            required_requests = 6 + (token_capacity - 6 + 5) // 6
+-            valid = ((args.batch, queries) == (6, [6] * 6)
+-                     and 41 <= token_capacity <= 72 and request_capacity == required_requests)
+-            expected = f"B6、各S6、41<=T容量<=72、请求容量{required_requests}（覆盖S1的dummy尾部）"
+-        if not valid:
+-            raise ValueError(f"metadata矩阵的初始捕获输入须为{expected}；各变长场景由矩阵内部生成")
++        if args.b1_metadata_matrix or (args.batch, queries, token_capacity, request_capacity) != (
++            28, [6] * 28, 168, 32
++        ):
++            raise ValueError("Score矩阵初始输入要求B28/S6、T168、请求容量32，不能使用B1矩阵")
+     if args.service_metadata_replay and queries == list(reversed(queries)):
+         raise ValueError("该服务metadata用例要求query长度反转后发生变化；B1请使用标准framework-graph检查")
+ 
+@@ -68,7 +60,7 @@
+     task_id = completed.stdout.strip()
+     if not task_id.startswith("task_") or len(task_id.splitlines()) != 1:
+         raise RuntimeError(f"Unexpected task-submit response: {task_id}")
+-    path = here / "jobs.json"
++    path = Path('/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/jobs.json')
+     jobs = json.loads(path.read_text())
+     jobs.append(
+         {
+--- a/run_probe.sh
++++ b/run_probe.sh
+@@ -103,6 +103,7 @@
+ 
+ repo, snapshot, launcher = map(Path, sys.argv[1:4])
+ mode = sys.argv[4]
++harness = Path('/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/score_owner_harness_v89')
+ snapshot.mkdir(parents=True, exist_ok=False)
+ shutil.copyfile(launcher, snapshot / "launcher.sh")
+ package = Path(sys.argv[5]).resolve()
+@@ -113,13 +114,14 @@
+ if sys.argv[7]:
+     shutil.copyfile(sys.argv[7], snapshot / "bsh_baseline_manifest.json")
+ for path in (
+-    repo / "tests/pypto_test/csa_spmd_tnd_20261020/run_probe.py",
+-    repo / "tests/pypto_test/csa_spmd_tnd_20261020/service_probe.py",
+-    repo / "tests/pypto_test/csa_spmd_tnd_20261020/service_metadata_replay.py",
+-    repo / "tests/pypto_test/csa_spmd_tnd_20261020/tnd_performance.py",
+-    repo / "tests/pypto_test/csa_spmd_tnd_20261020/bsh_probe.py",
+-    repo / "tests/pypto_test/csa_spmd_tnd_20261020/metadata_matrix.py",
+-    repo / "tests/pypto_test/dsv4_csa_single_layer.py",
++    harness / "run_probe.py",
++    harness / "service_probe.py",
++    harness / "service_metadata_replay.py",
++    harness / "tnd_performance.py",
++    harness / "bsh_probe.py",
++    harness / "metadata_matrix.py",
++    harness / "dsv4_csa_single_layer.py",
++    harness / "score_owner_diagnostics.py",
+ ):
+     shutil.copyfile(path, snapshot / path.name)
+ if mode in ("performance", "phase_profile"):
