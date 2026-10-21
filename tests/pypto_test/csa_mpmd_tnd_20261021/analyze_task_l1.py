@@ -3,7 +3,8 @@
 
 仅支持当前无分支、无循环提交的 MPMD 编排。TaskId 的低 32 位是 ring 内
 提交序号；要求窗口中完整出现 0..N-1，且只含一个 ring。自动匹配要求
-提交数量唯一，否则必须用 --orchestration SIDE=PATH 明确指定源码。
+提交数量唯一，或所有候选的序号/名称映射相同；否则须显式指定源码。
+等价映射只用于命名，保留全部候选路径，不据此识别具体核二进制。
 incore 时间包含核内等待，不能仅凭 L1 把 task 间隔归因于 AICPU 计算。
 平均阶段首尾只比较位置；任务顺序可逐窗变化，不能拼成一条真实泳道或据此断言并发。
 """
@@ -111,11 +112,15 @@ def main():
         if side in explicit:
             source = Path(explicit[side])
             names = task_names(source)
+            mapping_sources = [str(source)]
         else:
             matches = [(path, names) for path, names in parsed.items() if len(names) in counts]
-            if len(matches) != 1:
+            if not matches or any(names != matches[0][1] for _, names in matches):
                 raise ValueError(f"{side} 编排匹配不唯一，请显式传 --orchestration")
             source, names = matches[0]
+            mapping_sources = [str(path) for path, _ in matches]
+            if len(matches) > 1:
+                source = None
         records = [summarize_window(window, names) for window in windows]
         means = []
         for ordinal, name in names.items():
@@ -134,7 +139,12 @@ def main():
                     },
                 }
             )
-        output["sides"][side] = {"orchestration": str(source), "windows": records, "mean_stages": means}
+        output["sides"][side] = {
+            "orchestration": str(source) if source is not None else None,
+            "orchestration_mapping_sources": mapping_sources,
+            "windows": records,
+            "mean_stages": means,
+        }
         print(f"{side}: {len(names)} tasks, {len(records)} windows")
         for stage in means:
             detail = "; ".join(
