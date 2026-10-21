@@ -366,3 +366,57 @@ create，在G6保留原full初始化。原B1生成物可见这两次TEXPANDS，�
 的窗口，但其ready/gated派发修改不适用于当前单SPMD。当前前段已经包含四query
 Hadamard，不重复计算迁移收益。未拷贝其不同fixture的绝对性能作本轮基线。
 默认生产算子尚未修改，本轮10%目标仍未达成，未push。
+
+### B1结果与fixture失败纠正
+
+两项完整五窗任务均completed(exit=0)，严格数值/状态/图通过，结果为：
+
+| 候选 | v122中位μs | 候选中位μs | 耗时变化 | 配对快窗口 | 决策 |
+|---|---:|---:|---:|---:|---|
+| 4096半叶提前排序 | 367.20 | 375.36 | +2.2222% | 1/5 | 拒绝 |
+| 去掉G2无用填充 | 373.42 | 363.90 | -2.5494% | 4/5 | 保留供组合 |
+
+见`b1_sort_performance_results.json`。提前排序增加了分支、两次排序启动及循环
+携带根的UB搬运；生成物可见根的独立地址与回边TMOV。这是解释方向，不把静态
+指令数量认定为已测瓶颈。没有以“理论重叠”采用回退版。无用填充版生成物已无
+single_roots/single_segments，也不把完整收益全部归成12KiB写量的理论耗时。
+
+原S5同分任务`041614_47370630607`在fixture初始化失败，未执行候选：S5/Tcap6/R1
+缺少吸收多余padding token的dummy请求槽。这不是算法数值失败或runtime加载故障；
+后续“extension未加载”来自清理审计阶段。保留原完整错误，改为真实T5/R1后提交
+`task_20261022_041846_57849415001`，仍是H139264/S5同分正确性，不计入性能。
+没有增加R改变B1分档，也没有删除原失败记录。
+
+### 复用既有页布局证明，减少AIC页表读取
+
+`key_page_proof`只在原SCALE_PAGE_COALESCING且split-G6路径中读取已有
+META的(first_page,direction)，把每个panel内的页号查表改为first+direction*page。
+原逻辑页clamp、逻辑/物理容量检查、两种64B偏移Native key view、搬运次序以及
+全部QK/WS数学不变。direction=0仍逐页查原表。没有扩张证明启用域、追加Host
+metadata、修改页表或增加证明工作；复用前段原有META获取与业务发布协议。
+
+22项CPU检查执行实际地址表达式，覆盖正/逆序、碎片、共享页、页尾clamp、
+1..1025页及关闭域不读取陈旧证明。AIC搬运/数学/同步调用AST全部保持原样。
+B28启用和B8关闭完整CPU编译通过。B28五窗任务
+`task_20261022_042002_63203019442`正在运行，尚无性能结论；B8只是关闭域编译
+检查，不为未生效路径安排设备“提速”实验。
+
+### 前段顺序候选：Main AIV后移至Indexer输入发布之后
+
+当前阶段端点显示Main输出先于Indexer query量化/系数。新的`main_vector_late`
+把COOPERATIVE_PREFIX下原main_compressor_vector_stage完整调用移至IDX_SCALE
+发布之后、主Q反量化之前，使AIC有机会在主压缩Vector处理期间先做Score。
+原pool→等全部读者→state commit→norm/cache整段及参数逐字保留；非协同路径
+保持原次序。中间Indexer链不读取main cache/state，Attention仍等MAIN_OUTPUT。
+所有调用AST多重集合不变，未减少任何通知、代际或FIFO边。
+
+这是根据本轮阶段证据建立的单SPMD顺序实验，不是直接移植MPMD的ready选核。
+潜在代价是AIV较晚消费Score产生双槽反压，必须完整成对测量。B16/S6和固定
+混长正在完整CPU编译，未预记设备通过或收益；生产包未采用。
+
+追加完成状态：S5真实T5同分任务`041846_57849415001`已completed(exit=0)，
+严格输出/TopK/score/状态/图通过，详见`b1_sort_tie_results.json`。该功能证据
+不撤销提前排序版的性能拒绝结论。Main后移的两个CPU完整编译均通过，随后提交
+`task_20261022_042503_85147929684`（128K/B16/S6）和
+`task_20261022_042512_85871224786`（固定T56混长），均五窗、冻结v122成对。
+保留这两个handle继续收取；没有重复已完成的代表档或变更九档权重。
