@@ -420,3 +420,82 @@ B28启用和B8关闭完整CPU编译通过。B28五窗任务
 `task_20261022_042503_85147929684`（128K/B16/S6）和
 `task_20261022_042512_85871224786`（固定T56混长），均五窗、冻结v122成对。
 保留这两个handle继续收取；没有重复已完成的代表档或变更九档权重。
+
+## 2026-10-22：前段分链的单SPMD原型与B1组合
+
+上一goal轮有实际进展：两个本地阶段提交、B1正负设备证据，以及三个明确运行
+的后续任务。本轮重新核对goal active、工作树干净、公共SDK仍validated；没有
+重启任何在途任务。已收齐三项，均completed(exit=0)，严格输出/状态/图通过：
+
+| 候选/场景 | v122中位μs | 候选中位μs | 耗时变化 | 配对快窗口 | 决策 |
+|---|---:|---:|---:|---:|---|
+| 页证明复用 / 128K B28 | 1161.00 | 1164.34 | +0.2877% | 2/5 | 拒绝 |
+| Main AIV后移 / 128K B16 S6 | 811.74 | 803.00 | -1.0767% | 4/5 | 保留候选 |
+| Main AIV后移 / 固定T56混长 | 753.38 | 746.70 | -0.8867% | 4/5 | 保留候选 |
+
+证据为`key_page_proof_results.json`、`main_vector_late_results.json`。没有把少查
+页表当作已获收益，也没有把两项Main后移结果算作最终九档达标。
+
+### front_partition_i8_v2：Indexer与主QKV使用不重叠核组
+
+参考另一会话MPMD的两条前段链，但本原型仍是原72核单MIX、一个SPMD提交，
+没有加入动态task调度器或第二个incore。共享HC/QA/QR/RoPE之后，在原G6且
+COOPERATIVE_PREFIX域内划分：AIC0..7及AIV0..15负责Indexer压缩、query、
+Hadamard、量化、系数和scale；AIC8..23及AIV16..47负责主压缩、Q_B和反量化。
+KV投影仍由全部24个逻辑worker完整分摊，循环置换到以主分支为先；后继
+Score、Top-K、Attention、输出仍使用原24组分工和数学。
+
+只克隆前段调度wrapper以改变WORKERS及真实producer编号，数学helper保持
+原文件。主反量化仍沿原48波对齐规则选head tile，32个实际worker只改变条带，
+不改RMS归约、尾部recip(sqrt)、量化或K累计顺序。所有Tensor签名、GM工作区、
+代际和原阶段发布保留；空角色发布先于本分支业务，真实发布仍在写回后。
+
+关键依赖逐项处理：
+
+- 主分支不再经过Indexer wrapper，显式补回PHASE_META获取，不能假定此前
+  的QR/RoPE或主投影已经获取本轮compact offsets/counts。
+- 主压缩pool等待AIC8..23的真实投影者；state commit等AIV16..47中全部实际
+  pool读者，保留共享prefix读完才能覆盖state的生命周期。
+- Attention等待主cache的物理角色为24+16起的真实写者，不能被Indexer角色
+  提前发出的空MAIN_OUTPUT骗成就绪。
+- scale计划仍有48个逻辑页writer。16个Indexer AIV分别领取owner、owner+16、
+  owner+32，整页64B RMW始终归一个物理核；不改变META中的页owner链表。
+- 原Score的READY/ACK、槽重用及末尾排空完全保留，不通过跳过空lane通信提速。
+
+首版完整CPU编译在NZ非负性证明失败：`worker-8`虽处于正确分支，当前编译器
+不把差值视为非负NZ列偏移。未改共享SDK或权重布局；v2仅把Q_B logical worker
+改为physical_worker % 16，后16个连续物理编号形成完整双射，消费者仍等待全部
+真实16个写者。原失败源及`compile_front_partition_i8_b16/result.json`保留。
+
+CPU调度检查执行实际两条schedule及克隆wrapper，以数学stub记录事件：22项
+覆盖4/8/12组方案、T24/41/56/96/168/192/385、请求4..65，检查全部阶段恰好
+发布一次、等待图无环、state读者屏障、主META获取、worker唯一覆盖及48页owner。
+首版测试漏识别q_b_stage的NZ alias导致前置断言失败；补齐实际_q_b_nz_stage
+签名后全部通过，没有放宽依赖断言。该模型不等价于设备数值或流水性能验证。
+
+v2的B16/S6和固定混长完整CPU代码生成通过。设备五窗对照任务：
+
+- `task_20261022_043809_13687342079`：128K/B16/S6。
+- `task_20261022_043810_136987923117`：固定128K/B16/T56混长。
+
+这两项尚未收取最终结果，不预记性能通过。默认算子未修改。
+
+### combined_v2：单独保留B1无用填充收益
+
+在已验证combined_v1上加入B1去掉single_roots/single_segments无用填充，
+与live_half/batched_sort变换交换顺序后源码逐字一致。没有加入负性能的提前
+排序或页表复用，也没有把Main后移及分链实验混入。B1完整CPU编译通过，提交：
+
+- `task_20261022_044119_150603731813`：B1/S6五窗完整L1。
+- `task_20261022_044120_15073038393`：B1同址图S1～S6六场景。
+
+继续参考已明确定位的cannbot `resident_softmax_state_slot_recurrence_and_reuse_events`
+卡片；它为draft且平台未定位，只用于检查最后消费者、槽复用和事件方向。
+没有把增加槽数或声明常驻资源等同于必然10%收益，也没有因知识索引缺失自行
+重建知识仓。九档等权分母和目标保持不变，未push。
+
+补充13项CPU合同已通过：直接执行Attention的MAIN_OUTPUT等待表达式，确认只等
+主分支的真实物理写者；关闭分链guard后，完整Cube/Vector schedule AST与原版
+完全一致。合计35项CPU合同，不等同于最终设备边界验收。组合生成器新参数的
+局部循环变量曾覆盖报告名，已把变量分开并将本轮清单改回combined_v2.json；
+候选目录、源码字节、已编译及已提交快照未变化，没有重复提交设备任务。
