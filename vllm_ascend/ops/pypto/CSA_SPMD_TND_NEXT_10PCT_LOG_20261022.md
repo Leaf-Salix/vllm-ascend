@@ -859,3 +859,38 @@ T65/R16合法且保留。T80仍由前述独立完整L1实际S5用例验证。此
 
 当前无CPU任务，四项设备任务使用原句柄收取。生产默认未变、未push，
 完整九档10%尚未达成，goal继续active。
+
+
+### 边界终态与实际分档纠正：S4/S5是关闭对照，不能归因新算法
+
+064744、064745、064818、064819四项均completed/exit0、严格功能/状态检查
+通过。T72/R17与T65/R16两个metadata矩阵各8项（S1..6、261、123456）和4步
+连续轨迹全部通过，各12次同址图重放。连续轨迹保留前轮状态，包含请求减少、
+重排和新增；历史偏移覆盖C4余数。摘要query_head_guard_metadata_results.json，
+原metadata_matrix.json保留逐项输出/Top-K/cache/state、写界及同址证据。
+T72实际flag=True且容量整除8，覆盖新Query；T65实际flag=True但容量尾行，
+覆盖整个原Query回退。没有将这些描述为新增B1服务或完整九档通过。
+
+收取两个L1边界时，原collect_trials正确拒绝S4/S5不是固定九档。未修改或
+放宽evaluate_nine_cases。另建collect_query_guard_boundaries.py，显式仅收
+四种已定义边界输入，沿用完整72核/单MIX/native150/五交替配对/隔离工作区
+验证，强制记录实际QUERY_GROUP和QUERY_CONTIGUOUS_HEADS，并核对实际生成
+PTO是否存在head GM-view路径。八项负向/合同测试通过，包括确认原九档gate
+仍拒绝边界用例。所有边界报告formal_gate_eligible=False。
+
+更重要的实际分档发现：测试器在显式query-lengths下将query_tokens更新为
+真实最大值。原T64全S4记录query_tokens=4/G2/flag=False，T80全S5为5/G2/False；
+之前登记“上界6”只是CLI意图，不是实际执行条件，现明确纠正。两个实际候选
+与同轮v122的完整C++（仅去pto位置注释）、AIC/AIV wrappers、orchestration、
+compiled_meta全部一致，见query_head_guard_disabled_boundary_results.json。
+其818.94→829.10μs（+1.24063%、0/5）和978.06→979.52μs（+0.14928%、1/5）
+完整保留，但不能归因新Query，也不能作为真正启用区间的性能证据。
+
+没有重测已完成S4/S5，而是采用真实最大S=6且同总T的新输入，保持原harness：
+- task_20261022_065845_127797123832：T64，[6,2]+[4]*14。
+- task_20261022_065846_127906019085：T80，[6,4]+[5]*14。
+
+两者history131072、B16/Rcap16，无dummy、同卡同进程冻结v122五窗；收取器
+将要求实际G6且flag=True，否则拒绝当作启用证据。两项尚待终态，不预记收益。
+正式八档S6与固定第9档混长完全不变。当前只剩这两个设备任务，无CPU任务，
+生产默认未改、未push，goal继续active。
