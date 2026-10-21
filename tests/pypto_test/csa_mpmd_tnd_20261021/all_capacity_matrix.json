@@ -1,0 +1,337 @@
+{
+  "candidate": "v38_all_capacity_balanced_middle",
+  "reference_commit": "84751e34cb1f27eff9e4d3fdf03f8495982f1cdf",
+  "scope": "固定八档完整CSA L1、数值和保护区；不包括B1额外边界/连续metadata矩阵/16卡整模型",
+  "toolchain": {
+    "release": "csa-shared-20261021-upstream-fixes",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-mpmd-upstream-20261021",
+      "commit": "e891351e305e1b8ac70ffb9ffe60a243fc0420dc"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_mpmd_tnd_20261021/upstream_refresh_20261021/manifest.json",
+    "validated_at": "2026-10-21T18:47:25+08:00"
+  },
+  "note": "阶段汇总：全部正容量使用两条前段流水及Main KV；balanced长历史使用Score到Attention局部行依赖流水，非balanced保留原四task。固定八档输入不变，统一包/公共SDK；每档同卡同进程仅SPMD与MPMD交替五窗，不拼接前几轮快窗。小容量新中段分支已通过CPU，设备正确性待本矩阵验收。",
+  "status": "complete",
+  "rows": [
+    {
+      "case": "h131072_b1",
+      "history_label": 131072,
+      "batch": 1,
+      "result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/all_capacity_v38_h131072_b1/result.json",
+      "device_id": 0,
+      "statistics_us": {
+        "spmd": {
+          "min": 353.46,
+          "mean": 357.796,
+          "max": 363.32,
+          "samples": [
+            355.08,
+            363.32,
+            357.66,
+            359.46,
+            353.46
+          ]
+        },
+        "mpmd": {
+          "min": 344.16,
+          "mean": 357.16400000000004,
+          "max": 369.72,
+          "samples": [
+            361.8,
+            369.72,
+            363.1,
+            347.04,
+            344.16
+          ]
+        }
+      },
+      "ratio": 0.9982336303368401,
+      "extra_control_source": null,
+      "candidate_over_extra_control": null,
+      "all_bit_equal": true
+    },
+    {
+      "case": "h131072_b4",
+      "history_label": 131072,
+      "batch": 4,
+      "result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/all_capacity_v38_h131072_b4/result.json",
+      "device_id": 1,
+      "statistics_us": {
+        "spmd": {
+          "min": 474.18,
+          "mean": 478.308,
+          "max": 485.94,
+          "samples": [
+            485.94,
+            474.18,
+            479.16,
+            477.88,
+            474.38
+          ]
+        },
+        "mpmd": {
+          "min": 465.76,
+          "mean": 478.284,
+          "max": 491.96,
+          "samples": [
+            485.04,
+            481.7,
+            465.76,
+            491.96,
+            466.96
+          ]
+        }
+      },
+      "ratio": 0.999949823126521,
+      "extra_control_source": null,
+      "candidate_over_extra_control": null,
+      "all_bit_equal": true
+    },
+    {
+      "case": "h131072_b8",
+      "history_label": 131072,
+      "batch": 8,
+      "result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/all_capacity_v38_h131072_b8/result.json",
+      "device_id": 2,
+      "statistics_us": {
+        "spmd": {
+          "min": 554.9,
+          "mean": 559.68,
+          "max": 563.7,
+          "samples": [
+            554.9,
+            563.7,
+            562.54,
+            558.04,
+            559.22
+          ]
+        },
+        "mpmd": {
+          "min": 527.36,
+          "mean": 536.836,
+          "max": 548.36,
+          "samples": [
+            535.92,
+            537.12,
+            535.42,
+            548.36,
+            527.36
+          ]
+        }
+      },
+      "ratio": 0.9591838193253288,
+      "extra_control_source": null,
+      "candidate_over_extra_control": null,
+      "all_bit_equal": true
+    },
+    {
+      "case": "h131072_b16",
+      "history_label": 131072,
+      "batch": 16,
+      "result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/all_capacity_v38_h131072_b16/result.json",
+      "device_id": 3,
+      "statistics_us": {
+        "spmd": {
+          "min": 709.28,
+          "mean": 712.996,
+          "max": 717.64,
+          "samples": [
+            710.94,
+            709.28,
+            713.28,
+            717.64,
+            713.84
+          ]
+        },
+        "mpmd": {
+          "min": 694.0,
+          "mean": 699.688,
+          "max": 704.8,
+          "samples": [
+            694.0,
+            699.68,
+            702.92,
+            697.04,
+            704.8
+          ]
+        }
+      },
+      "ratio": 0.9813350986541299,
+      "extra_control_source": null,
+      "candidate_over_extra_control": null,
+      "all_bit_equal": true
+    },
+    {
+      "case": "h131072_b24",
+      "history_label": 131072,
+      "batch": 24,
+      "result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/all_capacity_v38_h131072_b24/result.json",
+      "device_id": 4,
+      "statistics_us": {
+        "spmd": {
+          "min": 829.26,
+          "mean": 834.036,
+          "max": 840.68,
+          "samples": [
+            837.58,
+            830.8,
+            831.86,
+            840.68,
+            829.26
+          ]
+        },
+        "mpmd": {
+          "min": 833.22,
+          "mean": 843.048,
+          "max": 860.8,
+          "samples": [
+            860.8,
+            835.62,
+            833.22,
+            842.56,
+            843.04
+          ]
+        }
+      },
+      "ratio": 1.0108052889803318,
+      "extra_control_source": null,
+      "candidate_over_extra_control": null,
+      "all_bit_equal": true
+    },
+    {
+      "case": "h131072_b28",
+      "history_label": 131072,
+      "batch": 28,
+      "result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/all_capacity_v38_h131072_b28/result.json",
+      "device_id": 5,
+      "statistics_us": {
+        "spmd": {
+          "min": 985.6,
+          "mean": 988.768,
+          "max": 992.46,
+          "samples": [
+            991.9,
+            987.04,
+            992.46,
+            985.6,
+            986.84
+          ]
+        },
+        "mpmd": {
+          "min": 976.9,
+          "mean": 985.228,
+          "max": 995.76,
+          "samples": [
+            995.76,
+            976.9,
+            981.36,
+            989.96,
+            982.16
+          ]
+        }
+      },
+      "ratio": 0.9964197870481245,
+      "extra_control_source": null,
+      "candidate_over_extra_control": null,
+      "all_bit_equal": true
+    },
+    {
+      "case": "h8192_b16",
+      "history_label": 8192,
+      "batch": 16,
+      "result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/all_capacity_v38_h8192_b16/result.json",
+      "device_id": 6,
+      "statistics_us": {
+        "spmd": {
+          "min": 572.5,
+          "mean": 581.488,
+          "max": 586.76,
+          "samples": [
+            572.5,
+            578.82,
+            586.76,
+            582.7,
+            586.66
+          ]
+        },
+        "mpmd": {
+          "min": 581.76,
+          "mean": 591.072,
+          "max": 600.94,
+          "samples": [
+            594.14,
+            581.76,
+            596.66,
+            581.86,
+            600.94
+          ]
+        }
+      },
+      "ratio": 1.0164818534518338,
+      "extra_control_source": null,
+      "candidate_over_extra_control": null,
+      "all_bit_equal": true
+    },
+    {
+      "case": "h8192_b32",
+      "history_label": 8192,
+      "batch": 32,
+      "result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/all_capacity_v38_h8192_b32/result.json",
+      "device_id": 7,
+      "statistics_us": {
+        "spmd": {
+          "min": 741.86,
+          "mean": 744.72,
+          "max": 746.86,
+          "samples": [
+            744.68,
+            746.4,
+            741.86,
+            746.86,
+            743.8
+          ]
+        },
+        "mpmd": {
+          "min": 767.48,
+          "mean": 779.672,
+          "max": 787.86,
+          "samples": [
+            786.32,
+            778.62,
+            787.86,
+            767.48,
+            778.08
+          ]
+        }
+      },
+      "ratio": 1.0469330755183157,
+      "extra_control_source": null,
+      "candidate_over_extra_control": null,
+      "all_bit_equal": true
+    }
+  ],
+  "incomplete": [],
+  "weighted_geomean": {
+    "G128": 0.9908469381200538,
+    "G8": 1.031595111001834,
+    "G": 0.9988657281054952,
+    "target": 0.9
+  },
+  "performance_gate_met": false
+}
