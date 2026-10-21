@@ -776,3 +776,40 @@ query_head_read_model.py从原函数实际device head分组条件提取模型：
 两任务当前running，无CPU任务；使用原句柄继续收取，不因观察等待重提。
 目前新增阶段提交af32fd56、0c52ab13，后续结果继续分阶段提交，未push。
 完整九档G尚未形成，goal保持active，后续还需受影响边界、实际服务和组合验收。
+
+
+### Query扩展两档均已收取：暂只保留B16方向，准备独立分档
+
+两项任务均completed/exit0，严格冻结v122精度、Top-K/score、cache/state、
+保护及图验证通过。保持独立轮次中位数，完整五窗见对应结果JSON：
+
+| v4场景 | v122中位μs | 候选中位μs | 耗时变化 | 配对更快 |
+|---|---:|---:|---:|---:|
+| 128K/B16/S6（上一轮） | 796.44 | 785.62 | -1.35855% | 5/5 |
+| 固定128K/B16混长T56 | 752.40 | 754.70 | +0.30569% | 2/5 |
+| 8K/B32/S6 | 926.10 | 930.56 | +0.48159% | 0/5 |
+
+结果文件分别为query_contiguous_heads_v4_results.json、
+query_contiguous_heads_v4_mixed_results.json、
+query_contiguous_heads_v4_short_results.json。混长方向混合且幅度小，不能
+把0.31%认定为稳定损失；但它没有足够正向采用证据。短B32五窗全慢，不
+全域开启。三档数据不构成九档G，也不与其它优化不同轮次相加。
+
+下一步优先构建独立constexpr分档：沿已有长G6、64<=token容量<=96资源域，
+保留实际device T不整除8时完整旧helper回退。64处Q_B wide-N及前置几何
+策略改变，96是既有LocalStats/O_A资源边界；不是按B16名称写白名单。
+这个区间只是有依据的待验证范围，尚未证明T64/T72/T80等都有性能收益。
+应显式加QUERY_CONTIGUOUS_HEADS，不能隐式捆绑现有Attention开关；源码
+启用端与已测v4、关闭端与v122的生成代码分别核对，再补T64/T80与T65尾行
+等受影响边界。没有改生产默认，没有提前写采用PASS。
+
+另外只读复审Score消费链：当前B16关闭scale_page_coalescing，逐step逐页
+读取FP16 scale；B28原本开启。另会话已有B16 scale/WS组合小幅正向，不能
+直接迁移其百分比。若进一步并行化页布局证明，需同时处理group_offsets
+尾区的单缓存行写者、各轮覆盖、IDX_SCALE发布/获取、动态页与碎片回退；
+现有2字/request不能分给多个Scalar写者而忽略64B行共享。本轮没有生成
+这个候选、修改工作区或启动新任务，只把它列为需完整设计的后续方向。
+
+全部当前NPU/仿真/CPU任务已终态，current_state没有pending。本轮实际完成
+单生产者诊断、WS整链负例、Query三档正负结果与源码/资源审计，有实质进展，
+不存在重复外部阻塞；目标继续active，生产默认未变，未push。
