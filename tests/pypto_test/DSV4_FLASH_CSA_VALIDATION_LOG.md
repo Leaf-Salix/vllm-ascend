@@ -21140,3 +21140,44 @@ query MIX AIC mean/max：长档57.271/61.352→55.129/58.924μs，短档53.037/5
 Score首启却后移6.268/6.784μs，完整均未受益。按既定口径保留核内候选用于前段
 联动，不单独采用或为此扩测八档。完整样本及阶段证据见
 [query_hadamard4_results.json](csa_mpmd_tnd_20261021/query_hadamard4_results.json)。
+
+### 735.27：两条前段局部流水数值通过，完整改善但暴露预派发选核长尾
+
+v31在融合容量区间将Indexer压缩/query链组成8 AIC/16 AIV的局部MIX，将主压缩
+与Q_B/反量化组成16 AIC/32 AIV的另一局部MIX。HC、QA/QR、KV、metadata、Score、
+Top-K、Attention和输出保持独立task，完整CSA为21个task，小容量仍走原独立链。
+KV三个task提前提交，Score显式等待两条前段和KV写回，避免占核后阻塞其前驱。
+
+POOL发布必须在任何state提交之前；每条链的state写等待全部真实POOL owner，
+norm只消费自己的pooled行。Indexer scale保留原48 logical page writer布局，
+当前16个AIV分别接管worker、worker+16、worker+32，仍由同一物理worker处理
+同页所有64B读改写。未改页计划布局或改成按request提交scale。两条信号分别为
+11×24×128与4×48×128个INT32，使用不同动态维度、首次清零、顺序独占；数学
+与Native cache/state原存储不变，没有新增Host逐请求metadata。
+
+长短B16完整CPU及设备检查通过。三侧eager、graph、post-L1的9类业务张量全部
+逐bit一致，保护区全部通过。对照选已测更快的v29，不用回退的v30作为唯一分母。
+
+| 场景 | 冻结SPMD min/mean/max | v29控制 min/mean/max | v31 min/mean/max | 相对控制mean |
+|---|---:|---:|---:|---:|
+| 128K/B16 | 718.84 / 722.148 / 724.60 | 767.62 / 782.228 / 808.06 | 715.54 / 762.348 / 786.72 | −2.54% |
+| 8K/B16 | 561.68 / 572.872 / 581.92 | 678.20 / 691.084 / 698.38 | 560.90 / 604.748 / 655.74 | −12.49% |
+
+单位μs。长档Score首启mean325.068→295.080μs，短档338.244→272.352μs；但完整
+跨度的max−min增大到71.18/94.84μs，不能仅凭较快的min认定已经稳定优于SPMD。
+长档五窗有三窗、短档有两窗变成两条前段串行。长档窗口1中，Main占用
+{0,1,3,4,6,7,9,10,12,13,15,16,18,19,21,22}这16个AIC，99.62→200.32μs；
+Indexer分到它的子集{0,3,6,9,12,15,18,21}，203.94μs才开始，未利用另外8个AIC
+并发。窗口3则两条链使用不相交核集合，约101/103μs共同开始，完整仅715.54μs。
+全部窗口、实际AIC集合和阶段见
+[front_pipelines_results.json](csa_mpmd_tnd_20261021/front_pipelines_results.json)。
+
+源码核对：当前Simpler 57e49923的`stage_sync_start_cores`在gated MIX路径使用
+`get_mix_split_cluster_offset_states`并按首位选择，可把busy核的pending位置和
+idle核一起纳入；普通ready路径先选idle集合。这与上述现象吻合，但L1本身没有
+派发状态字段，不能仅凭它证明某窗一定走了gated路径。下一候选v32只关闭融合
+分支QR生产者的allow_early_resolve，使两条链在共同最后前驱完成后再进入ready
+选核；保留sync_start、21个task及全部数学，公共SDK不改。先做长短B16对照确认。
+
+额外完成冻结B1 S1/S5的CPU编译，覆盖小容量及其两种资源策略；未把它们记作NPU
+边界验收。v31仍为候选，长尾、其余八档、连续状态和真实16卡要求尚未完成。
