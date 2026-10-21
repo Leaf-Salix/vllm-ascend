@@ -9,7 +9,8 @@
 ## 基线重建
 
 `frozen_v122.json` 固定 Git 提交、41 个源码 hash 和两个覆盖文件。
-`reference_overlay/` 保存这两个文件的原始字节，不作为当前默认实现或独立导入包。
+`reference_overlay/*.py.source` 保存这两个文件的原始字节，避免格式器修改固定基线。
+它们不作为当前默认实现或独立导入包。
 重建只读 Git 和覆盖文件，不依赖旧 `runs/shared_combined_candidate_v122`。
 
 在 worktree 根目录运行，输出目录必须不存在：

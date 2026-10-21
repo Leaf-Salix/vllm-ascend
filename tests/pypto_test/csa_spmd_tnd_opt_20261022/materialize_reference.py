@@ -15,7 +15,7 @@ def materialize(output):
     # Resolve and verify all bytes before creating any output.
     contents = {}
     for name, expected in manifest["files"].items():
-        overlay = here / "reference_overlay" / name
+        overlay = here / "reference_overlay" / (name + ".source")
         if name in manifest["overlay"]:
             value = overlay.read_bytes()
         else:
