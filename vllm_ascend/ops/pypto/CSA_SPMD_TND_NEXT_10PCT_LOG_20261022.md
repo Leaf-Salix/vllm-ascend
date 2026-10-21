@@ -530,3 +530,93 @@ rsqrt及尾行recip(sqrt)、BF16边界均未修改。T56仍选择4 head；含尾
 已提交`task_20261022_045018_19010782266`（front_partition_i8_v3、B16/S6五窗），
 沿用冻结v122、原工作区方法与公共SDK，尚未预记结果。当前不存在最终九档
 G<=0.90证据；生产算子未改、未push，goal继续active。
+
+## 2026-10-22：停止分链扩扫，建立M64/N256 Score独立试验
+
+上一goal轮完成两次本地阶段提交及多项正负对照，属于实际进展。本轮核对原
+v3任务仍运行，继续原handle；随后completed(exit=0)，严格回归通过。B16/S6
+799.34→809.12μs，+1.2235%，仅1/5窗口更快，见`front_partition_i8_v3_results.json`。
+按32个实际AIV均衡head工作量没有转化为完整收益。停止分链这条路线的参数
+扩扫；保留v2混长正向和Main后移的小幅收益，但不作为全S6采用结论。
+
+### 新Score资源组织与历史负例的区别
+
+先重新阅读旧v39/v60/v62记录：N128/M192单96KiB Acc与K128 WS回退7.21%；
+N128三M128、两个64KiB Acc复用回退3.45%；仅预取到L1的变体回退8.90%。
+不重复这些路径。新的`score_query_pipeline`仍独立基于v122，只作用于原
+长G6/SPLIT_SCORE_ROWS域：
+
+- QK按六个独立query分别做M64/N256/K128，使用一个64KiB INT32 Acc。
+- 加权归约为六段K64，保持全局head顺序0..383，使用独立16KiB FP32 Acc；
+  每个query的64个非零系数仍完整处于一段。不能据此预先声称设备逐bit相同。
+- 当前query的QK/FIX与前一query的WS交错，最后补WS5；每256列仅写一次六行。
+- Left保留六个8KiB query与六个2KiB系数片，共60KiB。Right为32KiB Key及
+  32KiB WS；只把下一Key预取到L1，不同时保留第三块Right。
+- 每1024列由原32次QK/32次WS变为24次QK/24次WS；这只是操作数模型，
+  不能代替完整耗时。原1024列双槽、逻辑叶、Native页检查、FP16 FIX比例/ReLU、
+  AIV Scale/Top-K、同分树和READY/ACK/末尾排空均保留。
+
+### 必须确认实际启用；资源与传递事件审计
+
+首次CPU编译误用了固定v122描述符，仍是QK_PANEL=64/TO_L0=True，所以新wrapper
+没有选中N256 helper。虽编译成功，但资源审计未找到query_qk_acc，不能作为新
+候选编译证据。已从实际候选policy重建描述符，先确认相同输入的v122 policy
+逐项等于原描述符，再只更新QK_PANEL=256、TO_L0=False；所有Tensor buffer
+形状/dtype保持相同。文件`descriptors/score_query_pipeline_b16.json`。
+
+实际启用版`compile_score_query_pipeline_active_b16`完整CPU编译通过。
+`score_query_pipeline_resources.json`从AllocateMemoryAddr和最终C++确认：
+QK Acc 0..65536、WS Acc 65536..81920互不重叠，Left末端61440字节；
+四个panel的Key各32KiB，WS0..4 Right不覆盖仍被六次QK消费的Key。
+最后WS5可以复用已退役Key地址，下一panel的Key也只能在WS5读完后覆盖。
+
+首版审计要求退役Key必须有直接M→MTE1事件，因此停止。逐段查看生成C++确认
+实际存在QK5 M→FIX、其FIX→MTE1两个完整set/wait链：WS5的Right正从QK5的FIX
+结果加载，这个传递依赖已保证最后一次Key读取完成。审计改为明确验证这两段
+事件，而非忽略检查；其它QK Acc和Right复用仍检查各自set/wait。最终审计通过，
+并验证旧的未启用N64编译产物会被拒绝。没有修改生成C++或公共SDK。
+
+四项CPU合同检查通过：原分档范围、全局K/head覆盖、页/FIFO/Vector数学不变、
+实际policy与CPU描述符一致。首版枚举包含非法T>R×query上界，测试已改为要求
+新旧policy都拒绝该输入，没有放宽生产验证。设备对照仅提交代表B16：
+`task_20261022_050510_249159220949`，五窗完整L1和严格同输入比较，尚待最终结果。
+
+### 不重复另一会话的multi-ND负例
+
+只读核对当前固定ISA的`pto/common/arch/memory/tload_common.hpp`，确有三维
+ND2NZ的ndNum通路，可表示4160字节页stride，但多矩阵stride必须正向。
+当前fixture为倒序物理页，不能只把二维Mat reshape就当成逻辑顺序正确。
+继续查另一会话记录，找到2026-10-20的Key多ND完整试验：54项UT、12项probe
+通过，B28全链1163.64→1310.50μs、0/5快；Mat父双槽assemble不支持，最终
+直接进两个Right槽，改变了供数生命周期。此前负例及其数据路径限制保留，
+本轮没有重复上卡、换成正序fixture或编辑共享SDK。
+
+当前生产默认未变，最终九档G仍未形成；完整10%目标继续active，未push。
+
+### M64/N256终态与下一步诊断范围
+
+`task_20261022_050510_249159220949`已completed(exit=0)：严格输出/Top-K/score、
+cache/state、保护、图和代际均通过；B16完整五窗798.16→848.84μs，+6.3496%，
+0/5快。见`score_query_pipeline_results.json`。拒绝采用，不扩其它档，也不将
+更少MMA或合法的Acc分配当作性能收益。当前无待收取设备任务。
+
+开始前已复核历史Scalar READY/ACK探针与phase-clock局限：它们包含异步队列
+和探针成本，不能把包围intrinsic的Scalar时钟差直接称为引擎阻塞时间。本轮
+没有重复已完成的全核阶段端点测量。下一步优先补可解释的生产路径诊断，
+再决定新的代码方向，而不是继续扫宽N或前段核数。
+
+已阅读本地`pypto-lib/.claude/skills/incore-profiling/SKILL.md`及其canonical
+`docs/debug-and-tune/incore-simulator-profiling.md`，并按技能执行只读函数发现。
+构建路径须传绝对路径（相对路径会由脚本按pypto-lib根解析）；正确发现唯一
+`dynamic_csa_full`及其配对.cpp/.pto。尚未运行仿真或生成任何trace。
+
+完整CSA的72角色常驻协作不能直接装进该技能的单核合成case。后续若采用
+仿真，应单独建立明确标识的Score生产路径诊断，复用原数学和页访问，手工
+核对group/leaf/Q/L/页表、系数和Scalar维度，让CUBE/MTE2/FIX均有真实工作。
+可评估独立生产者不受FIFO反压时的成本；这种隔离案例不用于解释完整72角色
+调度，更不能进入九档性能汇总。不得将原完整kernel预填就绪标志后冒充真实
+全核执行，也不得改变正式源、基线或用合成输入的周期替代实机L1。
+
+只读确认正式CANN 9.2.0-beta.2目录已有`tools/msopprof/bin/msopprof`与
+`tools/profiler/bin/msprof`；没有使用--msopprof/--auto-msopprof，没有复制worker
+或注入库、修改共享CANN/SDK。具体仿真case、输入绑定和有效trace尚待建立。
