@@ -797,6 +797,10 @@ def worker(args):
     llm = LLM(
         model=plan["model"], tokenizer_mode="deepseek_v4", trust_remote_code=True,
         worker_cls="offline_pd.worker.OfflineNPUWorker",
+        # NPUPlatform applies this compatibility setting only for worker_cls=auto.
+        # Our observer worker inherits NPUWorker, so preserve the same setting:
+        # Ascend's prepare/finalize owns TP slicing, not upstream MoE's extra chunk.
+        all2all_backend="flashinfer_all2allv",
         **({"scheduler_cls": "low_acceptance_20261001.scheduler.AcceptanceScheduler"}
            if args.mixed_requests else {}),
         tensor_parallel_size=4 if prefill else 1, enable_expert_parallel=True,
