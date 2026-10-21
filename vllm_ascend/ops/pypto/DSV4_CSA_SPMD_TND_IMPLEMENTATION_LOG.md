@@ -1272,3 +1272,40 @@ pto调试注释后与v4相同，Host orchestration逐字相同。独立可复核
 没有用CPU资源通过替代TND数值、动态页布局或完整L1设备验收。
 
 本CPU阶段及时提交；QA与WS候选仍不进入正式实现，整体10%目标未改变。
+
+### v88：借入B28 Score逻辑worker置换，完成独立CPU阶段
+
+前四个阶段提交已保存为af991f59、63533c5d、87b10fad、e76656c6。
+本阶段在正式TND源码之外生成borrowed_score_owner_candidate_v88，
+只借入另一会话source_score_owner_interval的七文件增量。Vector调度与
+pair发布函数先验证其原版AST和本地完全相同，才移植对应函数；其余
+文件作受断言保护的精确修改。保留本地inactive-B1形状修复、native150、
+已采用输出分工和TND服务/绑定，不覆盖另一会话或正式包。
+
+Host开启域为长历史G6、144<T容量<=256；真实group/leaf/visible及是否
+有至少两个Score步差异仍在本轮META writer判断。AIC与双AIV整组使用
+physical→logical；Top-K等根时使用logical→physical，原叶边界、叶内
+数学、同分优先级、GM槽位和物理phase发布不变。group_offsets在布局
+证明区之后追加96字；B28编译描述符由1480增至1576字，B16仍848字。
+
+B28开启/B16关闭的完整CPU编译通过。B16完整C++仅去整行pto调试注释后
+与v73已测v4一致，Host orchestration逐字相同；开启时仍一个MIX、24组。
+编译器对helper报ScalarWriteLineShared的保守告警，实际AllocateMemoryAddr
+中10处映射表Scalar写均位于worker==planner唯一写者条件内；未通过
+关闭诊断、修改编译器或增加不必要全核屏障来处理。
+
+实际Scalar函数体在有边界检查的CPU原语下完成11组检查：B28非身份置换、
+非零负数BOOL、active→empty→identity→active、少组/等负载/过多组、
+关闭及无效叶计划等。独立枚举每个物理组的producer工作项，核对每条
+query/lane的根等待实际writer；置换必须双射且两表互逆。刻意破坏逆表
+会被检查器拒绝。另96项Host边界检查和两份描述符/实际policy一致性通过。
+这些只是有界CPU语义与生成代码证据，不证明NPU并发或cache可见性。
+
+本次未新增设备任务。既有QA两项v86仍pending，16卡全部被其它作业占用；
+等待原任务，不重复提交或干预其它用户。WS与Score候选后续仍需各自
+完整L1/精度/动态页及图验证；尤其大T需>=24实际活动组的混长输入，
+旧6请求矩阵只会走身份路径，不能算作active置换验证。
+
+本阶段及时commit，正式八档仍为v4的GM0.991928345，10%目标未达到。
+同时整理recovery_state中旧v47/未采用/禁止commit等过期下一步描述，
+原内容保存在recovery_historical_before_v88.json，不改任何历史测量。

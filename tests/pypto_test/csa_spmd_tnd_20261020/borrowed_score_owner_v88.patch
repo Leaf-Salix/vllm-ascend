@@ -1,0 +1,567 @@
+--- a/vector_schedule.py
++++ b/vector_schedule.py
+@@ -59,6 +59,8 @@
+ """
+ 
+ import pypto.language as pl
++
++from .score_owner_stages import score_balance_plan_stage, score_logical_worker
+ 
+ from .attention_dependencies import wait_attention_plan_rows
+ from .attention_plan_stages import (
+@@ -321,6 +323,7 @@
+     LOCAL_ATTENTION_STATS: pl.constexpr = False,
+     SCALE_PAGE_COALESCING: pl.constexpr = False,
+     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
++    SCORE_PREFIX_BALANCE: pl.constexpr = False,
+ ):
+     pl.func_attr({"split_aiv": True})
+     x_fp32_gm = x_fp32
+@@ -443,13 +446,13 @@
+             # 整个请求的连续页证明与数值无关，移到同一 META producer；
+             # 每叶两条 AIV 复用结果。碎片/越界/失活请求记录0方向，保留原读取。
+             group_offsets = indexer_scale_layout_plan_stage(
+-                idx_bounds,
+-                idx_lengths,
+-                indexer_table,
+-                group_offsets,
+-                tokens,
+-                pl.tensor.dim(idx_cache, 0),
+-                VECTORS,
++                idx_bounds, idx_lengths, indexer_table, group_offsets,
++                tokens, pl.tensor.dim(idx_cache, 0), VECTORS,
++            )
++        if SCORE_PREFIX_BALANCE:
++            score_requests = pl.tensor.dim(idx_lengths, 0)
++            group_offsets = score_balance_plan_stage(
++                group_offsets, group_plan, score_requests, tokens,
+             )
+         # publish先排空业务写回并维护缓存，随后发单写者完成信号；不是atomic计数器。
+         # 计划在本次调用保持只读，消费者直到首次使用才等这个真实producer。
+@@ -461,7 +464,10 @@
+         # 只等本核所有真实消费行的四个producer，随后直接归约所需列。
+         # inv来自本AIV已经发布的INPUT；RAW缓冲不再读写，也没有RAW通知。
+         if worker < (tokens + 7) // 8:
+-            signal = wait_row_owners(signal, PHASE_PARTIAL, CORES, generation, (worker // 2) * 4, 4, 1, GROUPS, 0, 1)
++            signal = wait_row_owners(
++                signal, PHASE_PARTIAL, CORES, generation,
++                (worker // 2) * 4, 4, 1, GROUPS, 0, 1
++            )
+     else:
+         # 投影 task=(M16 行块*4+K4096 split)，一维 task % 24 决定真实 AIC owner。
+         if HC_ROW_DEPENDENCIES:
+@@ -469,7 +475,10 @@
+             # (4*rb+k)%24。48*4能被24整除，所有wave均对应相同四个producer。
+             # 空归约者不读取partials，也不应为无关行等待；仍照合同发布RAW。
+             if worker < (tokens + 15) // 16:
+-                signal = wait_row_owners(signal, PHASE_PARTIAL, CORES, generation, worker * 4, 4, 1, GROUPS, 0, 1)
++                signal = wait_row_owners(
++                    signal, PHASE_PARTIAL, CORES, generation,
++                    worker * 4, 4, 1, GROUPS, 0, 1
++                )
+         else:
+             projection_tasks = ((tokens + 15) // 16) * 4
+             signal = wait_row_owners(
+@@ -495,10 +504,14 @@
+             # PHASE_INPUT发布已保证本核写回，因此无需再等其它核的INPUT。
+             hc_gate_tiles = (tokens + 7) // 8
+             if worker < hc_gate_tiles:
+-                signal = wait_row_owners(signal, PHASE_RAW, CORES, generation, worker // 2, 1, 1, VECTORS, GROUPS, 1)
++                signal = wait_row_owners(
++                    signal, PHASE_RAW, CORES, generation,
++                    worker // 2, 1, 1, VECTORS, GROUPS, 1
++                )
+                 if worker + VECTORS < hc_gate_tiles:
+                     signal = wait_row_owners(
+-                        signal, PHASE_RAW, CORES, generation, worker // 2 + VECTORS // 2, 1, 1, VECTORS, GROUPS, 1
++                        signal, PHASE_RAW, CORES, generation,
++                        worker // 2 + VECTORS // 2, 1, 1, VECTORS, GROUPS, 1
+                     )
+         else:
+             signal = wait_row_owners(
+@@ -548,7 +561,9 @@
+     # 只省略没有本阶段有效输出的M8角色通知；活跃角色发布与全部wait/math不变。
+     if worker < (tokens + 7) // 8:
+         signal = publish_phase(signal, PHASE_NORM, core, CORES, generation)
+-    comb = hc_comb_range(inv, raw, hc_scale, hc_base_2d, comb, comb_tail, worker, VECTORS, partials, HC_CONSUMER_REDUCE)
++    comb = hc_comb_range(
++        inv, raw, hc_scale, hc_base_2d, comb, comb_tail, worker, VECTORS, partials, HC_CONSUMER_REDUCE
++    )
+     # 只省略没有本阶段有效输出的M8角色通知；活跃角色发布与全部wait/math不变。
+     if worker < (tokens + 7) // 8:
+         signal = publish_phase(signal, PHASE_COMB, core, CORES, generation)
+@@ -583,14 +598,8 @@
+     # 后面的既有ROPE获取同时保护该前缀；不能移到发布之后而不补依赖。
+     if EARLY_ATTENTION_GEOMETRY:
+         attention_indices = attention_geometry_prepare_stage(
+-            positions,
+-            idx_bounds,
+-            idx_lengths,
+-            compressed_table,
+-            attention_indices,
+-            pl.tensor.dim(main_cache, 0) // 32,
+-            worker,
+-            VECTORS,
++            positions, idx_bounds, idx_lengths, compressed_table, attention_indices,
++            pl.tensor.dim(main_cache, 0) // 32, worker, VECTORS,
+             PLAN_PHYSICAL_ROWS,
+         )
+     signal = publish_phase(signal, PHASE_ROPE, core, CORES, generation)
+@@ -842,6 +851,10 @@
+     # Score两种角色必须同时可推进。不能先等PHASE_SCORE_CUBE“整段完成”，否则
+     # Cube等待AIV归还双缓冲槽，而AIV等待Cube退出，形成环。这里只等输入就绪。
+     signal = wait_row_owners(signal, PHASE_IDX_SCALE, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
++    score_worker = pl.tile.get_block_idx()
++    if SCORE_PREFIX_BALANCE:
++        score_requests = pl.tensor.dim(idx_lengths, 0)
++        score_worker = score_logical_worker(group_offsets, score_requests, tokens, score_worker)
+     score_arena, pair_arena = indexer_score_vector_lane_stage(
+         idx_cache,
+         indexer_table,
+@@ -854,7 +867,7 @@
+         score_arena,
+         pair_arena,
+         pl.tile.get_subblock_idx(),
+-        pl.tile.get_block_idx(),
++        score_worker,
+         QUERY_GROUP,
+         QK_PANEL,
+         SCORE_TILE,
+@@ -904,6 +917,7 @@
+         generation,
+         QUERY_GROUP,
+         EARLY_ATTENTION_GEOMETRY,
++        SCORE_PREFIX_BALANCE,
+     )
+     signal = publish_phase(signal, PHASE_TOPK, core, CORES, generation)
+     attention_indices, attention_bias, attention_mask, signal = attention_slot_plan_stage(
+@@ -979,16 +993,8 @@
+                 # amax需要本行的全部1024列。首版按整组所有行的真实O_A owner
+                 # 获取数据，已比等待全八组更细；不声称做到逐行块最小依赖。
+                 signal = wait_row_owners(
+-                    signal,
+-                    PHASE_OA_GROUP_BASE + quant_group,
+-                    CORES,
+-                    generation,
+-                    quant_group * oa_per_group,
+-                    oa_per_group,
+-                    1,
+-                    GROUPS,
+-                    0,
+-                    1,
++                    signal, PHASE_OA_GROUP_BASE + quant_group, CORES, generation,
++                    quant_group * oa_per_group, oa_per_group, 1, GROUPS, 0, 1
+                 )
+                 o_quant, o_scales = o_projection_groups_quant_stage(
+                     o_r, o_quant, o_scales, tokens, worker, VECTORS, OB_ROWS, quant_group, quant_group + 1
+@@ -999,7 +1005,9 @@
+     else:
+         oa_tasks = 8 * ((tokens + 127) // 128) * (1024 // OA_COLS)
+         signal = wait_row_owners(signal, PHASE_OA, CORES, generation, 0, oa_tasks, 1, GROUPS, 0, 1)
+-        o_quant, o_scales = o_projection_group_quant_stage(o_r, o_quant, o_scales, tokens, worker, VECTORS, OB_ROWS)
++        o_quant, o_scales = o_projection_group_quant_stage(
++            o_r, o_quant, o_scales, tokens, worker, VECTORS, OB_ROWS
++        )
+         signal = publish_phase(signal, PHASE_O_QUANT, core, CORES, generation)
+     signal = wait_row_owners(signal, PHASE_OB, CORES, generation, 0, 64, 1, GROUPS, 0, 1)
+     # 所有有有效comb输出的HC角色先发布COMB，再进入未改动的Score全48核完成集合；post/comb此时已
+--- a/binding.py
++++ b/binding.py
+@@ -25,6 +25,7 @@
+ from vllm_ascend import envs
+ 
+ from .policy import CSASPMDPolicy, select_policy
++from .score_owner_stages import SCORE_BALANCE_WORDS
+ 
+ 
+ def _pad(value: int, block: int) -> int:
+@@ -199,10 +200,11 @@
+             "weights_partial": ((p16 * 4, 64), torch.float32),
+             "head_weights": ((p16, 64), torch.float32),
+             # 前缀+4*T组描述符，16项对齐后接48个scale链表头和4*T项地址描述符；
+-            # 启用连续页策略时尾部2*B项为(first_page,direction)，关闭时维持原容量。
++            # 连续页或Score映射保留2*B项布局证明区；映射另追加四份24项表。
+             "group_offsets": (
+                 (_pad(_pad(b + 1, 16) + 4 * t, 16) + 48 + 4 * t
+-                 + (2 * b if self.policy.scale_page_coalescing else 0),),
++                 + (2 * b if self.policy.scale_page_coalescing or self.policy.score_prefix_balance else 0)
++                 + (SCORE_BALANCE_WORDS if self.policy.score_prefix_balance else 0),),
+                 torch.int32,
+             ),
+             "group_plan": ((8,), torch.int32),
+--- a/indexer_publish_stages.py
++++ b/indexer_publish_stages.py
+@@ -63,6 +63,8 @@
+ """
+ 
+ import pypto.language as pl
++
++from .score_owner_stages import wait_balanced_score_roots
+ 
+ from ..deepseek_v4_flash_csa.config import FP32_NEG_INF
+ from .attention_dependencies import wait_indexer_query_roots
+@@ -162,6 +164,7 @@
+     generation: pl.Scalar[pl.INT32],
+     QUERY_GROUP: pl.constexpr,
+     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
++    SCORE_PREFIX_BALANCE: pl.constexpr = False,
+ ):
+     """AIV发布pair根；保持非balanced根0原位归并及原多路平局优先顺序。"""
+     tokens = pl.tensor.dim(positions, 0)
+@@ -192,16 +195,18 @@
+             # request_begin替换成固定S的除法。根数与下方归并完全相同。
+             local_query = query - _begin
+             group = pl.cast(pl.read(offsets, [request]), pl.INDEX) + local_query // QUERY_GROUP
+-            signals = wait_indexer_query_roots(
+-                signals,
+-                plan,
+-                group,
+-                local_query % QUERY_GROUP,
+-                root_count,
+-                generation,
+-                QUERY_GROUP,
+-                BALANCED,
+-            )
++            if SCORE_PREFIX_BALANCE:
++                score_requests = pl.tensor.dim(lengths, 0)
++                score_query_lane = local_query % QUERY_GROUP
++                signals = wait_balanced_score_roots(
++                    signals, offsets, plan, score_requests, tokens,
++                    group, score_query_lane, root_count, generation, QUERY_GROUP,
++                )
++            else:
++                signals = wait_indexer_query_roots(
++                    signals, plan, group, local_query % QUERY_GROUP, root_count,
++                    generation, QUERY_GROUP, BALANCED,
++                )
+             if BALANCED and QUERY_GROUP != 2:
+                 # G2独立半叶仍走下方原顺序左折叠，保持同分规则。
+                 # 多路归并helper保持incoming3/2/1/root顺序及最后不足四路分支。
+@@ -216,10 +221,7 @@
+                     resident_merged = pl.tile.mrgsort(next_pairs, root_pairs, tmp=resident_tmp)
+                     # 实取1024元素，避免把整个2048结果的生命周期带进下一轮。
+                     root_pairs = pl.tile.extract(
+-                        resident_merged,
+-                        0,
+-                        0,
+-                        [1, TOPK_PAIR_WIDTH],
++                        resident_merged, 0, 0, [1, TOPK_PAIR_WIDTH],
+                         target_memory=pl.MemorySpace.Vec,
+                     )
+                 # 保留原根0最终内容；只消除无人消费的中间写回。
+--- a/cube_schedule.py
++++ b/cube_schedule.py
+@@ -45,6 +45,7 @@
+     indexer_weights_project_stage,
+ )
+ from .indexer_score_stages import indexer_score_cube_stage
++from .score_owner_stages import SCORE_BALANCE_BRANCH_GROUPS, score_logical_worker
+ from .kv_stages import kv_project_stage
+ from .output_projection_a_stages import o_projection_a_groups_stage_nz, o_projection_a_stage_nz
+ from .output_projection_b_stages import o_b_groups_stage, o_b_stage
+@@ -200,6 +201,7 @@
+     COOPERATIVE_PREFIX: pl.constexpr = False,
+     SPLIT_SCORE_ROWS: pl.constexpr = False,
+     OUTPUT_WORK_BALANCE: pl.constexpr = False,
++    SCORE_PREFIX_BALANCE: pl.constexpr = False,
+ ):
+     # 恢复原分task五份流式权重的BYPASS；预定义incore使用函数属性表达。
+     # 当前PyPTO此属性只接受(参数序号,策略整数)，1表示CachePolicy.BYPASS。
+@@ -311,7 +313,7 @@
+             normed, main_wkv, main_wgate, main_value, main_score,
+             weights_proj, weights_partial, idx_query_rope_heads, hadamard,
+             idx_query_had, qr_matmul, wq_b, q_proj, idx_lengths, idx_count,
+-            idx_normed, idx_had, wkv, kv_fp32, signal, worker, generation, 4,
++            idx_normed, idx_had, wkv, kv_fp32, signal, worker, generation, SCORE_BALANCE_BRANCH_GROUPS,
+         )
+     else:
+         weights_partial = indexer_weights_project_stage(normed, weights_proj, weights_partial, worker, GROUPS)
+@@ -378,6 +380,10 @@
+     groups = pl.cast(pl.read(group_plan, [0]), pl.INDEX)
+     signal = wait_row_owners(signal, PHASE_COEFF, CORES, generation, 0, groups, 1, VECTORS, GROUPS, 1)
+     signal = wait_row_owners(signal, PHASE_IDX_SCALE, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
++    score_worker = worker
++    if SCORE_PREFIX_BALANCE:
++        score_requests = pl.tensor.dim(idx_lengths, 0)
++        score_worker = score_logical_worker(group_offsets, score_requests, tokens, worker)
+     indexer_transfer = indexer_score_cube_stage(
+         idx_query_i8,
+         coefficients,
+@@ -391,7 +397,7 @@
+         group_offsets,
+         group_plan,
+         indexer_transfer,
+-        worker,
++        score_worker,
+         QUERY_GROUP,
+         QK_PANEL,
+         SCORE_TILE,
+--- a/entry.py
++++ b/entry.py
+@@ -43,7 +43,7 @@
+     编排内部建立，避免作为独立外部参数触发部分重叠别名检查；不复制数据。业务
+     写回发生后先发布、读方等待后才用别名，不能单凭Python对象别名假设可见。
+     group_offsets至少pad16(pad16(B+1)+4*T)+48+4*T个INT32；
+-    SCALE_PAGE_COALESCING启用时尾部另加2*B项，关闭时保留原容量。
++    连续scale或Score映射启用时尾部先保留2*B项；Score映射再追加96项。
+     依次为前缀/组描述符/scale页writer链表头/合法关闭行地址/连续页布局；
+     最后每请求两项(first_page,direction)由META唯一writer覆盖后发布，
+     balanced Score复用证明；方向0保留原逐页读取，旧分区偏移均不变化。
+@@ -290,6 +290,7 @@
+     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+     SPLIT_SCORE_ROWS: pl.constexpr = False,
+     OUTPUT_WORK_BALANCE: pl.constexpr = False,
++    SCORE_PREFIX_BALANCE: pl.constexpr = False,
+ ):
+     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
+     with pl.cluster(name_hint="dynamic_csa_full"):
+@@ -384,6 +385,7 @@
+             COOPERATIVE_PREFIX,
+             SPLIT_SCORE_ROWS,
+             OUTPUT_WORK_BALANCE,
++            SCORE_PREFIX_BALANCE,
+         )
+         (
+             x_fp32,
+@@ -581,6 +583,7 @@
+             LOCAL_ATTENTION_STATS,
+             SCALE_PAGE_COALESCING,
+             PLAN_PHYSICAL_ROWS,
++            SCORE_PREFIX_BALANCE,
+         )
+     return (
+         x_fp32,
+@@ -816,6 +819,7 @@
+     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+     SPLIT_SCORE_ROWS: pl.constexpr = False,
+     OUTPUT_WORK_BALANCE: pl.constexpr = False,
++    SCORE_PREFIX_BALANCE: pl.constexpr = False,
+ ):
+     # Native cache只作为一个根入参传入。两份Key是编排内的零拷贝描述符，
+     # 避免把“可写cache+部分重叠只读视图”当作独立外部入参触发Torch别名拒绝。
+@@ -1066,6 +1070,7 @@
+             PLAN_PHYSICAL_ROWS,
+             SPLIT_SCORE_ROWS,
+             OUTPUT_WORK_BALANCE,
++            SCORE_PREFIX_BALANCE,
+         )
+     return (
+         x_fp32,
+--- a/policy.py
++++ b/policy.py
+@@ -123,6 +123,7 @@
+     plan_physical_rows: bool = False
+     split_score_rows: bool = False
+     output_work_balance: bool = False
++    score_prefix_balance: bool = False
+ 
+     def constexprs(self) -> dict[str, int | bool]:
+         return {
+@@ -147,6 +148,7 @@
+             "PLAN_PHYSICAL_ROWS": self.plan_physical_rows,
+             "SPLIT_SCORE_ROWS": self.split_score_rows,
+             "OUTPUT_WORK_BALANCE": self.output_work_balance,
++            "SCORE_PREFIX_BALANCE": self.score_prefix_balance,
+         }
+ 
+ 
+@@ -225,6 +227,9 @@
+         # 前段资源区间；依据完整实测取舍，不把回退唯一归因于QA或假定最优。
+         # 实际有效query/长度/页表仍在device读取，不按B4/B8等测试点枚举。
+         split_score_rows=long_history and group == 6 and tokens >= SCORE_SPLIT_MIN_TOKENS,
++        # Two M64 KV bodies plus more than one M16 tail, within two Q_B M128 boxes.
++        # Actual group/leaf/visible imbalance is checked anew by the META writer.
++        score_prefix_balance=long_history and group == 6 and (2 * 64 + 16) < tokens <= 256,
+         # B1 reuses its existing balanced half-leaf domain. Multiple-request
+         # redistribution is limited to long G6 and the existing 64..96-token
+         # resource interval. Short G2/B16 regressed despite exact outputs;
+--- /dev/null
++++ b/score_owner_stages.py
+@@ -0,0 +1,187 @@
++# SPDX-License-Identifier: Apache-2.0
++"""按本轮Score工作量与前段KV负载，置换Score的物理核归属。
++
++整体思路
++    不拆叶、不改变query组、tile或排序树。先统计原24个逻辑worker各自的
++    1024候选步数，再把较短的逻辑worker交给前段KV较重的物理核。AIC和
++    同组双AIV使用同一个映射；根消费者用逆映射等待真实物理写者。
++    每个逻辑worker的工作顺序、GM交接槽和根写入位置保持原样，FFTS仍在
++    原物理核组内握手，因此不是将一条流水的三种角色拆散重派。
++
++动态数据和布局
++    只在既有META单写者上计算，读取本轮group/leaf计划及各组visible。
++    group_offsets尾部为布局证明保留2*B字后，追加四份24项INT32：
++    Score步数、前段负载排序键、physical→logical、logical→physical。
++    常量24、4、128、64、16来自既有A3核数及Q_B/KV资源划分，不是B28表。
++    仅当真实group数在24..48且至少相差两个Score步时排序；其它情况写身份
++    映射。Host仅选择两个M128盒的资源区间，不回读device长度或页表。
++
++前段排序键
++    精确复用KV的logical=(physical+20)%24、M64主体/M16尾和最多3行组
++    分配，按每核实际计算的M行数排序；同M行数按原Q_B列块数打破平局。
++    这是负载排序启发式，不把行数当作实测时间，也不声称它是最优排程。
++    PREFILL/其它资源区间不启用，BRANCH_GROUPS须与前段调用保持一致。
++
++同步和限制
++    只有原META planner写这些相邻Scalar缓存行，PHASE_META负责发布；
++    其它角色沿原依赖链获取，不能用普通GM标记替代DCCI/DSB。映射每轮
++    重算，身份路径也覆盖全部映射，不复用上一轮结果。没有新task、信号
++    阶段、atomic或业务根Tensor。代价包含META统计/排序及消费者的映射读，
++    全部计入完整L1；是否采用必须由精度和真机配对决定。
++"""
++
++import pypto.language as pl
++
++from .indexer_group_stages import (
++    GROUP_DESCRIPTOR_ALIGNMENT, GROUP_DESCRIPTOR_WORDS, OFFSET_ROWS_DYN,
++    MAX_LEAVES, PLAN_WORDS, SCORE_TILE, indexer_leaf_range,
++)
++from .indexer_scale_layout_stages import LAYOUT_WORDS_PER_REQUEST, indexer_scale_layout_base
++from .kv_stages import HEAD_DIM, KV_DENSE_M_TILE, KV_FIXED_SMALL_ROWS, KV_M_TILE, KV_N_TILE, KV_OM
++from .phase_sync import SIGNAL_SLOT_WORDS, SIGNAL_WORDS
++from .query_projection_stages import QPROJ_N_BLOCKS, QPROJ_PIPE_M_TILE
++from .runtime_abi import CORES, GROUPS, PHASE_SCORE_VECTOR, VECTORS
++from .signals import csa_signal_wait
++
++SCORE_BALANCE_BRANCH_GROUPS = 4
++SCORE_BALANCE_WORDS = 4 * GROUPS
++SCORE_MIN_IMBALANCE = 2  # 至少一个双槽周期，才支付24×24的Scalar选配成本。
++SCORE_COST_SENTINEL = 1 << 30  # 大于当前合法工作量域；仅供有限集合最小值初始化。
++
++
++@pl.jit.inline(auto_scope=False)
++def score_balance_base(requests: pl.Scalar[pl.INDEX], tokens: pl.Scalar[pl.INDEX]):
++    # 即便诊断关闭布局证明，开启映射也保留这2*B项，避免两种尾区重叠。
++    layout_base = indexer_scale_layout_base(requests, tokens, VECTORS)
++    return layout_base + LAYOUT_WORDS_PER_REQUEST * requests
++
++
++@pl.jit.inline(auto_scope=False)
++def score_balance_plan_stage(
++    workspace: pl.InOut[pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]],
++    plan: pl.Tensor[[PLAN_WORDS], pl.INT32],
++    requests: pl.Scalar[pl.INDEX],
++    tokens: pl.Scalar[pl.INDEX],
++):
++    """原META单写者统计和选配；先写身份映射，所有回退均保持合法双射。"""
++    base = score_balance_base(requests, tokens)
++    for core in pl.range(GROUPS):
++        pl.write(workspace, [base + core], pl.cast(0, pl.INT32))
++        pl.write(workspace, [base + GROUPS + core], pl.cast(0, pl.INT32))
++        pl.write(workspace, [base + 2 * GROUPS + core], pl.cast(core, pl.INT32))
++        pl.write(workspace, [base + 3 * GROUPS + core], pl.cast(core, pl.INT32))
++    groups = pl.cast(pl.read(plan, [0]), pl.INDEX)
++    leaves = pl.cast(pl.read(plan, [2]), pl.INDEX)
++    leaf_tiles = pl.cast(pl.read(plan, [3]), pl.INDEX)
++    extra = pl.cast(pl.read(plan, [4]), pl.INDEX)
++    if (groups >= GROUPS and groups <= 2 * GROUPS and leaves > 0 and leaves <= MAX_LEAVES
++            and leaf_tiles > 0 and extra >= 0 and extra < leaves
++            and tokens > KV_FIXED_SMALL_ROWS and tokens <= 2 * QPROJ_PIPE_M_TILE
++            and pl.read(plan, [5]) == 6 and pl.read(plan, [6]) != 0):
++        descriptor_base = ((requests + 1 + GROUP_DESCRIPTOR_ALIGNMENT - 1)
++                           // GROUP_DESCRIPTOR_ALIGNMENT * GROUP_DESCRIPTOR_ALIGNMENT)
++        # 原group-major工作项逐项统计。只读真实visible，不用max_history替代
++        # 每组有效工作；不改任何访问地址或叶内排序边界。
++        for group in pl.range(groups):
++            visible = pl.cast(pl.read(workspace, [descriptor_base + GROUP_DESCRIPTOR_WORDS * group + 3]), pl.INDEX)
++            for leaf in pl.range(leaves):
++                _begin, _capacity, valid = indexer_leaf_range(leaf, leaf_tiles, extra, visible, True, 6)
++                steps = (valid + SCORE_TILE - 1) // SCORE_TILE
++                logical = (group * leaves + leaf) % GROUPS
++                old = pl.read(workspace, [base + logical])
++                pl.write(workspace, [base + logical], old + pl.cast(steps, pl.INT32))
++        maximum = pl.cast(0, pl.INT32)
++        minimum = pl.cast(SCORE_COST_SENTINEL, pl.INT32)
++        for logical in pl.range(GROUPS):
++            cost = pl.read(workspace, [base + logical])
++            maximum = pl.max(maximum, cost)
++            minimum = pl.min(minimum, cost)
++        if maximum - minimum >= SCORE_MIN_IMBALANCE:
++            full_rows = tokens // KV_DENSE_M_TILE * KV_DENSE_M_TILE
++            padded_rows = (tokens + KV_M_TILE - 1) // KV_M_TILE * KV_M_TILE
++            row_groups = pl.min(KV_OM, pl.max(1, tokens // KV_DENSE_M_TILE))
++            for physical in pl.range(GROUPS):
++                kv_logical = (physical + GROUPS - SCORE_BALANCE_BRANCH_GROUPS) % GROUPS
++                kv_rows = pl.cast(0, pl.INDEX)
++                if kv_logical < (HEAD_DIM // KV_N_TILE) * row_groups:
++                    row_group = kv_logical % row_groups
++                    full_stride = row_groups * KV_DENSE_M_TILE
++                    tail_stride = row_groups * KV_M_TILE
++                    full_blocks = pl.max((full_rows - row_group * KV_DENSE_M_TILE + full_stride - 1)
++                                         // full_stride, 0)
++                    tail_blocks = pl.max((padded_rows - full_rows - row_group * KV_M_TILE + tail_stride - 1)
++                                         // tail_stride, 0)
++                    kv_rows = full_blocks * KV_DENSE_M_TILE + tail_blocks * KV_M_TILE
++                qb_columns = pl.cast(0, pl.INDEX)
++                if physical >= SCORE_BALANCE_BRANCH_GROUPS:
++                    qb_workers = GROUPS - SCORE_BALANCE_BRANCH_GROUPS
++                    qb_worker = physical % qb_workers
++                    qb_columns = (QPROJ_N_BLOCKS - qb_worker + qb_workers - 1) // qb_workers
++                # 词典序排序键：KV的M行数优先，Q_B列块数只打破平局，不拟合μs。
++                prefix_rank = kv_rows * (QPROJ_N_BLOCKS + 1) + qb_columns
++                pl.write(workspace, [base + GROUPS + physical], pl.cast(prefix_rank, pl.INT32))
++                pl.write(workspace, [base + 2 * GROUPS + physical], pl.cast(-1, pl.INT32))
++                pl.write(workspace, [base + 3 * GROUPS + physical], pl.cast(-1, pl.INT32))
++            # 各轮各选一个未分配physical与logical，稳定平局选择较小编号。
++            # 24轮后两个表为逆置换，不需要跨核atomic或运行中的抢任务队列。
++            for rank in pl.range(GROUPS):
++                best_physical = pl.cast(-1, pl.INDEX)
++                best_prefix = pl.cast(-1, pl.INT32)
++                best_logical = pl.cast(-1, pl.INDEX)
++                best_cost = pl.cast(SCORE_COST_SENTINEL, pl.INT32)
++                for item in pl.range(GROUPS):
++                    if pl.read(workspace, [base + 2 * GROUPS + item]) < 0:
++                        prefix_cost = pl.read(workspace, [base + GROUPS + item])
++                        if prefix_cost > best_prefix:
++                            best_prefix = prefix_cost
++                            best_physical = item
++                    if pl.read(workspace, [base + 3 * GROUPS + item]) < 0:
++                        score_cost = pl.read(workspace, [base + item])
++                        if score_cost < best_cost:
++                            best_cost = score_cost
++                            best_logical = item
++                # 上述有限集合的最值必然存在；保护索引以避免异常计划越界写。
++                if best_physical >= 0 and best_logical >= 0:
++                    pl.write(workspace, [base + 2 * GROUPS + best_physical], pl.cast(best_logical, pl.INT32))
++                    pl.write(workspace, [base + 3 * GROUPS + best_logical], pl.cast(best_physical, pl.INT32))
++    return workspace
++
++
++@pl.jit.inline(auto_scope=False)
++def score_logical_worker(
++    workspace: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
++    requests: pl.Scalar[pl.INDEX], tokens: pl.Scalar[pl.INDEX],
++    physical: pl.Scalar[pl.INDEX],
++):
++    base = score_balance_base(requests, tokens)
++    return pl.cast(pl.read(workspace, [base + 2 * GROUPS + physical]), pl.INDEX)
++
++
++@pl.jit.inline(auto_scope=False)
++def wait_balanced_score_roots(
++    signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
++    workspace: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
++    plan: pl.Tensor[[PLAN_WORDS], pl.INT32],
++    requests: pl.Scalar[pl.INDEX], tokens: pl.Scalar[pl.INDEX],
++    group: pl.Scalar[pl.INDEX], local_query: pl.Scalar[pl.INDEX],
++    root_count: pl.Scalar[pl.INDEX], generation: pl.Scalar[pl.INT32],
++    QUERY_GROUP: pl.constexpr,
++):
++    """根布局不变，只将原logical owner翻译成物理发布者；完整获取协议保留。"""
++    groups = pl.cast(pl.read(plan, [0]), pl.INDEX)
++    leaves = pl.cast(pl.read(plan, [2]), pl.INDEX)
++    base = score_balance_base(requests, tokens)
++    lane = local_query // (QUERY_GROUP // 2)
++    for leaf in pl.range(root_count):
++        item = group * leaves + leaf
++        if groups < GROUPS:
++            item = leaf * groups + group
++        logical = item % GROUPS
++        physical = pl.cast(pl.read(workspace, [base + 3 * GROUPS + logical]), pl.INDEX)
++        producer = GROUPS + 2 * physical + lane
++        offset = (PHASE_SCORE_VECTOR * CORES + producer) * SIGNAL_SLOT_WORDS
++        signals = csa_signal_wait(signals, offset, generation)
++    pl.system.fence()
++    pl.system.cacheinvalid()
++    pl.system.fence()
++    return signals
