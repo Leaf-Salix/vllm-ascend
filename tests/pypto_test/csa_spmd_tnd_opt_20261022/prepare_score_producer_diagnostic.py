@@ -119,15 +119,19 @@ def main():
     here = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--revision", type=int, choices=(1, 2), default=2)
+    parser.add_argument("--label", choices=("v122", "n256", "ws_pool"))
     args = parser.parse_args()
     suffix = "" if args.revision == 1 else "_v2"
     reports = []
     for label, parent_name, panel, to_l0 in (
         ("v122", "frozen_v122", 64, True),
         ("n256", "score_query_pipeline", 256, False),
+        ("ws_pool", "score_ws_pool", 64, True),
     ):
+        if (args.label and label != args.label) or (not args.label and label == "ws_pool"):
+            continue
         parent = here / "runs" / parent_name
-        expected_name = "frozen_v122.json" if label == "v122" else "score_query_pipeline.json"
+        expected_name = parent_name + ".json"
         expected = json.loads((here / expected_name).read_text())["files"]
         assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in parent.glob("*.py")} == expected
         target = here / "runs" / f"producer_diagnostic_{label}{suffix}"
@@ -168,7 +172,8 @@ def main():
         "expected_work": {"producer_roles": 1, "groups": 1, "leaves": 1, "score_steps": 6},
         "cases": reports,
     }
-    with (here / f"score_producer_diagnostic{suffix}.json").open("x") as stream:
+    label_suffix = "_" + args.label if args.label else ""
+    with (here / f"score_producer_diagnostic{label_suffix}{suffix}.json").open("x") as stream:
         stream.write(json.dumps(report, indent=2) + "\n")
     print(json.dumps({r["label"]: r["source"] for r in reports}))
 

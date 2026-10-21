@@ -674,3 +674,82 @@ MMAD时间与指令CSV独立核对为1850 cycles/us。非MMAD的CSV周期与trac
 收益，不能整目录覆盖TND或据别的会话采用直接宣称通过。先局部移植、审计
 Acc地址和最后消费者，再诊断并仅以同轮完整L1决定是否保留。明确保留旧负例，
 不扫池宽、不复跑已被否定的联合短尾。生产默认未改、未push，goal仍active。
+
+
+### N64 WS列池：局部迁移、真实资源/复用事件与独立仿真正向
+
+prepare_score_ws_pool.py只变换v122的_indexer_score_cube_split_store，保留
+原policy、TND geometry、双M192、页保护和FIFO。两段K192按原顺序累计到
+八个16×64列窗，满16×512才写原6×512输出，最后READY仍在完整step后。
+没有整包复制另一会话的BSH，也没有叠加live_half/其它候选。三个CPU合同
+核对原数学/FIX、page/FIFO和真实源偏移产生的完整1024列覆盖，全部通过。
+
+完整B16与单生产者CPU均通过。score_ws_pool_resources.json审计两份最终
+AllocateMemoryAddr/C++：QK0 0..49152、QK1 49152..98304、WS98304..131072，
+16列窗按8个4096字节地址两遍复用；无WS Acc复制、每step32次QK/32次FIX、
+16次WS init+16次续加，只有2次TSTORE。中间pool覆盖有FIX→M事件；最后
+store到下一step的复用通过同PIPE_FIX队列、下一QK0 FIX→M→QK panel1→WS0
+传递依赖保护，不能因没有紧贴末store的冗余直接flag就误判缺失同步。
+此审计是源码/地址/事件机制证明，不是硬件重叠或性能测量。
+
+单生产者task_20261022_060953_246241820844 completed/exit0，输出12288值
+全部等于8。score_ws_pool_sim_results.json复用上轮原始N64仿真作同模型
+诊断：跨度46.7697→43.5227μs；QK/WS MMA仍各192次，MTE2仍847872字节，
+实际GM FIX由96→12次、L1 FIX192次不变。没有把约6.94%的合成生产端改善
+称为完整层收益，也没有重跑已完成的reference采集。
+
+完整代表B16/S6任务task_20261022_061056_25055969684已提交，严格冻结v122
+同进程五配对窗口；当前仍在运行，不能使用初始化result里的false当终态
+失败，也不能预记通过。公共SDK、计时口径、Native差异与九档目标均未变。
+
+并行只读核对Query访存，发现旧“连续head分工”只改worker区间、不改八token
+跨行tile，本轮拟评估真正八个相邻head组成Vec行。增加weight-scale重复读取
+是明确代价；原512列规约、两次FP32乘法及rsqrt保留。T不整除8时完整回退
+原helper，保留tail recip(sqrt)。前驱等全部Q_B、后继Cube等全部48个QUERY
+写者，所以重新分配head不需要更改生产者信号合同。三个源级所有权/数学/
+回退检查通过。首版统一pl.reshape在incore被解析为Tile，CPU类型检查拒绝；
+v2明确使用pl.tensor.reshape构造三个GM别名，正在CPU编译，尚未上卡。
+未改共享依赖、生产默认或push；目标继续active。
+
+
+### WS列池完整L1不受益，停止扩档；Query GM视图接口修正
+
+上述061056任务已completed/exit0。严格v122输出/Top-K/score、cache/state、
+保护、metadata和图检查通过；原Native precision_exact=false及5850项原有
+输出差异保持独立，不改成新精度PASS。五窗789.00→789.70μs，+0.08872%，
+仅1/5快，score_ws_pool_results.json保存全部配对窗口和工具链。暂不采用、
+不扩B28或扫池宽。独立生产者更快而整链未受益，只能说明此前合成改善没有
+转为当前系统级增益，不能直接据此量化AIV反压或认定某一个物理引擎瓶颈。
+
+Query v2的pl.tensor.reshape仍在ConvertTensorToTileOps中变成Tile，完整CPU
+同处拒绝。只读检查公共编译器发现tensor.view明确保留GM Tensor，而reshape
+是转换运算；v3改三个别名为pl.tensor.view，未改共享依赖，正重新编译。
+v1/v2失败源码、描述和日志保留；没有把类型失败当设备性能或组件bug。
+目标仍未达10%，生产默认不变，所有改动只做本地阶段commit，未push。
+
+
+### Query连续head v4完整编译通过，提交代表档严格对照
+
+v3已经保留三个GM Tensor view，但显式full([8,1], FP32)的行字节4不符合
+Vec的32字节对齐而被PTOAS拒绝。v4去掉这块新声明：激活scale使用同轮GM
+的device FP32 Scalar read，再做MULS；随后权重scale仍为独立FP32 MUL。
+这是设备读数，无Host回读或新预处理。数学乘法次序未合并，但MULS与旧
+row_expand_mul逐bit行为仍必须以设备对照确认，CPU数学模型不替代精度。
+
+三项测试改为检查实际v4源码，枚举T0..384的完整行容量、24/32/48 worker，
+每个(token,head)唯一覆盖且GM地址与原[T,64*512]一致。原尾行helper整体AST
+保持；RMS平方/512列规约/rsqrt、NOPE、RoPE及BF16 rint运算保持。只允许
+两次乘法广播方式改变；前后信号合同未改。三个检查与Ruff均通过。
+
+v4完整CPU成功，query_contiguous_heads_v4_resources.json确认：三个view与
+原q_proj/q_flat/wq_b_scale根及偏移相同，stride=[512,1]；compiled_meta与
+相同描述符、原Query代码编译结果完全相等，没有新增GM根/参数/返回；
+Vec地址最大163872B，与原Query相同。实际生成8×512连续读取、FP32 Scalar
+read和MULS后MUL。v1..v4全部CPU结果归档compile_history，失败目录不覆盖。
+旧连续DQ worker-range候选没有改变8-token跨行tile，本候选改变Vec行的
+含义，因此不是原样重跑旧分工负例；增加scale/rope准备读取的代价仍保留。
+
+任务task_20261022_062222_1899330389已提交，128K/B16/S6、冻结v122同进程
+五配对窗口，等待严格精度/状态/图/完整L1终态。尚未预记PASS或收益，未扩
+其它档。此前WS池完整负例已收取，当前只有这一项待收设备任务，无CPU悬挂。
+本轮生产默认保持不变、未push，九档综合10%仍未达成，goal继续active。

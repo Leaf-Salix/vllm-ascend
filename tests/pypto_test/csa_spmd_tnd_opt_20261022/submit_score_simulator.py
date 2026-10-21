@@ -31,7 +31,7 @@ def submit(job, here):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--label", choices=("v122", "n256"), required=True)
+    parser.add_argument("--label", choices=("v122", "n256", "ws_pool"), required=True)
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--submit-prepared", action="store_true")
     parser.add_argument("--name")
