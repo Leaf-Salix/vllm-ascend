@@ -1,0 +1,261 @@
+diff --git a/docs/PTO_IR_manual.md b/docs/PTO_IR_manual.md
+index ff3593d8..b6a3abe2 100644
+--- a/docs/PTO_IR_manual.md
++++ b/docs/PTO_IR_manual.md
+@@ -10423,7 +10423,7 @@ pto.comm.tget(%dst, %src, buf(%ping, %pong) : !pto.partition_tensor_view<128xf32
+ | Op | Operands | Attributes | Result |
+ |----|----------|------------|--------|
+ | `pto.comm.tnotify` | `signal`, `value` | `notifyOp = #pto<notify_op atomic_add>` or `#pto<notify_op set>` | none |
+-| `pto.comm.twait` | `signal`, `cmpValue` | `cmp = #pto<wait_cmp eq/ne/gt/ge/lt/le>` | none |
++| `pto.comm.twait` | `signal`, `cmpValue` | `cmp = #pto<wait_cmp eq/ne/gt/ge/lt/le>`, optional `backoffTicks : i64` | none |
+ | `pto.comm.ttest` | `signal`, `cmpValue` | `cmp = #pto<wait_cmp eq/ne/gt/ge/lt/le>` | `i1` |
+ 
+ **Constraints & Verification:**
+@@ -10450,6 +10450,16 @@ pto.comm.twait(%sig, %v : !pto.partition_tensor_view<1xi32>, i32) {cmp = #pto<wa
+ %ok = pto.comm.ttest(%sig, %v : !pto.partition_tensor_view<1xi32>, i32) {cmp = #pto<wait_cmp eq>} -> i1
+ ```
+ 
++On A3, positive `backoffTicks` selects local single-signal polling with a delay
++after each unsuccessful read. It requires `ge`, a statically single-element
++GM `i32` view, and a value in `[1, INT32_MAX]`. Each read still invalidates the
++signal cache line and uses a volatile load. The first read is immediate; signal
++publication, payload cache maintenance and non-consuming wait semantics are
++unchanged. The delay is measured in `get_sys_cnt()` ticks, not microseconds,
++and requires an advancing hardware counter. Missing or zero `backoffTicks`
++retains the existing `pto::comm::TWAIT` lowering. This option is not supported
++on A5 or for vector-valued signals.
++
+ ---
+ 
+ ##### `pto.comm.tbroadcast` - Collective Broadcast
+diff --git a/include/PTO/IR/PTOOps.td b/include/PTO/IR/PTOOps.td
+index 967d8e0c..6a2021e8 100644
+--- a/include/PTO/IR/PTOOps.td
++++ b/include/PTO/IR/PTOOps.td
+@@ -2047,7 +2047,8 @@ def TWaitOp : PTO_Op<"comm.twait", [
+   let arguments = (ins
+       PTOCommType:$signal,
+       AnySignlessInteger:$cmpValue,
+-      PTO_WaitCmpAttr:$cmp
++      PTO_WaitCmpAttr:$cmp,
++      OptionalAttr<I64Attr>:$backoffTicks
+   );
+   let results = (outs);
+   let hasVerifier = 1;
+diff --git a/lib/PTO/IR/PTOPipeline/PTOAsyncCommunicationVerification.cpp b/lib/PTO/IR/PTOPipeline/PTOAsyncCommunicationVerification.cpp
+index aa2ec2ed..36cb9112 100644
+--- a/lib/PTO/IR/PTOPipeline/PTOAsyncCommunicationVerification.cpp
++++ b/lib/PTO/IR/PTOPipeline/PTOAsyncCommunicationVerification.cpp
+@@ -243,8 +243,20 @@ LogicalResult TNotifyOp::verify() {
+ }
+ 
+ LogicalResult TWaitOp::verify() {
+-  return verifyCommSignalI32(getOperation(), getSignal(), getCmpValue(),
+-                             "cmp_value");
++    if (failed(verifyCommSignalI32(getOperation(), getSignal(), getCmpValue(), "cmp_value")))
++        return failure();
++    if (auto ticks = getBackoffTicksAttr()) {
++        if (ticks.getInt() < 0 || ticks.getInt() > INT32_MAX)
++            return emitOpError("expects backoffTicks in [0, INT32_MAX]");
++        if (ticks.getInt() > 0) {
++            if (getCmp() != pto::WaitCmp::GE)
++                return emitOpError("positive backoffTicks requires the GE comparison");
++            auto shape = getShapeVec(getSignal().getType());
++            if (shape.empty() || llvm::any_of(shape, [](int64_t dim) { return dim != 1; }))
++                return emitOpError("positive backoffTicks requires one statically sized i32 signal");
++        }
++    }
++    return success();
+ }
+ 
+ LogicalResult TTestOp::verify() {
+diff --git a/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp b/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
+index f0cc3a59..05248a20 100644
+--- a/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
++++ b/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
+@@ -10,6 +10,7 @@
+ //===----------------------------------------------------------------------===//
+ 
+ #include "PTOToEmitCPatterns.h"
++#include "ScalarMisc/SignalWaitBackoffSupport.h"
+ #include "Tensor/GatherCompareScalarSupport.h"
+ 
+ #include "mlir/Target/Cpp/CppEmitter.h"
+@@ -654,6 +655,17 @@ struct EmitPTOManualPass
+           return failure();
+       }
+       pto::annotatePTOEntryFunctions(mop);
++      if (targetArch != PTOArch::A3) {
++          bool unsupportedBackoff = false;
++          mop.walk([&](pto::TWaitOp wait) {
++              if (auto ticks = wait.getBackoffTicksAttr(); ticks && ticks.getInt() > 0) {
++                  wait.emitError("positive backoffTicks currently requires A3");
++                  unsupportedBackoff = true;
++              }
++          });
++          if (unsupportedBackoff)
++              return failure();
++      }
+ 
+       // A3 requires explicit FFTS base setup for inter-core sync ops.
+       if (targetArch == PTOArch::A3) {
+@@ -700,6 +712,7 @@ struct EmitPTOManualPass
+     bool globalTensorData = false;
+     bool bitcast = false;
+     bool gatherCompareScalar = false;
++    bool signalWaitBackoff = false;
+   };
+ 
+   static HelperFlags collectHelperFlags(ModuleOp mop) {
+@@ -709,6 +722,10 @@ struct EmitPTOManualPass
+         flags.eventIdArray = true;
+       if (isa<mlir::pto::TRandomOp>(op))
+         flags.tRandom = true;
++      if (auto wait = dyn_cast<mlir::pto::TWaitOp>(op)) {
++          if (auto ticks = wait.getBackoffTicksAttr(); ticks && ticks.getInt() > 0)
++              flags.signalWaitBackoff = true;
++      }
+       if (auto gather = dyn_cast<mlir::pto::TGatherOp>(op)) {
+         if (gather.getCdst())
+           flags.gatherCompareScalar = true;
+@@ -771,6 +788,9 @@ struct EmitPTOManualPass
+   static void emitPreambleRuntimeHelpers(ModuleOp mop, OpBuilder &builder,
+                                          const HelperFlags &flags) {
+     Location loc = mop->getLoc();
++    if (flags.signalWaitBackoff) {
++        builder.create<emitc::VerbatimOp>(loc, builder.getStringAttr(kSignalWaitBackoffSupport));
++    }
+     if (flags.globalTensorData) {
+       builder.create<emitc::VerbatimOp>(
+           loc, builder.getStringAttr(R"cpp(
+diff --git a/lib/PTO/Transforms/PTOToEmitC/ScalarMisc/Comm.cpp b/lib/PTO/Transforms/PTOToEmitC/ScalarMisc/Comm.cpp
+index 031d4c91..e7f5e2a3 100644
+--- a/lib/PTO/Transforms/PTOToEmitC/ScalarMisc/Comm.cpp
++++ b/lib/PTO/Transforms/PTOToEmitC/ScalarMisc/Comm.cpp
+@@ -225,6 +225,16 @@ struct PTOSignalCommToEmitC : public OpConversionPattern<SignalOp> {
+                                            ArrayAttr{}, ArrayAttr{}, operands);
+       rewriter.eraseOp(op);
+     } else {
++        if constexpr (std::is_same_v<SignalOp, pto::TWaitOp>) {
++            if (auto ticks = op.getBackoffTicksAttr(); ticks && ticks.getInt() > 0) {
++                std::string waitCallee = "PTOAS__WAIT_GE_BACKOFF<" + std::to_string(ticks.getInt()) + ">";
++                rewriter.create<emitc::CallOpaqueOp>(
++                    op.getLoc(), TypeRange{}, waitCallee, ArrayAttr{}, ArrayAttr{},
++                    ValueRange{*signalGT, adaptor.getCmpValue()});
++                rewriter.eraseOp(op);
++                return success();
++            }
++        }
+       auto waitCmpTy =
+           emitc::OpaqueType::get(rewriter.getContext(), "pto::comm::WaitCmp");
+       Value waitCmp = makeEmitCOpaqueConstant(
+diff --git a/lib/PTO/Transforms/PTOToEmitC/ScalarMisc/SignalWaitBackoffSupport.h b/lib/PTO/Transforms/PTOToEmitC/ScalarMisc/SignalWaitBackoffSupport.h
+new file mode 100644
+index 00000000..09dc2fc5
+--- /dev/null
++++ b/lib/PTO/Transforms/PTOToEmitC/ScalarMisc/SignalWaitBackoffSupport.h
+@@ -0,0 +1,33 @@
++// Copyright (c) 2026 Huawei Technologies Co., Ltd.
++// Licensed under the CANN Open Software License Agreement Version 2.0.
++#ifndef PTO_SCALAR_MISC_SIGNAL_WAIT_BACKOFF_SUPPORT_H
++#define PTO_SCALAR_MISC_SIGNAL_WAIT_BACKOFF_SUPPORT_H
++
++namespace mlir::pto {
++
++inline constexpr const char* kSignalWaitBackoffSupport = R"cpp(
++    template <uint64_t BackoffTicks, typename Signal>
++    static AICORE inline void PTOAS__WAIT_GE_BACKOFF(Signal& signal, int32_t expected)
++    {
++        auto ptr = reinterpret_cast<volatile __gm__ int32_t*>(signal.data());
++        uint32_t spin = 0;
++        while (true) {
++            __asm__ __volatile__("" ::: "memory");
++            dcci((__gm__ void*)ptr, cache_line_t::SINGLE_CACHE_LINE);
++            __asm__ __volatile__("" ::: "memory");
++            if (*ptr >= expected)
++                break;
++            const uint64_t wait_start = get_sys_cnt();
++            while ((uint64_t)(get_sys_cnt() - wait_start) < BackoffTicks) {
++                __asm__ __volatile__("" ::: "memory");
++            }
++            PTO_ASSERT(spin < 100000000, "local wait spin limit");
++            if ((++spin & 63) == 0) {
++                pipe_barrier(PIPE_ALL);
++            }
++        }
++    }
++)cpp";
++
++} // namespace mlir::pto
++#endif
+diff --git a/test/lit/pto/comm_twait_backoff.pto b/test/lit/pto/comm_twait_backoff.pto
+new file mode 100644
+index 00000000..4cf8b14e
+--- /dev/null
++++ b/test/lit/pto/comm_twait_backoff.pto
+@@ -0,0 +1,28 @@
++// RUN: ptoas --pto-arch=a3 %s -o - | FileCheck %s
++// RUN: not ptoas --pto-arch=a5 %s -o - 2>&1 | FileCheck %s --check-prefix=A5
++
++module {
++  func.func @wait_backoff(%signal_ptr: !pto.ptr<i32>, %expected: i32) {
++    %c0 = arith.constant 0 : index
++    %c1 = arith.constant 1 : index
++    %view = pto.make_tensor_view %signal_ptr, shape = [%c1], strides = [%c1] : !pto.tensor_view<1xi32>
++    %signal = pto.partition_view %view, offsets = [%c0], sizes = [%c1] : !pto.tensor_view<1xi32> -> !pto.partition_tensor_view<1xi32>
++    pto.comm.twait(%signal, %expected : !pto.partition_tensor_view<1xi32>, i32) {cmp = #pto<wait_cmp ge>, backoffTicks = 150 : i64}
++    pto.comm.twait(%signal, %expected : !pto.partition_tensor_view<1xi32>, i32) {cmp = #pto<wait_cmp ge>}
++    pto.comm.twait(%signal, %expected : !pto.partition_tensor_view<1xi32>, i32) {cmp = #pto<wait_cmp eq>, backoffTicks = 0 : i64}
++    return
++  }
++}
++
++// CHECK: static AICORE inline void PTOAS__WAIT_GE_BACKOFF(
++// CHECK: volatile __gm__ int32_t*
++// CHECK: dcci((__gm__ void*)ptr, cache_line_t::SINGLE_CACHE_LINE);
++// CHECK: if (*ptr >= expected)
++// CHECK-NEXT: break;
++// CHECK: get_sys_cnt()
++// CHECK: < BackoffTicks
++// CHECK-LABEL: AICORE void wait_backoff(
++// CHECK: PTOAS__WAIT_GE_BACKOFF<150>(
++// CHECK: pto::comm::TWAIT(
++// CHECK: pto::comm::TWAIT(
++// A5: positive backoffTicks currently requires A3
+diff --git a/test/lit/pto/comm_twait_backoff_invalid.pto b/test/lit/pto/comm_twait_backoff_invalid.pto
+new file mode 100644
+index 00000000..a1b401c1
+--- /dev/null
++++ b/test/lit/pto/comm_twait_backoff_invalid.pto
+@@ -0,0 +1,31 @@
++// RUN: split-file %s %t
++// RUN: not ptoas --pto-arch=a3 --emit-pto-ir %t/negative.pto 2>&1 | FileCheck %s --check-prefix=NEGATIVE
++// RUN: not ptoas --pto-arch=a3 --emit-pto-ir %t/compare.pto 2>&1 | FileCheck %s --check-prefix=COMPARE
++// RUN: not ptoas --pto-arch=a3 --emit-pto-ir %t/shape.pto 2>&1 | FileCheck %s --check-prefix=SHAPE
++// NEGATIVE: expects backoffTicks in [0, INT32_MAX]
++// COMPARE: positive backoffTicks requires the GE comparison
++// SHAPE: positive backoffTicks requires one statically sized i32 signal
++
++//--- negative.pto
++module {
++  func.func @negative(%signal: !pto.partition_tensor_view<1xi32>, %expected: i32) {
++    pto.comm.twait(%signal, %expected : !pto.partition_tensor_view<1xi32>, i32) {cmp = #pto<wait_cmp ge>, backoffTicks = -1 : i64}
++    return
++  }
++}
++
++//--- compare.pto
++module {
++  func.func @compare(%signal: !pto.partition_tensor_view<1xi32>, %expected: i32) {
++    pto.comm.twait(%signal, %expected : !pto.partition_tensor_view<1xi32>, i32) {cmp = #pto<wait_cmp eq>, backoffTicks = 150 : i64}
++    return
++  }
++}
++
++//--- shape.pto
++module {
++  func.func @shape(%signal: !pto.partition_tensor_view<2xi32>, %expected: i32) {
++    pto.comm.twait(%signal, %expected : !pto.partition_tensor_view<2xi32>, i32) {cmp = #pto<wait_cmp ge>, backoffTicks = 150 : i64}
++    return
++  }
++}

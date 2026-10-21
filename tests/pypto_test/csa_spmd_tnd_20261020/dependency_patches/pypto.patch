@@ -1,0 +1,373 @@
+diff --git a/docs/en/api/system.md b/docs/en/api/system.md
+index 5cf00e1db..4c128f30d 100644
+--- a/docs/en/api/system.md
++++ b/docs/en/api/system.md
+@@ -3,6 +3,15 @@
+ Synchronization, cache and cross-core primitives. These are side-effecting statements
+ rather than value-producing operators — most return nothing.
+ 
++`pl.system.signal_wait(signal, [offset], expected, backoff_ticks=150)` optionally
++delays unsuccessful polling of a local GM `INT32` signal on A3. The compile-time
++interval is measured in device counter ticks, not microseconds. The first read
++is immediate; each read still invalidates the signal cache line. This preserves
++non-consuming `>=` waiting and does not replace payload publication or acquisition.
++Zero (the default) retains the existing TWAIT lowering. Positive values require
++PTOAS support for `pto.comm.twait`'s `backoffTicks` attribute and an advancing
++hardware counter; they do not support simulators whose counter remains zero.
++
+ ::: pypto.language.system
+     options:
+       show_root_heading: false
+diff --git a/docs/en/user/language/00-types.md b/docs/en/user/language/00-types.md
+index 3263a7d90..e2187c68b 100644
+--- a/docs/en/user/language/00-types.md
++++ b/docs/en/user/language/00-types.md
+@@ -234,6 +234,10 @@ and FP4 are intentionally not part of this interface.
+ 
+ ### Dynamic shapes
+ 
++When passing a moving, fixed-size view such as `x[row:row + 8, :]` to an inline
++helper, JIT metadata inference preserves the eight-row extent. The origin may be a
++runtime scalar; it is not a reason to use the full parent tensor's row count.
++
+ `pl.dynamic(name)` marks an axis whose extent is **not known when the kernel is compiled
+ and may differ from one launch to the next** — a batch that varies with the request, a
+ sequence length that grows as decoding proceeds. The extent becomes a run-time value, so
+diff --git a/docs/zh/api/system.md b/docs/zh/api/system.md
+index aad22e4a8..2bc75fb5d 100644
+--- a/docs/zh/api/system.md
++++ b/docs/zh/api/system.md
+@@ -2,6 +2,13 @@
+ 
+ 同步、cache 与跨核原语。它们是产生副作用的语句而非产值算子 —— 多数没有返回值。
+ 
++`pl.system.signal_wait(signal, [offset], expected, backoff_ticks=150)` 可为 A3
++本地 GM `INT32` 信号的未成功轮询设置编译期退避间隔。单位为设备计时器 tick，
++不是微秒。第一次读取立即执行，每次读取仍使信号缓存行失效，保留不消费信号的
++`>=` 等待语义；不能替代业务数据的发布与获取。默认值 0 保留原 TWAIT lowering。
++正值需要 PTOAS 支持 `pto.comm.twait` 的 `backoffTicks` 属性以及正常递增的硬件
++计时器，不支持计时器始终为零的模拟器。
++
+ ::: pypto.language.system
+     options:
+       show_root_heading: false
+diff --git a/docs/zh/user/language/00-types.md b/docs/zh/user/language/00-types.md
+index a31df3ca6..25f34b275 100644
+--- a/docs/zh/user/language/00-types.md
++++ b/docs/zh/user/language/00-types.md
+@@ -161,6 +161,10 @@ view = pl.TensorView(stride=[1024, 1], layout=pl.TensorLayout.ND, valid_shape=[1
+ 
+ ### 动态 shape
+ 
++将 `x[row:row + 8, :]` 这样起点可变、大小固定的视图传给 inline helper 时，
++JIT 元数据推导保留八行的范围。起点可以是运行时标量，不应因此采用父 Tensor
++的完整行数。
++
+ `pl.dynamic(name)` 用来标注**编译时未知、且每次启动都可能不同**的轴 —— 随请求变化的 batch、解码过程中不断增长的序列长度。该维的尺寸成为运行期的值，因此一份编译产物服务这个轴的所有取值：动态维在 JIT 缓存 key 里折叠为 `None`，尺寸变化不会触发重编译。
+ 
+ <!-- doctest: run -->
+diff --git a/python/pypto/ir/op/system_ops.py b/python/pypto/ir/op/system_ops.py
+index 2a6f92a4f..9275af1d2 100644
+--- a/python/pypto/ir/op/system_ops.py
++++ b/python/pypto/ir/op/system_ops.py
+@@ -340,6 +340,8 @@ def _local_signal_call(
+     offsets: Sequence[int | Expr],
+     value: int | Expr,
+     span: Span | None,
++    *,
++    attributes: dict[str, int] | None = None,
+ ) -> Call:
+     actual_span = _get_span_or_capture(span)
+     if isinstance(value, int):
+@@ -347,7 +349,7 @@ def _local_signal_call(
+             raise ValueError(f"{name} value is outside INT32: {value}")
+         value = ConstInt(value, DataType.INT32, actual_span)
+     return _ir_core.create_op_call(
+-        name, [signal, _to_make_tuple(offsets, actual_span), value], {}, actual_span
++        name, [signal, _to_make_tuple(offsets, actual_span), value], attributes or {}, actual_span
+     )
+ 
+ 
+@@ -364,14 +366,24 @@ def signal_notify(
+ 
+ 
+ def signal_wait(
+-    signal: Expr, offsets: Sequence[int | Expr], expected: int | Expr, *, span: Span | None = None
++    signal: Expr,
++    offsets: Sequence[int | Expr],
++    expected: int | Expr,
++    *,
++    backoff_ticks: int = 0,
++    span: Span | None = None,
+ ) -> Call:
+     """临时本地 GM 等待，复用 TWAIT(Ge)，不消费信号或建立全体 barrier。
+ 
+     signal 必须为一维 INT32；expected 为 INT32，消费者不得写信号所在 cacheline。
+     返回后仍须按业务数据的访问路径完成消费者缓存维护与内存顺序。
+     """
+-    return _local_signal_call("system.signal_wait", signal, offsets, expected, span)
++    if type(backoff_ticks) is not int or not 0 <= backoff_ticks < (1 << 31):
++        raise ValueError(
++            f"backoff_ticks must be a compile-time integer in [0, INT32_MAX], got {backoff_ticks!r}"
++        )
++    attributes = {"backoff_ticks": backoff_ticks} if backoff_ticks else {}
++    return _local_signal_call("system.signal_wait", signal, offsets, expected, span, attributes=attributes)
+ 
+ 
+ def fence(*, span: Span | None = None) -> Call:
+diff --git a/python/pypto/jit/decorator.py b/python/pypto/jit/decorator.py
+index 8fcb8a5bc..8f5bf78d7 100644
+--- a/python/pypto/jit/decorator.py
++++ b/python/pypto/jit/decorator.py
+@@ -1185,7 +1185,9 @@ def _subscript_slice_meta(
+     ``stop - start`` (``start`` defaults to 0), and an open upper bound ``a:``
+     resolves to ``parent_dim - start`` — mirroring the parser's
+     ``_build_subscript_slice_args``. A dim falls back to the parent extent when
+-    its bounds aren't static — a ``DynDim`` parent flows through transparently
++    its bounds aren't static and their difference is unknown. A window
++    ``start:start + constant`` keeps its known extent even when ``start`` is a
++    runtime name. A ``DynDim`` parent flows through transparently
+     that way; a scalar index drops its dim (numpy-style rank reduction); dims
+     past the supplied indices are implicit ``:`` and keep the parent extent.
+     Returns ``None`` (skipped, leaving the clear ``_build_params`` error) when
+@@ -1216,6 +1218,17 @@ def _subscript_slice_meta(
+         else:
+             stop = resolve_int(idx.upper)
+             extent = stop - start if isinstance(start, int) and isinstance(stop, int) else None
++            if extent is None and isinstance(idx.lower, ast.Name):
++                # Cancel only a repeated scalar name, not arbitrary calls or
++                # subscripts whose evaluations may observe different values.
++                upper = idx.upper
++                if isinstance(upper, ast.BinOp) and isinstance(upper.op, ast.Add):
++                    for base, width in ((upper.left, upper.right), (upper.right, upper.left)):
++                        if isinstance(base, ast.Name) and base.id == idx.lower.id:
++                            constant = resolve_int(width)
++                            if constant is not None and constant >= 0:
++                                extent = constant
++                                break
+         dims.append(extent if extent is not None else parent)
+     dims.extend(src_meta.shape[len(indices) :])  # trailing implicit ``:``
+     return TensorMeta(shape=tuple(dims), dtype=src_meta.dtype, layout=src_meta.layout)
+diff --git a/python/pypto/language/op/system_ops.py b/python/pypto/language/op/system_ops.py
+index 610f9b4b9..14ca899cc 100644
+--- a/python/pypto/language/op/system_ops.py
++++ b/python/pypto/language/op/system_ops.py
+@@ -162,6 +162,7 @@ def signal_wait(
+     offsets: Sequence[IntLike],
+     expected: IntLike,
+     *,
++    backoff_ticks: int = 0,
+     span: Span | None = None,
+ ) -> Call:
+     """临时本地 GM 等待，复用 TWAIT(Ge)，不消费信号或建立全体 barrier。
+@@ -171,7 +172,9 @@ def signal_wait(
+     """
+     index_exprs = [item.unwrap() if isinstance(item, Scalar) else item for item in offsets]
+     expected_expr = expected.unwrap() if isinstance(expected, Scalar) else expected
+-    return _ir_ops.signal_wait(signal.unwrap(), index_exprs, expected_expr, span=span)
++    return _ir_ops.signal_wait(
++        signal.unwrap(), index_exprs, expected_expr, backoff_ticks=backoff_ticks, span=span
++    )
+ 
+ 
+ def set_ffts(workspace: Tensor, *, span: Span | None = None) -> Call:
+diff --git a/src/backend/common/pto_ops_memory.cpp b/src/backend/common/pto_ops_memory.cpp
+index 026a56e5c..bec214c3d 100644
+--- a/src/backend/common/pto_ops_memory.cpp
++++ b/src/backend/common/pto_ops_memory.cpp
+@@ -865,7 +865,13 @@ static std::string MakeLocalSignalCodegenPTO(const CallPtr& op, codegen::Codegen
+   const auto value = cg.GetExprAsCode(op->args_[2]);
+   // 同步信号本身使用 PTO-ISA 已有的发布/轮询；不声称它自动刷新任意 payload。
+   const auto instruction = notify ? "pto.comm.tnotify" : "pto.comm.twait";
+-  const auto attribute = notify ? "notifyOp = #pto<notify_op set>" : "cmp = #pto<wait_cmp ge>";
++  std::string attribute = notify ? "notifyOp = #pto<notify_op set>" : "cmp = #pto<wait_cmp ge>";
++  const int backoff_ticks = op->GetKwarg<int>("backoff_ticks", 0);
++  INTERNAL_CHECK_SPAN(backoff_ticks >= 0 && (!notify || backoff_ticks == 0), op->span_)
++      << "invalid local signal backoff after verification";
++  if (backoff_ticks > 0) {
++    attribute += ", backoffTicks = " + std::to_string(backoff_ticks) + " : i64";
++  }
+   cg.Emit(std::string(instruction) + "(" + partition + ", " + value + " : " + partition_type +
+           ", i32) {" + attribute + "}");
+   return "";
+diff --git a/src/ir/op/sync_ops/sync.cpp b/src/ir/op/sync_ops/sync.cpp
+index 7dce5c2f8..014ddb782 100644
+--- a/src/ir/op/sync_ops/sync.cpp
++++ b/src/ir/op/sync_ops/sync.cpp
+@@ -57,6 +57,17 @@ TypePtr DeduceLocalSignalType(const std::vector<ExprPtr>& args,
+   return GetUnknownType();
+ }
+ 
++TypePtr DeduceLocalSignalWaitType(const std::vector<ExprPtr>& args,
++                                  const std::vector<std::pair<std::string, std::any>>& kwargs) {
++  auto type = DeduceLocalSignalType(args, {});
++  for (const auto& [name, value] : kwargs) {
++    CHECK(name == "backoff_ticks") << "local signal wait received unknown attribute: " << name;
++    const auto* ticks = std::any_cast<int>(&value);
++    CHECK(ticks && *ticks >= 0) << "backoff_ticks must be a non-negative INT32 integer";
++  }
++  return type;
++}
++
+ }  // namespace
+ 
+ // ============================================================================
+@@ -134,9 +145,10 @@ REGISTER_OP("system.signal_wait")
+     .add_argument("signal", "Ordinary one-dimensional INT32 GM signal Tensor")
+     .add_argument("offsets", "One scalar offset")
+     .add_argument("expected", "INT32 progress threshold")
++    .set_attr<int>("backoff_ticks")
+     .no_memory_spec()
+     .no_arg_writes()
+-    .f_deduce_type(DeduceLocalSignalType);
++    .f_deduce_type(DeduceLocalSignalWaitType);
+ 
+ // Register system.cacheinvalid (Cache Maintenance Operation).
+ // Two forms selected by arg count:
+diff --git a/tests/ut/codegen/test_pto_codegen_ops.py b/tests/ut/codegen/test_pto_codegen_ops.py
+index 30d39d019..b52882994 100644
+--- a/tests/ut/codegen/test_pto_codegen_ops.py
++++ b/tests/ut/codegen/test_pto_codegen_ops.py
+@@ -5056,8 +5056,10 @@ class TestSyncAllCodegen:
+         class Prog:
+             @pl.function(type=pl.FunctionType.AIV)
+             def kernel(
+-                self, signal: pl.InOut[pl.Tensor[[256], pl.INT32]],
+-                offset: pl.Scalar[pl.INDEX], tag: pl.Scalar[pl.INT32],
++                self,
++                signal: pl.InOut[pl.Tensor[[256], pl.INT32]],
++                offset: pl.Scalar[pl.INDEX],
++                tag: pl.Scalar[pl.INT32],
+             ) -> pl.Tensor[[256], pl.INT32]:
+                 pl.system.signal_wait(signal, [offset], tag)
+                 pl.system.signal_notify(signal, [offset], tag)
+@@ -5073,6 +5075,27 @@ class TestSyncAllCodegen:
+         assert "pto.syncall" not in mlir
+         assert "comm_ctx" not in mlir.lower()
+ 
++    def test_local_signal_backoff_is_an_explicit_wait_attribute(self):
++        @pl.program
++        class Prog:
++            @pl.function(type=pl.FunctionType.AIV)
++            def kernel(
++                self,
++                signal: pl.InOut[pl.Tensor[[256], pl.INT32]],
++                offset: pl.Scalar[pl.INDEX],
++                tag: pl.Scalar[pl.INT32],
++            ) -> pl.Tensor[[256], pl.INT32]:
++                pl.system.signal_wait(signal, [offset], tag, backoff_ticks=150)
++                pl.system.signal_notify(signal, [offset], tag)
++                pl.system.signal_wait(signal, [offset], tag)
++                return signal
++
++        mlir = self._generate_mlir(Prog)
++        assert mlir.count("pto.comm.twait(") == 2
++        assert mlir.count("backoffTicks = 150 : i64") == 1
++        assert mlir.index("backoffTicks") < mlir.index("pto.comm.tnotify(")
++        assert "pto.syncall" not in mlir
++
+     def test_syncall_emits_hard_barrier_with_core_type(self):
+         """pl.system.syncall(core_type=...) emits pto.syncall() mode=<hard>."""
+ 
+diff --git a/tests/ut/jit/test_decorator.py b/tests/ut/jit/test_decorator.py
+index 3a94fb4c0..1c6436330 100644
+--- a/tests/ut/jit/test_decorator.py
++++ b/tests/ut/jit/test_decorator.py
+@@ -1525,6 +1525,40 @@ class TestSliceAndDepReturnMetadata:
+         # which here maps to ``buf``.
+         assert metas["mid"] == TensorMeta(shape=(16, 8), dtype=DataType.FP32)
+ 
++    def test_runtime_origin_slice_preserves_static_width_for_inline_helper(self):
++        """A moving eight-row view must not inherit the parent's 96 rows."""
++
++        @pl.jit.inline
++        def apply_inverse(block: pl.Tensor, inverse: pl.Tensor):
++            return pl.row_expand_mul(block, inverse)
++
++        @pl.jit
++        def kernel(
++            x: pl.Tensor[[96, 256], pl.FP32],
++            inverse: pl.Tensor[[8, 1], pl.FP32],
++            out: pl.Out[pl.Tensor[[8, 256], pl.FP32]],
++            row: pl.Scalar[pl.INDEX],
++        ):
++            block = x[row : row + 8, 0:256]
++            result = apply_inverse(block, inverse)
++            out[:, :] = result
++            return out
++
++        # Before the fix parsing the inline helper fails with rows=96 versus 8.
++        program = kernel.specialize()
++        helper = next(function for function in program.functions.values() if "apply_inverse" in function.name)
++        assert [dim.value for dim in helper.params[0].type.shape] == [8, 256]
++
++    def test_runtime_origin_slice_metadata_accepts_commuted_constant(self):
++        def body(src: pl.Tensor, row: pl.Scalar[pl.INDEX]):
++            block = src[row : 8 + row, 0:16]
++            return block
++
++        metas = _extract_local_tensor_metas(
++            body, seed_meta={"src": TensorMeta(shape=(96, 256), dtype=DataType.FP32)}
++        )
++        assert metas["block"] == TensorMeta(shape=(8, 16), dtype=DataType.FP32)
++
+     def test_extract_local_tensor_metas_runtime_slice_uses_parent_dim(self):
+         """A pl.slice dim that isn't a static int falls back to the parent
+         tensor's static dim (the slice is bounded above by its parent)."""
+diff --git a/tests/ut/language/parser/test_system_ops.py b/tests/ut/language/parser/test_system_ops.py
+index 60d96092f..9f696891b 100644
+--- a/tests/ut/language/parser/test_system_ops.py
++++ b/tests/ut/language/parser/test_system_ops.py
+@@ -862,8 +862,10 @@ def test_local_signal_round_trip():
+     class Before:
+         @pl.function(type=pl.FunctionType.AIV)
+         def kernel(
+-            self, signal: pl.InOut[pl.Tensor[[256], pl.INT32]],
+-            offset: pl.Scalar[pl.INDEX], tag: pl.Scalar[pl.INT32],
++            self,
++            signal: pl.InOut[pl.Tensor[[256], pl.INT32]],
++            offset: pl.Scalar[pl.INDEX],
++            tag: pl.Scalar[pl.INT32],
+         ) -> pl.Tensor[[256], pl.INT32]:
+             pl.system.signal_notify(signal, [offset], tag)
+             pl.system.signal_wait(signal, [offset], tag)
+@@ -891,5 +893,39 @@ def test_local_signal_rejects_overflowing_literal():
+         system_ops.signal_wait(signal, [0], 1 << 31)
+ 
+ 
++def test_local_signal_backoff_round_trip():
++    @pl.program
++    class Before:
++        @pl.function(type=pl.FunctionType.AIV)
++        def kernel(
++            self,
++            signal: pl.InOut[pl.Tensor[[256], pl.INT32]],
++            offset: pl.Scalar[pl.INDEX],
++            tag: pl.Scalar[pl.INT32],
++        ) -> pl.Tensor[[256], pl.INT32]:
++            pl.system.signal_wait(signal, [offset], tag, backoff_ticks=150)
++            return signal
++
++    printed = Before.as_python()
++    assert "backoff_ticks=150" in printed
++    ir.assert_structural_equal(Before, pl.parse_program(printed))
++
++
++@pytest.mark.parametrize("ticks", [-1, 1 << 31, True, 1.5])
++def test_local_signal_rejects_invalid_backoff(ticks):
++    span = ir.Span.unknown()
++    signal = ir.Var("signal", ir.TensorType([64], DataType.INT32), span)
++    with pytest.raises(ValueError, match="backoff_ticks must be"):
++        system_ops.signal_wait(signal, [0], 1, backoff_ticks=ticks)
++
++
++def test_local_signal_zero_backoff_preserves_legacy_call():
++    span = ir.Span.unknown()
++    signal = ir.Var("signal", ir.TensorType([64], DataType.INT32), span)
++    before = system_ops.signal_wait(signal, [0], 1, span=span)
++    after = system_ops.signal_wait(signal, [0], 1, backoff_ticks=0, span=span)
++    ir.assert_structural_equal(before, after)
++
++
+ if __name__ == "__main__":
+     pytest.main([__file__, "-v"])

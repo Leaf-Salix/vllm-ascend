@@ -11,9 +11,9 @@ import argparse
 import importlib.abc
 import importlib.machinery
 import os
-from pathlib import Path
 import runpy
 import sys
+from pathlib import Path
 
 
 def main():
@@ -22,10 +22,12 @@ def main():
     parser.add_argument("--simpler-root", type=Path, required=True)
     parser.add_argument("--ptoas-root", type=Path, required=True)
     parser.add_argument("--vllm-root", type=Path)
+    parser.add_argument("--workspace-root", type=Path)
     parser.add_argument("script", type=Path)
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[3]
+    workspace = args.workspace_root.resolve() if args.workspace_root else repo.parent
     pypto = args.pypto_root.resolve()
     simpler = args.simpler_root.resolve()
     ptoas = args.ptoas_root.resolve()
@@ -67,7 +69,7 @@ def main():
     sys.meta_path.insert(0, SourceFinder())
     sys.path[:0] = [str(repo / "tests/pypto_test"), str(simpler_site)]
     os.environ.update(
-        PTO_EAGER_ROOT=str(repo.parent),
+        PTO_EAGER_ROOT=str(workspace),
         CSA_STATIC_PYPTO_ROOT=str(pypto),
         CSA_STATIC_PYPTO_IMPORT_MODE="filesystem",
         HCA_SIMPLER_ROOT=str(simpler),
