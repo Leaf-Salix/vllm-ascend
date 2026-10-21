@@ -17,14 +17,14 @@ def function(text, name):
     return next(node for node in ast.parse(text).body if isinstance(node, ast.FunctionDef) and node.name == name)
 
 
-def append_parameter(text, name):
+def append_parameter(text, name, parameter="SHORT_HALF_SCORE_UB"):
     node = function(text, name)
     lines = text.splitlines(keepends=True)
-    lines.insert(node.args.args[-1].end_lineno, "    SHORT_HALF_SCORE_UB: pl.constexpr = False,\n")
+    lines.insert(node.args.args[-1].end_lineno, f"    {parameter}: pl.constexpr = False,\n")
     return "".join(lines)
 
 
-def append_argument(text, name):
+def append_argument(text, name, argument="SHORT_HALF_SCORE_UB"):
     calls = [
         node
         for node in ast.walk(ast.parse(text))
@@ -36,7 +36,7 @@ def append_argument(text, name):
     closing = lines[call.end_lineno - 1]
     assert closing.strip() == ")", closing
     indent = closing[: len(closing) - len(closing.lstrip())] + "    "
-    lines.insert(call.end_lineno - 1, indent + "SHORT_HALF_SCORE_UB,\n")
+    lines.insert(call.end_lineno - 1, indent + argument + ",\n")
     return "".join(lines)
 
 

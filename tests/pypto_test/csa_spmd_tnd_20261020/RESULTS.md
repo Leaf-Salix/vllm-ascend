@@ -108,6 +108,8 @@ a241fa61 BSH静态形状修复；候选为O_A/O_B互补分工v4。B1/B16经完�
 | 128K/B1/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 358.08 | 366.26 | +2.28% | 不适用 | PASS | [结果](runs/qa_incremental_b1_s6_v93b/result.json) |
 | 128K/B16/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 785.02 | 788.22 | +0.41% | 不适用 | PASS | [结果](runs/ws_incremental_b16_s6_v93b/result.json) |
 | 8K/B16/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 647.54 | 643.64 | -0.60% | 不适用 | PASS | [结果](runs/short_half_ub_h8192_b16_s6_v95/result.json) |
+| 128K/B28/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 1151.84 | 1152.62 | +0.07% | 不适用 | PASS | [结果](runs/topk_prefix_h131072_b28_s6_v99/result.json) |
+| 128K/B8/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 642.68 | 622.60 | -3.12% | 不适用 | PASS | [结果](runs/topk_prefix_h131072_b8_s6_v101/result.json) |
 
 ## 任务与原始证据
 
@@ -226,6 +228,12 @@ a241fa61 BSH静态形状修复；候选为O_A/O_B互补分工v4。B1/B16经完�
 | `task_20261021_142045_325426029053` | [qa_incremental_b1_s6_v93b](runs/qa_incremental_b1_s6_v93b/result.json) | completed (exit=0) | complete | PASS |
 | `task_20261021_142045_32543028090` | [ws_incremental_b16_s6_v93b](runs/ws_incremental_b16_s6_v93b/result.json) | completed (exit=0) | complete | PASS |
 | `task_20261021_144229_86824910253` | [short_half_ub_h8192_b16_s6_v95](runs/short_half_ub_h8192_b16_s6_v95/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_150402_219144119122` | [short_half_ub_t65_r16_matrix_v98](runs/short_half_ub_t65_r16_matrix_v98/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_151458_2930389393` | [topk_prefix_h131072_b28_s6_v99](runs/topk_prefix_h131072_b28_s6_v99/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_154139_748519735` | [topk_prefix_h131072_b8_s6_v101](runs/topk_prefix_h131072_b8_s6_v101/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_155419_187365031349` | [short_half_ub_ties_device_v100b](runs/short_half_ub_ties_device_v100b/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_160738_306213119230` | [topk_prefix_t41_r12_matrix_v103](runs/topk_prefix_t41_r12_matrix_v103/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_162057_10868510136` | [topk_prefix_ties_device_v104](runs/topk_prefix_ties_device_v104/result.json) | submitted | complete | 否 |
 
 各任务完整命令和固定launcher SHA256见 `jobs.json`。
 Native超阈值元素、Top-K替换、cache/state及保护区明细仍在原始result.json；
