@@ -620,3 +620,57 @@ cache/state、保护、图和代际均通过；B16完整五窗798.16→848.84μs
 只读确认正式CANN 9.2.0-beta.2目录已有`tools/msopprof/bin/msopprof`与
 `tools/profiler/bin/msprof`；没有使用--msopprof/--auto-msopprof，没有复制worker
 或注入库、修改共享CANN/SDK。具体仿真case、输入绑定和有效trace尚待建立。
+
+
+## 2026-10-22：Score单生产者仿真已跑通，宽N负例得到独立指令证据
+
+独立诊断只复制原Score helper并移除三个FIFO调用及空guard/drain，数学、
+页读取、query尾行处理保持。入口一AIC、一G6、一逻辑叶、六个1024列step，
+不伪造72角色协作，也不预填完整CSA就绪标志。12个buffer分别按真实维度
+分配；从packed wrapper提取14个动态轴及block_idx/block_num，实际绑定0/1。
+否则默认block_idx=1会得到空trace。Native页表为192..1倒序，page字节4160，
+INT8输入/Key为1，系数仅本query的64个head为1；输出12288个FP32值全部应为8。
+两个只读Key别名为合成独立buffer，逻辑字节一致，不声称真实cache别名性能。
+
+初版pl.cluster(1)不合法，保留失败源后改为直接调用单incore入口。两个v2
+完整CPU生成通过。首轮task_20261022_054417_411548524006和
+054418_411706318223均exit1：技能旧兼容前导与CANN9.2内置FP8/FP4类型冲突。
+随后CPU干跑另发现MrgSortExecutedNumList重复定义；仅生成case前导移除已由
+当前CANN/PTO-ISA提供的声明。原生成kernel正文、SDK、CANN及技能文件均未改。
+v2/v3中间失败目录保留；v4先完成CCEC编译/链接再采集，没有重复正式L1任务。
+
+最终task_20261022_055755_4107924772（v122）与
+055756_4117009850（N256）均completed/exit0；均实际执行、输出全部校验通过，
+各导出一个Cube核trace/指令CSV。共用已验证工具链，仿真模型Ascend910_9391、
+dav-c220-cube；模型不等于对实机具体SoC身份的证明。两项都经task-submit auto，
+未复制worker或安装依赖。五项CPU合同通过，相关六个脚本Ruff通过。
+
+轻量结果及输入/代码/trace索引在score_producer_sim_results.json，复现提取器
+summarize_score_simulator.py。原始大产物位于runs/score_sim_{v122,n256}_v4，
+clean/同时保留raw二进制、clean trace和instr_metrics.json。cleaner分别跳过
+10/8个无法重锚定的同步箭头，因此事件细节以raw及生成代码为准，不认为clean
+图包含所有依赖。原始trace的时间数值为微秒，displayTimeUnit=ns只是显示设置；
+MMAD时间与指令CSV独立核对为1850 cycles/us。非MMAD的CSV周期与trace队列
+生命周期不能直接互换，未把WAIT/SET累计周期当作不重叠阻塞时间。
+
+| 单生产者、同一合成输入 | v122 N64 | M64/N256 |
+|---|---:|---:|
+| 完整X事件首尾跨度（仿真μs） | 46.7697 | 67.0222 |
+| INT8 QK MMA次数 | 192 | 144 |
+| FP16 WS MMA次数 | 192 | 144 |
+| MMAD可见区间并集（μs） | 28.9065 | 28.1773 |
+| MTE2搬入字节 | 847872 | 847872 |
+| MTE2指令数 | 194 | 194 |
+| MMAD之间最大空隙（μs） | 0.4114 | 1.4741 |
+
+此表是无FIFO反压的单生产者诊断，不能进入正式九档、不能外推+43%的硬件
+回退；正式B16已测+6.3496%的结论不变。指令区间并集也不是物理引擎利用率。
+但它确实否定“少25% MMA即可大幅加速”的假设：Cube区间总量近似不变，
+大面板串行依赖/间隙明显增加，GM搬入总字节未减少。停止宽N参数扩扫。
+
+下一步回到N64供数和FIX写回组织。只读核对另一会话日志19849及20571等段：
+保留双48KiB QK早FIX的WS八列池方案，TSTORE16→2，旧轮B16/B28省5.42/12.12μs；
+换公共环境后B16仅省5.14μs，B28中位略慢。它是可借鉴机制而非本会话已取得
+收益，不能整目录覆盖TND或据别的会话采用直接宣称通过。先局部移植、审计
+Acc地址和最后消费者，再诊断并仅以同轮完整L1决定是否保留。明确保留旧负例，
+不扫池宽、不复跑已被否定的联合短尾。生产默认未改、未push，goal仍active。
