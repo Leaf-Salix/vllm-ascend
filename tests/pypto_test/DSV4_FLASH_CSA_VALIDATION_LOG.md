@@ -21268,3 +21268,46 @@ KV完整K累加、归约、RoPE、cache slot保护及状态数学保持不变。
 128K/B24已补排，用于较大容量覆盖；全八档、同址metadata/连续状态和16卡要求
 仍未完成，正式算子尚未替换。下一项独立候选v35从v32评估Score→Top-K→plan→
 Attention局部流水，便于隔离收益；之后再按设备结果决定是否与v34组合。
+
+补充128K/B24：任务`task_20261022_044541_17011533941` completed(exit=0)，三侧
+9类张量逐bit一致，eager/graph/post-L1与保护区均通过。冻结SPMD为
+831.50/836.836/848.00μs，v32控制879.76/887.336/893.34μs，v34候选
+850.16/859.564/869.10μs（min/mean/max）；mean降低3.13%，max降低24.24μs。
+上述结果JSON已追加全部五窗及阶段。这里补的是同一候选的较大容量，不重采B16。
+
+### 735.31：Score到Attention按行流水数值通过，长档改善、短档回退，采用条件分支继续
+
+v35独立从v32构造，将Score、Top-K发布、八行plan和Attention组成一个局部MIX，
+其余前段与输出仍独立，21减为18个task。使用冻结84751e34已验证的Top-K/plan
+数学及按行等待；外部cache、Q和metadata由TMR保证就绪，组内环槽仍用Score
+事件0/1和Attention事件2～5，不能把阶段完成信号当作环槽ACK。独立4阶段代际
+工作区为144KiB，首次清零；仅对实际读到的Score根和plan行获取生产者。
+
+MPMD的Score少组路径已按leaf轮换group，等待公式必须同步取逆：
+`item=leaf*groups+(group+groups-leaf%groups)%groups`，然后按item%24及AIV lane
+找到生产者；非少组路径仍为group*leaves+leaf。对groups=1..48、leaves=1..32的
+全工作项核对逆映射，无负数取余。没有改变device计划、query范围、排序同分规则
+或数值容差。小容量原独立链暂不改。
+
+CPU第一次编译暴露当前PyPTO `_dep_out_metas`按Out/InOut参数声明顺序传播类型：
+生成器的返回顺序与之不一致，把Top-K INT32 metadata误传给packed，报O_A的
+INT32×BF16 matmul错误。修正生成器，使返回值、接收目标和Out/InOut声明顺序一致；
+长短档CPU编译随后通过。未修改公共SDK，也没有把类型错误当作数值策略变更。
+
+两档设备任务completed(exit=0)，三侧eager、graph、post-L1的9类张量逐bit一致，
+所有保护区通过。完整L1单位μs：
+
+| 场景 | 冻结SPMD min/mean/max | v32控制 min/mean/max | v35 min/mean/max | 相对控制mean |
+|---|---:|---:|---:|---:|
+| 128K/B16 | 711.22 / 719.268 / 723.12 | 721.68 / 726.176 / 733.84 | 710.62 / 715.448 / 726.34 | −1.48% |
+| 8K/B16 | 572.12 / 578.084 / 589.24 | 589.28 / 597.512 / 602.48 | 601.64 / 605.580 / 610.08 | +1.35% |
+
+按同窗首尾计算再取mean：长档中段Score首启→Attention末尾320.336→311.724μs，
+缩短8.612μs；短档188.920→192.104μs，反而增加3.184μs。不能以减少三个task
+就声称全档更快。新局部MIX的incore时间包含内部等待，未另外采PMU，不把其中
+的计算与等待强行拆成独立耗时。原始样本及阶段见
+[middle_pipeline_results.json](csa_mpmd_tnd_20261021/middle_pipeline_results.json)。
+
+保留长历史候选，短历史不采用。生成器新增`--balanced-only`，依照既有Score
+资源/历史策略选择中段流水，非balanced保持原四个task。v37从v34组合该分支，
+先检查长短CPU分支再做长档同轮对照；不能把v34与v35两轮收益直接相加。
