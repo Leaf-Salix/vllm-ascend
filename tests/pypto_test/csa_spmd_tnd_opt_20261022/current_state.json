@@ -1,5 +1,5 @@
 {
-  "goal_status": "active",
+  "goal_status": "paused",
   "baseline": "frozen_tnd_v122",
   "formal_case_count": 9,
   "formal_geometric_mean_ratio": null,
@@ -16,20 +16,13 @@
     "front_partition_i8_v2_mixed_only",
     "query_contiguous_heads_v4_b16",
     "query_resident_weights_b16",
-    "output_quant_reuse_b1"
+    "output_quant_reuse_b1",
+    "page_proof_single_row_b16"
   ],
   "next_steps": [
-    "Collect independent page_proof_single_row B28/B16 paired v122 L1 using exact task IDs; full CPU semantics/codegen/physical alignment audit passed",
-    "Preserve standalone B1 quant reuse; remove unproven interactions before next composition and require full generated-program equivalence for reuse",
-    "combined_v4 all terminal and exact but has B16 regression and lost standalone B1 gain; keep most-validated combination at v1 and do not adopt v4",
-    "For later composition use only measured applicable policies; never add independent percentage gains or submit quarantined combined_v3",
-    "Current a2a3 aic_gather/aiv_shard pipe uses GM; do not attempt a large MIX rewrite assuming it removes GM transport",
-    "Keep pursuing the unchanged nine equal-weight cases G<=0.90 and all dynamic/service acceptance; no final cohort or adoption yet"
+    "Stopped after completing all work already in flight, as explicitly requested; do not start or submit more work without a resume instruction"
   ],
-  "pending_tasks": {
-    "page_proof_single_row_b28": "task_20261022_091214_268296623111",
-    "page_proof_single_row_b16": "task_20261022_091222_272500228073"
-  },
+  "pending_tasks": {},
   "pending_cpu": null,
   "log": "vllm_ascend/ops/pypto/CSA_SPMD_TND_NEXT_10PCT_LOG_20261022.md",
   "git_note": "Shared origin tracking ref changed externally to 059dab4a (reflog update by push at 02:06:49). This session did not fetch/push/rebase; local optimization commits preserved.",
@@ -60,6 +53,15 @@
     "query_head_capacity_guard": "B16 positive evidence retained; non-B16 B12 is -0.096% with only 3/5 faster; not adopted",
     "combined_v3": "Contains rejected broad Query guard; CPU compiled only, do not submit",
     "query_resident_swap": "Correct in all three trials; B16 -0.369% 3/5, mixed +0.143% 2/5, short B32 -0.576% 4/5; not globally adopted",
-    "combined_v4": "Exact in three cases and B1 S1-S6; B1 +0.069%, B16 +1.272% (0/5 faster), mixed -0.075%; do not adopt"
-  }
+    "combined_v4": "Exact in three cases and B1 S1-S6; B1 +0.069%, B16 +1.272% (0/5 faster), mixed -0.075%; do not adopt",
+    "combined_v5": "CPU B1/B16 complete; full generated C++/packed wrappers/host/meta match measured B1 quant-only and B16 combined_v1 respectively; no NPU run/adoption",
+    "page_proof_single_row": "B16 -1.008% with 5/5 faster; B28 -0.098% with 3/5 faster; exact full checks passed. No expanded page matrix, production adoption or nine-case gate before user-requested stop."
+  },
+  "stop_request": "User paused goal and requested finishing only the current optimization attempt before stopping",
+  "remaining_work_on_resume": [
+    "Nine equal-weight G<=0.90 remains unproven; do not add independent gains or move frozen-v122 baseline",
+    "Page proof single-row candidate has local B16 evidence only; affected dynamic page/layout coverage remains before adoption",
+    "combined_v5 has CPU codegen equivalence for B1/B16 only; no NPU run or final cohort; mixed/other-domain equivalence not established",
+    "Final same-candidate nine-case performance and affected correctness/service/continuous-state acceptance remain incomplete"
+  ]
 }

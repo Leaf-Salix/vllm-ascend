@@ -1215,3 +1215,43 @@ audit_page_proof_single_row.py已落盘。两项完整五窗L1已提交：
 - B16/S6 task_20261022_091222_272500228073
 
 仍与同轮冻结v122比较，不与v4组合混算。九档G未形成，goal active，无push。
+
+
+### 用户暂停：只收尾已经启动的尝试
+
+用户明确暂停goal，并要求“把本次的性能优化尝试做完之后就停下”。核对工具
+状态已为paused，不恢复总目标。本轮收尾仅包括已提交的page_proof_single_row
+B28/B16两项设备任务、已启动的combined_v5 CPU编译及结果归档，不提交新任务。
+
+暂停前已生成combined_v5：从output_quant_guard复制，仅换入combined_v1的
+Score文件，保留G6半段裁剪/三query排序和B1量化复用；去除Main后移及空发布
+裁剪。此举是隔离组合交互，不认定哪一项单独导致v4回退。两项CPU编译均完成。
+收尾时比较完整生成C++（只去pto位置注释）、两个packed封装、Host及meta：
+B1与已测量化复用版相同，B16与已测combined_v1相同，全部通过。
+证据combined_v5_compile_results.json和combined_v5_codegen_audit.json。
+combined_v5没有NPU性能验证、没有生产采用，也不是最终九档达标证据。
+
+当前两个旧设备句柄仍live，沿原句柄收取，不因暂停或观察等待重启。完成后
+本地commit并停止；未授权push，生产默认不变，目标未达到不标complete。
+
+
+### 本次尝试收尾完成，按用户要求停止
+
+两个page_proof_single_row任务均completed/exit0。严格冻结v122输出/Top-K/
+score、全部cache/state、保护、图及代际检查通过；Native原有差异保持单列。
+五窗完整72核L1结果：
+
+| 场景 | v122中位μs | 候选中位μs | 耗时变化 | 配对更快 |
+|---|---:|---:|---:|---:|
+| 128K/B28/S6 | 1159.82 | 1158.68 | -0.09829% | 3/5 |
+| 128K/B16/S6 | 801.58 | 793.50 | -1.00801% | 5/5 |
+
+结果page_proof_single_row_results.json保留全部窗口及源码/SDK证据。B16保留
+局部正向候选；B28接近零，不宣称稳定提速。此轮没有额外提交动态页矩阵、
+组合或完整九档，也没有将候选采用到生产。后续验证属于暂停后的未完成工作。
+
+已启动的combined_v5 B1/B16 CPU编译及完整生成物等价检查也已归档；未启动
+v5设备任务，不用CPU等价冒充它完成了九档验收。所有本会话设备任务现已终态，
+无CPU或设备pending。Goal保持paused，G<=0.90仍未达成；生产默认未变。
+按用户“本次尝试做完就停下”的指令结束本轮，不自动恢复或扩大优化。
+本地阶段提交后停止，没有push。
