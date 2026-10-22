@@ -21826,3 +21826,28 @@ Native描述符均为17个请求槽、16个活动请求、55个有效token/T64�
 该结果只证明单卡单层真实服务路由，不代替16卡整模型；未采新的性能。公共SDK
 未变，冻结SPMD核内实现和BSH数学文件未修改。复现手册仍只保留PyTorch单卡流程，
 服务及整模型验收过程仅记在本目标日志中。
+
+
+### 735.51：固定B1/S6页边界通过，准备真实16卡混合接受率对照
+
+补测原固定history130943/S6边界，任务`task_20261022_082016_165046637`
+completed(exit=0)，当前正式副本两侧eager/图/post-L1全部9类业务张量逐bit
+一致，保护区通过。至此原B1 S1～S6指定边界均有设备证据；S1/S5来自v46，
+其后变动不影响B1 constexpr及执行路径。全部样本见
+[b1_s6_boundary_results.json](csa_mpmd_tnd_20261021/b1_s6_boundary_results.json)。
+
+新增16卡功能测试冻结器及启动器：只从明确Git提交提取代码，SPMD及其BSH
+数学依赖相对84751e34若出现非接入文件差异立即拒绝，不自动更新分母；两侧
+同一份冻结框架和Native HCA，只切spmd_tnd/mpmd_tnd。公共工具链清单须一致，
+不复制权重、SDK或KV，也不触发Native重新构建。
+
+沿用既有mixed8k_fixed的前16个不同请求，每请求192输出token，TP1/DP=EP16、
+NZ2、确定性level1、HCCL确定性、EPLB关闭；保留已有FULL_DECODE_ONLY、
+npugraph_ex/static kernel计算配置，单独私有OPP及编译目录。此阶段只验收
+正确性，不增加整模型性能门槛，也不更改固定八档L1输入。
+
+新增测试observer记录每层实际runtime、Python提交数、工作区数和ACLGraph
+合同允许/拒绝计数；各DP生成结束后才读取局部signal代际，证明PTO实际推进。
+该代际观测不能代替全部cache内容位差检查。继续保留原逐请求token、DSpark
+0～5直方图及Prometheus一致性检查。脚本语法/Ruff通过，16卡尚未执行，
+不能把单层服务通过改写成整模型通过。
