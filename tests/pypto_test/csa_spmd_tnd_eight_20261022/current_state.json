@@ -31,15 +31,13 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {
-    "C04_uniform_meta_v1": "task_20261023_003650_1390799683",
-    "C05_uniform_meta_v1": "task_20261023_003836_22329631593"
-  },
+  "pending_tasks": {},
   "next_steps": [
-    "Collect the two priority uniform_meta_v1 tasks; verify actual META proof=1 and complete 10-window L1",
-    "Preserve frozen combined_v1 denominator and compare C04 to retained 763.65us before adoption",
-    "If promising, run same-address proof transitions, continuous decode and canonical service gates",
-    "Keep production79fae6db0, 512B signals and original causal/page checks; no push"
+    "User requests macro-level optimization: analyze complete-DAG costs and data movement before more parameter experiments",
+    "Reuse current C05 phase evidence; distinguish task arrival, service, FIFO waiting and completion instead of summing phase endpoints",
+    "Jointly model O_A/quant/O_B work placement and repeated weight loads; reject old row-only and O_B-only negative variants",
+    "For cross-stage scheduling, preserve leaf-level locality and global work balance; do not rerun the rejected fine-step wave design",
+    "Prioritize C04/C05, preserve retained C04 improvement and frozen combined_v1 denominator; all eight cases still count equally; no push"
   ],
   "knowledge_query": {
     "status": "index_missing",
@@ -62,7 +60,7 @@
     "output_quant_schedule": 14,
     "uniform_meta": 63
   },
-  "updated_at": "2026-10-23T00:46:30.995702+08:00",
+  "updated_at": "2026-10-23T01:17:56.044701+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -139,6 +137,15 @@
       "candidate": "output_quant_no_unused_pad_v1",
       "case_id": "C05",
       "evidence": "output_quant_priority_results.json"
+    },
+    {
+      "candidate": "uniform_meta_v1",
+      "cases": [
+        "C04",
+        "C05"
+      ],
+      "evidence": "uniform_meta_v1_results.json",
+      "reason": "Complete-L1 medians regress despite proof=1 and all strict checks passing"
     }
   ],
   "promising_candidates": [],
@@ -251,11 +258,25 @@
     }
   ],
   "pending_observation": {
-    "C04": "pending",
-    "C05": "pending",
-    "occupying_task": "task_20261023_000924_333970730698",
-    "occupying_status": "running",
-    "source": "task-submit --status; both original task IDs preserved"
+    "observed_at": "2026-10-23T01:17:56.044683+08:00",
+    "tasks": {
+      "task_20261023_003650_1390799683": "completed (exit=0)",
+      "task_20261023_003836_22329631593": "completed (exit=0)"
+    },
+    "own_pending_tasks": 0
   },
-  "prepared_uniform_state": "uniform_meta_state_v1.json"
+  "prepared_uniform_state": "uniform_meta_state_v1.json",
+  "macro_review": {
+    "user_requested": true,
+    "evidence": "macro_schedule_analysis.json",
+    "script": "analyze_macro_schedule.py",
+    "new_device_sampling": false,
+    "scope": "Current policy work geometry and reused same-SDK C05 diagnostics; no new optimization adopted",
+    "priority": [
+      "Whole-output O_A/quant/O_B cost and weight supply for C05, then affected resource tiers",
+      "Complete prefix/Score/Attention dependency and service-cost analysis for C04/C05",
+      "Uniform execution specialization and mixed cost-aware scheduling only when backed by net whole-chain opportunity"
+    ],
+    "rejected_fine_step_wave_reused_as_negative_evidence": true
+  }
 }
