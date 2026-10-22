@@ -99,6 +99,7 @@ from .indexer_topk_stages import (
 )
 from .leaf_scale_layout_stages import indexer_leaf_scale_layout
 from .request_geometry import QUERY_BOUNDS_DYN, REQUESTS_DYN
+from .score_group_order_stages import active_score_order_base
 from .topk_threshold_stages import threshold_merge_top512
 
 QUERY_HEAD_ROWS_DYN = pl.dynamic("CSA_SCORE_QUERY_HEAD_ROWS")
@@ -147,6 +148,7 @@ def _indexer_score_cube_original(
     balance_leaves: pl.constexpr,
     SCORE_READY_EVENT: pl.constexpr,
     SCORE_CONSUMED_EVENT: pl.constexpr,
+    SCORE_GROUP_ORDER: pl.constexpr = False,
 ):
     """AIC生产FP32 score双槽；须与两个vector_lane同MIX并发，外层/运行时已设置同一FFTS域。"""
     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
@@ -155,8 +157,15 @@ def _indexer_score_cube_original(
     buf_leaf_tiles = pl.cast(pl.read(plan, [3]), pl.INDEX)
     buf_extra_leaves = pl.cast(pl.read(plan, [4]), pl.INDEX)
     # 每个core独立读取同一device计划；空core不触发任何FFTS事件。
+    buf_order_base = pl.cast(-1, pl.INDEX)
+    if balance_leaves and query_group_size == 6 and SCORE_GROUP_ORDER:
+        buf_order_base = active_score_order_base(
+            offsets, groups, pl.tensor.dim(kv_seq_lens, 0), pl.tensor.dim(position_ids, 0)
+        )
     for buf_item in pl.range(buf_worker, groups * buf_max_leaves, TOPK_SCORE_WORKERS):
         buf_group, buf_leaf = indexer_work_item(buf_item, groups, buf_max_leaves)
+        if buf_order_base >= 0:
+            buf_group = pl.cast(pl.read(offsets, [buf_order_base + 1 + buf_group]), pl.INDEX)
         buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_group(
             bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
         )
@@ -436,6 +445,7 @@ def _indexer_score_cube_split_store(
     balance_leaves: pl.constexpr,
     SCORE_READY_EVENT: pl.constexpr,
     SCORE_CONSUMED_EVENT: pl.constexpr,
+    SCORE_GROUP_ORDER: pl.constexpr = False,
 ):
     """长G6/N64：两半QK早FIX；原完整16行系数分K累加后一次写回。
 
@@ -450,8 +460,15 @@ def _indexer_score_cube_split_store(
     buf_leaf_tiles = pl.cast(pl.read(plan, [3]), pl.INDEX)
     buf_extra_leaves = pl.cast(pl.read(plan, [4]), pl.INDEX)
     # 每个core独立读取同一device计划；空core不触发任何FFTS事件。
+    buf_order_base = pl.cast(-1, pl.INDEX)
+    if balance_leaves and query_group_size == 6 and SCORE_GROUP_ORDER:
+        buf_order_base = active_score_order_base(
+            offsets, groups, pl.tensor.dim(kv_seq_lens, 0), pl.tensor.dim(position_ids, 0)
+        )
     for buf_item in pl.range(buf_worker, groups * buf_max_leaves, TOPK_SCORE_WORKERS):
         buf_group, buf_leaf = indexer_work_item(buf_item, groups, buf_max_leaves)
+        if buf_order_base >= 0:
+            buf_group = pl.cast(pl.read(offsets, [buf_order_base + 1 + buf_group]), pl.INDEX)
         buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_group(
             bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
         )
@@ -1092,6 +1109,7 @@ def indexer_score_cube_stage(
     SCORE_READY_EVENT: pl.constexpr,
     SCORE_CONSUMED_EVENT: pl.constexpr,
     SPLIT_SCORE_ROWS: pl.constexpr = False,
+    SCORE_GROUP_ORDER: pl.constexpr = False,
 ):
     """按已选长G6资源区间执行双QK早FIX；小域及其它组合保留原helper。"""
     if SPLIT_SCORE_ROWS and balance_leaves and query_group_size == 6 and qk_panel_cols == 64 and score_tile == 1024:
@@ -1109,14 +1127,15 @@ def indexer_score_cube_stage(
             plan,
             buf_score_transfer,
             buf_worker,
-            6,  # 此helper固定的数学资源合同；不是T/B/历史实值。
-            64,  # 此helper固定的数学资源合同；不是T/B/历史实值。
-            1024,  # 此helper固定的数学资源合同；不是T/B/历史实值。
+            6,
+            64,
+            1024,
             key_prefetch_panels,
             key_prefetch_to_l0,
-            True,  # 此helper固定的数学资源合同；不是T/B/历史实值。
+            True,
             SCORE_READY_EVENT,
             SCORE_CONSUMED_EVENT,
+            SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
         )
     else:
         result = _indexer_score_cube_original(
@@ -1141,6 +1160,7 @@ def indexer_score_cube_stage(
             balance_leaves,
             SCORE_READY_EVENT,
             SCORE_CONSUMED_EVENT,
+            SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
         )
     return result
 
@@ -1436,6 +1456,7 @@ def indexer_score_vector_lane_stage(
     SCORE_CONSUMED_EVENT: pl.constexpr,
     SHORT_HALF_SCORE_UB: pl.constexpr = False,
     SHORT_TOPK_PREFIX: pl.constexpr = False,
+    SCORE_GROUP_ORDER: pl.constexpr = False,
 ):
     """AIV lane0/1都完整消费同一core事件；只有真实query可写根，空尾lane仍ACK。"""
     groups = pl.cast(pl.read(plan, [0]), pl.INDEX)
@@ -1443,8 +1464,15 @@ def indexer_score_vector_lane_stage(
     buf_leaf_tiles = pl.cast(pl.read(plan, [3]), pl.INDEX)
     buf_extra_leaves = pl.cast(pl.read(plan, [4]), pl.INDEX)
     # 每个core独立读取同一device计划；空core不触发任何FFTS事件。
+    buf_order_base = pl.cast(-1, pl.INDEX)
+    if balance_leaves and query_group_size == 6 and SCORE_GROUP_ORDER:
+        buf_order_base = active_score_order_base(
+            offsets, groups, pl.tensor.dim(kv_seq_lens, 0), pl.tensor.dim(position_ids, 0)
+        )
     for buf_item in pl.range(buf_worker, groups * buf_max_leaves, TOPK_SCORE_WORKERS):
         buf_group, buf_leaf = indexer_work_item(buf_item, groups, buf_max_leaves)
+        if buf_order_base >= 0:
+            buf_group = pl.cast(pl.read(offsets, [buf_order_base + 1 + buf_group]), pl.INDEX)
         buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_group(
             bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
         )

@@ -324,6 +324,7 @@ def vector_schedule(
     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
     SHORT_HALF_SCORE_UB: pl.constexpr = False,
     SHORT_TOPK_PREFIX: pl.constexpr = False,
+    SCORE_GROUP_ORDER: pl.constexpr = False,
 ):
     pl.func_attr({"split_aiv": True})
     x_fp32_gm = x_fp32
@@ -438,6 +439,7 @@ def vector_schedule(
             QUERY_GROUP,
             BALANCED,
             ROOTS,
+            SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
         )
         # scale的地址/页所有权也只依赖本轮metadata，可在量化值产生之前准备。
         # 输入slots在整次调用中不可变；计划与组描述符共用一块有明确分区的工作区。
@@ -882,6 +884,7 @@ def vector_schedule(
         1,
         SHORT_HALF_SCORE_UB,
         SHORT_TOPK_PREFIX,
+        SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
     )
     signal = publish_phase(signal, PHASE_SCORE_VECTOR, core, CORES, generation)
     if COOPERATIVE_PREFIX:
@@ -922,6 +925,7 @@ def vector_schedule(
         generation,
         QUERY_GROUP,
         EARLY_ATTENTION_GEOMETRY,
+        SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
     )
     signal = publish_phase(signal, PHASE_TOPK, core, CORES, generation)
     attention_indices, attention_bias, attention_mask, signal = attention_slot_plan_stage(

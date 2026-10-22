@@ -4578,3 +4578,60 @@ runtime-offset接口。查重后按用户授权提交[PyPTO #3116](https://githu
 请求接通受支持的runtime契约、否则明确回退诊断，并补贯通PTOAS的测试。
 没有硬编码地址别名，也没有把安全回退称为新精度bug。该问题说明不能仅凭
 CSA源码的BYPASS声明声称权重绕L2已生效；是否能带来净收益仍需后续实测。
+
+### 2026-10-23：保留长历史M192分工与混长重排，八档综合尚未达到10%
+
+critical_prefix_v2扩档任务均completed/exit0，完整十窗、eager/graph/post-L1
+逐bit及保护通过，实际candidate CPP与预审CPU产物唯一匹配。两个参考均为
+此前核验的同SDK、同卡历史记录，原始候选uncompared报告不修改；结果单独
+结合证书，见critical_prefix_v2_expansion_results.json。
+
+| 档位 | 原算法同SDK μs | 候选 μs | 耗时变化 |
+|---|---:|---:|---:|
+| C06 / 128K B28 S6 | 1173.42 | 1138.41 | -2.9836% |
+| C07 / 8K B32 S6 | 917.71 | 930.19 | +1.3599% |
+
+因此最终联合前缀谓词为long_history、G6、128<Tcap<=192，短历史C07恢复
+原实现，C04继续已保留leaf版。这个边界来自不同资源域的正负结果，不把
+B28收益外推给短历史。C05 canonical service任务306508826683已通过，实际
+CPP与已测C05候选一致；见critical_prefix_C05_service.json。
+
+C06首次状态任务339468723710被旧测试壳的C04/C05白名单拒绝，未执行算子。
+保留失败记录后冻结m192_state_harness_v1，只扩入口白名单；原16 metadata+
+4连续步骤检查不改，执行真实schedule AST核验B28容量。新任务
+task_20261023_043423_353647121264 completed/exit0，全部逐bit、几何、地址、
+代际、保护及连续状态通过；实际CPP亦与合并候选相同。不是重跑已成功的B24
+验证。对应证据critical_prefix_C06_state.json。
+
+混长旧候选在logical-codegen SDK下的十窗728.33μs，现在可对新同SDK原版
+742.86计算，缩短1.9560%，旧跨SDK比率仍撤回。重查完整原始72-role周期值、
+逐bit/保护、权重、fixture检查及原版描述符一致；候选卡2、原版卡3，属于
+规范允许的历史复用，不能描述为同卡配对因果测量。原v3的15 metadata+4连续
+状态、v4 canonical service同样核对实际bootstrap release和完整CPP，均与
+当前合并候选C08代码一致，故不重复这些验证。见score_group_order_same_sdk_result.json
+与score_group_order_reuse_validation.json。
+
+合并包merged_schedule_v1以原冻结算法作三方基底，合并当前leaf/关键前缀与
+已验证group-order。9处冲突仅为新增constexpr/调用参数列表或格式；明确同时
+保留各特性，未整目录覆盖而丢失leaf。冻结包完整CPU编译7个代码类覆盖八档：
+C01/C02/C03/C07对原版、C04对已保留leaf、C05/C06对已测联合前缀、C08对已测
+group-order，四份CPP仅忽略位置注释及ABI均一致。C06还直接绑定实际NPU
+candidate目录，非只用相同policy推断。完整记录见merged_schedule_v1_codegen.json。
+
+合并包104项服务合同测试通过，测试进程将该包路径单独绑定并在结束检查所有
+已导入子模块来自此冻结包；生产文件在此阶段没有先行替换。合并包C06进一步
+执行真实canonical service任务task_20261023_044346_37857603166，completed/exit0，
+模型钩子/custom-op、图、workspace复用、空调用/回退和逐bit/保护通过，实际
+CPP与合并C05/C06类一致。对应merged_schedule_C06_service.json。
+
+上述门禁完成后正式集成两项新增策略，原C04 leaf优化保留，总计本goal新增
+保留三项机制。补齐group-order及长G6 M192容量/历史/query上界边界测试，实际
+生产136项CPU合同通过。生产与冻结包各模块执行AST一致，仅文档和独立import
+排序不同；最终生产C05完整CPU CPP再核对逐字一致。同步更正BYPASS注释，
+不再暗示声明已经产生L2绕缓存指令。未重复相同设备数学/性能测试。
+
+retained_merged_schedule.json保存八档原分母、当前采用值、每档比率及全部
+证据入口。按原八档等权计算，当前几何平均比率0.9899876499，即约缩短1.0012%，
+仍明显高于0.90验收线；没有重置分母或把局部百分比相加。生产集成清单为
+merged_schedule_integration.json。所有本轮NPU任务已终态，共享SDK未修改，
+未push；原10% goal继续active，下一轮继续从整链服务成本和数据供给分析机会。

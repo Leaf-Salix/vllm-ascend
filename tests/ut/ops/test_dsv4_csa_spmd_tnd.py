@@ -131,6 +131,38 @@ def test_leaf_scale_layout_resource_and_history_bounds(tokens, requests, max_que
     assert policy.scale_page_coalescing is coalescing
 
 
+@pytest.mark.parametrize(
+    "tokens,requests,max_query,length,enabled,rows",
+    [
+        (1, 1, 6, 131078, False, 128),
+        (64, 16, 6, 131078, False, 128),
+        (96, 16, 6, 131078, False, 128),
+        (128, 24, 6, 131078, False, 128),
+        (129, 24, 6, 131078, True, 192),
+        (144, 24, 6, 131078, True, 192),
+        (168, 28, 6, 131078, True, 192),
+        (192, 32, 6, 131078, True, 192),
+        (193, 33, 6, 131078, False, 128),
+        (256, 43, 6, 131078, False, 128),
+        (144, 29, 5, 131077, False, 192),
+        (144, 144, 1, 131073, False, 192),
+        (144, 24, 6, 32771, False, 192),
+        (144, 24, 6, 32772, True, 192),
+        (168, 28, 6, 8198, False, 192),
+        (192, 32, 6, 8198, False, 192),
+        (168, 28, 6, 262150, True, 192),
+    ],
+)
+def test_joint_prefix_uses_only_long_g6_single_m192_domain(tokens, requests, max_query, length, enabled, rows):
+    """Keep the measured B16/short-history regressions outside the joint prefix."""
+    policy = select_policy(tokens=tokens, requests=requests, max_query_tokens=max_query, max_seq_len=length)
+    assert policy.joint_bf16_prefix is enabled
+    assert policy.prefix_projection_rows == rows
+    assert policy.constexprs()["JOINT_BF16_PREFIX"] is enabled
+    assert policy.constexprs()["PREFIX_PROJECTION_ROWS"] == rows
+    assert not (policy.joint_bf16_prefix and policy.score_group_order)
+
+
 def native_case():
     """真实混长[2,6,1]描述符与Native共享key/scale页，不分配NPU。"""
     tokens, requests, pages = 9, 3, 4
@@ -582,3 +614,26 @@ def test_tnd_runner_preserves_framework_mixed_graph_choice(monkeypatch, history,
     else:
         assert mode == CUDAGraphMode.NONE and descriptor.num_tokens == 9
         dispatch.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "tokens,requests,max_query,length,compiled",
+    [
+        (31, 16, 6, 131078, False),
+        (32, 16, 6, 131078, True),
+        (48, 8, 6, 131078, False),
+        (48, 16, 6, 131078, True),
+        (56, 16, 6, 131078, True),
+        (63, 16, 6, 131078, True),
+        (64, 16, 6, 131078, False),
+        (96, 16, 6, 131078, False),
+        (56, 16, 5, 131077, False),
+        (56, 16, 6, 8198, False),
+        (6, 1, 6, 131078, False),
+    ],
+)
+def test_score_group_order_compile_domain(tokens, requests, max_query, length, compiled):
+    """Host selects code; actual group count, live rows and history remain device-side."""
+    policy = select_policy(tokens=tokens, requests=requests, max_query_tokens=max_query, max_seq_len=length)
+    assert policy.score_group_order is compiled
+    assert policy.constexprs()["SCORE_GROUP_ORDER"] is compiled

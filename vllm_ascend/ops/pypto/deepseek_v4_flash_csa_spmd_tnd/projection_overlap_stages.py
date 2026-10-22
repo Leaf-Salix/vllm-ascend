@@ -123,15 +123,17 @@ def projection_overlap_stage(
     generation: pl.Scalar[pl.INT32],
     BRANCH_GROUPS: pl.constexpr,
     QB_WIDE_N: pl.constexpr = False,
+    JOINT_BF16_PREFIX: pl.constexpr = False,
 ):
     """0<R<24；Host只选择R，动态行数及所有输入依赖仍留在核内。"""
     tokens = pl.tensor.dim(normed, 0)
     # 主压缩只依赖normed，提早发布可让其AIV消费者与后续Q_B重叠。
     # 保留原M64/N64和完整K归约，各核只发布自己的结果，不等待其它AIC。
-    main_value, main_score = compressor_project_stage(
-        normed, main_wkv, main_wgate, main_value, main_score, worker, GROUPS
-    )
-    signal = publish_phase(signal, PHASE_MAIN_PROJECT, worker, CORES, generation)
+    if not JOINT_BF16_PREFIX:
+        main_value, main_score = compressor_project_stage(
+            normed, main_wkv, main_wgate, main_value, main_score, worker, GROUPS
+        )
+        signal = publish_phase(signal, PHASE_MAIN_PROJECT, worker, CORES, generation)
     weights_partial = indexer_weights_project_stage(normed, weights_proj, weights_partial, worker, GROUPS)
     signal = publish_phase(signal, PHASE_WEIGHTS_PROJECT, worker, CORES, generation)
     if worker < BRANCH_GROUPS:
@@ -174,7 +176,8 @@ def projection_overlap_stage(
     # 同一组24个KV逻辑worker做循环置换，保持全部M/N块唯一归属。常见的
     # 最多12个非空worker落在Q_B一侧，不继续堆到Hadamard辅助核；即便
     # 其它动态形状需要更多波次，也仍按完整原KV算法覆盖，未冻结任务数。
-    kv_worker = (worker + GROUPS - BRANCH_GROUPS) % GROUPS
-    kv_fp32 = kv_project_stage(normed, wkv, kv_fp32, kv_worker, GROUPS)
-    signal = publish_phase(signal, PHASE_KV_PROJECT, worker, CORES, generation)
+    if not JOINT_BF16_PREFIX:
+        kv_worker = (worker + GROUPS - BRANCH_GROUPS) % GROUPS
+        kv_fp32 = kv_project_stage(normed, wkv, kv_fp32, kv_worker, GROUPS)
+        signal = publish_phase(signal, PHASE_KV_PROJECT, worker, CORES, generation)
     return main_value, main_score, weights_partial, query_had, q_proj, idx_had, kv_fp32, signal

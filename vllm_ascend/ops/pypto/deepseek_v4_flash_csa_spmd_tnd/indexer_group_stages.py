@@ -67,6 +67,7 @@ import pypto.language as pl
 
 from ..deepseek_v4_flash_csa.config import FLASH as M
 from .request_geometry import QUERY_BOUNDS_DYN, REQUESTS_DYN, request_bounds
+from .score_group_order_stages import plan_score_group_order
 
 TOKENS_DYN = pl.dynamic("CSA_INDEX_GROUP_T")
 OFFSET_ROWS_DYN = pl.dynamic("CSA_INDEX_GROUP_OFFSETS")
@@ -125,6 +126,7 @@ def indexer_group_plan_stage(
     GROUP_SIZE: pl.constexpr,
     BALANCED: pl.constexpr,
     ROOTS_PER_LEAF: pl.constexpr,
+    SCORE_GROUP_ORDER: pl.constexpr = False,
 ):
     """worker0写组前缀、描述符和叶计划；容量pad16(B+1)+4*T由入口保证。"""
     if worker == 0:
@@ -178,10 +180,11 @@ def indexer_group_plan_stage(
                 # B1把原每个8192叶的两个半叶独立调度，包含尾部空根。
                 # 末叶边界依赖各组实际visible，不能把全部半叶静态等分为4096。
                 leaf_tiles = pl.cast(CANDIDATES_PER_LEAF // (2 * SCORE_TILE), pl.INDEX)
-                leaves = 2 * pl.max((max_history + CANDIDATES_PER_LEAF - 1)
-                                    // CANDIDATES_PER_LEAF, 1)
+                leaves = 2 * pl.max((max_history + CANDIDATES_PER_LEAF - 1) // CANDIDATES_PER_LEAF, 1)
             else:
                 leaves, leaf_tiles, extra = indexer_long_leaf_plan(max_history, groups)
+        if BALANCED and GROUP_SIZE == 6 and SCORE_GROUP_ORDER:
+            offsets = plan_score_group_order(offsets, groups, requests, tokens, leaves)
         pl.write(plan, [0], pl.cast(groups, pl.INT32))
         pl.write(plan, [1], pl.cast(max_history, pl.INT32))
         pl.write(plan, [2], pl.cast(leaves, pl.INT32))

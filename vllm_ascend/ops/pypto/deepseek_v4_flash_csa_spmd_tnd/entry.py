@@ -296,6 +296,9 @@ def _csa_core_group(
     SHORT_TOPK_PREFIX: pl.constexpr = False,
     QB_WIDE_N: pl.constexpr = False,
     PREFIX_BRANCH_GROUPS: pl.constexpr = 4,
+    JOINT_BF16_PREFIX: pl.constexpr = False,
+    PREFIX_PROJECTION_ROWS: pl.constexpr = 128,
+    SCORE_GROUP_ORDER: pl.constexpr = False,
 ):
     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
     with pl.cluster(name_hint="dynamic_csa_full"):
@@ -392,6 +395,9 @@ def _csa_core_group(
             OUTPUT_WORK_BALANCE,
             QB_WIDE_N,
             PREFIX_BRANCH_GROUPS,
+            JOINT_BF16_PREFIX,
+            PREFIX_PROJECTION_ROWS,
+            SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
         )
         (
             x_fp32,
@@ -592,6 +598,7 @@ def _csa_core_group(
             PLAN_PHYSICAL_ROWS,
             SHORT_HALF_SCORE_UB,
             SHORT_TOPK_PREFIX,
+            SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
         )
     return (
         x_fp32,
@@ -832,6 +839,9 @@ def decode_csa_spmd(
     SHORT_TOPK_PREFIX: pl.constexpr = False,
     QB_WIDE_N: pl.constexpr = False,
     PREFIX_BRANCH_GROUPS: pl.constexpr = 4,
+    JOINT_BF16_PREFIX: pl.constexpr = False,
+    PREFIX_PROJECTION_ROWS: pl.constexpr = 128,
+    SCORE_GROUP_ORDER: pl.constexpr = False,
 ):
     # Native cache只作为一个根入参传入。两份Key是编排内的零拷贝描述符，
     # 避免把“可写cache+部分重叠只读视图”当作独立外部入参触发Torch别名拒绝。
@@ -1087,6 +1097,9 @@ def decode_csa_spmd(
             SHORT_TOPK_PREFIX,
             QB_WIDE_N,
             PREFIX_BRANCH_GROUPS,
+            JOINT_BF16_PREFIX,
+            PREFIX_PROJECTION_ROWS,
+            SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
         )
     return (
         x_fp32,

@@ -23,39 +23,33 @@
       "candidate": "leaf_scale_guard_v2",
       "case_id": "C04",
       "evidence": "retained_leaf_scale.json"
+    },
+    {
+      "candidate": "critical_prefix_long_g6_m192",
+      "cases": [
+        "C05",
+        "C06"
+      ],
+      "evidence": "retained_merged_schedule.json"
+    },
+    {
+      "candidate": "mixed_score_group_order",
+      "case_id": "C08",
+      "evidence": "retained_merged_schedule.json"
     }
   ],
   "production_operator_changed": true,
-  "formal_geometric_mean_ratio": null,
+  "formal_geometric_mean_ratio": 0.9899876498714436,
   "push_authorized": false,
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {
-    "task_20261023_041733_306508826683": {
-      "case": "C05",
-      "candidate": "critical_prefix_v2",
-      "kind": "canonical_service",
-      "device": 0
-    },
-    "task_20261023_041929_31218698749": {
-      "case": "C06",
-      "candidate": "critical_prefix_v2",
-      "kind": "complete_L1_external_reference",
-      "device": 2
-    },
-    "task_20261023_041929_312190823750": {
-      "case": "C07",
-      "candidate": "critical_prefix_v2",
-      "kind": "complete_L1_external_reference",
-      "device": 11
-    }
-  },
+  "pending_tasks": {},
   "next_steps": [
-    "Collect C05 service and C06/C07 full-L1 results for M192-only critical prefix; use qualified external reference and actual compiled candidates",
-    "Requalify existing C08 group-order data against the now available same-SDK original baseline, without repeating already completed tests",
-    "Keep retained C04 763.65us code; v2 off code is byte-equivalent",
-    "Goal remains eight equal-weight cases versus original algorithm; no SDK edits or push"
+    "Analyze whole-chain resource service time and dependency-induced waits on the retained merged implementation; preserve original eight-case denominator",
+    "Prioritize changes that reduce real data supply/control cost or exploit a demonstrated resource mismatch, not adjacent tile scans",
+    "Track PyPTO #3116 before any L2-bypass experiment; never hardcode aliases or mutate a live shared SDK",
+    "Retained geometric mean is above 0.90; continue toward the original ten-percent objective; no push"
   ],
   "knowledge_query": {
     "status": "index_missing",
@@ -81,9 +75,10 @@
     "pipe_reader": 10,
     "joint_prefix": 67,
     "critical_prefix": 67,
-    "critical_prefix_guard": 2313
+    "critical_prefix_guard": 2313,
+    "merged_production_contracts": 136
   },
-  "updated_at": "2026-10-23T04:22:52.462713+08:00",
+  "updated_at": "2026-10-23T05:03:12.799496+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -122,6 +117,15 @@
       "device_execution": true,
       "reason": "CSV has no Step Id; parsing interrupted post-profile validation; original data retained",
       "action": "v2 binds records through explicit trace markers and checks post-profile state before parsing"
+    },
+    {
+      "task_id": "task_20261023_042827_339468723710",
+      "case_id": "C06",
+      "candidate": "critical_prefix_v2_state",
+      "status": "completed (exit=1)",
+      "device_execution": false,
+      "reason": "Existing state harness allowlist only admitted C04/C05; rejected before kernel launch",
+      "action": "Frozen extended allowlist with unchanged 16+4 checks; replacement task completed successfully"
     }
   ],
   "rejected_candidates": [
@@ -220,9 +224,7 @@
     "published_for_validation_at": "2026-10-22T18:00:10+08:00",
     "validated_at": "2026-10-22T18:14:28+08:00"
   },
-  "unqualified_candidates": [
-    "score_group_order_v5_C08_performance"
-  ],
+  "unqualified_candidates": [],
   "sdk_provenance_correction": "sdk_provenance_audit.json",
   "prepared_priority_candidates": {
     "leaf_scale_v1": {
@@ -280,7 +282,8 @@
         "C05",
         "C06",
         "C07"
-      ]
+      ],
+      "status": "C07 rejected; long-G6 subset adopted through merged_schedule_v1"
     }
   },
   "local_stage_commit": "3a0f423c6",
@@ -298,9 +301,11 @@
     }
   ],
   "locally_retained_candidates": [
-    "leaf_scale_guard_v2"
+    "leaf_scale_guard_v2",
+    "critical_prefix_long_g6_m192",
+    "mixed_score_group_order"
   ],
-  "C05_decision": "Keep original strategy; all measured priority changes are negative, flat, or too small to establish benefit",
+  "C05_decision": "Adopt long-G6 M192 critical prefix after full-L1 and state/service checks",
   "disabled_code_equivalence": "leaf_scale_guard_disabled_classes.json",
   "priority_round_complete": true,
   "parked_weak_positive_candidates": [
@@ -344,13 +349,12 @@
     }
   ],
   "pending_observation": {
-    "observed_at": "2026-10-23T04:22:52.462713+08:00",
+    "observed_at": "2026-10-23T05:03:12.799496+08:00",
+    "own_pending_tasks": 0,
     "tasks": {
-      "task_20261023_041733_306508826683": "running",
-      "task_20261023_041929_31218698749": "running",
-      "task_20261023_041929_312190823750": "running"
-    },
-    "own_pending_tasks": 3
+      "task_20261023_043423_353647121264": "completed (exit=0)",
+      "task_20261023_044346_37857603166": "completed (exit=0)"
+    }
   },
   "prepared_uniform_state": "uniform_meta_state_v1.json",
   "macro_review": {
@@ -399,5 +403,6 @@
     "original_algorithm_unchanged": true,
     "new_device_measurements_for_reuse": 0
   },
-  "current_sdk_C08_reference": "baseline_current_sdk_C08.json"
+  "current_sdk_C08_reference": "baseline_current_sdk_C08.json",
+  "current_implementation": "merged_schedule_v1"
 }

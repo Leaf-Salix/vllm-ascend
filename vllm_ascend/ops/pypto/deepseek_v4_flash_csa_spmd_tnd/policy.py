@@ -65,6 +65,9 @@ class CSASPMDPolicy:
     short_half_score_ub: bool = False
     qb_wide_n: bool = False
     prefix_branch_groups: int = 4
+    joint_bf16_prefix: bool = False
+    prefix_projection_rows: int = 128
+    score_group_order: bool = False
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -94,6 +97,9 @@ class CSASPMDPolicy:
             "SHORT_HALF_SCORE_UB": self.short_half_score_ub,
             "QB_WIDE_N": self.qb_wide_n,
             "PREFIX_BRANCH_GROUPS": self.prefix_branch_groups,
+            "JOINT_BF16_PREFIX": self.joint_bf16_prefix,
+            "PREFIX_PROJECTION_ROWS": self.prefix_projection_rows,
+            "SCORE_GROUP_ORDER": self.score_group_order,
         }
 
 
@@ -153,6 +159,20 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         # G2 wide-N/two-core prefix showed no benefit; keep the original four producers.
         qb_wide_n=(long_history and group == 6 and SCORE_SPLIT_MIN_TOKENS <= tokens < EARLY_GEOMETRY_MIN_TOKENS),
         prefix_branch_groups=4,
+        # Keep the Indexer chain early; its four Hadamard cores skip main/KV work.
+        # Restrict the joint grid to long-G6 single-M192: B16 and short-history
+        # measurements regressed. Real request membership remains device-side.
+        joint_bf16_prefix=long_history and group == 6 and 128 < tokens <= 192,
+        prefix_projection_rows=192 if 128 < tokens <= 192 else 128,
+        # Keep the measured mixed case in the existing [32, 64) Q_B resource tier.
+        # Real group membership and the heavy/light proof remain device-side.
+        score_group_order=(
+            long_history
+            and group == 6
+            and tokens >= SCORE_SPLIT_MIN_TOKENS
+            and tokens < EARLY_GEOMETRY_MIN_TOKENS
+            and tokens < requests * group
+        ),
         # Host upper bound only; real mixed-query membership remains on device.
         short_half_score_ub=(
             not long_history and group == 2 and requests * ((max_query_tokens + 1) // 2) <= SHORT_HALF_SCORE_GROUP_LIMIT
