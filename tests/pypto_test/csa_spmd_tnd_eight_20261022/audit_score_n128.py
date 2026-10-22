@@ -24,6 +24,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("compile_dir", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--two-acc", action="store_true", help="Audit alternating M128/M64 accumulators")
     args = parser.parse_args()
     here = Path(__file__).resolve().parent
     root = args.compile_dir.resolve()
@@ -50,8 +51,31 @@ def main():
     cpp = root / "kernel/ptoas/dynamic_csa_full.cpp"
     code = cpp.read_text()
     lines = code.splitlines()
-    accs = set(re.findall(r"Tile<TileType::Acc, int32_t, 192, 128,[^;\n]+> (v\d+);", code))
-    assert len(accs) == 2, accs  # live <= 3 branch and live > 3 branch
+    if args.two_acc:
+        accs = set(
+            re.findall(
+                r"// pto: %(?:live_half_)?split_qk_acc_(?:large|small)_inline[^\n]*\n\s*;\n\s*(v\d+) = Tile<",
+                code,
+            )
+        )
+        assert len(accs) == 4, accs
+        inserts = []
+        for node in ast.walk(ast.parse(ir_path.read_text())):
+            if not isinstance(node, ast.AnnAssign) or not isinstance(node.value, ast.Call):
+                continue
+            call = node.value
+            if ast.unparse(call.func) == "pl.tile.assemble" and isinstance(call.args[1], ast.Name):
+                name = call.args[1].id
+                if re.match(r"(?:live_half_)?split_qk[01]_(?:large|small)_inline", name):
+                    expected = [128, 0] if "_small_" in name else [0, 0]
+                    assert ast.literal_eval(call.args[2]) == expected
+                    assert "[[192, 128], pl.FP16" in ast.unparse(node.annotation)
+                    inserts.append(dict(source=name, offset=expected))
+        assert len(inserts) == 48
+    else:
+        accs = set(re.findall(r"Tile<TileType::Acc, int32_t, 192, 128,[^;\n]+> (v\d+);", code))
+        assert len(accs) == 2, accs  # live <= 3 branch and live > 3 branch
+        inserts = []
     evidence = []
     for acc in sorted(accs):
         writes = [i for i, line in enumerate(lines) if re.search(rf"TMATMUL\({acc},", line)]
@@ -66,7 +90,7 @@ def main():
                 assert paired_flag("\n".join(lines[previous_insert:line_no]), "PIPE_FIX", "PIPE_M"), line_no
             evidence.append(dict(acc=acc, matmul_line=line_no + 1, fix_insert_line=insert + 1))
             previous_insert = insert
-    assert len(evidence) == 24
+    assert len(evidence) == (48 if args.two_acc else 24)
     # The reused WS Right storage must wait for the preceding first-half MMAD.
     right_edges = []
     for i, line in enumerate(lines):
@@ -92,6 +116,8 @@ def main():
         packed_abi_unchanged=True,
         resources=resources,
         qk_reuse_edges=evidence,
+        two_accumulators=args.two_acc,
+        partial_row_insertions=inserts,
         ws_right_reuse_edges=right_edges,
         ir=str(ir_path),
         cpp=str(cpp),
