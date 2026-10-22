@@ -4743,3 +4743,99 @@ C04合计357 MiB，C05合计535.5 MiB。C05中KV cache→UB、UB→GM ring、GM�
 
 本轮未修改共享SDK或生产算子，所有自有任务终态，未push。过程仍集中在本
 文档，失败预检与未测描述符归档在runs；原10% goal保持active。
+
+### 2026-10-23：实测KV访问局部性，拒绝逐行检查省略，反馈采集流水能力
+
+本轮开始复核HEAD=cbbcb41ff、工作区干净、所有旧任务终态；公共SDK仍为
+csa-shared-20261022-logical-codegen。知识库SQLite索引仍缺失，未重建或改做
+全库扫描；本轮接口依据为共享PyPTO、PTOAS和实际固定版本PTO-ISA源码。
+
+此前结果没有保存真实TopK/物理计划数组，因此冻结kv_access_harness_v1，
+仅执行一次已验证的merged_schedule_v1 C05，导出运行后的索引、位置、Q/L、
+页表与块mask，不改算子、不插桩、不采L1。任务task_20261023_062321_209509211525
+completed/exit0。该探针明确不重新声称数学验证；实际唯一CPP与已测C05候选
+一致，SDK、权重、固定case一致，复用原逐bit/图/状态证据。CPU独立核验所有
+物理索引等于本轮逻辑TopK经过causal范围、当前页表和物理容量约束后的映射，
+块mask与合法行一致。原始NPZ及其hash保存在runs，摘要retained_C05_kv_access.json。
+四项分析器测试覆盖连续访问、集合相同但顺序相反、页空洞和错误物理计划拒绝。
+
+| C05实际访问指标 | 观察值 |
+|---|---:|
+| 有效压缩KV行访问 | 73728 |
+| 按原64行lane切片及原顺序的连续run | 73724 |
+| 理想合并可减少的行请求比例上界 | 0.00543% |
+| 每64行片段的不同物理页中位数 | 62 |
+| 每片段改整页读取的payload放大倍数 | 31.12× |
+| 同请求相邻query的行集合重叠均值／中位数 | 5.37%／4.88% |
+| 同位置行重合比例均值 | 0.0163% |
+| 可直接复用的完整64行片段／128行块 | 0／0 |
+| 整个请求内去重后可少读的行比例均值 | 11.53% |
+| 全合法128行块／活动128行块 | 576／576 |
+
+这些是固定seed/fixture观察，不能外推所有线上请求。集合去重比例也不等于
+按原顺序可复用的L1 tile。当前连续24-query逻辑波次的不同物理行约10500～11120；
+假设改成一请求一cluster，同一query步24请求则为12288。该模型只描述逻辑
+working set，不是实际L2 miss或调度时序，但已不足以支持盲目重排请求以求缓存收益。
+因此本轮没有试整页读、按物理索引排序或跨query整块KV驻留。
+
+实际ISA pin为327cd5869f3a7c4d2c6a1b945b2aed06e7665c5d。A2/A3 ND Row/Zero
+对合法行执行范围判断和DMA，对非法行进入逐元素零填充分支；合法行没有额外
+清零。候选plan_gather_valid_v1复用plan已有的完整合法性mask，每128行做一次
+row_min，写私有attention_mask列7..10。0..4仍是原事件谓词，5/6仍是query几何；
+一个plan owner独占每行64B，当前代所有真实容量行（含inactive）均覆盖证明。
+消费者只有在同代证明为1时使用MGATHER Row/Undefined，否则保留原Zero读法。
+原query顺序、softmax/PV数学、FFTS事件、工作区及ABI均不变。
+
+27项CPU检查执行真实新增证明/消费分支，覆盖完整块、两lane中的坏行、负索引、
+容量外索引、full→partial→empty→full、尾行和poison保护；移除新增两处逻辑后，
+原plan及两Attention helper数学AST一致。完整C04/C05 CPU编译和资源门禁通过，
+主要Mat475136/Acc131072/Left65536/Right65536、AIV Vec180224字节，原FFTS
+发出点一致；关闭域C03四份CPP与原版仅忽略位置注释后相同。
+
+两档新性能任务均completed/exit0，eager/graph/post-L1逐bit及保护全部通过，
+原始20个完整72-role单MIX窗口和实际CPU/NPU CPP均已绑定。结果如下：
+
+| 档位 | 已保留版本 μs | 合法块采集候选 μs | 对已保留版变化 |
+|---|---:|---:|---:|
+| C04 / 128K B16 S6 | 763.65 | 781.01 | +2.2733% |
+| C05 / 128K B24 S6 | 1003.02 | 1006.30 | +0.3270% |
+
+任务分别为task_20261023_064346_258855815134、task_20261023_064228_255495026812。
+plan_gather_valid_v1_results.json保留全部样本。C05差值很小，只报告所见中位数，
+不声称统计显著；两档都没有净收益，因此不采用、不扩档，也不做采用所需的
+额外同址坏页/服务测试。生产仍是32a1426d9的三个保留机制，八档比率仍为
+0.9899876499，原0.90目标未达到。
+
+#### 编译侧后续方向：独立Vector工作被MGATHER宏完成等待约束
+
+进一步核对了PTOAS SyncMacroModel与ISA内部事件。没有把已关闭的#861
+Scalar index-read race当作新bug；当前编译器确实在索引DMA后插入MTE2→S。
+也区分了#1587的动态subview别名问题。本轮最小复现仅用三个静态不相交UB
+分配，先加载独立Vector输入和gather索引，再MGATHER、TADDS和两个输出store。
+共享PTOAS0.69编译通过，正确地在gather前发出独立输入的ready；同址负对照
+也编译通过，并保留gather后真实的数据依赖。
+
+不过ISA的MGatherRowImpl尾部仍有MTE2→V set/wait，后续独立TADDS位于
+同一V队列中，受到该宏完成点约束。不能仅凭头文件就断定它生效：本轮还用
+当前CCEC、A3 target和标准-O3/-DMEMORY_BASE等编译参数做预处理，确认
+__PTO_AUTO__未定义，PtoSetWaitFlag确实展开set_flag/wait_flag调用。
+未删除任何同步，未改共享SDK，也没有将CPU证据称为设备收益。
+
+查重后按用户既有授权提交[PTOAS #1674](https://github.com/hw-native-sys/PTOAS/issues/1674)，
+请求从ND Row/Undefined窄域提供由编译器管理依赖的异步采集路径。必须保留
+索引就绪、真实V/MTE3消费者完成、同址和循环复用依赖；Zero路径若扩展还须
+正确建模Scalar补零写入，不能全局开宏删除其它算子的同步。完整输入为
+mgather_independent_vector.pto，预处理和两对照证据为
+mgather_overlap_codegen_evidence.json，issue登记upstream_issue_1674.json。
+
+下一步先核对Attention每tick的Score输入准备、softmax与KV采集的真实重叠条件，
+并排重旧逐行／双遍gather负例；不能仅删几个范围判断或以字节量预测收益。
+本轮所有自有任务已终态，未push，goal继续active。
+
+后续排重补记：主BSH记录的E44双遍显式DMA已在长B16回退2.330%；E45的
+64KiB持久KV区曾需202240B而超188416B；E46改32KiB后，B24/B28仍分别
+回退0.577%/0.658%，均未采用。旧stage=2行加载还增加了1KiB UB复制，原逐行
+TLOAD循环本来就没有逐行显式wait。上述方案不能改名重测。当前TND的PV已
+左右各256列读取，不能再把“半列读取”当新发现。后续只有Score输入前取位置、
+独立KV缓冲生存期及实际V/MTE2重叠共同发生有依据的改变，才构成新候选；
+按更少head更新PV以减少同时live临时量仅是待完整编译审查的资源方案，尚未实现。

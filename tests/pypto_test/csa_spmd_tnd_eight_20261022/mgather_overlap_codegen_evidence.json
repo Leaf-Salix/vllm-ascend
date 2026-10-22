@@ -1,0 +1,24 @@
+{
+  "device_execution": false,
+  "performance_eligible": false,
+  "ptoas_commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f",
+  "pto_isa_pin": "327cd5869f3a7c4d2c6a1b945b2aed06e7665c5d",
+  "source": "tests/pypto_test/csa_spmd_tnd_eight_20261022/mgather_independent_vector.pto",
+  "output": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/mgather_sync_probe_v1",
+  "header": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/MGather.hpp",
+  "header_sha256": "f0a6d3f259a71f91c68b2d2dd5bc55028b6fdbad3b272186aa2c15fc8ec7d2f5",
+  "pto_auto_defined_in_ccec_probe": false,
+  "active_event_helper": "void PtoSetWaitFlag(event_t SetEventId = EVENT_ID0, event_t WaitEventId = EVENT_ID0)\n{\n    set_flag(SrcPipe, DstPipe, SetEventId);\n    wait_flag(SrcPipe, DstPipe, WaitEventId);\n}\n",
+  "independent_cpp_excerpt": "  TLOAD(v14, v3);\n  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID1);\n  TLOAD(v10, v2);\n  set_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);\n  wait_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);\n  MGATHER<pto::Coalesce::Row>(v12, v1, v10);\n  set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID1);\n  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID1);\n  TADDS(v14, v14, v9);\n  set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);\n  wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);\n",
+  "both_controls_compile": true,
+  "independent_input_ready_before_gather": true,
+  "fixed_scalar_index_read_issue": "https://github.com/hw-native-sys/PTOAS/issues/861",
+  "distinct_dynamic_subview_issue": "https://github.com/hw-native-sys/PTOAS/issues/1587",
+  "limits": [
+    "This demonstrates header/code-generation ordering, not device speedup",
+    "No fences were removed and no shared toolchain source/build was changed",
+    "The requested asynchronous reader must preserve index readiness, consumer completion and actual alias/reuse dependencies"
+  ],
+  "ccec_O3_standard_flags_preprocess_passed": true,
+  "preprocessed_standard_flags_source": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/mgather_sync_probe_v1/probe_O3.ii"
+}

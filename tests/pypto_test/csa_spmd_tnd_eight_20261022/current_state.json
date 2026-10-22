@@ -46,10 +46,10 @@
   "pending_cpu": null,
   "pending_tasks": {},
   "next_steps": [
-    "Measure actual selected-KV contiguous runs, page distribution and cross-query overlap before redesigning Attention data supply",
-    "Prioritize Score/Attention service cost and joint output-projection traffic; retain all original arithmetic and the eight-case denominator",
-    "Account for per-core load, all operand bytes and instruction cost; no repeated adjacent tile sweeps or previously rejected direct-KV/weight-resident ideas without new evidence",
-    "Track PyPTO #3116 for supported L2 runtime-offset wiring; shared SDK remains unchanged; no push"
+    "Inspect whether the Attention softmax/score-input schedule can overlap scattered KV gathering with proven disjoint UB lifetimes; deduplicate prior prefetch and row-loop experiments first",
+    "Use the measured low-contiguity/low-ordered-reuse result to avoid whole-page loads and query-group KV-residency assumptions",
+    "Track PTOAS #1674 and PyPTO #3116 for supported pipeline/cache capabilities; do not mutate the shared SDK while sessions/jobs use it",
+    "Preserve all three retained mechanisms and the original eight-case denominator; the 0.90 goal remains unachieved; no push"
   ],
   "knowledge_query": {
     "status": "index_missing",
@@ -77,9 +77,11 @@
     "critical_prefix": 67,
     "critical_prefix_guard": 2313,
     "merged_production_contracts": 136,
-    "query_local_math_ownership_policy": 27
+    "query_local_math_ownership_policy": 27,
+    "kv_access_analysis": 4,
+    "plan_gather_valid": 27
   },
-  "updated_at": "2026-10-23T06:15:22.055646+08:00",
+  "updated_at": "2026-10-23T07:17:55.241155+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -201,6 +203,15 @@
       ],
       "evidence": "query_local_v5_results.json",
       "reason": "Strict checks pass; complete L1 regresses 4.34% / 4.03% against retained implementations"
+    },
+    {
+      "candidate": "plan_gather_valid_v1",
+      "cases": [
+        "C04",
+        "C05"
+      ],
+      "evidence": "plan_gather_valid_v1_results.json",
+      "reason": "Strict checks pass; observed complete-L1 medians do not improve either retained priority case"
     }
   ],
   "promising_candidates": [],
@@ -294,6 +305,14 @@
         "C07"
       ],
       "status": "C07 rejected; long-G6 subset adopted through merged_schedule_v1"
+    },
+    "plan_gather_valid_v1": {
+      "source": "plan_gather_valid_v1.json",
+      "adopted": false,
+      "device_execution": true,
+      "status": "rejected_no_complete_L1_gain",
+      "full_codegen_passed": true,
+      "measurement": "plan_gather_valid_v1_results.json"
     }
   },
   "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
@@ -346,6 +365,12 @@
       "number": 3116,
       "url": "https://github.com/hw-native-sys/pypto/issues/3116",
       "evidence": "l2_bypass_lowering_evidence.json"
+    },
+    {
+      "repo": "hw-native-sys/PTOAS",
+      "number": 1674,
+      "url": "https://github.com/hw-native-sys/PTOAS/issues/1674",
+      "evidence": "mgather_overlap_codegen_evidence.json"
     }
   ],
   "signal_layout_audit": "signal_layout_audit.json",
@@ -358,13 +383,12 @@
     }
   ],
   "pending_observation": {
-    "observed_at": "2026-10-23T06:15:22.055646+08:00",
+    "observed_at": "2026-10-23T07:17:55.241155+08:00",
     "own_pending_tasks": 0,
     "tasks": {
-      "task_20261023_053902_91322522932": "completed (exit=0)",
-      "task_20261023_055621_141049523995": "completed (exit=0)",
-      "task_20261023_055838_147095425686": "completed (exit=0)",
-      "task_20261023_060513_164967611051": "completed (exit=0)"
+      "task_20261023_062321_209509211525": "completed (exit=0)",
+      "task_20261023_064228_255495026812": "completed (exit=0)",
+      "task_20261023_064346_258855815134": "completed (exit=0)"
     }
   },
   "prepared_uniform_state": "uniform_meta_state_v1.json",
@@ -385,7 +409,9 @@
     "query_local_candidate": "query_local_v5.json",
     "dependency_opportunities": "retained_dependency_opportunities.json",
     "attention_logical_traffic": "attention_interface_traffic.json",
-    "query_local_status": "rejected_on_C04_and_C05_after_strict_complete_L1"
+    "query_local_status": "rejected_on_C04_and_C05_after_strict_complete_L1",
+    "actual_kv_access": "retained_C05_kv_access.json",
+    "mgather_overlap": "mgather_overlap_codegen_evidence.json"
   },
   "parked_candidates": [
     {
@@ -424,5 +450,5 @@
   "current_implementation": "merged_schedule_v1",
   "earlier_stage_commit": "3a0f423c6",
   "production_commit": "32a1426d9",
-  "latest_stage": "query_local_rejected_and_macro_data_supply_review"
+  "latest_stage": "kv_locality_measured_plan_valid_gather_rejected_and_overlap_issue_filed"
 }
