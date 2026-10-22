@@ -1,7 +1,9 @@
 # CSA TND v122 之后的九档优化
 
-目标与约束见 `vllm_ascend/ops/pypto/CSA_SPMD_TND_NEXT_10PCT_GOAL_20261022.md`。
-过程见同目录 `CSA_SPMD_TND_NEXT_10PCT_LOG_20261022.md`。
+目标与约束见 [TND 实现记录：九档优化目标](../../../vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md#csa-tnd-next-10pct-goal-20261022)。
+过程见 [同一实现记录：九档优化过程](../../../vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md#csa-tnd-next-10pct-log-20261022)。
+本目录保留已暂停优化的历史九档口径；后续性能汇总使用
+[八档六列性能规范](../../../vllm_ascend/ops/pypto/CSA_PERFORMANCE_TEST_SPEC.md)。
 
 固定比较完整 HC_pre/RMSNorm/CSA/HC_post 的 72 核 L1 首尾。八档 S6 加固定
 128K/B16 混长，九档等权几何平均 candidate/v122 <= 0.90。
