@@ -32,19 +32,30 @@
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
   "pending_tasks": {
-    "task_20261023_035202_22899263683": {
-      "case": "C04",
-      "candidate": "critical_prefix_v1",
-      "kind": "complete_L1",
-      "device": 8,
-      "observed_status": "running"
+    "task_20261023_041733_306508826683": {
+      "case": "C05",
+      "candidate": "critical_prefix_v2",
+      "kind": "canonical_service",
+      "device": 0
+    },
+    "task_20261023_041929_31218698749": {
+      "case": "C06",
+      "candidate": "critical_prefix_v2",
+      "kind": "complete_L1_external_reference",
+      "device": 2
+    },
+    "task_20261023_041929_312190823750": {
+      "case": "C07",
+      "candidate": "critical_prefix_v2",
+      "kind": "complete_L1_external_reference",
+      "device": 11
     }
   },
   "next_steps": [
-    "Collect C04/C05 critical_prefix_v1 full-L1 exact checks and all ten samples; compare also with retained C04 763.65us",
-    "Expand state/service only if complete-L1 result justifies it; no component speedup or clock probes as adoption evidence",
-    "Prioritize critical-branch readiness, actual data supply and work reuse; coarse dynamic scheduling only with a net resource model",
-    "Eight-case original-denominator geometric-mean goal stays active; no push"
+    "Collect C05 service and C06/C07 full-L1 results for M192-only critical prefix; use qualified external reference and actual compiled candidates",
+    "Requalify existing C08 group-order data against the now available same-SDK original baseline, without repeating already completed tests",
+    "Keep retained C04 763.65us code; v2 off code is byte-equivalent",
+    "Goal remains eight equal-weight cases versus original algorithm; no SDK edits or push"
   ],
   "knowledge_query": {
     "status": "index_missing",
@@ -69,9 +80,10 @@
     "output_tall": 34,
     "pipe_reader": 10,
     "joint_prefix": 67,
-    "critical_prefix": 67
+    "critical_prefix": 67,
+    "critical_prefix_guard": 2313
   },
-  "updated_at": "2026-10-23T04:00:51.741971+08:00",
+  "updated_at": "2026-10-23T04:22:52.462713+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -256,8 +268,19 @@
       "adopted": false,
       "cpu_checks": 67,
       "codegen_audit": "critical_prefix_v1_codegen.json",
-      "status": "C05_complete_C04_running",
+      "status": "C04_rejected_C05_small_positive",
       "measurement": "critical_prefix_v1_results.json"
+    },
+    "critical_prefix_v2": {
+      "source": "critical_prefix_v2.json",
+      "adopted": false,
+      "codegen_audit": "critical_prefix_v2_codegen.json",
+      "C05_state": "critical_prefix_C05_state.json",
+      "enabled_eight_cases": [
+        "C05",
+        "C06",
+        "C07"
+      ]
     }
   },
   "local_stage_commit": "3a0f423c6",
@@ -303,6 +326,12 @@
       "number": 3114,
       "url": "https://github.com/hw-native-sys/pypto/issues/3114",
       "evidence": "upstream_issue_3114.json"
+    },
+    {
+      "repo": "hw-native-sys/pypto",
+      "number": 3116,
+      "url": "https://github.com/hw-native-sys/pypto/issues/3116",
+      "evidence": "l2_bypass_lowering_evidence.json"
     }
   ],
   "signal_layout_audit": "signal_layout_audit.json",
@@ -315,12 +344,13 @@
     }
   ],
   "pending_observation": {
-    "observed_at": "2026-10-23T04:00:51.741971+08:00",
+    "observed_at": "2026-10-23T04:22:52.462713+08:00",
     "tasks": {
-      "task_20261023_035202_22899263683": "running",
-      "task_20261023_035202_22899807255": "completed (exit=0)"
+      "task_20261023_041733_306508826683": "running",
+      "task_20261023_041929_31218698749": "running",
+      "task_20261023_041929_312190823750": "running"
     },
-    "own_pending_tasks": 1
+    "own_pending_tasks": 3
   },
   "prepared_uniform_state": "uniform_meta_state_v1.json",
   "macro_review": {
@@ -362,12 +392,12 @@
       "C04",
       "C05",
       "C06",
-      "C07"
-    ],
-    "missing": [
+      "C07",
       "C08"
     ],
+    "missing": [],
     "original_algorithm_unchanged": true,
     "new_device_measurements_for_reuse": 0
-  }
+  },
+  "current_sdk_C08_reference": "baseline_current_sdk_C08.json"
 }

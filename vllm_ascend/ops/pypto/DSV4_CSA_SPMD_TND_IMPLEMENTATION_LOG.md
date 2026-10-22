@@ -4523,3 +4523,58 @@ eager/graph/post-L1的全部输出、Top-K/score、cache/state逐bit和保护通
 task_20261023_035202_22899263683已由pending转running，保留原handle等待，
 结果在critical_prefix_v1_results.json继续归档；当前没有其它待收CPU会话。
 阶段commit337a287b4已保存关键链候选与前版两档诊断，未push。
+
+### 2026-10-23：关键前缀收窄到M192；完整八档同SDK参考补齐
+
+上一goal轮属于实际进展，本轮重新确认goal active、工作树干净和公共SDK
+仍logical-codegen/validated，再收取原B16任务，未因等待重启。C04
+critical_prefix_v1完整十窗中位776.74μs，全部逐bit/图/保护通过，但相对
+保留值763.65回退13.09μs，不能因略优于原778.39就采用。全样本和两档结果
+更新到critical_prefix_v1_results.json，B16继续保留原leaf优化。
+
+critical_prefix_v2仅将容量谓词收窄为128<Tcap<=192，沿用单M192和0..3核
+Indexer、4..23核主投影/KV分工；八档只影响C05/C06/C07，不凭B号单点选择，
+也不假设设备Q/L等长。2313组容量/历史/query上界检查确认只增加两个预定
+constexpr。C04关闭路径四份CPP及ABI与保留生产版本完全一致；C05全部源体、
+constexpr和描述符与已测v1相同；C06constexpr与C05相同。C07完整CPU编译、
+ABI和资源检查通过：Mat475136、Left/Right各65536、Acc131072、Vec163872B。
+证据见critical_prefix_v2_codegen.json。首次生成器缺少C02代表描述符，在设备
+提交前失败；不完整目录保留，修正为读取各档原报告后冻结全新v2，没有覆盖
+任何已编译/运行的包。
+
+C05状态任务task_20261023_040249_263110822494 completed/exit0，16种metadata
+变更和4次连续状态推进全部通过，包含S1..6、不同历史、inactive/padding、
+所有者逆序及碎片页。同图同地址、代际、几何、保护和输出/Top-K/score/cache/state
+逐bit通过；实际candidate完整CPP与v1 C05 CPU产物唯一匹配。v2 C05输入到
+编译器保持一致，因此复用该状态证据，不重复16+4；见critical_prefix_C05_state.json。
+canonical service任务task_20261023_041733_306508826683（卡0）继续使用v2。
+
+补齐的C08原版任务task_20261023_040249_263115323657（卡3）completed/exit0，
+原combined_v1源码未变、十个完整72-role窗口、严格检查通过，中位742.86μs。
+全部样本742.20/745.06/743.68/743.52/747.02/740.94/737.46/737.46/749.06/742.14，
+见baseline_current_sdk_C08.json。现在八档都有同公共SDK的原算法参考；这是
+补齐环境可比性，没有更换优化分母。旧混长group-order性能可以重新核验，
+仍须匹配原始执行版本/代码和已完成的状态证据，不能沿用旧跨SDK比率。
+
+C06/C07扩档分别为task_20261023_041929_31218698749（卡2）和
+task_20261023_041929_312190823750（卡11），使用现有sdk_measurement_harness_v2
+的uncompared模式：原冻结算法继续作精度参考，采十窗后再与已核验历史分母
+1173.42/917.71μs结合；原始报告不伪造calibration标记或源码hash。曾准备额外
+reference读取器，但发现已有等价采样壳后撤下草稿、归档到runs，没有覆盖
+既有v2壳或重复扩建测试框架。三个新任务待收，生产未采用关键前缀候选。
+
+#### 权重缓存策略的贯通证据与上游反馈
+
+纯CPU小矩阵DEFAULT/BYPASS对照，经实际公共PyPTO和PTOAS0.69完整降到C++：
+BYPASS在MLIR中带一个l2_bypass属性，却没有offset操作数；两份完整C++逐字
+相同，均不调用get_l2_cache_offset。测试同时记录实际SDK根/HEAD，未改共享
+源码或构建，未上NPU。首次探针漏--pto-level=level3而在默认版本编译被拒，
+修正后的新目录1项通过，失败日志保留。l2_bypass_lowering_evidence.json保留
+属性行、完整文件路径和指纹；没有测得缓存性能差异或新的正确性故障。
+
+PTOAS当前有offset才调整地址，无offset安全回退普通TLOAD；其旧#1537问题
+已经修复关闭。PyPTO当前文档/UT仍描述旧hint形式，UT停在MLIR，尚未接上新
+runtime-offset接口。查重后按用户授权提交[PyPTO #3116](https://github.com/hw-native-sys/pypto/issues/3116)，
+请求接通受支持的runtime契约、否则明确回退诊断，并补贯通PTOAS的测试。
+没有硬编码地址别名，也没有把安全回退称为新精度bug。该问题说明不能仅凭
+CSA源码的BYPASS声明声称权重绕L2已生效；是否能带来净收益仍需后续实测。
