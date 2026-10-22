@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "status": "fixed_short_state_validation",
+  "status": "frozen_after_short_state_device_validation",
   "immutable_after_validation": true,
   "reference_commit": "84751e34cb1f27eff9e4d3fdf03f8495982f1cdf",
   "model": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
@@ -182,71 +182,9 @@
       "state_validation_only": true
     }
   ],
-  "b1_boundaries": [
-    {
-      "query_lengths": [
-        1
-      ],
-      "history_lengths": [
-        131072
-      ],
-      "token_capacity": 1,
-      "request_capacity": 1
-    },
-    {
-      "query_lengths": [
-        2
-      ],
-      "history_lengths": [
-        131071
-      ],
-      "token_capacity": 2,
-      "request_capacity": 1
-    },
-    {
-      "query_lengths": [
-        3
-      ],
-      "history_lengths": [
-        131069
-      ],
-      "token_capacity": 3,
-      "request_capacity": 1
-    },
-    {
-      "query_lengths": [
-        4
-      ],
-      "history_lengths": [
-        131041
-      ],
-      "token_capacity": 4,
-      "request_capacity": 1
-    },
-    {
-      "query_lengths": [
-        5
-      ],
-      "history_lengths": [
-        130945
-      ],
-      "token_capacity": 5,
-      "request_capacity": 1
-    },
-    {
-      "query_lengths": [
-        6
-      ],
-      "history_lengths": [
-        130943
-      ],
-      "token_capacity": 6,
-      "request_capacity": 1
-    }
-  ],
-  "capacity_rule": "Fixed explicit single-card graph capacities 6/16/32/64/96/112. These are the measurement configuration, not a claim that every vLLM deployment chooses this bucket set; real 16-card capture configuration will be recorded separately.",
+  "capacity_rule": "独立功能状态根固定B32/T192；同址矩阵在该容量内覆盖S1-S6和失活尾部padding。禁止用于八档性能统计。",
   "padding_source": "vllm_ascend/worker/model_runner_v1.py:_pad_query_start_loc_for_fia mixed branch, frozen 84751e34",
-  "frozen_date": "2026-10-21",
-  "validation_evidence": "initial_evidence.json",
+  "frozen_date": "2026-10-22",
+  "validation_evidence": "scheduling_v20_v21_validation.json",
   "purpose": "仅功能状态验收；8320的固定基准使原状态矩阵最短历史仍在短历史Cube资源域，不改变八档性能输入或状态矩阵的S1-S6/重排/连续步骤。"
 }
