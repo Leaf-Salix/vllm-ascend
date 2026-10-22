@@ -31,16 +31,13 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {
-    "C04_uniform_geometry_v1": "task_20261022_231311_146232724441",
-    "C05_uniform_geometry_v1": "task_20261022_231741_162492223535"
-  },
+  "pending_tasks": {},
   "next_steps": [
-    "Validate uniform_geometry_v1 complete codegen, then C04/C05 same-SDK full L1 and exactness",
-    "If beneficial, validate same-address equal/mixed/unequal-KV transitions and continuous decode",
-    "Retain 79fae6db0 C04 proof; frozen combined_v1 denominator and eight-case 10% acceptance remain unchanged",
-    "Signal-slot footprint research deferred behind newly authorized equal-length branch",
-    "Stage local commits; no push"
+    "Keep retained production 79fae6db0, original combined_v1 algorithm denominator and eight-case acceptance",
+    "Equal-length TND specialization remains authorized; reject this geometry-only branch, not the entire approach",
+    "Use measured critical path to choose a different next priority candidate; do not rerun rejected uniform_geometry_v1 or its state gate",
+    "Track PyPTO issue3114; no shared SDK edits while other sessions/tasks use the released build",
+    "Stage local commits and do not push without an explicit request"
   ],
   "knowledge_query": {
     "status": "index_missing",
@@ -61,7 +58,7 @@
     "output_tail_balance": 17,
     "uniform_geometry": 71
   },
-  "updated_at": "2026-10-22T23:18:25.135656+08:00",
+  "updated_at": "2026-10-22T23:34:40.524817+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -119,6 +116,15 @@
       "candidate": "leaf_scale_guard_v1",
       "case_id": "C02",
       "evidence": "leaf_scale_guard_v1_C02_result.json"
+    },
+    {
+      "candidate": "uniform_geometry_v1",
+      "cases": [
+        "C04",
+        "C05"
+      ],
+      "evidence": "uniform_geometry_v1_results.json",
+      "reason": "Complete-L1 medians regress on both priority cases"
     }
   ],
   "promising_candidates": [],
@@ -211,5 +217,14 @@
     ],
     "confirmed": true,
     "device_values_not_host_capacity": "Prove all Q/L each invocation; mixed/padded data retain original mapping"
-  }
+  },
+  "upstream_reporting_authorized": true,
+  "upstream_issues": [
+    {
+      "repo": "hw-native-sys/pypto",
+      "number": 3114,
+      "url": "https://github.com/hw-native-sys/pypto/issues/3114",
+      "evidence": "upstream_issue_3114.json"
+    }
+  ]
 }

@@ -3990,3 +3990,33 @@ B24=`task_20261022_231741_162492223535`（卡0），各10有效窗及全部样�
 仍对原combined_v1的同SDK基线比较，另观察是否超过已采用C04的763.65μs。
 同址验证器已准备16组metadata和4步连续解码，增加等长→不同KV长→等长、
 等长→失活padding→等长转换，仅当候选值得继续时执行设备门禁。
+
+
+### 等长几何候选收齐：两档负例；PyPTO问题已上报
+
+两任务completed/exit0，各10个完整72角色L1窗口，reference/candidate的eager、
+graph和post-L1全部逐bit与guards检查通过。C04中位789.36μs，对同SDK原分母
+778.39μs为+1.4093%，对已采用763.65μs为+3.3667%；C05为1024.20μs，
+对1014.46μs为+0.9601%。完整样本、原始路径和任务信息见
+`uniform_geometry_v1_results.json`。两档均不采用，不再为此负例执行16+4状态
+矩阵或服务门禁。正式生产代码仍是79fae6db0已验证版本。本结果只否定这版
+几何寻址实现，不否定用户新授权的等长专用计算/调度路径；未将控制流或寄存器
+变化武断归为已证实瓶颈。
+
+补充关闭档编译发现宽度恒0时，虽然除法受if width>0保护，Simplify仍先折叠
+不可达的query//0。增加外层constexpr helper调用开关的v2，C04编译成功但
+C03关闭档仍失败，未进行额外NPU计时，未改已排队/运行的v1冻结源码。
+最小@pl.program复现只运行InlineFunctions→Simplify：前者成功，后者报
+const_fold.h:218；将受保护除法的分母写为pl.max(width,1)的对照可正常化简为0。
+此处是CPU编译问题，不归因于PTOAS/Simpler或硬件，不宣称与本次性能回退有关。
+
+用户明确授权发现PyPTO、Simpler、PTOAS的问题可直接提issue。已查重并提交
+[PyPTO #3114](https://github.com/hw-native-sys/pypto/issues/3114)，含精确commit、
+独立最小复现、预期IR、错误及已验证绕过；提交后再次读取核对正文和OPEN状态。
+记录为`upstream_issue_3114.json`，本地复现脚本为repro_unreachable_floor_div.py。
+仓库模板所写ir-pass标签实际不存在，首次未创建；核实无同名issue后不带标签
+成功提交，没有重复issue。公共SDK未编辑/重建。
+
+本会话本轮两项设备任务及所有CPU编译已结束，无待收结果。八档10%总目标
+仍active且未达成；未push。后续SDK问题沿用本次用户授权，确认与查重后直接
+上报相应上游，并在本统一记录中保留链接，不另外拆出过程MD。
