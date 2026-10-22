@@ -125,9 +125,9 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         # B4/B8/B15/B16重复测得收益；短历史T>96两点方向不一致，保留原GM。
         # 实际T/请求边界仍在device读取；依赖编译器删除关闭分支的死Tile状态。
         local_attention_stats=long_history and group == 6 and tokens <= LOCAL_STATS_MAX_TOKENS,
-        # 连续scale读取需要AICPU编排先证明页布局；真实规划成本须单独记录。
+        # 连续scale读取由Score消费者用Vector证明本叶页布局，结果仅存在本核。
         # 沿已有小M16并行域和O_A N256的较大T域启用，中间域保留逐页读取。
-        # 不按B/history验收点枚举；页是否连续仍由本轮device表完整证明。
+        # 不按B/history验收点枚举；每叶仍完整检查本轮实际读取的页，碎片则回退。
         # 小M16与较大T边界已做完整同轮验证；其余验证边界见统一优化日志。
         scale_page_coalescing=(long_history and group == 6 and (parallel_small_qa or tokens > LOCAL_STATS_MAX_TOKENS)),
         # 沿已有至少两个M32行块的前置几何区间，统一在plan验证选中页，

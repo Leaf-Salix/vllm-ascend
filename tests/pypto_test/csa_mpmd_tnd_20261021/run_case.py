@@ -141,6 +141,7 @@ def main():
     parser.add_argument("--frozen", type=Path, required=True)
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--control-mpmd", type=Path, help="同进程增加已接受的多 task 控制组")
+    parser.add_argument("--mpmd-only", action="store_true", help="只比较已验收MPMD控制组与候选，不重复运行SPMD")
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--compile", action="store_true")
     parser.add_argument("--baseline-only", action="store_true")
@@ -151,6 +152,10 @@ def main():
     parser.add_argument("--device", type=int, help="task-submit 自动追加；须与 TASK_DEVICE 一致")
     parser.add_argument("--cases", type=Path, default=Path(__file__).with_name("cases.json"))
     args = parser.parse_args()
+    if args.mpmd_only and (
+        not args.control_mpmd or args.baseline_only or args.state_validation or args.service_validation
+    ):
+        parser.error("--mpmd-only须指定已验收控制组，且不能用于状态、服务或baseline-only验证")
     args.output.mkdir(parents=True, exist_ok=False)
     manifest = json.loads(args.cases.read_text())
     case = select_case(manifest, args.case, args.boundary_query_length)
@@ -337,7 +342,10 @@ def main():
                 raise AssertionError("Native fixture 与固定清单不一致")
 
             entries, guards = {}, {}
-            variants = [("spmd", baseline_name)]
+            variants = [] if args.mpmd_only else [("spmd", baseline_name)]
+            if args.mpmd_only:
+                report["scope"] = "accepted MPMD control versus candidate, full CSA L1; no new SPMD measurement"
+                report["numerical_reference"] = str(args.control_mpmd)
             if control_name is not None:
                 variants.append(("mpmd_control", control_name))
             variants.append(("mpmd", candidate_name))
@@ -557,7 +565,7 @@ def main():
                     "max": max(samples),
                     "samples": samples,
                 }
-            if "mpmd" in entries:
+            if "mpmd" in entries and "spmd" in entries:
                 report["ratio"] = report["statistics_us"]["mpmd"]["mean"] / report["statistics_us"]["spmd"]["mean"]
             if "mpmd_control" in entries:
                 report["candidate_over_control"] = (

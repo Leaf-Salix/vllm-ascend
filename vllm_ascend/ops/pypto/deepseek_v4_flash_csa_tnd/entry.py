@@ -70,7 +70,6 @@ from .indexer_query_stages import (
     indexer_weights_project_stage,
     indexer_weights_reduce_stage,
 )
-from .indexer_scale_layout_stages import indexer_scale_layout_plan_stage
 from .indexer_scale_plan_stages import indexer_scale_page_commit_stage, indexer_scale_page_plan_stage
 from .indexer_score_stages import indexer_score_cube_stage, indexer_score_vector_lane_stage
 from .kv_stages import (
@@ -735,24 +734,6 @@ def decode_csa_tnd(
     (idx_offsets, idx_count) = compact_offsets_and_count_stage(
         idx_bounds, idx_lengths, idx_offsets, idx_count, tokens, 0
     )
-    (group_offsets, group_plan) = indexer_group_plan_stage(
-        idx_bounds, idx_lengths, positions, group_offsets, group_plan, tokens, 0, QUERY_GROUP, BALANCED, ROOTS
-    )
-    group_offsets = indexer_scale_page_plan_stage(
-        idx_bounds,
-        idx_lengths,
-        positions,
-        idx_offsets,
-        idx_slots,
-        idx_cache,
-        group_offsets,
-        pl.tensor.dim(idx_scales, 0),
-        VECTORS,
-    )
-    if BALANCED and SCALE_PAGE_COALESCING:
-        group_offsets = indexer_scale_layout_plan_stage(
-            idx_bounds, idx_lengths, indexer_table, group_offsets, tokens, pl.tensor.dim(idx_cache, 0), VECTORS
-        )
     with pl.spmd(
         pl.min((tokens + 3) // 4, VECTORS), name_hint="csa_rope_sign", allow_early_resolve=True, sync_start=True
     ):
@@ -890,6 +871,23 @@ def decode_csa_tnd(
         head_weights = indexer_weights_reduce_stage(
             weights_partial, head_weights, tokens, pl.tile.get_block_idx(), VECTORS
         )
+    # 请求/叶/scale所有权规划仍在AICPU执行，但先提交不依赖该规划的投影。
+    # 第一位group_offsets消费者是下方head_coefficients；此处完成计划后
+    # 才提交它及cache/Score消费者，避免HC完成后AICore空等标量扫描。
+    (group_offsets, group_plan) = indexer_group_plan_stage(
+        idx_bounds, idx_lengths, positions, group_offsets, group_plan, tokens, 0, QUERY_GROUP, BALANCED, ROOTS
+    )
+    group_offsets = indexer_scale_page_plan_stage(
+        idx_bounds,
+        idx_lengths,
+        positions,
+        idx_offsets,
+        idx_slots,
+        idx_cache,
+        group_offsets,
+        pl.tensor.dim(idx_scales, 0),
+        VECTORS,
+    )
     with pl.spmd(
         VECTORS,
         name_hint="indexer_head_coefficients",

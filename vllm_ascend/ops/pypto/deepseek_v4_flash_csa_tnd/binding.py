@@ -192,9 +192,9 @@ class PreparedDynamicCSA:
             "weights_partial": ((p16 * 4, 64), torch.float32),
             "head_weights": ((p16, 64), torch.float32),
             # 前缀+4*T组描述符，16项对齐后接48个scale链表头和4*T项地址描述符；
-            # 启用连续页策略时尾部2*B项为(first_page,direction)，关闭时维持原容量。
+            # 连续页证明由Score消费者本核持有，不再分配额外2*B项GM表。
             "group_offsets": (
-                (_pad(_pad(b + 1, 16) + 4 * t, 16) + 48 + 4 * t + (2 * b if self.policy.scale_page_coalescing else 0),),
+                (_pad(_pad(b + 1, 16) + 4 * t, 16) + 48 + 4 * t,),
                 torch.int32,
             ),
             "group_plan": ((8,), torch.int32),

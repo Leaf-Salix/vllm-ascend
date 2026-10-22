@@ -15,13 +15,15 @@ Score、Attention自身的Cube/Vector硬件流水保留。
 
 - HC的widen/RMS、linear、reduce、gates、mix/norm、Sinkhorn独立。
 - Q_A/QR、Indexer Compressor、Indexer query/weights、主Compressor、Q_B、KV各自成链。
-- Score、Top-K、Attention页计划、Attention独立；O_A、量化、O_B、HC_post独立。
+- Score、Top-K、Attention页计划、Attention独立；O_A→量化→O_B按八个输出组独立调度，
+  HC_post通过TaskId等待全部输出组。
 - 输入沿用Native TND hidden、设备Q/L、页表、slots、compact RoPE和cache/state。
   活动query由Q/L决定，不用`T/B`或`token//6`猜测；padding不参与业务计算。
 - 请求/组/叶和压缩偏移目前在AICPU编排计算，仍保留旧消费者的数据描述表作为迁移接口。
   后续须缩减冗余表、通过任务参数/切片表达工作范围，不能把此状态当作最终任务粒度达标。
-- scale页写入保持同页唯一写者，避免64B读改写竞争；页表连续性在AICPU逐页检查，
-  每次图重放重新读取真实输入。算法内规划成本属于CSA，不移到Host准备或测试复位。
+- scale页写入保持同页唯一写者，避免64B读改写竞争。连续页读取证明由实际Score消费者
+  对本叶页表做Vector校验，结果只留本核Scalar，没有独立metadata任务或GM证明表。
+  每次图重放重新读取真实输入；规划和校验成本属于CSA，不移到Host准备或测试复位。
 
 `binding.PreparedDynamicCSA`只按描述符准备工作区并绑定Native存储，不增加Host
 `.item()`/D2H。原信号工作区、初始化和根参数已移除。业务临时量仍由单流/单图独占。
