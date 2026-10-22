@@ -31,16 +31,13 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {
-    "C04_output_quant_task16_v1": "task_20261023_000814_330260230692",
-    "C05_output_quant_no_unused_pad_v1": "task_20261023_000814_33026777254"
-  },
+  "pending_tasks": {},
   "next_steps": [
-    "Collect the two exact queued priority jobs; preserve every window and compare to same-SDK original baseline",
-    "C04 task16 must also improve on retained leaf-proof 763.65us before adoption",
-    "C05 no-padding candidate must preserve poison in o_quant[T:] and bit-exact outputs",
-    "If a candidate improves full L1, run its actual graph/state/service gates and affected eight-case tiers",
-    "Keep 512B signals; do not repeat historical pure-Cube publish-cache removal negative; no push"
+    "Preserve production79fae6db0 and its retained C04 leaf proof; original combined_v1 eight-case denominator unchanged",
+    "Do not repeat pure-Cube cache-publish removal, quant-task16, unused-tail clearing removal, or local-per-AIV uniform proof negatives",
+    "For the authorized equal-length branch, investigate one proof by the existing META producer and reuse it across consumers; avoid repeating full Q/L proof on each AIV",
+    "Audit any uniform fast path against same-address mixed/inactive/unequal-KV replay and unchanged causal/page protections",
+    "No shared SDK mutations; local phase commits only; no push"
   ],
   "knowledge_query": {
     "status": "index_missing",
@@ -62,7 +59,7 @@
     "uniform_geometry": 71,
     "output_quant_schedule": 14
   },
-  "updated_at": "2026-10-23T00:09:30.611397+08:00",
+  "updated_at": "2026-10-23T00:24:09.790624+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -129,6 +126,16 @@
       ],
       "evidence": "uniform_geometry_v1_results.json",
       "reason": "Complete-L1 medians regress on both priority cases"
+    },
+    {
+      "candidate": "output_quant_task16_v1",
+      "case_id": "C04",
+      "evidence": "output_quant_priority_results.json"
+    },
+    {
+      "candidate": "output_quant_no_unused_pad_v1",
+      "case_id": "C05",
+      "evidence": "output_quant_priority_results.json"
     }
   ],
   "promising_candidates": [],
