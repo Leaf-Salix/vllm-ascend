@@ -7,6 +7,7 @@
 
 import argparse
 import importlib
+import importlib.util
 import json
 import os
 import statistics
@@ -24,6 +25,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--source", type=Path, help="冻结的 ops/pypto 完整依赖目录")
+    parser.add_argument("--control-source", type=Path, help="同进程配对的冻结 ops/pypto 目录；不改公共依赖")
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--history", type=int, default=131072)
     parser.add_argument("--queries", help="逗号分隔的真实 query 长度；默认每请求 6 行")
@@ -34,11 +36,14 @@ def main():
     parser.add_argument("--native-only", action="store_true", help="只采 Native 直接调用外部 profiling，不使用图")
     parser.add_argument("--profile", action="store_true", help="通过功能检查后采两侧直接调用外部 profiling")
     parser.add_argument("--diagnostic-perf", action="store_true",
-                        help="仅在与旧 HCA 全部逐bit一致时，保留 Native 误差并诊断性能；不改 passed")
+                        help="仅在与冻结控制组全部逐bit一致时，保留 Native 误差并诊断性能；不改 passed")
     parser.add_argument("--compare-legacy", action="store_true", help="S6 上核实 TND 迁移是否改变旧 HCA 数学")
     parser.add_argument("--compressor-probe-only", action="store_true", help="固定 Native RMS 输出验证 C128；不测性能")
+    parser.add_argument("--metadata-sequence", action="store_true", help="固定设备地址，直接调用 S1/S5/混长 A→B→A；不测性能")
     parser.add_argument("--device", type=int)
     args = parser.parse_args()
+    if args.control_source and args.compare_legacy:
+        raise ValueError("控制组只能选冻结 TND 或旧 HCA 中的一种")
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=False)
     os.environ["PYPTO_PROG_BUILD_DIR"] = str(args.output / "build")
@@ -65,12 +70,25 @@ def main():
         from pypto.runtime import CompileOptions
 
         entry = importlib.import_module(PACKAGE + ".entry")
+        control_package = None
+        if args.control_source:
+            path = args.control_source.resolve() / "deepseek_v4_flash_hca_tnd"
+            control_package = "vllm_ascend.ops.pypto._hca_tnd_control"
+            spec = importlib.util.spec_from_file_location(
+                control_package, path / "__init__.py", submodule_search_locations=[str(path)],
+            )
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[control_package] = module
+            spec.loader.exec_module(module)
+            report["control_source"] = str(path)
         options = CompileOptions(platform="a2a3", memory_planner=passes.MemoryPlanner.PYPTO)
         if args.cpu:
             entry.decode_hca_tp1_layer_test.compile(config=options)
             if args.compare_legacy:
                 legacy_entry = importlib.import_module("vllm_ascend.ops.pypto.deepseek_v4_flash_hca.decode_hca")
                 legacy_entry.decode_hca_tp1_layer_test.compile(config=options)
+            if control_package:
+                importlib.import_module(control_package + ".entry").decode_hca_tp1_layer_test.compile(config=options)
             report["passed"] = True
             save("cpu_backend_compiled")
             return
@@ -96,6 +114,11 @@ def main():
             raise ValueError("设备参数与 task-submit 分配不一致")
         queries = [int(v) for v in args.queries.split(",")] if args.queries else [6] * args.batch
         histories = [int(v) for v in args.histories.split(",")] if args.histories else [args.history] * args.batch
+        if args.metadata_sequence:
+            if args.history < 128:
+                raise ValueError("同址矩阵需要至少128行历史")
+            # 初始化时每请求都关闭一个C128组，为后续零/部分/全部输出提供原有容量。
+            histories = [args.history // 128 * 128 - 1] * args.batch
         if len(queries) != args.batch or len(histories) != args.batch:
             raise ValueError("queries/histories 必须逐请求提供")
         report.update(device=device_id, query_lengths=queries, history_lengths=histories,
@@ -110,7 +133,8 @@ def main():
         config = EngineArgs(
             model=str(checkpoint), tokenizer_mode="deepseek_v4", trust_remote_code=True,
             dtype="bfloat16", quantization="ascend", tensor_parallel_size=1,
-            hf_overrides={"sliding_window": 128}, max_model_len=max(16384, max(histories) + 128),
+            hf_overrides={"sliding_window": 128},
+            max_model_len=max(16384, max(histories) + (768 if args.metadata_sequence else 128)),
             max_num_seqs=64, max_num_batched_tokens=384, block_size=32,
             enable_prefix_caching=False, enforce_eager=True,
             speculative_config={"method": "dspark", "num_speculative_tokens": 5, "enforce_eager": True},
@@ -124,6 +148,7 @@ def main():
                 config, layer.self_attn, args.batch, args.history, 1024, device,
                 query_lengths=queries, history_lengths=histories,
                 token_capacity=args.token_capacity, request_capacity=args.request_capacity,
+                table_history=(args.history // 128 * 128 + 512) if args.metadata_sequence else None,
             )
             output = torch.empty_like(fixture["hidden"])
             native_intermediates = {}
@@ -223,11 +248,15 @@ def main():
                     raise AssertionError("固定 Native RMS 输入的 C128 数值或写保护失败")
                 return
             legacy = None
-            if args.compare_legacy:
-                if queries != [6] * args.batch or args.token_capacity or args.request_capacity:
+            reference_call = None
+            reference_config = None
+            if args.compare_legacy or control_package:
+                if args.compare_legacy and (queries != [6] * args.batch or args.token_capacity or args.request_capacity):
                     raise ValueError("旧 HCA 对照只能在真实 S6、无 padding 的输入运行")
-                from vllm_ascend.ops.pypto.deepseek_v4_flash_hca import native_adapter as legacy_adapter
-                from vllm_ascend.ops.pypto.deepseek_v4_flash_hca.decode_hca import decode_hca_tp1_layer_test
+                reference_package = control_package or "vllm_ascend.ops.pypto.deepseek_v4_flash_hca"
+                legacy_adapter = importlib.import_module(reference_package + ".native_adapter")
+                reference_module = importlib.import_module(reference_package + (".entry" if control_package else ".decode_hca"))
+                decode_hca_tp1_layer_test = reference_module.decode_hca_tp1_layer_test
 
                 legacy_op = pypto.torch.register(
                     decode_hca_tp1_layer_test, "dsv4_hca_legacy_diagnostic::attention", config=options,
@@ -239,17 +268,41 @@ def main():
                     compact_metadata=fixture["compact"]["compressed"], output=output,
                 )
                 restore(fixture)
+                before_reference = set((args.output / "build").glob("*/kernel_config.py"))
                 legacy_call()
                 torch.npu.synchronize()
+                reference_configs = set((args.output / "build").glob("*/kernel_config.py")) - before_reference
+                if len(reference_configs) != 1:
+                    raise RuntimeError("控制组需要唯一 kernel_config")
+                reference_config = reference_configs.pop()
+                reference_call = legacy_call
                 legacy = collect()
-                report["legacy_guards"] = guard_checks(fixture)
-                save("legacy_reference_ready")
+                report["reference_guards"] = guard_checks(fixture)
+                save("numerical_reference_ready")
             call = adapter.NativeHCACall(
                 adapter.HCAOperators.register(config=options), adapter.prepare_weights(layer.self_attn, layer),
                 fixture["hidden"], fixture["positions"], groups,
                 layer_name=layer.self_attn.dsa_attn.dsa_attn.layer_name,
                 compact_metadata=fixture["compact"]["compressed"], output=output,
             )
+            if args.metadata_sequence:
+                from metadata_sequence import validate
+
+                def save_metadata(label, value):
+                    report["metadata_validation"] = value
+                    save("metadata_" + label)
+
+                report["metadata_validation"] = validate(
+                    adapter=adapter, operators=call.operators, weights=adapter.prepare_weights(layer.self_attn, layer),
+                    pinned=call, config=config, layer=layer, fixture=fixture, output=output,
+                    history=args.history, save=save_metadata,
+                )
+                report["device_execution"] = True
+                report["passed"] = report["metadata_validation"]["passed"]
+                save("metadata_sequence_complete")
+                if not report["passed"]:
+                    raise AssertionError("同址 TND metadata 直接调用验证失败")
+                return
             restore(fixture)
             output.fill_(float("nan"))
             previous_configs = set((args.output / "build").glob("*/kernel_config.py"))
@@ -264,11 +317,11 @@ def main():
                 report["pto_native"][name] = [compare_tensor(a, b, 1e-5, 1e-5)
                                                for a, b in zip(eager[name], native[name])]
             if legacy is not None:
-                report["pto_legacy"] = {"output": compare_tensor(eager["output"], legacy["output"], 0, 0)}
-                report["legacy_native"] = {"output": compare_tensor(legacy["output"], native["output"], 0.01, 0.01)}
+                report["pto_reference"] = {"output": compare_tensor(eager["output"], legacy["output"], 0, 0)}
+                report["reference_native"] = {"output": compare_tensor(legacy["output"], native["output"], 0.01, 0.01)}
                 for name in fixture["groups"]:
-                    report["pto_legacy"][name] = [compare_tensor(a, b, 0, 0) for a, b in zip(eager[name], legacy[name])]
-                    report["legacy_native"][name] = [compare_tensor(a, b, 1e-5, 1e-5) for a, b in zip(legacy[name], native[name])]
+                    report["pto_reference"][name] = [compare_tensor(a, b, 0, 0) for a, b in zip(eager[name], legacy[name])]
+                    report["reference_native"][name] = [compare_tensor(a, b, 1e-5, 1e-5) for a, b in zip(legacy[name], native[name])]
             save("eager_compared")
 
             restore(fixture)
@@ -299,12 +352,12 @@ def main():
                                 and all_passed(report["repeat_guards"]))
             diagnostic_allowed = (
                 args.diagnostic_perf and legacy is not None
-                and all_passed(report["pto_legacy"]) and all_passed(report["legacy_guards"])
+                and all_passed(report["pto_reference"]) and all_passed(report["reference_guards"])
                 and report["pto_native"]["output"]["status"] == "PASS"
                 and all_passed(report["repeat_eager"]) and all_passed(report["pto_guards"])
                 and all_passed(report["repeat_guards"]) and not report["nonfinite_output"]
             )
-            report["migration_preserves_legacy"] = all_passed(report["pto_legacy"]) if legacy is not None else None
+            report["preserves_reference"] = all_passed(report["pto_reference"]) if legacy is not None else None
             report["diagnostic_performance_only"] = bool(diagnostic_allowed and not report["passed"])
             if not report["passed"] and not diagnostic_allowed:
                 raise AssertionError("输出、cache/state、重复直接调用或写保护检查失败，见 result.json")
@@ -314,28 +367,51 @@ def main():
                 configs = list(set((args.output / "build").glob("*/kernel_config.py")) - previous_configs)
                 if len(configs) != 1:
                     raise RuntimeError(f"要求唯一整层 kernel_config，得到 {configs}")
-                for _ in range(3):
-                    restore(fixture)
-                    call()
-                    torch.npu.synchronize()
-                windows = []
+                entries = {"candidate": call}
+                kernel_configs = {"candidate": configs[0]}
+                if reference_call is not None:
+                    entries = {"control": reference_call, **entries}
+                    kernel_configs["control"] = reference_config
+                for warmup in range(3):
+                    order = list(entries) if warmup % 2 == 0 else list(reversed(entries))
+                    for side in order:
+                        restore(fixture)
+                        entries[side]()
+                        torch.npu.synchronize()
+                by_side = {side: [] for side in entries}
+                window_index = 0
                 save("collecting_l1")
                 for index in range(args.windows):
-                    restore(fixture)
-                    torch.npu.synchronize()
-                    pypto.torch.begin_dfx()
-                    try:
-                        call()
-                    finally:
-                        pypto.torch.end_dfx()
-                    raw = args.output / "dfx"
-                    if index:
-                        raw /= f"window_{index}"
-                    windows.append(export_l1(raw, args.output / f"l1_{index:02d}", "mpmd_hca_tnd", configs[0]))
-                samples = [window["incore_span_us"] for window in windows]
-                report["l1"] = {"windows": windows, "samples_us": samples,
-                                "median_us": statistics.median(samples), "min_us": min(samples),
-                                "max_us": max(samples), "mean_us": statistics.mean(samples)}
+                    order = list(entries) if index % 2 == 0 else list(reversed(entries))
+                    for side in order:
+                        restore(fixture)
+                        torch.npu.synchronize()
+                        pypto.torch.begin_dfx()
+                        try:
+                            entries[side]()
+                        finally:
+                            pypto.torch.end_dfx()
+                        raw = args.output / "dfx"
+                        if window_index:
+                            raw /= f"window_{window_index}"
+                        by_side[side].append(export_l1(
+                            raw, args.output / f"l1_{index:02d}_{side}", "mpmd_hca_" + side, kernel_configs[side],
+                        ))
+                        window_index += 1
+                report["paired_l1"] = {}
+                for side, windows in by_side.items():
+                    samples = [window["incore_span_us"] for window in windows]
+                    report["paired_l1"][side] = {
+                        "windows": windows, "samples_us": samples, "median_us": statistics.median(samples),
+                        "min_us": min(samples), "max_us": max(samples), "mean_us": statistics.mean(samples),
+                    }
+                report["l1"] = report["paired_l1"]["candidate"]
+                if reference_call is not None:
+                    report["candidate_over_control"] = (report["l1"]["median_us"]
+                                                        / report["paired_l1"]["control"]["median_us"])
+                restore(fixture)
+                call()
+                torch.npu.synchronize()
                 report["post_l1_guards"] = guard_checks(fixture)
                 after = collect()
                 post_checks = {"output": compare_tensor(after["output"], eager["output"], 0, 0)}

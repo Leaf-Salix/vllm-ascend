@@ -133,3 +133,96 @@ Native 输出在容差内、重复直接调用与保护区通过，才允许采�
 5. 逐档验证超过 Native 30% 的完整目标；当前只有一档诊断，没有八档达标结论。
 
 本轮完成了实际源码、编译和设备归因，属于有进展；目标保持 active。
+
+## 2026-10-22：Q_B负结果、TND边界及按Native核内重排优先级
+
+### Q_B扩大到24核：两档均不采用
+
+控制与候选在同一进程、同一卡上交错，各7个直接调用L1窗口；公共SDK为
+`csa-shared-20261021-upstream-fixes`。保持四组INT8点积和后处理，只把每组4 Cube改为6。
+两档输出、raw/压缩cache、state均与冻结控制逐bit相同，保护区及重复直接调用通过；
+Native严格storage差异没有消失，不改总体精度状态。
+
+| 场景 | 原版中位数 μs | 24核候选中位数 μs | 差值 | 任务 |
+|---|---:|---:|---:|---|
+| 128K/B16/S6 | 513.14 | 518.58 | +5.44 | `task_20261022_175355_101880012851` |
+| 128K/B28/S6 | 771.62 | 778.56 | +6.94 | `task_20261022_175355_10189308318` |
+
+不采用、不扩档；正式entry始终导入旧Q_B。候选完整模块移到
+`tests/pypto_test/hca_tnd_mpmd_20261022/candidates/query_projection_rejected.py`，
+冻结包与7窗原始泳道仍在 `experiments/qb_24_v2`、`runs/qb_24_b16_v1`、`runs/qb_24_b28_v1`。
+不把更多核数当作性能优化结论。
+
+### 同址metadata直接调用：四场景通过，最后一次Native失败待定位
+
+`metadata_h131072_v1`先发现入口用`max_seqlen_q<=6`拒绝合法dummy容量；
+Native这个字段可包含补位，不能据此推断真实请求长度。移除此检查，真实语义仍由设备Q/L决定。
+收口时改用Native已有Host字段`max_seqlen_q_actual`检查1～6；字段缺失才退回旧max。
+这样既接受长dummy，又不放行本实现尚未支持的真实长query。没有Host回读设备Tensor。
+`metadata_h131072_v2`暴露测试把compact视图长度误当固定容量，改为初态提供足够现有容量，
+测试更新只在原设备allocation内填写有效行；生产adapter不新增复制或展开缓冲。
+
+`metadata_h131072_v3`的S1、混长及页属主反转、S5、无新压缩行四场景通过：
+同址更新与新描述符调用全部输出/cache/state逐bit一致，Native输出容差通过，写保护通过。
+最后A_s1_again在**Native调用后的同步**报MTE非法GM地址，尚未进入本轮PTO调用。
+保留原错误与前四项，不写完整A→B→A通过，也不先归因于PTO同步或Native自身bug。
+新性能工作先保持固定fixture，未围绕此异常反复扩测。
+
+### 用户要求抓大放小：先核实真实Native路径和已有大项证据
+
+完整来源与量化结果见
+`tests/pypto_test/hca_tnd_mpmd_20261022/NATIVE_KERNEL_REVIEW.md`。
+本次GitCode访问失败，使用只读recipes 6d060311及仓内/已安装A3源码，不声称读到了远端最新版本。
+
+已核实C128走SparseAttnSharedKV的CFA分支；当前host、kernel和AICPU metadata都按
+M=gSize=64，KV块512。不能用文档M256示意或旧ops-transformer版本断言当前实现合轴四条query。
+已有三槽和跨query流水不重复列为新点；旧双query/512列/直读分页的负结果也一并核对。
+
+新统计区分kernel-duration、task包络和设置/提前等待：B16 O_A包络84.10μs，
+核占用/24为55.59μs；分组量化包络73.62μs，但核占用/48仅3.72μs，不能误当成
+73μs计算可回收。B28 O_A包络129.16μs，O_B至归约/post仍是较大的尾链。
+O_A生成码已包含真实双缓冲，不靠反复添加stage=2宣称新机制。
+
+本轮结构性候选将O_B、八组反量化归约与HC_post放入一组MIX流水，保留O_A和分组量化。
+每核两槽交接，某输出列块的g7完成后直接收尾；48MiB全量partials由M96/M128分支的
+2.25/3MiB循环缓冲替代。A3交接仍有GM读写，不能把容量下降说成相同比例流量下降。
+量化全组等待和大T权重重复加载是明确代价，将用B16/B28同进程配对判断。
+候选在 `tests/pypto_test/hca_tnd_mpmd_20261022/candidates/output_fused.py`；正式output暂未修改。
+
+公共SDK18:00切换为`csa-shared-20261022-logical-codegen`，18:14标为validated。
+本轮CPU与后续设备配对统一新版本，控制也重新编译；不跨SDK与旧时间相减。
+CPU v1～v4在NZ动态列偏移非负证明处失败，尚未上卡；正在检查pass中间IR，
+不将CPU候选或理论结构写成已验证提速。
+
+### 尾链融合候选完成：数值严格等价，B16明显变慢，不采用
+
+CPU v5/v6增加pass dump后确认：编排侧的`workers=24`在outlining后仍作为标量参数，
+此前Simplify已删除NZ列偏移的max(0,...)保护，后面的NZ地址检查无法证明range步长非负。
+v7直接在核内range写编译常量24，候选与控制完整后端编译通过；没有修改共享SDK。
+这些只是源码等价改写，不更改核数、数学和TND语义。
+
+单卡任务`task_20261022_183801_30125409797`，128K/B16/S6，新公共SDK同进程交错各7窗：
+
+| 版本 | L1中位数 μs | 全部样本 μs |
+|---|---:|---|
+| 原尾链 | 511.60 | 511.60, 504.54, 513.18, 516.84, 515.40, 503.78, 502.02 |
+| O_B/归约/HC_post MIX | 623.54 | 613.98, 607.22, 623.54, 613.22, 657.12, 628.00, 634.82 |
+
+输出及所有cache/state与控制逐bit相同，重复直接调用、只读metadata、写保护通过。
+Native严格storage差异仍保留，`passed=false`与`diagnostic_performance_only=true`均如实记录。
+性能增加111.94μs（21.88%）；不采用、不扩测B28、不修改正式output。
+
+同批泳道的O_A核占用/24为52.99→54.38μs，基本未变；旧O_B核占用/24为30.39μs，
+新MIX AIC为63.27μs；旧归约/post核占用/48为29.05μs，新MIX AIV为120.66μs。
+新尾链开工约476μs，旧O_B约436μs已开始，失去原来分组量化后提前开工的重叠。
+这证明当前组织的等待和核占用抵消了缓冲缩小；尚未用PMU区分各类指令/GM带宽占比，
+不把全部额外时间武断归因于某条缓存或同步指令。
+
+下一步保持原分组尾链，不围绕失败融合版继续扫小参数；仍按Native实际数据复用和
+完整关键路径选择结构变化。全八档、服务接入、Native原有精度差异及30%目标均未收口。
+
+NZ证明问题已用无权重、无设备的分档inline helper独立复现：v4中captured_step失败，
+literal_step完整编译通过；早期不含inline分档的v2/v3两版都通过，不能删掉这个触发条件。
+提交 [PyPTO #3105](https://github.com/hw-native-sys/pypto/issues/3105)，附完整可运行脚本、
+pass证据、保留常量/范围事实的修改建议及负偏移回归要求；未提PR、未添加label、未改SDK。
+复现脚本和issue正文分别为测试目录的`repro_nz_positive_stride.py`、`NZ_POSITIVE_STRIDE_ISSUE.md`。

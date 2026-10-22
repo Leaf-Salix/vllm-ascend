@@ -17,6 +17,11 @@
 初始任务 `task_20261022_164106_175565826883` 已完成；其图重放结果只保留作历史。
 后续全部使用 eager 直接调用，详见正式目录 OPTIMIZATION_LOG.md。
 
+本日后续已核对 [Native核内路径与大项优先级](NATIVE_KERNEL_REVIEW.md)：
+Q_B扩24核在B16/B28均回退，未采用；O_B归约/HC_post合并流水在B16严格保持结果，
+但完整L1从511.60增至623.54μs，未采用且不扩测B28。两项候选在`candidates/`保留。
+同址metadata检查前四场景通过，最后A再次执行Native时报MTE异常，尚不能算完整A→B→A通过。
+
 ## 复现
 
 ```bash
@@ -50,3 +55,5 @@ task-submit --device auto --max-time 1500 \
 
 `--diagnostic-perf` 仅允许在新旧 HCA 输出及全部 cache/state 逐 bit 一致时采集诊断性能。
 它保留 Native storage 的失败项及 `passed=false`，不把性能测量改写成精度通过。
+`--control-source`可指定冻结TND控制组，与候选在同进程交错采完整L1；
+`--compare-legacy`与它互斥。新旧SDK不跨版本计算收益。

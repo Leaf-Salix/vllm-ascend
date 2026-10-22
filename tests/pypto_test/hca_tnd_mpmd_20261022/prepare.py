@@ -32,6 +32,7 @@ def main():
     shutil.copy2(HERE / "run_case.py", target / "run_case.py")
     shutil.copy2(HERE / "compressor_probe.py", target / "compressor_probe.py")
     shutil.copy2(HERE / "profile_eager.py", target / "profile_eager.py")
+    shutil.copy2(HERE / "metadata_sequence.py", target / "metadata_sequence.py")
     if args.legacy_signature_compat:
         path = operator / "deepseek_v4_flash_hca/o_proj_hc_post.py"
         text = path.read_text()

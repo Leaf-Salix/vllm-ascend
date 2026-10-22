@@ -66,7 +66,13 @@ class NativeHCACall:
                     or value.seq_lens.ndim != 1 or not 1 <= value.seq_lens.numel() <= 64
                     or value.query_start_loc.numel() != value.seq_lens.numel() + 1):
                 raise ValueError(f"{name} 不满足 TND decode metadata 描述符合同")
-            if not 1 <= value.max_seqlen_q <= 6:
+            # Native 的 max_seqlen_q 可能包含一个吸收大段 padding 的失活请求，
+            # 优先使用已有Host字段max_seqlen_q_actual检查真实请求上限；不回读设备Q/L。
+            # 设备 L=0 分支屏蔽dummy，缺少actual字段时按旧max保守判定。
+            query_bound = getattr(value, "max_seqlen_q_actual", None)
+            if query_bound is None:
+                query_bound = value.max_seqlen_q
+            if not 1 <= query_bound <= 6:
                 raise ValueError(f"{name} 仅支持 Dspark=5 下真实 query 长度 1～6")
             if value.seq_lens.dtype != torch.int32 or value.query_start_loc.dtype != torch.int32:
                 raise ValueError(f"{name} 的 Native Q/L 必须是 INT32 device Tensor")
