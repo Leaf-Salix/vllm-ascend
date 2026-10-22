@@ -70,7 +70,7 @@ class CSAMPMDPolicy:
 
 
 def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_len: int) -> CSAMPMDPolicy:
-    """仅依据已有Host信息选策略；有效分组数、叶数及全部访问地址由AIV/AIC计算。"""
+    """仅依据已有Host描述符选策略；实际分组/叶数由AICPU规划，寻址在设备消费端完成。"""
     values = (tokens, requests, max_query_tokens, max_seq_len)
     if any(type(v) is not int or v <= 0 for v in values):
         raise ValueError("tokens/requests/max_query_tokens/max_seq_len须为已有的正整数描述符")

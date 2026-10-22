@@ -734,14 +734,15 @@ def decode_csa_tnd(
     (idx_offsets, idx_count) = compact_offsets_and_count_stage(
         idx_bounds, idx_lengths, idx_offsets, idx_count, tokens, 0
     )
+    # 与BSH前段一致：独立分块按就绪核启动，依赖仍由TMR保证；Score/Attention保持整组起跑。
     with pl.spmd(
-        pl.min((tokens + 3) // 4, VECTORS), name_hint="csa_rope_sign", allow_early_resolve=True, sync_start=True
+        pl.min((tokens + 3) // 4, VECTORS), name_hint="csa_rope_sign", allow_early_resolve=True, sync_start=False
     ):
         (rope_signed, rope_swap) = q_rope_prepare_stage(
             rope_sin, rope_signed, rope_swap, pl.tile.get_block_idx(), VECTORS
         )
     with pl.spmd(
-        pl.min((tokens + 7) // 8, VECTORS), name_hint="csa_inverse_rope", allow_early_resolve=True, sync_start=True
+        pl.min((tokens + 7) // 8, VECTORS), name_hint="csa_inverse_rope", allow_early_resolve=True, sync_start=False
     ):
         inverse_sin = attention_inverse_rope_sign_stage(rope_sin, inverse_sin, pl.tile.get_block_idx(), VECTORS)
     if EARLY_ATTENTION_GEOMETRY:
@@ -749,7 +750,7 @@ def decode_csa_tnd(
             pl.min((tokens + 7) // 8, VECTORS),
             name_hint="csa_query_geometry",
             allow_early_resolve=True,
-            sync_start=True,
+            sync_start=False,
         ):
             attention_indices = attention_geometry_prepare_stage(
                 positions,
@@ -762,22 +763,22 @@ def decode_csa_tnd(
                 VECTORS,
                 PLAN_PHYSICAL_ROWS,
             )
-    with pl.spmd(qa_workers, name_hint="qproj_a", allow_early_resolve=True, sync_start=True) as qa_tid:
+    with pl.spmd(qa_workers, name_hint="qproj_a", allow_early_resolve=True, sync_start=False) as qa_tid:
         qa = q_a_stage(normed, wq_a, qa, pl.tile.get_block_idx(), GROUPS, QA_M16_PARALLEL)
     with pl.spmd(
-        idx_project_workers, name_hint="indexer_compressor_kv_score", allow_early_resolve=True, sync_start=True
+        idx_project_workers, name_hint="indexer_compressor_kv_score", allow_early_resolve=True, sync_start=False
     ):
         (idx_value, idx_score) = indexer_compressor_project_stage(
             normed, idx_wkv, idx_wgate, idx_value, idx_score, pl.tile.get_block_idx(), GROUPS
         )
     with pl.spmd(
-        pl.min((tokens + 7) // 8, VECTORS), name_hint="qproj_a_rms_quant", allow_early_resolve=True, sync_start=True
+        pl.min((tokens + 7) // 8, VECTORS), name_hint="qproj_a_rms_quant", allow_early_resolve=True, sync_start=False
     ):
         (qr, qr_scale, qr_matmul, qr_scale_pad) = q_r_stage(
             qa, gamma_cq, qr, qr_scale, qr_matmul, qr_scale_pad, pl.tile.get_block_idx(), VECTORS
         )
     with pl.spmd(
-        pl.min(requests, VECTORS), name_hint="indexer_compressor_pool", allow_early_resolve=True, sync_start=True
+        pl.min(requests, VECTORS), name_hint="indexer_compressor_pool", allow_early_resolve=True, sync_start=False
     ) as idx_pool_tid:
         idx_pooled = indexer_compressor_pool_stage(
             idx_value,
@@ -796,7 +797,7 @@ def decode_csa_tnd(
         pl.min(requests, VECTORS),
         name_hint="indexer_state_commit",
         allow_early_resolve=True,
-        sync_start=True,
+        sync_start=False,
         deps=[idx_pool_tid],
     ):
         idx_state = indexer_compressor_state_commit_stage(
@@ -815,7 +816,7 @@ def decode_csa_tnd(
         pl.min(requests, VECTORS),
         name_hint="indexer_compressor_norm_rope",
         allow_early_resolve=True,
-        sync_start=True,
+        sync_start=False,
     ):
         idx_normed = indexer_compressor_norm_rope_stage(
             idx_pooled,
@@ -831,15 +832,15 @@ def decode_csa_tnd(
             VECTORS,
         )
     with pl.spmd(
-        idx_hadamard_workers, name_hint="indexer_compressor_hadamard", allow_early_resolve=True, sync_start=True
+        idx_hadamard_workers, name_hint="indexer_compressor_hadamard", allow_early_resolve=True, sync_start=False
     ):
         compact_count = pl.cast(pl.read(idx_count, [0]), pl.INDEX)
         idx_had = indexer_compressor_hadamard_stage(
             idx_normed, hadamard, idx_had, compact_count, pl.tile.get_block_idx(), GROUPS
         )
-    with pl.spmd(GROUPS, name_hint="indexer_query_proj", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(GROUPS, name_hint="indexer_query_proj", allow_early_resolve=True, sync_start=False):
         idx_query_acc = indexer_query_project_stage(qr, idx_wq_b, idx_query_acc, pl.tile.get_block_idx(), GROUPS)
-    with pl.spmd(query_rope_workers, name_hint="indexer_query_rope", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(query_rope_workers, name_hint="indexer_query_rope", allow_early_resolve=True, sync_start=False):
         idx_query_rope = indexer_query_dequant_rope_stage(
             qr_scale,
             idx_wq_b_scale,
@@ -850,15 +851,17 @@ def decode_csa_tnd(
             pl.tile.get_block_idx(),
             VECTORS,
         )
-    with pl.spmd(query_hadamard_workers, name_hint="indexer_query_hadamard", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(
+        query_hadamard_workers, name_hint="indexer_query_hadamard", allow_early_resolve=True, sync_start=False
+    ):
         idx_query_had = indexer_query_hadamard_four_tokens_stage(
             idx_query_rope_heads, hadamard, idx_query_had, tokens, pl.tile.get_block_idx(), GROUPS
         )
-    with pl.spmd(pl.min(tokens, VECTORS), name_hint="indexer_query_quant", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(pl.min(tokens, VECTORS), name_hint="indexer_query_quant", allow_early_resolve=True, sync_start=False):
         (idx_query_i8, idx_query_scale) = indexer_query_quant_stage(
             idx_query_had, idx_query_i8, idx_query_scale, tokens, pl.tile.get_block_idx(), VECTORS
         )
-    with pl.spmd(weight_workers, name_hint="indexer_weights_proj", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(weight_workers, name_hint="indexer_weights_proj", allow_early_resolve=True, sync_start=False):
         weights_partial = indexer_weights_project_stage(
             normed, weights_proj, weights_partial, pl.tile.get_block_idx(), GROUPS
         )
@@ -866,7 +869,7 @@ def decode_csa_tnd(
         pl.min((tokens + 15) // 16, VECTORS),
         name_hint="indexer_weights_reduce",
         allow_early_resolve=True,
-        sync_start=True,
+        sync_start=False,
     ):
         head_weights = indexer_weights_reduce_stage(
             weights_partial, head_weights, tokens, pl.tile.get_block_idx(), VECTORS
@@ -892,7 +895,7 @@ def decode_csa_tnd(
         VECTORS,
         name_hint="indexer_head_coefficients",
         allow_early_resolve=True,
-        sync_start=True,
+        sync_start=False,
     ):
         coefficients = indexer_head_coefficients_stage(
             idx_query_scale_heads,
@@ -910,7 +913,7 @@ def decode_csa_tnd(
         pl.min(requests, VECTORS),
         name_hint="indexer_compressor_cache_write",
         allow_early_resolve=True,
-        sync_start=True,
+        sync_start=False,
     ):
         (idx_scales, idx_debug, idx_cache) = indexer_compact_quant_cache_stage(
             idx_had,
@@ -926,7 +929,7 @@ def decode_csa_tnd(
             VECTORS,
         )
     with pl.spmd(
-        VECTORS, name_hint="indexer_scale_page_commit", allow_early_resolve=True, sync_start=True
+        VECTORS, name_hint="indexer_scale_page_commit", allow_early_resolve=True, sync_start=False
     ) as idx_cache_tid:
         idx_cache = indexer_scale_page_commit_stage(
             idx_scales, group_offsets, idx_cache, tokens, requests, pl.tile.get_block_idx(), VECTORS
@@ -935,14 +938,14 @@ def decode_csa_tnd(
         main_project_workers,
         name_hint="compressor_kv_score",
         allow_early_resolve=True,
-        sync_start=True,
+        sync_start=False,
         deps=[qa_tid],
     ):
         (main_value, main_score) = compressor_project_stage(
             normed, main_wkv, main_wgate, main_value, main_score, pl.tile.get_block_idx(), GROUPS
         )
     with pl.spmd(
-        pl.min(main_requests, VECTORS), name_hint="compressor_pool", allow_early_resolve=True, sync_start=True
+        pl.min(main_requests, VECTORS), name_hint="compressor_pool", allow_early_resolve=True, sync_start=False
     ) as main_pool_tid:
         main_pooled = compressor_pool_stage(
             main_value,
@@ -961,7 +964,7 @@ def decode_csa_tnd(
         pl.min(main_requests, VECTORS),
         name_hint="compressor_state_commit",
         allow_early_resolve=True,
-        sync_start=True,
+        sync_start=False,
         deps=[main_pool_tid],
     ):
         main_state = compressor_state_commit_stage(
@@ -980,7 +983,7 @@ def decode_csa_tnd(
         pl.min(main_requests, VECTORS),
         name_hint="compressor_norm_rope_cache",
         allow_early_resolve=True,
-        sync_start=True,
+        sync_start=False,
     ):
         (main_normed, main_debug, main_cache) = compressor_norm_rope_cache_stage(
             main_pooled,
@@ -998,9 +1001,9 @@ def decode_csa_tnd(
             pl.tile.get_block_idx(),
             VECTORS,
         )
-    with pl.spmd(GROUPS, name_hint="qproj_b", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(GROUPS, name_hint="qproj_b", allow_early_resolve=True, sync_start=False):
         q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, pl.tile.get_block_idx(), GROUPS)
-    with pl.spmd(VECTORS, name_hint="qproj_dequant_rms_nope_rope", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(VECTORS, name_hint="qproj_dequant_rms_nope_rope", allow_early_resolve=True, sync_start=False):
         q_flat = q_dequant_rope_stage(
             wq_b_scale,
             rope_cos,
@@ -1012,10 +1015,10 @@ def decode_csa_tnd(
             pl.tile.get_block_idx(),
             VECTORS,
         )
-    with pl.spmd(kv_workers, name_hint="kv_proj", allow_early_resolve=True, sync_start=True):
+    with pl.spmd(kv_workers, name_hint="kv_proj", allow_early_resolve=True, sync_start=False):
         kv_fp32 = kv_project_stage(normed, wkv, kv_fp32, pl.tile.get_block_idx(), GROUPS)
     with pl.spmd(
-        pl.min((tokens + 7) // 8, VECTORS), name_hint="kv_norm_rope", allow_early_resolve=True, sync_start=True
+        pl.min((tokens + 7) // 8, VECTORS), name_hint="kv_norm_rope", allow_early_resolve=True, sync_start=False
     ):
         kv = kv_norm_rope_stage(
             kv_fp32, gamma_ckv, rope_cos, rope_signed, rope_swap, kv, pl.tile.get_block_idx(), VECTORS
@@ -1024,7 +1027,7 @@ def decode_csa_tnd(
         pl.min((tokens + 7) // 8, VECTORS),
         name_hint="csa_cache_writeback",
         allow_early_resolve=True,
-        sync_start=True,
+        sync_start=False,
     ):
         cache_rows = original_kv_writeback_stage(kv, native_slots, cache_rows, pl.tile.get_block_idx(), VECTORS)
     with pl.spmd(

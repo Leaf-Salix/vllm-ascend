@@ -22276,3 +22276,92 @@ AIC/AIV 类型和记录数量，未根据执行开始时间猜名，也未伪造
 图内显示 hc_pre 各阶段、投影、Compressor、Indexer、TopK、Attention、八组输出
 和 HC_post。C01/C03/C08 各 62 组，其余各 63 组，粒度保持独立 task。
 导出全量记录数、TaskId 计数及首尾跨度与原始数据相同，Ruff 检查通过。
+
+### 735.68：按BSH多task的调度策略分项验证起跑约束
+
+用户确认当前泳道基本恢复MPMD，要求主要参考deepseek_v4_flash_csa优化核间调度。
+已核对BSH的decode_csa、decode_o_proj、decode_indexer：根入口auto_scope=False，
+用显式scope管理生命周期；分组O_A/quant/O_B以及多数前段投影/量化不强制sync_start。
+当前TND根默认自动scope，且这些独立task普遍sync_start=True，两者并不相同。
+
+先独立验证两个调度改动，均从已接受v9出发，未改变数学、分工、allow_early_resolve
+或Tensor/TaskId依赖。每侧10次单调用L1，原始样本和所有检查见
+[scheduling_v12_v14_results.json](csa_mpmd_aicpu_20261022/scheduling_v12_v14_results.json)。
+
+| 候选 | 场景 | 控制/候选中位数μs | 控制/候选最大值μs |
+|---|---|---:|---:|
+| v13：只去掉八组输出链的整组起跑 | 128K/B24/S6 | 1254.82 / 1236.12 | 1275.98 / 1248.18 |
+| v13 | 8K/B32/S6 | 1214.12 / 1178.07 | 1250.46 / 1207.80 |
+| v14：只去掉前段28项起跑约束 | 128K/B24/S6 | 1281.25 / 1135.54 | 1311.98 / 1163.38 |
+| v14 | 8K/B32/S6 | 1232.02 / 1090.17 | 1284.50 / 1107.90 |
+
+四项任务均退出0，eager、graph、post-L1的输出/TopK/score/cache/state、保护区
+全部通过，PTO对照逐bit一致。v14保留HC六段、Score、TopK、Attention和输出原设置；
+v13保留前段和HC_post原设置。分开测量避免把收益直接归因于多个同时变化的因素。
+新v16仅组合这两项，正在四个代表档验证并采L1十窗和全设备Profiler三十窗；SPMD
+只作为数值参考，不重测其性能。此记录尚未把组合标为已采用，也未改旧八档报告。
+
+此前G6特化v12的两档也完整通过。长S6中位数1269.44→1265.90μs，仅0.28%；
+混长回退916.17→897.14μs。由于混长并未启用固定G6数学，不能把它的收益归因于
+G6特化；该版本的条件分支还改变了Score的scope层级。保留证据，不把它混入v16。
+
+原始v9按正确ring/task映射分段，C05 Score前区间中位520.27μs，Score跨度287.41μs，
+Attention跨度209.96μs，输出链196.89μs。各分段中位数不可相加冒充完整中位数。
+[分段证据](csa_mpmd_aicpu_20261022/v9_named_stage_breakdown.json)包含每窗端点与来源，
+这说明只优化Score核内不足以解决当前完整差距。
+
+### 735.69：显式scope实验的CPU边界与设备待验证状态
+
+v15直接在默认auto_scope=True的根中手放pl.scope被编译器正确拒绝。v15b改为
+auto_scope=False，并用一个显式整层scope保持原生命周期；显式作用域内给已有
+参数重绑定不同符号shape被拒绝。v15c将三项reshape改用独立局部view名字，保持
+外部ABI及真实地址。上述失败均仅发生CPU，没有设备失败或性能样本。
+
+v15c C05全量CPU编译通过。去除scope包装并还原三个局部别名后，算术AST与v9
+相同；生成编排SIMPLER_SCOPE静态位置112→2，任务提交点仍42，Tensor读/写
+位置仍22/24。实际动态执行次数不等于静态位置数，不能据此直接宣称性能收益。
+证据见[explicit_scope_codegen.json](csa_mpmd_aicpu_20261022/explicit_scope_codegen.json)。
+两档单卡v9对照已排队，未叠加起跑策略；完整功能和性能仍待设备结果。
+公共SDK保持26e94e056/914863ed3/57e499238，无算法层软同步、无Host回读、无16卡。
+
+### 735.70：保留BSH起跑策略组合，八档及同址状态验收通过
+
+v16组合在完整八档均通过eager、图重放、post-L1与post-Profiler检查，输出、
+TopK/score、cache/state与所选SPMD参考逐bit一致，保护区通过。每档候选十次
+单调用L1及三十次完整全流Profiler；SPMD仅为数值参考，没有重复采集其性能。
+同址metadata十场景、四步连续状态全部通过，包括S1～S6、padding、请求重排、
+零compact输出、碎片页和连续状态；偏移/count、地址稳定性、保护区逐项通过。
+
+| 固定场景 | v9 L1中位数μs | v16 L1中位数μs | v9最大值μs | v16最大值μs |
+|---|---:|---:|---:|---:|
+| 128K/B1/S6 | 447.37 | 383.09 | 453.82 | 406.22 |
+| 256K/B16/S6 | 1208.96 | 1048.77 | 1231.86 | 1064.18 |
+| 128K/B8/S6 | 749.22 | 641.03 | 767.70 | 650.92 |
+| 128K/B16/S6 | 1007.10 | 875.50 | 1033.02 | 897.10 |
+| 128K/B24/S6 | 1263.25 | 1119.29 | 1277.78 | 1140.80 |
+| 128K/B28/S6 | 1429.94 | 1284.74 | 1452.22 | 1324.76 |
+| 8K/B32/S6 | 1218.12 | 1056.85 | 1232.14 | 1078.16 |
+| 128K/B16/混长T56 | 902.94 | 770.11 | 922.02 | 783.78 |
+
+以上v9为同SDK、同固定输入的合格历史样本，包含C05全部20窗；同进程分项
+控制结果见735.68，支持组合的收益归因。完整六列规范表见
+[scheduling_v16_PERFORMANCE.md](csa_mpmd_aicpu_20261022/scheduling_v16_PERFORMANCE.md)，
+全部样本与原始路径见[scheduling_v16_qualified.json](csa_mpmd_aicpu_20261022/scheduling_v16_qualified.json)，
+状态收据见[scheduling_v16_state_validation.json](csa_mpmd_aicpu_20261022/scheduling_v16_state_validation.json)。
+Native、BSH、SPMD列复用同条件合格记录；没有覆盖先前v9报告或下载的泳道。
+
+正式接入仅entry.py的28个和output_tasks.py的3个sync_start值；保留其他
+任务起跑设置、所有allow_early_resolve及Tensor/TaskId依赖。除注释和格式外，
+当前正式AST与实测v16一致；将这些布尔值归一后，与v9算术AST完全相同。
+42处提交点及62/63组实际task保持，算法层软同步审查通过。Ruff检查通过。
+采用记录见[scheduling_v16_adoption.json](csa_mpmd_aicpu_20261022/scheduling_v16_adoption.json)。
+
+v15c显式scope两档功能逐bit通过；长档中位1261.81→1267.00μs、短档
+1211.43→1198.95μs，未在长档形成收益，本轮不采用，也不把112→2个scope
+位置当成性能成功。v12 G6和v15系列均保留为私有诊断，不进入本次正式版本。
+
+下一步只准备了v17：参考BSH的32行量化任务粒度，把输出量化每组worker上限
+4→8，针对T144/T168/T192的5/6个行块避免某个worker额外执行第二块；保留
+8行双级流水和最后活动块的尾零所有权。目前仅CPU解析通过，未设备验证、未采用。
+当前八档TND-MPMD仍慢于TND-SPMD，未达到原10%目标，目标保持active。
+本轮只做单卡，公共SDK未变；阶段本地中文Signed-off-by提交，不自动push。

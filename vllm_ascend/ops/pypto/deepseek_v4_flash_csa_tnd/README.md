@@ -5,10 +5,12 @@
 代际、轮询等算法层软同步；跨task依赖由AICPU的Tensor/切片和显式TaskId管理。
 Score、Attention自身的Cube/Vector硬件流水保留。
 
-当前重构**尚未完成完整矩阵和性能验收**。长短档CPU后端编译通过，长档生成42处独立
-任务提交；旧冻结场景的长B16、短B32已完成eager/图/采样后逐bit及保护区验证。
-长档修复了AICPU与AICore的BOOL转整数编码差异；短档该标志为0，不受此修正影响。
-两档完整L1仍慢于参考，不能作为目标已完成的证明。旧融合实现的通过结果不能证明本次重构正确。
+当前八档性能规范的单卡功能、图、状态及完整计时已通过；保持62/63组实际任务。
+前段投影/量化/cache和八组输出链按BSH策略取消额外整组起跑等待，保留Tensor/TaskId
+依赖及原数学；HC、Score、TopK、Attention和HC_post仍保留既有起跑设置。
+本轮完整L1中位数较v9下降10.15%～14.71%，八档最大值也下降；仍慢于TND-SPMD，
+**尚未达到原10%目标**。同址metadata十场景及四步连续状态均通过。
+长档保留AICPU与AICore的BOOL整数0/1编码修复。旧融合实现的结果不代替本实现验收。
 旧源码和八档性能保留在Git `67134f28b`与原证据目录中。
 
 ## 任务与数据
@@ -33,6 +35,9 @@ Score、Attention自身的Cube/Vector硬件流水保留。
 
 重构实验在`tests/pypto_test/csa_mpmd_aicpu_20261022/`，通过`prepare.py`冻结算子和
 测试入口；SDK统一采用公共manifest。CPU检查不占卡，NPU执行通过`task-submit`。
+最新八档表为该目录的`scheduling_v16_PERFORMANCE.md`，对应完整样本与实际路径见
+`scheduling_v16_qualified.json`，同址状态见`scheduling_v16_state_validation.json`。
+Native、BSH和SPMD复用同条件合格记录；本轮只补变更的TND-MPMD两列。
 
 原10%优化目标的固定混长/padding场景与参考保持原义；最新八档六列性能另按
 `CSA_PERFORMANCE_TEST_SPEC.md`汇总，不能混算场景、权重和分母。主比较为完整CSA

@@ -42,6 +42,7 @@ def output_tasks(
     oa_units = (tokens + 127) // 128 * (1024 // OA_COLS)
     quant_units = (tokens + 31) // 32
     ob_tids = pl.array.create(OUTPUT_GROUPS, pl.TASK_ID)
+    # 对齐BSH：各组按就绪核启动，O_A→quant→O_B仍严格依赖；不为小组额外等待整组准入。
     with pl.manual_scope():
         for group in pl.parallel(OUTPUT_GROUPS):
             with pl.spmd(
@@ -49,7 +50,7 @@ def output_tasks(
                 name_hint="o_proj_a",
                 deps=[attention_tid],
                 allow_early_resolve=True,
-                sync_start=True,
+                sync_start=False,
             ) as oa_tid:
                 o_r = o_projection_a_groups_stage_nz(
                     packed,
@@ -67,7 +68,7 @@ def output_tasks(
                 name_hint="o_quant",
                 deps=[oa_tid],
                 allow_early_resolve=True,
-                sync_start=True,
+                sync_start=False,
             ) as quant_tid:
                 (o_quant, o_scales) = o_projection_groups_quant_stage(
                     o_r,
@@ -85,7 +86,7 @@ def output_tasks(
                 name_hint="o_proj_b",
                 deps=[quant_tid],
                 allow_early_resolve=True,
-                sync_start=True,
+                sync_start=False,
             ) as ob_tid:
                 o_partials = o_b_group_task(o_quant, wo_b, o_partials, tokens, group, OB_ROWS)
             ob_tids[group] = ob_tid
