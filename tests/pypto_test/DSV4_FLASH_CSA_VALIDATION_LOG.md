@@ -21955,3 +21955,26 @@ MIX的spmd也被拒绝；按提示在宽N inline helper加入CORE_GROUP后，后
 [output_resolve_plan.json](csa_mpmd_tnd_20261021/output_resolve_plan.json)。
 这一步检验输出组排到忙核后方的影响；在结果出来前，不把旧L1差值直接定性为
 AICPU调度开销，也不更新正式策略或八档G。
+
+
+### 735.56：按10月22日八档六列规范单独采集，暂停优化Goal保持不变
+
+用户要求按另一会话的CSA_PERFORMANCE_TEST_SPEC.md出性能数据。固定版本及
+场景清单保存到[csa_performance_20261022](csa_performance_20261022/SPEC.md)：
+128K/B1、256K/B16、128K/B8/B16/B24/B28、8K/B32均S6，另加固定列表
+128K/B16混长T56。所有请求历史等于标称H，不加业务dummy；这不是原优化Goal的
+混长带padding八档，不更改它的分母、输入或暂停状态。不启动16卡，不修改算法。
+
+TND多task冻结61af469e的正式实现（数学采用275fd6e1+06dced14）；TND单SPMD
+选另一会话已完成设备完整链路和服务验证的combined_v1。BSH多task/单SPMD使用
+当前正式源码，单SPMD保留已验证150tick语义，并通过既有native_wait_signal_v1
+适配公共SDK的backoff_ticks接口。没有引入仅CPU通过的combined_v5或其他新候选。
+
+Native六档历史各30窗通过路径和原始记录复核后直接复用；旧PTO大多为每侧5窗、
+旧SDK或不同输入，不能用5+5两侧冒充10窗。补测每侧10个单次L1，TND多task同图
+再独立采30次Profiler，保存AICPU/AICore完整设备跨度及全部流。原始证据保留在
+新目录runs，轻量采样、任务和来源进入PERFORMANCE.json。最终只呈现规范八行表。
+
+首轮Native因冻结测试入口漏带measure.py而在导入期失败，未执行算子；补齐独立
+native_sources_v2并经CPU导入检查后重跑。256K/B16与混长Native均退出0，各30窗；
+TND128K/B16及BSH128K/B1的两侧10窗、数值/状态/保护区通过，继续补其余缺项。
