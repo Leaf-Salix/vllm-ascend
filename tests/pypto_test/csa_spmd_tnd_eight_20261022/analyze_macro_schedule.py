@@ -21,7 +21,18 @@ OUTPUT_N = 1024
 def output_work(tokens, row_tile, column_tile):
     row_blocks = math.ceil(tokens / row_tile)
     column_blocks = OUTPUT_N // column_tile
-    owners = [dict(core=core, jobs=0, valid_mn=0, aligned_mn=0, weight_load_bytes=0) for core in range(CORES)]
+    owners = [
+        dict(
+            core=core,
+            jobs=0,
+            valid_mn=0,
+            aligned_mn=0,
+            weight_load_bytes=0,
+            activation_load_bytes=0,
+            operand_load_bytes=0,
+        )
+        for core in range(CORES)
+    ]
     for logical in range(OUTPUT_GROUPS * row_blocks * column_blocks):
         row_block = (logical % (row_blocks * column_blocks)) // column_blocks
         valid = min(row_tile, tokens - row_block * row_tile)
@@ -30,9 +41,11 @@ def output_work(tokens, row_tile, column_tile):
         owner["valid_mn"] += valid * column_tile
         owner["aligned_mn"] += math.ceil(valid / 16) * 16 * column_tile
         owner["weight_load_bytes"] += OUTPUT_K * column_tile * 2
+        owner["activation_load_bytes"] += OUTPUT_K * valid * 2
+        owner["operand_load_bytes"] = owner["weight_load_bytes"] + owner["activation_load_bytes"]
     assert sum(owner["valid_mn"] for owner in owners) == OUTPUT_GROUPS * tokens * OUTPUT_N
     quantities = {}
-    for key in ("jobs", "valid_mn", "aligned_mn", "weight_load_bytes"):
+    for key in ("jobs", "valid_mn", "aligned_mn", "weight_load_bytes", "activation_load_bytes", "operand_load_bytes"):
         values = [owner[key] for owner in owners]
         quantities[key] = dict(
             total=sum(values),
@@ -84,8 +97,9 @@ def main():
         limitations=[
             "O_A owner model follows existing (group,row_block,column_block) % 24 geometry",
             "M16 alignment is an arithmetic-work proxy, not measured Cube cycles",
-            "Weight load bytes count logical GM-to-L1 requests, not measured HBM traffic",
-            "Hypothetical single-M/N128 geometry has no compile/resource/device validation",
+            "Operand load bytes count logical GM-to-L1 requests, not measured HBM traffic",
+            "Single-M/N128 entries are cost models; compile/device evidence belongs to separate "
+            "output_tall_v1 artifacts",
             "Score rows-times-steps exclude prefix arrival, Scalar, memory and FIFO costs",
             "Three instrumented windows are diagnostic only; endpoints/spreads cannot be added as savings",
             "Current C04 retained implementation has no matched task-level timing decomposition here",
@@ -111,7 +125,7 @@ def main():
                 distinct_steps=sorted({core["score_steps"] for core in score["original"]["cores"]}),
             )
         if 128 < case["valid_tokens"] <= 192:
-            data["unimplemented_single_m_n128_geometry"] = output_work(case["valid_tokens"], 192, 128)
+            data["single_m_n128_geometry_model"] = output_work(case["valid_tokens"], 192, 128)
         report["cases"][case["id"]] = data
     for name in (
         "QB",
