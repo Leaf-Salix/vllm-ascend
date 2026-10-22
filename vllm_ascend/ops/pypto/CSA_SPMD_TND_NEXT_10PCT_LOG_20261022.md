@@ -1151,3 +1151,21 @@ entry取已核对guard。所有Query head改写和被隔离的combined_v3均排�
 未加入已有负例、无用fill或WS池。源manifest和prepare_combined_v4.py可重建。
 B1/B16完整CPU编译进行中；组合收益必须重新实测，不相加上表与历史百分比。
 生产默认仍不变，九档目标未达成，goal active，未push。
+
+
+### combined_v4静态检查完成，三项完整对照已提交
+
+B1/B16均完整CPU编译通过；packed_meta与对应quant guard完全相同。真实
+物理地址上界：Cube Mat475136、Left/Right各65536、Acc131072B；Vector
+B1为155872、B16为180224B，均在各空间容量内。B1的量化源保持三个load
+位点，B16关闭复用恢复六个。B1原值生命周期审计在组合生成物上再次通过，
+不是直接复用独立候选的地址证明。报告combined_v4_compile_results.json与
+combined_v4_b1_quant_resources.json，仍不当作设备性能或组合精度结论。
+
+完整v122同轮72核L1、各五窗任务（源码同一combined_v4）：
+- task_20261022_085830_177785012157：128K/B1/S6，计时后同址S1～S6。
+- task_20261022_085837_178275330818：128K/B16/S6。
+- task_20261022_085847_179054217504：固定第9档混长T56/R16。
+
+全部使用原harness和公共SDK，经task-submit自动分卡；当前pending/running，
+无CPU任务。保留原句柄等待终态，不因排队或观察超时重复提交。未改生产默认。
