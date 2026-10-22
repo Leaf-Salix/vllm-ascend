@@ -17,6 +17,8 @@ def main():
     parser.add_argument("--legacy-signature-compat", action="store_true")
     parser.add_argument("--precision-probe", action="store_true")
     parser.add_argument("--output-variant", type=Path, help="只在冻结包替换output模块，正式源码不变")
+    parser.add_argument("--q-projection-variant", type=Path,
+                        help="在冻结TND包内替换Q_B，保留公共HCA模块供同进程控制组使用")
     args = parser.parse_args()
     if Path(args.name).name != args.name:
         raise ValueError("实验名必须是单段目录名")
@@ -35,6 +37,18 @@ def main():
         output_module = operator / "deepseek_v4_flash_hca_tnd/output.py"
         shutil.copy2(output_module, output_module.with_name("output_base.py"))
         shutil.copy2(args.output_variant.resolve(), output_module)
+    if args.q_projection_variant:
+        # 控制组会从同一Python进程导入公共HCA依赖，因此不能覆盖那个公共模块。
+        # 候选仅改TND自身的引用，控制入口仍使用原来的公共QKV/Q_B实现。
+        tnd = operator / "deepseek_v4_flash_hca_tnd"
+        shutil.copy2(args.q_projection_variant.resolve(), tnd / "q_projection_streamed.py")
+        shutil.copy2(operator / "deepseek_v4_flash_hca/qkv_proj_rope.py", tnd / "qkv_proj_rope.py")
+        entry = tnd / "entry.py"
+        entry_text = entry.read_text()
+        old_import = "from ..deepseek_v4_flash_hca.qkv_proj_rope import qkv_proj_rope"
+        if entry_text.count(old_import) != 1:
+            raise ValueError("TND的QKV引用已改变，须重新核对候选与控制隔离")
+        entry.write_text(entry_text.replace(old_import, "from .qkv_proj_rope import qkv_proj_rope"))
     shutil.copy2(HERE / "run_case.py", target / "run_case.py")
     shutil.copy2(HERE / "compressor_probe.py", target / "compressor_probe.py")
     shutil.copy2(HERE / "profile_eager.py", target / "profile_eager.py")
@@ -67,6 +81,7 @@ def main():
         "legacy_signature_compat": args.legacy_signature_compat,
         "precision_probe": args.precision_probe,
         "output_variant": str(args.output_variant.resolve()) if args.output_variant else None,
+        "q_projection_variant": str(args.q_projection_variant.resolve()) if args.q_projection_variant else None,
         "shared_toolchain": json.loads((HERE.parent / "csa_shared_toolchain/manifest.json").read_text()),
         "files": [{"path": str(p.relative_to(target)), "bytes": p.stat().st_size}
                   for p in sorted(target.rglob("*.py"))],
