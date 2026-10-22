@@ -150,7 +150,7 @@ source /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/p
 最终性能展示只包含以下八行逐档表，数值单位为 μs；不增加几何平均、均值、
 合计、每 token 指标或“整体提升”行。下面是空白模板，不是已采集的性能结果。
 
-| 场景 | Native (μs) | BSH-MPMD-L1 (μs) | BSH-SPMD (μs) | TND-MPMD-AICPU (μs) | TND-MPMD-L1 (μs) | TND-SPMD (μs) | (Native − TND-SPMD) / Native |
+| 场景 | Native (μs) | BSH-MPMD-L1 (μs) | BSH-SPMD (μs) | TND-MPMD-AICPU (μs) | TND-MPMD-L1 (μs) | TND-SPMD (μs) | (Native − TND-SPMD) / TND-SPMD |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | 128K/B1/S6 | 待采集 | 待采集 | 待采集 | 待采集 | 待采集 | 待采集 | — |
 | 256K/B16/S6 | 待采集 | 待采集 | 待采集 | 待采集 | 待采集 | 待采集 | — |
@@ -164,11 +164,11 @@ source /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/p
 百分比按未四舍五入的中位数计算：
 
 ```text
-百分比 = 100 × (median_native - median_tnd_spmd) / median_native
+百分比 = 100 × (median_native - median_tnd_spmd) / median_tnd_spmd
 ```
 
-耗时显示两位小数，百分比显示两位小数并带 `%`。正值表示 TND-SPMD 耗时相对
-Native 耗时减少的比例，分母是 Native。
+耗时显示两位小数，百分比显示两位小数并带 `%`。正值表示 Native 耗时比
+TND-SPMD 耗时高出的比例，分母是 TND-SPMD，不是 Native。
 该列按用户指定比较 Native 外层 device 跨度与 TND-SPMD incore L1 跨度，
 不解释为同口径的端到端延迟降低率或服务吞吐提升。
 
