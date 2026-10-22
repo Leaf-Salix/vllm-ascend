@@ -1,0 +1,42 @@
+{
+  "implemented": false,
+  "device_execution": false,
+  "performance_eligible": false,
+  "hypothesis": "Reduce private signal-slot spacing while preserving every publish/wait/fence and generation rule",
+  "current_slot_words": 128,
+  "current_slot_bytes": 512,
+  "candidate_slot_words": 16,
+  "candidate_slot_bytes": 64,
+  "current_buffer_bytes": 2211840,
+  "candidate_buffer_bytes": 276480,
+  "primary_sources": [
+    {
+      "path": "runs/baseline/phase_sync.py",
+      "fact": "512B is inherited validated isolation spacing, explicitly not claimed to be minimum cache line"
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-shared-20261022/src/ir/verifier/warning_scalar_write_line_shared.cpp",
+      "fact": "Documents whole 64B Scalar DCache writeback and single-writer cache-line ownership"
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/comm/a2a3/TNotify.hpp",
+      "fact": "Set uses signal-line DCCI before/after store, DSB_DDR and trailing PIPE_ALL"
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/comm/a2a3/TWait.hpp",
+      "fact": "Polling invalidates the addressed signal cache line; current PTOAS backoff extension must remain unchanged"
+    }
+  ],
+  "required_work": [
+    "Audit all hardcoded signal stride and graph-contract/validator assumptions",
+    "Create newly zeroed workspace; never reinterpret existing live generation state",
+    "72-role concurrent publication/readback stress before complete CSA",
+    "Keep pre-notify PIPE_ALL: trailing TNOTIFY barrier does not establish payload completion before signal store",
+    "Full output/cache/state/generation and complete L1 on priority cases"
+  ],
+  "limitations": [
+    "No proof of memory-system bottleneck or expected gain",
+    "No shared SDK edits or altered synchronization semantics",
+    "Phase diagnostic reserves words16..19 and is incompatible with stride16; must not reuse its layout unchanged"
+  ]
+}
