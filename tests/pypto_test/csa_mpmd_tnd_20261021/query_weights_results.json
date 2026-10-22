@@ -1,0 +1,910 @@
+{
+  "candidate": "v23_query_weights",
+  "control": "v22_front_q_priority",
+  "adopted": false,
+  "decision": "长档完整mean/max获益，短档轻微回退；保留长档候选，待八档与后续核内优化综合验收。",
+  "task_count": 34,
+  "query_signal_bytes": 221184,
+  "toolchain": {
+    "release": "csa-shared-20261021-upstream-fixes",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-mpmd-upstream-20261021",
+      "commit": "e891351e305e1b8ac70ffb9ffe60a243fc0420dc"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_mpmd_tnd_20261021/upstream_refresh_20261021/manifest.json",
+    "validated_at": "2026-10-21T18:47:25+08:00"
+  },
+  "cases": {
+    "h131072_b16": {
+      "result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/query_weights_v23_h131072_b16/result.json",
+      "device": 1,
+      "statistics_us": {
+        "spmd": {
+          "min": 728.96,
+          "mean": 733.108,
+          "max": 736.5,
+          "samples": [
+            728.96,
+            736.5,
+            735.02,
+            733.66,
+            731.4
+          ]
+        },
+        "mpmd_control": {
+          "min": 873.42,
+          "mean": 892.684,
+          "max": 908.64,
+          "samples": [
+            897.76,
+            908.64,
+            873.42,
+            894.7,
+            888.9
+          ]
+        },
+        "mpmd": {
+          "min": 863.9,
+          "mean": 880.144,
+          "max": 891.24,
+          "samples": [
+            881.82,
+            878.48,
+            885.28,
+            891.24,
+            863.9
+          ]
+        }
+      },
+      "candidate_over_control": 0.9859524759041274,
+      "candidate_over_spmd": 1.2005652645994862,
+      "checks": {
+        "spmd_eager": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        }
+      },
+      "stage_analysis": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/query_weights_v23_h131072_b16/task_l1_analysis.json",
+      "selected_mean_stages": {
+        "mpmd": [
+          {
+            "name": "hc_gate_mix_norm",
+            "begin_us": 37.28,
+            "end_us": 56.144,
+            "kinds": {
+              "aiv": {
+                "min_us": 18.060000000000002,
+                "mean_us": 18.3415,
+                "max_us": 18.724,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "qproj_a",
+            "begin_us": 58.032000000000004,
+            "end_us": 71.20400000000001,
+            "kinds": {
+              "aic": {
+                "min_us": 11.332,
+                "mean_us": 12.06825,
+                "max_us": 13.112,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "qproj_a_rms_quant",
+            "begin_us": 84.496,
+            "end_us": 90.988,
+            "kinds": {
+              "aiv": {
+                "min_us": 5.04,
+                "mean_us": 5.715,
+                "max_us": 6.244000000000001,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "indexer_query_chain",
+            "begin_us": 162.89600000000002,
+            "end_us": 250.704,
+            "kinds": {
+              "aic": {
+                "min_us": 53.932,
+                "mean_us": 56.849833333333336,
+                "max_us": 58.848,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 78.684,
+                "mean_us": 83.20233333333333,
+                "max_us": 87.512,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "indexer_scale_page_commit",
+            "begin_us": 348.308,
+            "end_us": 356.456,
+            "kinds": {
+              "aiv": {
+                "min_us": 3.836,
+                "mean_us": 5.870916666666667,
+                "max_us": 7.932,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "compressor_pool_norm_cache",
+            "begin_us": 157.592,
+            "end_us": 180.032,
+            "kinds": {
+              "aiv": {
+                "min_us": 4.04,
+                "mean_us": 13.17835294117647,
+                "max_us": 18.604,
+                "instances": 17
+              }
+            }
+          },
+          {
+            "name": "qproj_b",
+            "begin_us": 231.824,
+            "end_us": 276.632,
+            "kinds": {
+              "aic": {
+                "min_us": 36.232,
+                "mean_us": 39.98016666666667,
+                "max_us": 44.54,
+                "instances": 24
+              }
+            }
+          },
+          {
+            "name": "qproj_dequant_rms_nope_rope",
+            "begin_us": 293.188,
+            "end_us": 317.552,
+            "kinds": {
+              "aiv": {
+                "min_us": 14.912,
+                "mean_us": 19.762416666666667,
+                "max_us": 24.172,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "index_score_topk",
+            "begin_us": 369.012,
+            "end_us": 567.184,
+            "kinds": {
+              "aic": {
+                "min_us": 176.44,
+                "mean_us": 183.1235,
+                "max_us": 191.768,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 176.548,
+                "mean_us": 187.158,
+                "max_us": 197.492,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "sparse_attn",
+            "begin_us": 603.284,
+            "end_us": 721.1320000000001,
+            "kinds": {
+              "aic": {
+                "min_us": 79.352,
+                "mean_us": 91.518,
+                "max_us": 113.988,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 83.50800000000001,
+                "mean_us": 96.09475,
+                "max_us": 117.336,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "hc_post",
+            "begin_us": 851.32,
+            "end_us": 880.144,
+            "kinds": {
+              "aiv": {
+                "min_us": 19.128,
+                "mean_us": 23.094833333333334,
+                "max_us": 28.488,
+                "instances": 48
+              }
+            }
+          }
+        ],
+        "mpmd_control": [
+          {
+            "name": "hc_gate_mix_norm",
+            "begin_us": 37.264,
+            "end_us": 56.364,
+            "kinds": {
+              "aiv": {
+                "min_us": 18.176000000000002,
+                "mean_us": 18.5065,
+                "max_us": 18.888,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "qproj_a",
+            "begin_us": 58.156,
+            "end_us": 71.544,
+            "kinds": {
+              "aic": {
+                "min_us": 11.268,
+                "mean_us": 12.2985,
+                "max_us": 13.272,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "qproj_a_rms_quant",
+            "begin_us": 84.956,
+            "end_us": 91.5,
+            "kinds": {
+              "aiv": {
+                "min_us": 5.5600000000000005,
+                "mean_us": 6.0200000000000005,
+                "max_us": 6.484,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "indexer_query_chain",
+            "begin_us": 234.892,
+            "end_us": 314.968,
+            "kinds": {
+              "aic": {
+                "min_us": 50.448,
+                "mean_us": 53.032333333333334,
+                "max_us": 54.752,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 72.088,
+                "mean_us": 76.27925,
+                "max_us": 79.516,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "indexer_scale_page_commit",
+            "begin_us": 362.332,
+            "end_us": 370.356,
+            "kinds": {
+              "aiv": {
+                "min_us": 1.792,
+                "mean_us": 4.767333333333333,
+                "max_us": 7.632000000000001,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "compressor_pool_norm_cache",
+            "begin_us": 135.124,
+            "end_us": 165.824,
+            "kinds": {
+              "aiv": {
+                "min_us": 5.032,
+                "mean_us": 16.207529411764707,
+                "max_us": 24.256,
+                "instances": 17
+              }
+            }
+          },
+          {
+            "name": "qproj_b",
+            "begin_us": 142.984,
+            "end_us": 191.92000000000002,
+            "kinds": {
+              "aic": {
+                "min_us": 38.38,
+                "mean_us": 43.92583333333334,
+                "max_us": 48.684,
+                "instances": 24
+              }
+            }
+          },
+          {
+            "name": "qproj_dequant_rms_nope_rope",
+            "begin_us": 267.86400000000003,
+            "end_us": 292.964,
+            "kinds": {
+              "aiv": {
+                "min_us": 16.552,
+                "mean_us": 21.036666666666665,
+                "max_us": 24.764,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "index_score_topk",
+            "begin_us": 383.072,
+            "end_us": 582.668,
+            "kinds": {
+              "aic": {
+                "min_us": 176.552,
+                "mean_us": 184.204,
+                "max_us": 194.132,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 176.548,
+                "mean_us": 187.85491666666667,
+                "max_us": 199.012,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "sparse_attn",
+            "begin_us": 618.032,
+            "end_us": 732.684,
+            "kinds": {
+              "aic": {
+                "min_us": 74.94800000000001,
+                "mean_us": 86.94533333333334,
+                "max_us": 110.68,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 79.296,
+                "mean_us": 91.52983333333333,
+                "max_us": 114.132,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "hc_post",
+            "begin_us": 865.648,
+            "end_us": 892.684,
+            "kinds": {
+              "aiv": {
+                "min_us": 16.276,
+                "mean_us": 21.002833333333335,
+                "max_us": 26.824,
+                "instances": 48
+              }
+            }
+          }
+        ]
+      }
+    },
+    "h8192_b16": {
+      "result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/query_weights_v23_h8192_b16/result.json",
+      "device": 2,
+      "statistics_us": {
+        "spmd": {
+          "min": 590.18,
+          "mean": 593.252,
+          "max": 596.76,
+          "samples": [
+            596.76,
+            590.18,
+            594.46,
+            593.36,
+            591.5
+          ]
+        },
+        "mpmd_control": {
+          "min": 723.18,
+          "mean": 734.76,
+          "max": 743.04,
+          "samples": [
+            730.1,
+            739.38,
+            723.18,
+            743.04,
+            738.1
+          ]
+        },
+        "mpmd": {
+          "min": 728.66,
+          "mean": 737.324,
+          "max": 748.82,
+          "samples": [
+            744.8,
+            733.24,
+            748.82,
+            728.66,
+            731.1
+          ]
+        }
+      },
+      "candidate_over_control": 1.0034895748271544,
+      "candidate_over_spmd": 1.242851267252365,
+      "checks": {
+        "spmd_eager": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards": 101,
+          "all_guards_pass": true,
+          "numerical_tensors": 9,
+          "all_numerical_pass": true,
+          "all_bit_equal": true
+        }
+      },
+      "stage_analysis": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/query_weights_v23_h8192_b16/task_l1_analysis.json",
+      "selected_mean_stages": {
+        "mpmd": [
+          {
+            "name": "hc_gate_mix_norm",
+            "begin_us": 35.836000000000006,
+            "end_us": 54.924,
+            "kinds": {
+              "aiv": {
+                "min_us": 17.692,
+                "mean_us": 18.184,
+                "max_us": 18.848,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "qproj_a",
+            "begin_us": 56.828,
+            "end_us": 69.69200000000001,
+            "kinds": {
+              "aic": {
+                "min_us": 11.456,
+                "mean_us": 12.02025,
+                "max_us": 12.76,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "qproj_a_rms_quant",
+            "begin_us": 95.4,
+            "end_us": 102.232,
+            "kinds": {
+              "aiv": {
+                "min_us": 5.404,
+                "mean_us": 6.126,
+                "max_us": 6.676,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "indexer_query_chain",
+            "begin_us": 157.776,
+            "end_us": 250.22,
+            "kinds": {
+              "aic": {
+                "min_us": 57.592,
+                "mean_us": 59.44566666666667,
+                "max_us": 61.04,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 81.992,
+                "mean_us": 88.19725,
+                "max_us": 92.108,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "indexer_scale_page_commit",
+            "begin_us": 353.44800000000004,
+            "end_us": 360.828,
+            "kinds": {
+              "aiv": {
+                "min_us": 5.104,
+                "mean_us": 5.956583333333334,
+                "max_us": 7.192,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "compressor_pool_norm_cache",
+            "begin_us": 153.596,
+            "end_us": 175.996,
+            "kinds": {
+              "aiv": {
+                "min_us": 4.256,
+                "mean_us": 13.731529411764706,
+                "max_us": 19.464000000000002,
+                "instances": 17
+              }
+            }
+          },
+          {
+            "name": "qproj_b",
+            "begin_us": 227.82000000000002,
+            "end_us": 277.212,
+            "kinds": {
+              "aic": {
+                "min_us": 40.648,
+                "mean_us": 44.83566666666667,
+                "max_us": 49.044000000000004,
+                "instances": 24
+              }
+            }
+          },
+          {
+            "name": "qproj_dequant_rms_nope_rope",
+            "begin_us": 295.236,
+            "end_us": 326.908,
+            "kinds": {
+              "aiv": {
+                "min_us": 20.604,
+                "mean_us": 26.899083333333333,
+                "max_us": 31.076,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "index_score_topk",
+            "begin_us": 373.20799999999997,
+            "end_us": 423.00800000000004,
+            "kinds": {
+              "aic": {
+                "min_us": 18.056,
+                "mean_us": 29.018,
+                "max_us": 43.756,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 21.992,
+                "mean_us": 33.14033333333333,
+                "max_us": 48.964,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "sparse_attn",
+            "begin_us": 458.608,
+            "end_us": 569.16,
+            "kinds": {
+              "aic": {
+                "min_us": 73.76,
+                "mean_us": 84.9605,
+                "max_us": 106.612,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 77.616,
+                "mean_us": 89.45658333333334,
+                "max_us": 110.136,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "hc_post",
+            "begin_us": 706.62,
+            "end_us": 737.3240000000001,
+            "kinds": {
+              "aiv": {
+                "min_us": 18.964,
+                "mean_us": 24.401666666666667,
+                "max_us": 30.456,
+                "instances": 48
+              }
+            }
+          }
+        ],
+        "mpmd_control": [
+          {
+            "name": "hc_gate_mix_norm",
+            "begin_us": 36.808,
+            "end_us": 55.936,
+            "kinds": {
+              "aiv": {
+                "min_us": 17.864,
+                "mean_us": 18.394,
+                "max_us": 18.956,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "qproj_a",
+            "begin_us": 57.68,
+            "end_us": 71.068,
+            "kinds": {
+              "aic": {
+                "min_us": 11.636,
+                "mean_us": 12.32325,
+                "max_us": 13.28,
+                "instances": 16
+              }
+            }
+          },
+          {
+            "name": "qproj_a_rms_quant",
+            "begin_us": 84.756,
+            "end_us": 91.71600000000001,
+            "kinds": {
+              "aiv": {
+                "min_us": 5.668,
+                "mean_us": 6.276,
+                "max_us": 6.768,
+                "instances": 8
+              }
+            }
+          },
+          {
+            "name": "indexer_query_chain",
+            "begin_us": 196.62,
+            "end_us": 285.084,
+            "kinds": {
+              "aic": {
+                "min_us": 55.476,
+                "mean_us": 57.5835,
+                "max_us": 59.252,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 79.572,
+                "mean_us": 84.3625,
+                "max_us": 87.99600000000001,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "indexer_scale_page_commit",
+            "begin_us": 354.776,
+            "end_us": 362.14,
+            "kinds": {
+              "aiv": {
+                "min_us": 3.016,
+                "mean_us": 5.1280833333333335,
+                "max_us": 7.0520000000000005,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "compressor_pool_norm_cache",
+            "begin_us": 133.156,
+            "end_us": 157.804,
+            "kinds": {
+              "aiv": {
+                "min_us": 3.764,
+                "mean_us": 13.756470588235295,
+                "max_us": 20.576,
+                "instances": 17
+              }
+            }
+          },
+          {
+            "name": "qproj_b",
+            "begin_us": 188.144,
+            "end_us": 240.048,
+            "kinds": {
+              "aic": {
+                "min_us": 41.776,
+                "mean_us": 46.705333333333336,
+                "max_us": 51.312,
+                "instances": 24
+              }
+            }
+          },
+          {
+            "name": "qproj_dequant_rms_nope_rope",
+            "begin_us": 312.104,
+            "end_us": 339.81600000000003,
+            "kinds": {
+              "aiv": {
+                "min_us": 19.02,
+                "mean_us": 23.251416666666668,
+                "max_us": 27.408,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "index_score_topk",
+            "begin_us": 376.548,
+            "end_us": 428.25600000000003,
+            "kinds": {
+              "aic": {
+                "min_us": 20.792,
+                "mean_us": 31.386166666666668,
+                "max_us": 45.436,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 23.572000000000003,
+                "mean_us": 36.364583333333336,
+                "max_us": 51.116,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "sparse_attn",
+            "begin_us": 464.144,
+            "end_us": 572.268,
+            "kinds": {
+              "aic": {
+                "min_us": 70.62,
+                "mean_us": 82.336,
+                "max_us": 104.184,
+                "instances": 24
+              },
+              "aiv": {
+                "min_us": 74.316,
+                "mean_us": 86.8445,
+                "max_us": 107.7,
+                "instances": 48
+              }
+            }
+          },
+          {
+            "name": "hc_post",
+            "begin_us": 711.052,
+            "end_us": 734.76,
+            "kinds": {
+              "aiv": {
+                "min_us": 13.356,
+                "mean_us": 17.69875,
+                "max_us": 23.532,
+                "instances": 48
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
