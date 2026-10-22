@@ -13,6 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("compile_dir", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--selection", choices=("TSEL", "TSELS"), default="TSEL")
     args = parser.parse_args()
     here = Path(__file__).resolve().parent
     root = args.compile_dir.resolve()
@@ -46,7 +47,7 @@ def main():
     code = cpp.read_text()
     assert "MGATHER<pto::Coalesce::Elem, pto::GatherOOB::Zero>" in code
     assert "MGATHER<pto::Coalesce::Row, pto::GatherOOB::Zero>" in code
-    assert code.count("TSELS(") >= 3
+    assert code.count(args.selection + "(") >= 3
     baseline = json.loads((here / "baseline.json").read_text())
     original = Path(baseline["cases"]["C04"]["source_report"]).parent / "build_output"
     (metadata,) = original.glob("decode_csa_spmd_*/compiled_meta.json")
@@ -57,6 +58,7 @@ def main():
         passed=True,
         device_execution=False,
         packed_abi_unchanged=True,
+        selection=args.selection,
         baseline_meta=str(metadata),
         resources=resources,
         gathers=gathers,

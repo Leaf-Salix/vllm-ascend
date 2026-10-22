@@ -26,31 +26,20 @@
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
   "pending_tasks": {
-    "task_20261022_173834_1885489714": {
-      "task_id": "task_20261022_173834_1885489714",
-      "candidate": "score_n128_single_acc_v3",
-      "case_id": "C04",
-      "status": "running",
-      "device": 8,
-      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b16_s6_score_n128_single_acc_v3",
-      "codegen_evidence": "score_n128_single_acc_v2_codegen.json",
-      "preflight": "score_n128_single_acc_v3_preflight.json"
-    },
-    "task_20261022_174755_7079965369": {
-      "task_id": "task_20261022_174755_7079965369",
-      "candidate": "scale_probe_v7r2",
-      "status": "submitted",
-      "performance_eligible": false,
-      "device": "auto",
-      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/scale_probe_v7r2",
-      "reason": "Compare pure-vector TSEL path after repeated-tail mismatch of TSELS; CPU compilation passed"
+    "task_20261022_181543_203120114774": {
+      "task_id": "task_20261022_181543_203120114774",
+      "candidate": "score_group_order_v2",
+      "case_id": "C08",
+      "device": 2,
+      "status": "pending",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b16_mixed_score_group_order_v2"
     }
   },
   "next_steps": [
-    "Collect frozen scale microprobe v6; inspect byte parity before another full CSA run",
-    "Collect existing C04 N128 v3 task; strict regression and ten full L1 windows before expansion",
-    "Continue SPMD phase/owner analysis for B1 and mixed-length tails; MPMD timing is not SPMD phase timing",
-    "Validate an adopted combination across eight cases and metadata/service regressions; G<=0.90 unproven"
+    "Collect existing C08 group-order task; strict regression and ten full L1 windows before expansion",
+    "If group ordering helps, validate metadata transitions, other seven cases and service behavior before adoption",
+    "Use current phase evidence and measured negative candidates to refine the next isolated kernel optimization",
+    "G<=0.90 remains unproven; freeze denominator and do not push without authorization"
   ],
   "knowledge_query": {
     "status": "index_missing",
@@ -58,10 +47,10 @@
     "ready_receipt": false
   },
   "cpu_checks": {
-    "passed": 28,
+    "passed": 31,
     "device_execution": false
   },
-  "updated_at": "2026-10-22T17:48:50.985238+08:00",
+  "updated_at": "2026-10-22T18:23:01.741679+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -82,6 +71,20 @@
       "valid_windows": 0,
       "reason": "Candidate synchronize raised 507015 VEC instruction parameter invalid; frozen reference eager passed",
       "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b16_s6_scale_gather_v4_env2"
+    }
+  ],
+  "rejected_candidates": [
+    {
+      "candidate": "score_n128_single_acc_v3",
+      "case_id": "C04",
+      "ratio_to_frozen": 1.1835674502151634,
+      "evidence": "score_n128_single_acc_v3_result.json"
+    },
+    {
+      "candidate": "scale_gather_v7",
+      "case_id": "C04",
+      "ratio_to_frozen": 1.037540545080961,
+      "evidence": "scale_gather_v7_result.json"
     }
   ]
 }
