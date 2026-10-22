@@ -1065,3 +1065,52 @@ query_resident_swap_resources.json和query_resident_swap_weight_resources.json�
 
 均由冻结harness的submit_probe.py经task-submit自动分卡，不改公共SDK。
 当前待终态；无生产采用，不相加父版或独立候选收益。
+
+
+### RoPE索引驻留三档收齐：全部严格正确，收益有限，不全域采用
+
+三个任务均completed/exit0，严格冻结v122输出/Top-K/score、cache/state、
+保护区、图及代际通过；Native原有差异继续单列。完整L1五个交替窗口：
+
+| 场景 | 耗时变化 | 配对更快 |
+|---|---:|---:|
+| 128K/B16/S6 | -0.36862% | 3/5 |
+| 固定混长T56 | +0.14270% | 2/5 |
+| 8K/B32/S6 | -0.57553% | 4/5 |
+
+原始窗口、两侧中位数可由query_resident_swap_b16_results.json及
+query_resident_swap_mixed_short_results.json重算。减少逻辑load和索引算术
+未给出全域稳定收益，不将跨轮绝对值相减来推断比权重驻留更好或更坏；
+短B32保留小幅局部证据，不当成正式采用或九档目标完成。
+
+复核既有O_A生成物：已有两份K256 L1以及双K128 Left/Right，不把简单
+新增双槽当作新机制；历史B1显式K512/M16供数已是完整负例。本轮不重试。
+新发现输出量化的oc_amax/oc_q是相同GM地址的两次真实TLOAD，源和最终IR
+均存在。准备独立基于v122的output_quant_reuse，仅用oc_q=oc_amax延长原值
+生存期；所有amax/div/scale乘法/三次cast、valid行、尾零、分工AST保持。
+CPU合同和完整B16编译已通过；仍需检查abs/scratch不可覆盖原值到最后的
+row_expand_mul，再做完整L1实测，不预记收益。
+
+
+### O_A量化原值复用：生成物安全，开始完整L1与B1尾行矩阵
+
+output_quant_reuse完整B16编译和audit_output_quant_reuse.py通过。输入物理
+UB在两个展开lane分别为[65536,98304)、[98304,131072)，abs与row_max scratch
+均另有存储；到最后一次row_expand_mul前，重叠地址只有oc_q的只读别名。
+最终乘法后原值再无消费者，允许结果覆盖原tile。尾轮也逐项同样核查。
+展开后原输入load静态位点6→3，整体Vec地址上界163872→155872B，packed ABI
+不变。C++确认实际TLOAD、TABS与TROWEXPANDMUL，别名TASSIGN同址。
+审计首次假设别名会使用同一个C++变量名而失败；修为核验别名的TASSIGN地址，
+保留物理区间覆盖及生命周期检查，未放宽任何数值/保护区条件。
+
+一个CPU源码合同和Ruff通过；本轮只替换第二次相同load，不改运算顺序或
+尾部语义，不改变custom allocator合同。B16逻辑输入字节6MiB→3MiB，不声称
+这是实际HBM流量或完整收益。此源独立基于v122，不叠加Query或其他优化。
+
+三项冻结harness/公共SDK完整L1五窗任务：
+- B16/S6 task_20261022_084339_11452478515
+- 8K/B32/S6 task_20261022_084352_115624411592
+- B1/S6及同址S1～S6 task_20261022_084401_116502025524；Tcap6/Rcap1，
+  table-history131200满足原矩阵动态边界合同，固定S6计时先于metadata回归。
+
+任务尚待终态。生产默认不变、没有push，目标继续active。
