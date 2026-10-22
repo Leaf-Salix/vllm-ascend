@@ -4089,5 +4089,56 @@
       "evidence": "../csa_mpmd_tnd_20261021/upstream_refresh_20261021/manifest.json",
       "validated_at": "2026-10-21T18:47:25+08:00"
     }
+  },
+  {
+    "task_id": "task_20261022_085723_173640232463",
+    "case": "native_format_environment_probe",
+    "experiment": "v60_model_cache_ready",
+    "purpose": "同16卡启动器环境前缀的单卡格式转换，验证ASCEND_CACHE_PATH修复；不执行CSA/模型",
+    "command": "bash /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v60_model_cache_ready/probe_environment.sh /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v60_model_cache_ready/source /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/model_v60_environment_probe mpmd_tnd",
+    "output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/model_v60_environment_probe"
+  },
+  {
+    "task_id": "task_20261022_085838_17830235196",
+    "case": "model_8k_b16_mixed",
+    "device_num": 16,
+    "variant": "mpmd_tnd",
+    "experiment": "v60_model_cache_ready",
+    "purpose": "Native格式转换预检查通过后，重跑原固定16卡MPMD正确性；仅修复启动器缓存目录准备",
+    "output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/model_v60_mpmd_tnd_8k_b16",
+    "command": "bash /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v60_model_cache_ready/source/tests/pypto_test/csa_mpmd_tnd_20261021/run_model_validation.sh /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v60_model_cache_ready/source /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/model_v60_mpmd_tnd_8k_b16 mpmd_tnd",
+    "source_manifest": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v60_model_cache_ready/manifest.json"
+  },
+  {
+    "task_id": "task_20261022_090758_22223639146",
+    "case": "h131072_b16",
+    "experiment": "v64_output_resolve",
+    "purpose": "只关闭输出组提前解析，保留sync_start和全部核内计算；以v59控制隔离后段回退来源",
+    "command": "bash /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v64_output_resolve/launch.sh /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v64_output_resolve /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/output_resolve_v64_h131072_b16 h131072_b16 --control-mpmd /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/experiments/v59_qb_wide/operator",
+    "output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_tnd_20261021/runs/output_resolve_v64_h131072_b16",
+    "toolchain": {
+      "release": "csa-shared-20261021-upstream-fixes",
+      "status": "validated",
+      "sessions": [
+        "CSA-SPMD",
+        "CSA-SPMD-TND",
+        "CSA-MPMD-TND"
+      ],
+      "pypto": {
+        "source": ".worktrees/pypto-csa-mpmd-upstream-20261021",
+        "commit": "e891351e305e1b8ac70ffb9ffe60a243fc0420dc"
+      },
+      "ptoas": {
+        "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+        "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+        "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+      },
+      "simpler": {
+        "source": ".worktrees/simpler-csa-core-args-256-20261016",
+        "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+      },
+      "evidence": "../csa_mpmd_tnd_20261021/upstream_refresh_20261021/manifest.json",
+      "validated_at": "2026-10-21T18:47:25+08:00"
+    }
   }
 ]

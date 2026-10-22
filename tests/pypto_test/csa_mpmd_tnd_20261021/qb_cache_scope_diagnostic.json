@@ -1,0 +1,27 @@
+{
+  "scope": "私有宽N候选的缓存声明CPU诊断；不修改公共SDK、不提交设备验证",
+  "attempts": [
+    {
+      "candidate": "v61_qb_weight_bypass",
+      "cpu_result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/qb_bypass_v61_cpu_h131072_b16/result.json",
+      "diagnosis": "if QB_WIDE_N内的spmd缓存声明：声明必须直接位于scope body",
+      "device_execution": false,
+      "adopted": false
+    },
+    {
+      "candidate": "v62_qb_weight_bypass",
+      "cpu_result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/qb_bypass_v62_cpu_h131072_b16/result.json",
+      "diagnosis": "外层spmd只派发预定义MIX：无实际GM读取，cache policy没有附着对象",
+      "device_execution": false,
+      "adopted": false
+    },
+    {
+      "candidate": "v63_qb_weight_bypass",
+      "cpu_result": "tests/pypto_test/csa_mpmd_tnd_20261021/runs/qb_bypass_v63_cpu_h131072_b16/result.json",
+      "diagnosis": "在宽N inline helper增加CORE_GROUP scope：SplitIncoreOrch前置检查拒绝残留InCore ScopeStmt",
+      "device_execution": false,
+      "adopted": false
+    }
+  ],
+  "decision": "这些写法均未通过当前前端；保留失败证据，删除不能用的生成器。本轮转向独立输出派发消融，不宣称L2是根因。"
+}

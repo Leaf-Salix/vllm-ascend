@@ -21928,3 +21928,30 @@ B8 Main AIC均值80.02→76.91μs，但max101.44→101.81μs，AIV与完整Main
 修复为启动前创建显式的CANN/PyPTO/vLLM缓存及日志目录；计算代码、固定请求、
 SDK和配置不变。重新排整机前先用单卡检查同一环境的Native格式转换，避免
 为同一个初始化错误再次加载全量权重。此前单层功能和八档L1结果不受影响。
+
+
+### 735.55：同环境单卡初始化通过，16卡重跑；隔离输出组提前派发
+
+缓存目录修正后，按16卡启动器相同环境前缀执行单卡Native BF16→NZ→CPU
+检查。任务`task_20261022_085723_173640232463` completed(exit=0)，格式29、
+转换值精确一致，确认CANN9.2私有OPP及新缓存路径初始化正常。该小测试未执行
+模型或CSA。证据见[model_environment_preflight.json](csa_mpmd_tnd_20261021/model_environment_preflight.json)。
+新的共同模型源码冻结在7d3478f8；原输入、SDK、数学和图配置不变，重跑MPMD
+任务`task_20261022_085838_17830235196`已从排队进入running。首轮失败目录不覆盖，
+仍须等实际decode、路由和接受统计，尚未排SPMD对照或宣称整模型通过。
+
+针对v59长B16输出链增加约9μs，先做Q_B权重BYPASS的CPU接口诊断。当前
+set_cache_policy必须直接附着实际核内scope：内层if被拒绝，外层仅派发预定义
+MIX的spmd也被拒绝；按提示在宽N inline helper加入CORE_GROUP后，后端又因
+残留InCore ScopeStmt未被outline拒绝。三种写法均未提交NPU或进入正式路径，
+不修改公共SDK、不改写为缓存假设已成立。保留原CPU日志及短摘要
+[qb_cache_scope_diagnostic.json](csa_mpmd_tnd_20261021/qb_cache_scope_diagnostic.json)，
+删除不可用生成器，避免它被后续误当可运行优化。
+
+另建v64纯调度消融：基于v59，只把output_group_chain的allow_early_resolve
+改为False，保留原Tensor/TaskId依赖、sync_start及全部输出/Main数学文件。
+完整CPU编译通过；设备对照以v59为控制，任务
+`task_20261022_090758_22223639146`已排队，计划见
+[output_resolve_plan.json](csa_mpmd_tnd_20261021/output_resolve_plan.json)。
+这一步检验输出组排到忙核后方的影响；在结果出来前，不把旧L1差值直接定性为
+AICPU调度开销，也不更新正式策略或八档G。
