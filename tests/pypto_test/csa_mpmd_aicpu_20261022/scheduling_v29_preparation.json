@@ -1,0 +1,39 @@
+{
+  "candidate": "aicpu_v29_indexer_query_priority",
+  "adopted": false,
+  "base_commit": "d86c95f69",
+  "shared_release": "csa-shared-20261022-logical-codegen",
+  "cpu": {
+    "source": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/cpu_v29_h131072_b24_s6/result.json",
+    "stage": "cpu_backend_compiled",
+    "passed": true
+  },
+  "change": "长历史Indexer query→Q_B调度门控，不是数学必需依赖。保持24核条带和独立task，不引入软同步。",
+  "entry_patch": "--- a/entry.py\n+++ b/entry.py\n@@ -503,8 +503,9 @@\n     cache_rows: pl.InOut[pl.Tensor[[CACHE_ROWS, 512], pl.BF16]],\n     tokens: pl.Scalar[pl.INDEX],\n     kv_workers: pl.Scalar[pl.INDEX],\n+    query_priority_tid: pl.Scalar[pl.TASK_ID],\n ):\n-    with pl.spmd(GROUPS, name_hint=\"qproj_b\", allow_early_resolve=True, sync_start=False):\n+    with pl.spmd(GROUPS, name_hint=\"qproj_b\", allow_early_resolve=True, sync_start=False, deps=[query_priority_tid]):\n         q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, pl.tile.get_block_idx(), GROUPS)\n     with pl.spmd(VECTORS, name_hint=\"qproj_dequant_rms_nope_rope\", allow_early_resolve=True, sync_start=False):\n         q_flat = q_dequant_rope_stage(\n@@ -950,6 +951,7 @@\n             cache_rows,\n             tokens,\n             kv_workers,\n+            qa_tid,  # 短历史维持原次序；QA已经是QR→Q_B的数据前驱。\n         )\n         (main_value, main_score, main_pooled, main_state, main_normed, main_debug, main_cache, main_project_tid) = (\n             main_compressor_tasks(\n@@ -1066,7 +1068,9 @@\n             idx_had = indexer_compressor_hadamard_stage(\n                 idx_normed, hadamard, idx_had, compact_count, pl.tile.get_block_idx(), GROUPS\n             )\n-    with pl.spmd(GROUPS, name_hint=\"indexer_query_proj\", allow_early_resolve=True, sync_start=False):\n+    with pl.spmd(\n+        GROUPS, name_hint=\"indexer_query_proj\", allow_early_resolve=True, sync_start=False\n+    ) as indexer_query_tid:\n         idx_query_acc = indexer_query_project_stage(qr, idx_wq_b, idx_query_acc, pl.tile.get_block_idx(), GROUPS)\n     with pl.spmd(query_rope_workers, name_hint=\"indexer_query_rope\", allow_early_resolve=True, sync_start=False):\n         idx_query_rope = indexer_query_dequant_rope_stage(\n@@ -1211,6 +1215,7 @@\n             cache_rows,\n             tokens,\n             kv_workers,\n+            indexer_query_tid,  # 长历史有意优先Indexer投影；这是调度门控，不是额外数学依赖。\n         )\n     with pl.spmd(\n         GROUPS, name_hint=\"indexer_score\", allow_early_resolve=True, sync_start=True, deps=[idx_cache_tid]\n",
+  "jobs": [
+    {
+      "task_id": "task_20261023_003913_24672216061",
+      "candidate": "aicpu_v29_indexer_query_priority",
+      "case": "h131072_b24_s6",
+      "purpose": "Indexer query优先于Q_B，完整L1同进程v22对照",
+      "output": "runs/aicpu_v29_pair_h131072_b24_s6",
+      "last_observed_status": "pending"
+    },
+    {
+      "task_id": "task_20261023_003913_24682728046",
+      "candidate": "aicpu_v29_indexer_query_priority",
+      "case": "h131072_b16_mixed",
+      "purpose": "Indexer query优先于Q_B，完整L1同进程v22对照",
+      "output": "runs/aicpu_v29_pair_h131072_b16_mixed",
+      "last_observed_status": "pending"
+    },
+    {
+      "task_id": "task_20261023_003913_2468718764",
+      "candidate": "aicpu_v29_indexer_query_priority",
+      "case": "h8192_b32_s6",
+      "purpose": "Indexer query优先于Q_B，完整L1同进程v22对照",
+      "output": "runs/aicpu_v29_pair_h8192_b32_s6",
+      "last_observed_status": "pending"
+    }
+  ]
+}
