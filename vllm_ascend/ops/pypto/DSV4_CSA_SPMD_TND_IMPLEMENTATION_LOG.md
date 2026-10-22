@@ -4502,3 +4502,24 @@ C03关闭路径四份CPP及ABI完全一致。首个生成器调用误匹配WORKE
 task_20261023_035202_22899807255（卡0）已提交，每档十个完整72-role窗口，仍
 对同SDK原combined_v1校准；C04采用时还须优于保留值763.65μs。尚未有新性能
 结论，不先做state/service扩测。生产保持原已采用版本，goal active。
+
+等待重点档期间，只读补齐同SDK历史分母证据：C01 358.02、C03 599.84、
+C06 1173.42、C07 917.71μs，来源同一csa_performance_20261022_aicpu归档。
+qualify_other_references.py核对各case、bootstrap实际SDK根/validated release、
+完整四份CPP/ABI对原冻结算法的已有等价证明、同一fixture构造，以及每档十窗
+原始72-role周期值重算和eager/graph/post-L1检查。保存所有样本和原始窗口路径，
+见same_sdk_reused_other_references.json；没有新增这四档NPU测量，也没有覆盖
+原baseline.json或挑选其它卡上的C04/C05更有利分母。C02沿用此前已合格记录。
+
+当前七档有合格同SDK原算法参考，C08仍缺：该归档C08实际只采MPMD L1，SPMD
+实现还启用了group-order候选，二者都不能补作原SPMD分母。后续若进入混长
+候选正式验收，需补这项缺失参考，不重跑其余七项。
+
+04:00补记：critical_prefix_v1的C05任务completed/exit0。完整L1十窗中位
+1003.02μs，相比原同SDK1014.46缩短11.44μs（1.1277%）；样本
+1006.32/1003.08/1004.40/1010.04/1000.64/992.62/1001.92/1002.96/999.48/1004.20。
+eager/graph/post-L1的全部输出、Top-K/score、cache/state逐bit和保护通过。
+这是小幅正向结果，尚未采用，不将前版或探针变化累加为收益。C04同候选任务
+task_20261023_035202_22899263683已由pending转running，保留原handle等待，
+结果在critical_prefix_v1_results.json继续归档；当前没有其它待收CPU会话。
+阶段commit337a287b4已保存关键链候选与前版两档诊断，未push。
