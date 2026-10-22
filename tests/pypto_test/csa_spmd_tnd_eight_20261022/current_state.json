@@ -32,23 +32,24 @@
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
   "pending_tasks": {
-    "task_20261023_033752_18611141470": {
+    "task_20261023_035202_22899263683": {
       "case": "C04",
-      "candidate": "joint_prefix_v2",
-      "kind": "phase_diagnostic",
+      "candidate": "critical_prefix_v1",
+      "kind": "complete_L1",
       "device": 8
     },
-    "task_20261023_033752_186126911640": {
+    "task_20261023_035202_22899807255": {
       "case": "C05",
-      "candidate": "joint_prefix_v2",
-      "kind": "phase_diagnostic",
+      "candidate": "critical_prefix_v1",
+      "kind": "complete_L1",
       "device": 0
     }
   },
   "next_steps": [
-    "Bind joint-prefix diagnostic CPP to the actual measured candidate; identify why fewer source-level loads did not reduce full critical path",
-    "Use whole-stage dependency and data-reuse evidence to choose a structural change; no adjacent tile scan from operation count alone",
-    "Eight-case goal, original denominator, retained C04 leaf optimization and no push remain"
+    "Collect C04/C05 critical_prefix_v1 full-L1 exact checks and all ten samples; compare also with retained C04 763.65us",
+    "Expand state/service only if complete-L1 result justifies it; no component speedup or clock probes as adoption evidence",
+    "Prioritize critical-branch readiness, actual data supply and work reuse; coarse dynamic scheduling only with a net resource model",
+    "Eight-case original-denominator geometric-mean goal stays active; no push"
   ],
   "knowledge_query": {
     "status": "index_missing",
@@ -72,9 +73,10 @@
     "uniform_meta": 63,
     "output_tall": 34,
     "pipe_reader": 10,
-    "joint_prefix": 67
+    "joint_prefix": 67,
+    "critical_prefix": 67
   },
-  "updated_at": "2026-10-23T03:38:53.715867+08:00",
+  "updated_at": "2026-10-23T03:53:40.008549+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -252,7 +254,14 @@
       "device_execution": true,
       "cpu_gate": "67 tests; C04/C05 full codegen/resources/ABI pass; C03 off CPP equal",
       "measurement": "joint_prefix_v2_results.json",
-      "status": "not_adopted_phase_diagnosis_pending"
+      "status": "not_adopted_phase_diagnosis_complete"
+    },
+    "critical_prefix_v1": {
+      "source": "critical_prefix_v1.json",
+      "adopted": false,
+      "cpu_checks": 67,
+      "codegen_audit": "critical_prefix_v1_codegen.json",
+      "status": "complete_L1_submitted"
     }
   },
   "local_stage_commit": "3a0f423c6",
@@ -310,10 +319,10 @@
     }
   ],
   "pending_observation": {
-    "observed_at": "2026-10-23T03:38:53.715867+08:00",
+    "observed_at": "2026-10-23T03:53:40.008549+08:00",
     "tasks": {
-      "task_20261023_032803_157168828876": "completed (exit=0)",
-      "task_20261023_032956_16262894437": "completed (exit=0)"
+      "task_20261023_033752_18611141470": "completed (exit=0)",
+      "task_20261023_033752_186126911640": "completed (exit=0)"
     },
     "own_pending_tasks": 2
   },
@@ -345,6 +354,7 @@
     "C05_output_tall_v1": "output_tall_v1_C05_phase.json",
     "C04_retained_phase": "retained_C04_phase_sdk_v1.json",
     "C04_current_pipe": "current_C04_pipe_sdk_v2.json",
-    "C05_current_pipe": "current_C05_pipe_sdk_v2.json"
+    "C05_current_pipe": "current_C05_pipe_sdk_v2.json",
+    "joint_prefix_v2": "joint_prefix_v2_phase_comparison.json"
   }
 }
