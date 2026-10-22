@@ -1,0 +1,75 @@
+--- a/run_pto.py
++++ b/run_pto.py
+@@ -83,4 +83,2 @@
+-    if side == "spmd" and (len(rows) != 72 or len(task_ids) != 1):
+-        raise ValueError("冻结 SPMD 基线不再是完整 MIX SPMD")
+-    if side.startswith("mpmd") and len(task_ids) <= 1:
+-        raise ValueError("MPMD 必须包含多个独立调度 task")
++    if len(rows) != 72 or len({r[0] for r in rows}) != 72 or len(task_ids) != 1:
++        raise ValueError("Expected one complete 72-role MIX task")
+@@ -154,0 +153,3 @@
++    if args.family != "tnd" or args.control_mpmd or args.baseline_only or args.state_validation or args.service_validation:
++        raise ValueError("This frozen harness measures an independent TND-SPMD candidate only")
++    frozen_baseline = json.loads(Path(__file__).with_name("baseline.json").read_text())
+@@ -181 +182,3 @@
+-        "scope": "full CSA L1",
++        "scope": "TND-SPMD full CSA L1; frozen reference medians reused",
++        "comparison_reference": frozen_baseline["reference_kind"],
++        "historical_reference": frozen_baseline["cases"][case["id"]]["cell"],
+@@ -232,2 +235,2 @@
+-            "spmd": str(packages / reference_package),
+-            "mpmd": str(args.candidate),
++            "reference": str(packages / reference_package),
++            "candidate": str(args.candidate),
+@@ -245 +248 @@
+-            module.decode_csa_tnd._get_dep_graph()
++            module.decode_csa_spmd._get_dep_graph()
+@@ -249 +252 @@
+-                module.decode_csa_tnd.compile(**policy.constexprs(), config=options)
++                module.decode_csa_spmd.compile(**policy.constexprs(), config=options)
+@@ -344 +347 @@
+-            variants = [("spmd", baseline_name)]
++            variants = [("reference", baseline_name)]
+@@ -347 +350 @@
+-            variants.append(("mpmd", candidate_name))
++            variants.append(("candidate", candidate_name))
+@@ -349 +352 @@
+-                if side.startswith("mpmd") and args.baseline_only:
++                if side.startswith("candidate") and args.baseline_only:
+@@ -361 +364 @@
+-                if args.family == "bsh" and side == "mpmd":
++                if args.family == "bsh" and side == "candidate":
+@@ -442,0 +446,3 @@
++                for value in result.values():
++                    if not value["bit_equal"]:
++                        value["status"] = "FAIL"
+@@ -533 +539 @@
+-                save("paired_l1")
++                save("candidate_l1_with_unmeasured_reference_replays")
+@@ -538,0 +545,4 @@
++                        if side == "reference":
++                            graphs[side].replay()
++                            stream.synchronize()
++                            continue
+@@ -558,9 +567,0 @@
+-            if args.family == "tnd":
+-                from outer_profile import profile_mpmd
+-                save("mpmd_outer_profile")
+-                report["outer_profile"] = profile_mpmd(fixture, graphs["mpmd"], output, args.output)
+-                state, check = snapshot("mpmd")
+-                numerical = compare(state, expected)
+-                report["checks"]["mpmd_post_outer"] = {"guards": check, "numerical": numerical}
+-                if not all(check.values()) or not all(v["status"] == "PASS" for v in numerical.values()):
+-                    raise AssertionError("外层profile后输出/state/保护检查失败")
+@@ -569 +570 @@
+-            for side in entries:
++            for side in ("candidate",):
+@@ -578,6 +579,2 @@
+-            if "mpmd" in entries:
+-                report["ratio"] = report["statistics_us"]["mpmd"]["mean"] / report["statistics_us"]["spmd"]["mean"]
+-            if "mpmd_control" in entries:
+-                report["candidate_over_control"] = (
+-                    report["statistics_us"]["mpmd"]["mean"] / report["statistics_us"]["mpmd_control"]["mean"]
+-                )
++            report["ratio_to_frozen"] = (report["statistics_us"]["candidate"]["median"]
++                / report["historical_reference"]["median_us"])

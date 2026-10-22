@@ -1,0 +1,65 @@
+{
+  "goal_status": "active",
+  "objective": "参考cannbot-knowledge ops做TND-SPMD核内优化及核间调度优化，按新八档规范在现有基础上降低10%耗时",
+  "metric": {
+    "kind": "equal_weight_geomean_candidate_over_frozen",
+    "case_count": 8,
+    "threshold": 0.9,
+    "user_confirmed": true
+  },
+  "baseline": "baseline.json",
+  "baseline_kind": "frozen_combined_v1_eight_20261022",
+  "baseline_source": "combined_v1",
+  "latest_upstream": "67134f28bdbd9881b14c4d91f0e27092d88f6501",
+  "baseline_evidence": {
+    "cases": 8,
+    "l1_windows": 80,
+    "source_modules": 41,
+    "full_table_cells": 46,
+    "device_remeasured": false
+  },
+  "accepted_candidates": [],
+  "production_operator_changed": false,
+  "formal_geometric_mean_ratio": null,
+  "push_authorized": false,
+  "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
+  "log_anchor": "csa-tnd-eight-case-10pct-20261022",
+  "pending_cpu": null,
+  "pending_tasks": {
+    "task_20261022_165739_25359074832": {
+      "case_id": "C04",
+      "candidate": "scale_gather_v4",
+      "device": 8,
+      "last_status": "submitted",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b16_s6_scale_gather_v4_env2",
+      "retry_reason": "Fixed verified launcher environment failure before any kernel execution"
+    }
+  },
+  "next_steps": [
+    "Collect the existing C04 task handle; do not resubmit because observation times out",
+    "Check strict regression, all ten samples and frozen historical median before expanding",
+    "Continue SPMD phase/owner analysis for B1 and mixed-length tails; MPMD timing is not SPMD phase timing",
+    "Finish one accepted candidate across all eight cases and required metadata/service regressions; G<=0.90 unproven"
+  ],
+  "knowledge_query": {
+    "status": "index_missing",
+    "read_only_direct_evidence": true,
+    "ready_receipt": false
+  },
+  "cpu_checks": {
+    "passed": 22,
+    "device_execution": false
+  },
+  "updated_at": "2026-10-22T16:58:38.643012+08:00",
+  "failed_attempts": [
+    {
+      "task_id": "task_20261022_164733_203463730090",
+      "case_id": "C04",
+      "candidate": "scale_gather_v4",
+      "status": "completed (exit=1)",
+      "device_execution": false,
+      "reason": "Launcher sourced worktree-local Native template OPP path; dependency exists only in the primary checkout",
+      "action": "Source the same primary Native OPP used by the frozen eight-case measurement; preflight passed"
+    }
+  ]
+}

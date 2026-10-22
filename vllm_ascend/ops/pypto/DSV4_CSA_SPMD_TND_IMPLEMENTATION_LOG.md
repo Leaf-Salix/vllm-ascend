@@ -13,10 +13,12 @@
 - [v122 之后的九档优化目标：原始计划与约束](#csa-tnd-next-10pct-goal-20261022)
 - [v122 之后的九档优化过程：截至暂停的全部记录](#csa-tnd-next-10pct-log-20261022)
 - [后续性能测试规范：八档、六列、至少十个有效窗口](CSA_PERFORMANCE_TEST_SPEC.md)
+- [新八档核内与核间优化目标及执行记录](#csa-tnd-eight-case-10pct-20261022)
 
-当前优化 Goal 仍为 **paused**，没有待收取设备/CPU 任务；九档 10% 目标尚未达成。
+旧九档优化 Goal 已结束追踪，九档 10% 目标没有达成。用户随后建立了新的八档
+核内与核间优化 Goal，目前为 **active**；其冻结基线与进度见上面的新八档入口。
 下文的 active、pending、未授权 push 等描述是各条记录形成时的状态，按时间顺序阅读。
-本次文档归并及用户授权的累积提交推送不恢复优化，也不将历史五窗口结果改标为
+此前文档归并及用户授权的累积提交推送未恢复当时的优化，也未将历史五窗口结果改标为
 新规范要求的十窗口结果。新八档测试规范与旧九档优化验收分别保留其口径。
 
 ## 本轮目标与边界
@@ -3441,3 +3443,128 @@ v5设备任务，不用CPU等价冒充它完成了九档验收。所有本会话
 无CPU或设备pending。Goal保持paused，G<=0.90仍未达成；生产默认未变。
 按用户“本次尝试做完就停下”的指令结束本轮，不自动恢复或扩大优化。
 本地阶段提交后停止，没有push。
+
+<a id="csa-tnd-eight-case-10pct-20261022"></a>
+
+## 2026-10-22：新八档核内与核间优化，固定现有已验证基线
+
+用户清除了旧 Goal，建立新目标：参考 cannbot-knowledge 的 ops 做核内优化，
+分析各 task 均衡性做核间调度优化，性能测试按 CSA_PERFORMANCE_TEST_SPEC.md，
+在现有基础上提升 10%。随后明确继续优化 **TND-SPMD**，八档等权几何平均耗时
+降低至少 10%；这是本轮验收定义，不是每档必须分别降低 10%。
+
+```text
+r_i = candidate_TND_SPMD_L1_median_i / frozen_combined_v1_L1_median_i
+G = exp(sum(log(r_i), i=1..8) / 8)
+目标：G <= 0.90
+```
+
+正式性能展示保持规范规定的八行、六种计时和 Native 相对 TND-SPMD 的百分比，
+不增加几何平均行；G 作为优化目标的内部验收字段保存。各格至少 10 个有效窗口，
+保留全部样本，混长两列 BSH 为 N/A。原九档/v122 分母和已归档结果不改写。
+保持正式第 4 层 W8A8/NZ2、BF16、TP1、完整 HC_pre/RMSNorm/CSA/HC_post，
+动态 Q/L、Native 分页和 cache/state 合同继续有效，原 Native 差异单列。
+
+### 同步、来源和历史数据复用
+
+本 worktree 从已发布的 `2b670ca8d` 快进到 `67134f28b`，取得另外会话刚完成的
+`tests/pypto_test/csa_performance_20261022/` 八档六列数据，没有改写远端成果。
+新目标没有授权继续 push；后续按阶段本地提交。公共 SDK 仍为已验证的
+`csa-shared-20261021-upstream-fixes`，没有修改或重建它。
+
+本轮实验目录为 `tests/pypto_test/csa_spmd_tnd_eight_20261022/`。
+逐格审查现有结果后，选用已完成全部八档测量的 **combined_v1**，不使用更慢的
+v122 或仅 CPU 通过的 combined_v5 作性能分母。`freeze_baseline.py` 完成：
+
+- 核对全部六列已填格的样本数和中位数；只对明确不支持的混长 BSH 格接受 N/A。
+- 从八份完整结果和 80 份原始 L1 重新计算 TND-SPMD 跨度，逐窗确认 72 核、
+  一个 MIX task、incore 首尾和完整记录，并与全部保存样本逐项匹配。
+- 验证实际设备测量冻结包的 41 个模块与 combined_v1 清单一致。
+- 固定 `baseline.json`、完整 Git revision 和必要的六份 `.py.source` 覆盖文件；
+  `materialize_baseline.py` 已从这些永久材料重建出逐字相同的基线。
+
+八档已有 TND-SPMD 中位数依次为 355.01、971.61、617.39、773.83、1012.17、
+1158.70、924.00、750.79 μs。原始未舍入值、全部样本和来源保存在 baseline.json。
+本次未重测这些合格历史值；后续对照检查可以执行冻结基线获取正确性输出，
+但不能用另一次更慢的基线测量替换本轮固定性能分母。
+
+### 核间分析与核内候选的依据
+
+`analyze_balance.py` 只读现有原始 L1，复用另一会话按同次编排提交序号命名 task
+的解析器。`baseline_balance.json` 保留十个窗口的 MPMD 原始 L1 索引与核间统计，
+以及 SPMD 全核尾部统计；逐核区间仍保存在对应原始记录。B1 的中间链 AIC
+最大/平均耗时中位数约 1.89，混长约 1.08；
+多数等长大档接近 1.01。它们包含等待和空角色，不是计算利用率，不能据此断言
+已经算力均衡，也不能把 MPMD 的阶段耗时直接移植为 SPMD 内部阶段耗时。
+继续结合真实 owner 公式、每核工作量及必要的阶段端点定位可改善的尾部。
+
+知识查询 `discover` 确认 `artifacts/indexes/knowledge.sqlite3` 缺失，退出码 2。
+依 `knowledge-query/SKILL.md` 停止索引检索，不扫描全库兜底、不修改知识库或
+自行伪造 ready/outcome。只读已定位的 ops 卡片：
+
+- `guides/synchronization/resident_softmax_state_slot_recurrence_and_reuse_events.md`：
+  draft、未定位平台；作为保持最后消费者与复用顺序的工程提醒，不认证其示例。
+- `guides/synchronization/attention_schedule_slots_and_platform_handoffs.md`：
+  draft、未定位平台；保持参与者、事件数、空块和排空协议，不移植 950 专用路径。
+- `guides/operator_practice/simd_operator_optimization/memory_access/l2_cache_mode_config.md`：
+  draft，正文说明 A3 适用；区分带宽和缓存替换，不能无 PMU 证据认定缓存瓶颈。
+- `apis/simd_api/basic_api/memory_vector_compute/sort_and_merge_isasi/sort32.md`：
+  stable、明确 A3；保留局部同分顺序和既有归并树，不以近似 TopK 改写正确性边界。
+
+以上路径均相对 `cannbot-knowledge/knowledge/ops/ascendc/`。同时读取当前公共
+PyPTO 的 mgather、reinterpret_view、cmp/sels 接口实现，作为候选的实际接口依据。
+这些阅读不构成已取得设备收益的证据。
+
+首个独立候选针对 Score AIV 的 Native scale 页读取：原通用路径对每个 1024 候选
+块执行 32 次 Scalar 页址及边界处理；候选用 Tile 一次计算页号、显式屏蔽非法页，
+再读取相同的 64B scale 行。Native cache 仍是唯一外部根，在编排内建立只读别名，
+无 Host 数据搬运。连续页快速分支、Score/FIFO/ACK/排空、浮点运算及 TopK 树保持。
+非 64B page stride 或 INT32 索引范围外保留原逐页回退。
+
+21 组 CPU 检查执行真实 helper 的算子逻辑，对照原逐字节读取，覆盖正/逆序与碎片页、
+负页/越界/INT32 极大值、空表、31/32/33 页边界、重复尾页和三种 page stride，全部通过。
+这只证明地址与字节合同，不代替设备代码、缓存协议和性能验证。
+
+首版完整编译在 JIT 的 Tensor dtype/view 元数据推导处失败；第二版改为 INT8
+64B 行别名，进入主体解析后发现分支 Tile 的 pad 类型不一致。第三版保持完整有效区，
+显式携带 zero-pad 类型后重新编译。三个尝试均单独保存源码和结果，不改公共 SDK，
+当前尚无该候选的设备性能结论。结果和后续取舍在此入口继续追加。
+
+### 16:48：Scale 批量读取完成代码生成，首个十窗口任务已排队
+
+第三版已通过主体解析，但 PTOAS 指出 A2/A3 TSELS 的 tmp 必须与 src/dst 同 dtype，
+且至少容纳一整行。已读取公共 PTOAS `PTOScatterAndSelect.cpp` 的实际检查，
+第四版改用 INT32 的完整索引行 scratch，保持原候选地址逻辑。
+`compile_scale_gather_C04_v4/result.json` 确认 parse/full_codegen 均通过。
+
+`scale_gather_v4_codegen.json` 从实际分配后 IR 与 C++ 核对：页表使用
+`MGATHER<Coalesce::Elem, GatherOOB::Zero>`，scale 行使用
+`MGATHER<Coalesce::Row, GatherOOB::Zero>`，三个 TSELS 屏蔽非法地址；
+外部 kernel ABI 与原八档实测基线完全一致。UB 地址上界 180224B，Mat 475136B，
+Left/Right 各 65536B，Acc 131072B，均在既有空间容量内。只读别名没有增加外部
+cache 根或搬运任务。首次审计误按 `TMGATHER` 拼写查 C++ 而失败，修正为实际
+生成的 `MGATHER` 名称；没有放松指令变体、地址类型或空间边界检查。
+
+复用原八档 fixture/scale 构造和 L1 导出代码，生成独立测量器：
+冻结参考用于 eager、图重放精确比较及交替重放，但不重新采集其性能；候选采集
+10 个完整窗口，固定历史中位数仍是唯一性能分母。最终输出/TopK/score 和
+cache/state 对冻结参考逐字节比较，Native 原有差异保持原状。
+CPU 执行生成后的实际采样循环，确认十次 reference 重放不进入 DFX，候选有十次
+成对 begin/end，每次只测一次图重放，原始记录目录互不覆盖。与地址检查合计
+22 项通过，Ruff 与 shell 语法检查通过。
+
+首个任务 `task_20261022_164733_203463730090`，指定历史 C04 使用的同一张 8 号卡，
+单卡、最大运行时间 1500 秒，当前观察为 pending。候选源码为
+`runs/scale_gather_v4`，输出 `runs/h131072_b16_s6_scale_gather_v4`。
+本轮尚无已保留的新设备优化，未把编译、CPU 合同或局部工作量变化当成 10% 达标。
+
+### 16:57：修复启动环境缺项，保留失败任务后重提
+
+`task_20261022_164733_203463730090` 已 completed/exit1。日志停在 Native 模板
+OPP 检查，未导入候选、未执行算子。启动器误从本 worktree 定位未构建的 OPP，
+而原八档测量使用主检出的已构建 Native 模板依赖。修为 source 主检出的同一
+`csa_native_template_20260929/env.sh`，CPU shell 路径前检通过；没有重建或改动 OPP。
+
+同一冻结候选重新提交为 `task_20261022_165739_25359074832`，仍指定 8 号卡。
+输出使用新 attempt `runs/h131072_b16_s6_scale_gather_v4_env2`；旧任务及初始化
+失败保存在 jobs.json/current_state.json，不归因于候选算法，不计入性能样本。
