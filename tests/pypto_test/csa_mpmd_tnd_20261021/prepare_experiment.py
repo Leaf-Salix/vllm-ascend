@@ -21,7 +21,15 @@ def main():
         destination / "operator",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
-    for name in ("run_case.py", "scenarios.py", "cases.json", "baseline.json", "launch.sh", "state_replay.py"):
+    for name in (
+        "run_case.py",
+        "scenarios.py",
+        "cases.json",
+        "baseline.json",
+        "launch.sh",
+        "state_replay.py",
+        "service_validation.py",
+    ):
         shutil.copyfile(here / name, destination / name)
     helpers = destination / "helpers"
     helpers.mkdir()

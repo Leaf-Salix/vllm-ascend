@@ -21739,3 +21739,90 @@ CPU回归使用真实TND单SPMD及MPMD根，检查模式0/1/2的布局和几何�
 保留原BSH形状/模式冲突检查：3 passed，7 deselected。日志为
 `csa_mpmd_tnd_20261021/runs/jit_root_layout_regression.log`。服务设备验证须重新
 完成，CPU通过不代替真实调用、图重放及16卡结果。
+
+
+### 735.48：补齐大容量同址、碎片页及三个B1边界，不改变固定性能输入
+
+v54使用当前正式v49+长HC留核策略，扩大状态验证入口到T112/R29；任务
+`task_20261022_072736_24048325666` completed(exit=0)。10个同址metadata
+场景与4步连续状态全部通过，SPMD/MPMD每次9类业务张量逐bit一致；根地址、
+信号代际及隔离字、C4几何、只读metadata、cache合法写入范围均通过。
+新增fragmented_pages在原物理页表中交换历史页，覆盖大容量启用scale整页读取
+时的设备连续性判定及回退。测试准备复用cache分配，不增加生产Host规划。
+
+正式v52的固定B1/S2、S3、S4三个任务也全部completed(exit=0)，eager、图重放、
+post-L1业务结果逐bit一致、保护区通过。它们不计八档G；此前S1/S5通过。
+固定S6边界的history=130943与主性能S6的history=131072不同，主性能通过不能
+代替该特定页边界，仍需补这一项。结果与全部样本见
+[functional_matrix_v54_v55_results.json](csa_mpmd_tnd_20261021/functional_matrix_v54_v55_results.json)。
+
+同一状态矩阵也检查DMA阶段同步候选v55的T64/R17和T112/R29，两项原任务均
+completed(exit=0)，每项10场景+4连续步骤均逐bit、地址、协议及保护检查通过。
+这些是功能证据，不将状态测试的准备开销或运行时间冒充性能收益。
+
+### 735.49：连续head完整回退；DMA阶段缓存维护有分档差异，均未全域采用
+
+v53从已提交单SPMD优化移植连续8-head反量化，保持512列RMS及两次FP32乘法
+和RoPE舍入。两项设备对照全部数值/图/状态逐bit通过，但完整L1回退：
+
+| 场景 | 冻结SPMD min/mean/max | v52控制 min/mean/max | v53 min/mean/max | 相对控制mean |
+|---|---:|---:|---:|---:|
+| 128K/B16 | 722.28 / 725.084 / 728.86 | 676.00 / 678.356 / 681.26 | 674.20 / 681.424 / 694.12 | +0.45% |
+| 128K/B24 | 824.74 / 832.272 / 837.14 | 807.94 / 826.128 / 844.88 | 828.30 / 841.316 / 856.52 | +1.84% |
+
+B16 Main AIV实例mean139.691→137.335μs、max142.216→140.376μs，有小幅核内
+收益，但Main首启85.184→94.056μs更晚，完整无收益。B24 Main AIV mean
+145.240→151.991μs，前段也更晚。否决当前完整候选；保留B16局部收益线索，
+不照搬单SPMD百分比。所有五窗及阶段数据见
+[query_contiguous_results.json](csa_mpmd_tnd_20261021/query_contiguous_results.json)。
+
+v55只为HC和输出链DMA payload省去不必要的整块DCache维护：发布仍先
+PIPE_ALL等FIX/MTE3完成，再DDR fence、底层signal_notify；等待沿用原150tick
+和owner集合。输出HCpost之前仍完整失效DCache，因为该阶段有业务Scalar读。
+不改begin_invocation、ACK、allow_early_resolve、sync_start、生命周期或数学。
+三个设备性能任务及上述两项状态矩阵均通过，未改公共SDK。
+
+| 场景 | 冻结SPMD min/mean/max | v52控制 min/mean/max | v55 min/mean/max | 相对控制mean |
+|---|---:|---:|---:|---:|
+| 128K/B1 | 354.80 / 366.756 / 373.38 | 320.02 / 328.760 / 341.56 | 328.58 / 338.192 / 349.04 | +2.87% |
+| 128K/B16 | 726.62 / 729.112 / 731.84 | 696.22 / 701.764 / 707.24 | 687.50 / 693.136 / 699.66 | −1.23% |
+| 8K/B32 | 750.26 / 753.256 / 755.74 | 748.90 / 762.372 / 790.14 | 754.98 / 759.004 / 771.00 | −0.44% |
+
+长B16输出AIV mean139.926→137.349μs，HC本身没有明确变快，收益不能全部归因
+于HC。短B32的mean收益包含控制首窗790.14μs长尾；其输出AIV反而174.337→
+175.299μs，尚不足以认定稳定核内收益。B1主要回退在未修改的中段：AIV mean
+59.389→65.744μs，不能仅从跨窗平均认定为缓存指令直接变慢。当前不全域采用，
+后续只在有完整收益依据的资源域组合。详见
+[dma_phase_results.json](csa_mpmd_tnd_20261021/dma_phase_results.json)。
+最新完整八档仍是v49的G=0.975115424，以上不同轮次数据不拼接成新的G。
+
+
+### 735.50：真实query上界沿Native标量贯通，MPMD服务、框架图和回退通过
+
+v56签名修正后的重试`task_20261022_075227_33196047746`仍未通过服务判定，
+直接算子可运行但custom-op未提交MPMD。源码定位到Native的max_seqlen_q含
+dummy padding，固定B16的9行失活区间被误当成真实query超过S6。
+
+不增加Host逐请求长度生成或CPU规约：AscendDSADecodeMetadata新增可选
+max_seqlen_q_actual，普通/草稿builder只传递现成common.max_query_len。
+Native原max_seqlen_q及tiling算子入参原样保留。TND eligible及图合同读取
+真实上界，旧metadata没有该字段则沿原保守上界；非整数或范围外仍拒绝。
+CPU回归9项通过，覆盖dummy9/真实6、真实7拒绝、旧metadata和非法类型；
+meta Tensor作为标量被拒绝，未读取设备值。日志为runs/native_query_bound_regression.log。
+
+新增编译前服务预检查，避免拒绝路径等到完整核编译后才暴露。v57实测五组
+Native描述符均为17个请求槽、16个活动请求、55个有效token/T64；tiling上界9、
+真实上界6、服务上界6，eligible=True，确认不是用猜测值放宽DSpark约束。
+任务`task_20261022_081635_2742110721` completed(exit=0)、stage=complete。
+
+正式prepare_csa_model安装MPMD runtime，真实torch custom-op完成eager提交；
+9类业务张量与冻结SPMD逐bit一致、31项输入/cache保护检查通过。ACLGraphWrapper
+捕获后两次重放均与参考一致，Python提交数不增加、根地址不变、工作区复用、
+图合同允许重放。总Python提交数2（eager+capture），没有伪造PTO执行计数。
+空调用拒绝旧图、输出原输入、cache不变且无PTO提交；H2048/S1回退到真实Native，
+输出按既定0.01/0.01容差通过，所有cache与直接Native结果精确一致、保护区通过。
+详见[service_route_results.json](csa_mpmd_tnd_20261021/service_route_results.json)。
+
+该结果只证明单卡单层真实服务路由，不代替16卡整模型；未采新的性能。公共SDK
+未变，冻结SPMD核内实现和BSH数学文件未修改。复现手册仍只保留PyTorch单卡流程，
+服务及整模型验收过程仅记在本目标日志中。

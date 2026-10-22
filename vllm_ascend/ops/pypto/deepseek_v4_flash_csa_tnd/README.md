@@ -6,7 +6,7 @@
 `entry.decode_csa_tnd` 保持多个可独立调度的task，包含HC局部流水、metadata、
 Q_A/QR、Indexer和Main两条前段、Score/Top-K/Attention以及输出局部流水。
 长历史BALANCED路径把Score到Attention按行衔接，其他路径保留四个独立task；
-BALANCED分支12个task，其余15个（本轮长B4也走15个task）。跨task使用
+按资源策略保留11、12或15个task（B1为11，长B4为15）。跨task使用
 Tensor/TaskId依赖，局部MIX内部
 使用独立代际信号和实际生产者等待，没有把完整CSA改为单SPMD。
 
@@ -35,8 +35,10 @@ G8=1.017087、综合G=0.975115；追加分支后的统一八档G仍待测，
 
 已注册独立 vLLM variant：`PTO_CSA_VARIANT=mpmd_tnd`，服务输入、图与回退
 合同复用 TND 路径，权重签名、策略和实际提交使用本包。CPU 合同检查已通过，
-新组合的同址metadata、连续状态及真实整模型验证仍待完成；单卡结果不代替
-这些验收，也不表示已达到10%性能目标。
+新组合的T64/R17及T112/R29同址metadata、连续状态矩阵已通过，包含混合S1～S6、
+请求成员变化及碎片页回退。真实单层custom-op、ACLGraph重放、空调用和短历史
+Native回退也已通过；16卡整模型验证仍待完成。这些单卡结果不代替整模型验收，
+也不表示已达到10%性能目标。
 进度与设备证据统一追加到
 [`DSV4_FLASH_CSA_VALIDATION_LOG.md`](../../../../tests/pypto_test/DSV4_FLASH_CSA_VALIDATION_LOG.md)。
 

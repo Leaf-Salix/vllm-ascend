@@ -18,7 +18,7 @@ from .binding import PreparedDynamicCSA
 from .graph_contract import TNDGraphContract, tensor_descriptor
 from .native_adapter import bind_native_inputs, token_capacity_view
 from .policy import select_policy
-from .service_config import MAX_QUERY_TOKENS, supported_descriptor
+from .service_config import MAX_QUERY_TOKENS, native_query_bound, supported_descriptor
 
 
 def _descriptor_key(native):
@@ -113,11 +113,12 @@ class CSAServiceRuntime(AttentionServiceBase):
                 return None
             req = item.decode
             requests = req.seq_lens.numel()
+            query_bound = native_query_bound(req)
             if not supported_descriptor(
                 tokens=tokens,
                 requests=requests,
                 actual_tokens=item.num_actual_tokens,
-                max_query_tokens=req.max_seqlen_q,
+                max_query_tokens=query_bound,
                 max_seq_len=req.max_seq_lens,
                 batch_capacity=self.batch_capacity,
             ):
@@ -132,7 +133,7 @@ class CSAServiceRuntime(AttentionServiceBase):
                 return None
             if req.num_reqs_actual is not None and not 1 <= req.num_reqs_actual <= requests:
                 return None
-            counts = (requests, item.num_actual_tokens, req.max_seqlen_q, req.max_seq_lens)
+            counts = (requests, item.num_actual_tokens, query_bound, req.max_seq_lens)
             if reference_counts is not None and counts != reference_counts:
                 return None
             reference_counts = counts
@@ -236,11 +237,12 @@ class CSAServiceRuntime(AttentionServiceBase):
                 return False
             req = item.decode
             requests = req.seq_lens.numel()
+            query_bound = native_query_bound(req)
             if not supported_descriptor(
                 tokens=tokens,
                 requests=requests,
                 actual_tokens=item.num_actual_tokens,
-                max_query_tokens=req.max_seqlen_q,
+                max_query_tokens=query_bound,
                 max_seq_len=req.max_seq_lens,
                 batch_capacity=self.batch_capacity,
             ):
@@ -251,7 +253,7 @@ class CSAServiceRuntime(AttentionServiceBase):
                 return False
             if req.seq_lens.device != hidden.device or req.query_start_loc.device != hidden.device:
                 return False
-            counts = (requests, item.num_actual_tokens, req.max_seqlen_q, req.max_seq_lens)
+            counts = (requests, item.num_actual_tokens, query_bound, req.max_seq_lens)
             if reference_counts is not None and counts != reference_counts:
                 return False
             reference_counts = counts

@@ -15,6 +15,7 @@ import os
 import statistics
 import sys
 import traceback
+import types
 from pathlib import Path
 
 
@@ -135,6 +136,7 @@ def main():
     parser.add_argument("--case", required=True)
     parser.add_argument("--boundary-query-length", type=int, choices=range(1, 7), help="使用已冻结B1边界，排除于八档G")
     parser.add_argument("--state-validation", action="store_true", help="独立同址metadata/连续状态验证，不测性能")
+    parser.add_argument("--service-validation", action="store_true", help="真实MPMD模型钩子/custom-op/框架图，不测性能")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--frozen", type=Path, required=True)
     parser.add_argument("--candidate", type=Path, required=True)
@@ -153,9 +155,18 @@ def main():
     manifest = json.loads(args.cases.read_text())
     case = select_case(manifest, args.case, args.boundary_query_length)
     check_case(case)
+    if args.service_validation:
+        if args.state_validation or args.boundary_query_length or args.control_mpmd or args.baseline_only:
+            raise ValueError("服务验证是独立两侧功能模式")
+        os.environ["PTO_CSA_VARIANT"] = "mpmd_tnd"
     if args.state_validation:
-        if args.case != "h131072_b16" or args.boundary_query_length or args.control_mpmd or args.baseline_only:
-            raise ValueError("状态矩阵只从长B16构造SPMD/MPMD两侧功能场景，不能混入其它对照")
+        if (
+            args.case not in ("h131072_b16", "h131072_b28")
+            or args.boundary_query_length
+            or args.control_mpmd
+            or args.baseline_only
+        ):
+            raise ValueError("状态矩阵只从长B16/B28构造SPMD/MPMD两侧功能场景，不能混入其它对照")
         # 独立功能场景预留连续decode的页表容量；固定八档清单完全不修改。
         case["name"] += "_state_validation"
         case["table_history"] += 128
@@ -176,6 +187,9 @@ def main():
     if args.state_validation:
         report["scope"] = "same-address metadata and continuous state; excluded from performance matrix"
         report["performance_measured"] = False
+    if args.service_validation:
+        report["scope"] = "real MPMD model hook/custom-op/ACLGraphWrapper; excluded from performance matrix"
+        report["performance_measured"] = False
 
     def save(stage=None):
         if stage:
@@ -192,9 +206,21 @@ def main():
 
         prefix = "vllm_ascend.ops.pypto."
         packages = args.frozen / "vllm_ascend/ops/pypto"
-        mount_package(packages / "deepseek_v4_flash_csa", prefix + "deepseek_v4_flash_csa")
-        baseline_name = mount_package(packages / "deepseek_v4_flash_csa_spmd_tnd", prefix + "_mpmd_tnd_reference")
-        candidate_name = mount_package(args.candidate, prefix + "_mpmd_tnd_candidate")
+        if args.service_validation:
+            # 冻结参考的BSH数学依赖放在私有父命名空间，真实服务仍使用当前框架代码。
+            namespace = prefix + "_service_reference"
+            parent = types.ModuleType(namespace)
+            parent.__path__ = [str(packages)]
+            parent.__package__ = namespace
+            parent.__spec__ = importlib.util.spec_from_loader(namespace, loader=None, is_package=True)
+            sys.modules[namespace] = parent
+            mount_package(packages / "deepseek_v4_flash_csa", namespace + ".deepseek_v4_flash_csa")
+            baseline_name = mount_package(packages / "deepseek_v4_flash_csa_spmd_tnd", namespace + ".reference")
+            candidate_name = mount_package(args.candidate, prefix + "deepseek_v4_flash_csa_tnd")
+        else:
+            mount_package(packages / "deepseek_v4_flash_csa", prefix + "deepseek_v4_flash_csa")
+            baseline_name = mount_package(packages / "deepseek_v4_flash_csa_spmd_tnd", prefix + "_mpmd_tnd_reference")
+            candidate_name = mount_package(args.candidate, prefix + "_mpmd_tnd_candidate")
         control_name = (
             mount_package(args.control_mpmd, prefix + "_mpmd_tnd_control") if args.control_mpmd is not None else None
         )
@@ -339,14 +365,23 @@ def main():
                 name: {k: {"shape": list(v.shape), "dtype": str(v.dtype)} for k, v in entry.buffers.items()}
                 for name, entry in entries.items()
             }
-            pypto.torch.init(
-                device=device_id,
-                platform="a2a3",
-                runtime="tensormap_and_ringbuffer",
-                enable_chip_swimlane=1,
-                enable_dep_gen=args.dep_gen,
-                output_dir=str(args.output / "dfx"),
-            )
+            if args.service_validation:
+                from service_validation import preflight, prepare
+
+                service_runtime = prepare(layer)
+                report["service_preflight"] = preflight(service_runtime, fixture, config)
+                save("service_preflight")
+                if not report["service_preflight"]["eligible"]:
+                    raise AssertionError("真实服务预检查拒绝：详见service_preflight中的Native描述符")
+            else:
+                pypto.torch.init(
+                    device=device_id,
+                    platform="a2a3",
+                    runtime="tensormap_and_ringbuffer",
+                    enable_chip_swimlane=1,
+                    enable_dep_gen=args.dep_gen,
+                    output_dir=str(args.output / "dfx"),
+                )
             save("fixture_ready")
 
             slot_indices = {}
@@ -421,6 +456,24 @@ def main():
                 if not all(check.values()) or not all(v["status"] == "PASS" for v in numerical.values()):
                     raise AssertionError(f"{side} eager 正确性/保护区失败")
 
+            if args.service_validation:
+                from service_validation import validate
+
+                report["service_validation"] = validate(
+                    runtime=service_runtime,
+                    layer=layer,
+                    config=config,
+                    fixture=fixture,
+                    output=output,
+                    expected=expected,
+                    compare=compare,
+                    save=save,
+                )
+                if not report["service_validation"]["passed"]:
+                    raise AssertionError("真实MPMD服务/框架图验证失败")
+                report["passed"] = True
+                save("complete")
+                return
             graphs = {}
             stream = torch.npu.Stream()
             stream.wait_stream(torch.npu.current_stream())

@@ -294,6 +294,9 @@ class AscendDSADecodeMetadata:
     ori_win_left: int | None = None
     ori_win_right: int | None = None
     dspark_swa_indices: torch.Tensor | None = None
+    # Existing scheduler bound excludes graph-padding requests. Keep the Native
+    # tiling bound max_seqlen_q unchanged, since that includes the padded span.
+    max_seqlen_q_actual: int | None = None
 
 
 @dataclass
@@ -1156,6 +1159,7 @@ class AscendDSAMetadataBuilder(AttentionMetadataBuilder[AscendDSAMetadata]):
             max_seqlen_kv=max_seqlen_kv,
             max_seqlen_q=max_seqlen_q,
             attn_mask=None,
+            max_seqlen_q_actual=common_attn_metadata.max_query_len,
             query_start_loc=query_start_loc,  # cached
             query_start_loc_cpu=query_start_loc_cpu,
             sin=sin[: self.num_decode_tokens, ...],
@@ -1407,6 +1411,7 @@ class AscendDSAMetadataBuilder(AttentionMetadataBuilder[AscendDSAMetadata]):
             max_seqlen_kv=None,  # type: ignore[arg-type]
             max_seqlen_q=None,  # type: ignore[arg-type]
             attn_mask=None,
+            max_seqlen_q_actual=common_attn_metadata.max_query_len,
             query_start_loc=query_start_loc,
             query_start_loc_cpu=None,
             sin=sin[:num_decode_tokens, ...],

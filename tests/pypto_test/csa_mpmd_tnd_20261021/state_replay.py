@@ -32,15 +32,16 @@ METADATA_NAMES = (
 
 
 def validate(*, config, layer, fixture, root, native_bind, entries, graphs, guards, compare, case, report, save):
-    if set(entries) != {"spmd", "mpmd"} or fixture["tokens"] != 64 or fixture["request_capacity"] != 17:
-        raise ValueError("状态验证要求T64/R17的SPMD/MPMD两侧同址根")
+    capacity, requests = fixture["tokens"], fixture["request_capacity"]
+    if set(entries) != {"spmd", "mpmd"} or capacity < 36 or requests < 7:
+        raise ValueError("状态验证需要容纳六个S6及dummy的SPMD/MPMD两侧同址根")
     history = case["history_label"]
     initial = {name: group["initial"] for name, group in fixture["groups"].items()}
     addresses = {side: {k: v.data_ptr() for k, v in entry.buffers.items()} for side, entry in entries.items()}
     result = {"passed": False, "performance_measured": False, "metadata_cases": [], "continuous_steps": []}
     report["state_validation"] = result
 
-    def new_case(queries, histories, owners=None):
+    def new_case(queries, histories, owners=None, page_pattern="original"):
         other = make_fixture(
             config,
             layer.self_attn,
@@ -50,10 +51,11 @@ def validate(*, config, layer, fixture, root, native_bind, entries, graphs, guar
             root["x_hc"].device,
             query_lengths=queries,
             history_lengths=histories,
-            token_capacity=64,
-            request_capacity=17,
+            token_capacity=capacity,
+            request_capacity=requests,
             table_history=case["table_history"],
             page_owners=owners,
+            indexer_page_pattern=page_pattern,
             cache_template=fixture["groups"],
         )
         groups = {name: (other["metadata"][g["prefix"]], g["views"]) for name, g in other["groups"].items()}
@@ -87,7 +89,10 @@ def validate(*, config, layer, fixture, root, native_bind, entries, graphs, guar
         for entry in entries.values():
             select = importlib.import_module(type(entry.policy).__module__).select_policy
             selected = select(
-                tokens=64, requests=17, max_query_tokens=6, max_seq_len=max(h + q for h, q in zip(histories, queries))
+                tokens=capacity,
+                requests=requests,
+                max_query_tokens=6,
+                max_seq_len=max(h + q for h, q in zip(histories, queries)),
             )
             if selected != entry.policy:
                 raise ValueError("场景跨越资源策略，必须重新捕获而不能重放旧图")
@@ -159,7 +164,7 @@ def validate(*, config, layer, fixture, root, native_bind, entries, graphs, guar
         for q, h in zip(other["query_lengths"], other["history_lengths"]):
             offsets.append(prefix - h // 4 - 1)
             prefix += (h + q) // 4 - h // 4
-        offsets += [0] * (17 - len(offsets))
+        offsets += [0] * (requests - len(offsets))
         for branch in ("main", "idx"):
             geometry[branch + "_offsets"] = torch.equal(
                 entries[side].buffers[branch + "_offsets"].cpu(), torch.tensor(offsets, dtype=torch.int32)
@@ -173,16 +178,17 @@ def validate(*, config, layer, fixture, root, native_bind, entries, graphs, guar
             {"guards": protected, "same_addresses": same, "generation": protocol, "geometry": geometry},
         )
 
-    def pair(label, queries, histories, previous, owners=None):
-        other, metadata, slots = new_case(queries, histories, owners)
+    def pair(label, queries, histories, previous, owners=None, page_pattern="original"):
+        other, metadata, slots = new_case(queries, histories, owners, page_pattern)
         row = {
             "name": label,
             "query_lengths": queries,
             "history_lengths": histories,
             "physical_owners": owners,
+            "indexer_page_pattern": page_pattern,
             "valid_tokens": sum(queries),
-            "token_capacity": 64,
-            "request_capacity": 17,
+            "token_capacity": capacity,
+            "request_capacity": requests,
             "checks": {},
             "passed": False,
         }
@@ -212,8 +218,10 @@ def validate(*, config, layer, fixture, root, native_bind, entries, graphs, guar
         ("mixed_reverse_owners", [6, 1, 5, 2, 4, 3], histories, [5, 4, 3, 2, 1, 0]),
         ("uniform_s1_again", [1] * 6, histories, None),
     ]
-    for label, queries, history_values, owners in schedules:
-        row, _ = pair(label, queries, history_values, {side: initial for side in entries}, owners)
+    schedules = [(*schedule, "original") for schedule in schedules]
+    schedules.append(("fragmented_pages", [6, 1, 5, 2, 4, 3], histories, None, "fragmented_history"))
+    for label, queries, history_values, owners, pattern in schedules:
+        row, _ = pair(label, queries, history_values, {side: initial for side in entries}, owners, pattern)
         result["metadata_cases"].append(row)
         save()
         if not row["passed"]:
