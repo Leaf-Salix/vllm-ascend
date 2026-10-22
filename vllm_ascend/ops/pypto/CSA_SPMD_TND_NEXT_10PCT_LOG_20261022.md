@@ -1169,3 +1169,49 @@ combined_v4_b1_quant_resources.json，仍不当作设备性能或组合精度结
 
 全部使用原harness和公共SDK，经task-submit自动分卡；当前pending/running，
 无CPU任务。保留原句柄等待终态，不因排队或观察超时重复提交。未改生产默认。
+
+
+### combined_v4三档完成：精确通过，但没有保住单项收益
+
+三个任务均completed/exit0，全部严格v122输出/Top-K/score、状态/保护/图/
+代际通过；B1计时后的同址S1～S6六例也全过，没有新增连续多请求步骤。
+
+| 场景 | v122中位μs | 组合中位μs | 耗时变化 | 配对更快 |
+|---|---:|---:|---:|---:|
+| 128K/B1/S6 | 377.80 | 378.06 | +0.06882% | 4/5 |
+| 128K/B16/S6 | 781.44 | 791.38 | +1.27201% | 0/5 |
+| 固定混长T56 | 748.16 | 747.60 | -0.07485% | 3/5 |
+
+全部样本combined_v4_b1_results.json、combined_v4_b16_mixed_results.json，
+矩阵摘要combined_v4_b1_metadata.json。不能把4/5配对较快替代约定的中位数
+比值，也不能把独立B1的5.06%带入此组合。v4不采用；原v1仍是最多验证的
+组合。下一组合应先去除未经B1单独证明的Main后移等交互，并核对各分档
+完整生成物，不假定数学独立就能保留时序收益。原Native差异未改标。
+
+### 页表证明单有效行：保持物理8行，对同一逻辑行只归约一次
+
+独立page_proof_single_row从冻结v122建立，只在compressed_pages_all_valid
+和indexer_scale_layout_plan_stage内把ones/repeated的valid rows从8改成1。
+物理8×1024和8×1 tile保持；所有有效列、页表读取/边界、回退、输出及通知
+不改。两者原本把同一行复制8次，最终只读row0，此候选没有改变请求布局。
+
+4项CPU合同执行真实helper，覆盖0/1/7/32/33/1023/1024/1025/2049页、短表、
+正逆序、碎片、负页/越界、大整数边界、空request、工作区保留区；Attention
+另对独立范围oracle，布局阶段与原输出全数组相同。Ruff检查通过。固定ISA
+a2a3 TROWMIN/TROWMAX明确把src.GetValidRow()传入TRowReduceInstr；不从通用
+API名推断硬件循环，也未改共享SDK。
+
+B28完整CPU编译通过，包含实际启用的两种证明。生成IR的输出物理8×1、
+32B，valid_shape=[1,1]；输入物理8×1024、有效行1、原动态有效列。完整C++
+确认对应TROWMIN/TROWMAX的Tile构造实际有效行1、只取第0个结果。审计首次
+因set_validshape在PTOAS成为原Tile的metadata操作而找不到别名注释；修为
+跟随同址且valid rows一致的metadata别名，未删物理布局/范围检查。报告
+page_proof_single_row_resources.json；Vec上界163872B，packed ABI不变。
+
+此次只减少广播/归约的有效重复行，full常量仍按物理布局初始化，不能声称
+所有相关指令或HBM流量减少8倍，更不能预记完整L1收益。复现prepare、test、
+audit_page_proof_single_row.py已落盘。两项完整五窗L1已提交：
+- B28/S6 task_20261022_091214_268296623111
+- B16/S6 task_20261022_091222_272500228073
+
+仍与同轮冻结v122比较，不与v4组合混算。九档G未形成，goal active，无push。
