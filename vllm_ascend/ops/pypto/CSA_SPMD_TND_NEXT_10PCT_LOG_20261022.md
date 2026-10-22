@@ -1114,3 +1114,40 @@ UB在两个展开lane分别为[65536,98304)、[98304,131072)，abs与row_max scr
   table-history131200满足原矩阵动态边界合同，固定S6计时先于metadata回归。
 
 任务尚待终态。生产默认不变、没有push，目标继续active。
+
+
+### 量化复用完整结果：B1降低5.06%，两个大档回退，建立独立B1分档
+
+三个任务均completed/exit0，严格v122输出/Top-K/score、状态/保护/图/代际通过：
+
+| 场景 | v122中位μs | 候选中位μs | 耗时变化 | 配对更快 |
+|---|---:|---:|---:|---:|
+| 128K/B16/S6 | 784.54 | 788.54 | +0.50985% | 0/5 |
+| 8K/B32/S6 | 933.44 | 937.86 | +0.47352% | 2/5 |
+| 128K/B1/S6 | 384.72 | 365.24 | -5.06342% | 5/5 |
+
+完整样本output_quant_reuse_results.json。B1计时之后同址S1～S6六例也全过，
+轻量摘要output_quant_reuse_b1_metadata.json保留原件路径/hash。此矩阵没有
+多请求连续步骤，不把六例扩大为新连续状态或服务验证。原Native差异仍单列。
+少一次TLOAD和更小UB并未让大batch受益，不能据逻辑字节数预判全域收益。
+
+按用户允许B1单独分档，output_quant_guard新增独立constexpr
+OUTPUT_QUANT_REUSE：requests==1且token容量<=8；既有decode query上界最多6。
+其余容量恢复原双load。选择只依赖已有Host容量，不用它推断真实Q/L或请求
+归属，不引入环境变量、D2H或通知。默认False，通过entry→vector→两种量化
+入口完整传递；未捆绑Top-K或Attention开关。
+
+6项策略/数学/参数传递CPU合同通过，B1启用与B16关闭完整CPU编译通过。
+audit_output_quant_guard.py对实际已测产物逐项比较：启用与B1复用版、关闭与
+B16的v122，完整C++仅去整行pto位置注释后相同；AIC/AIV packed封装、Host
+orchestration和compiled_meta逐字一致。证据output_quant_guard_codegen_audit.json。
+不把源码开关关闭自动当作等价证明，也不声称ELF完全同一或九档性能已通过。
+不为已证明同一代码再重复B1同样的设备窗口。
+
+新组合combined_v4仅包含最充分验证的combined_v1（B1空发布、混长live-half、
+三query排序合批）、main_vector_late、B1量化复用分档。先证明空发布修改与
+主AIV后移的转换可交换，再传量化flag；Score文件取原v1，其他量化/policy/
+entry取已核对guard。所有Query head改写和被隔离的combined_v3均排除，
+未加入已有负例、无用fill或WS池。源manifest和prepare_combined_v4.py可重建。
+B1/B16完整CPU编译进行中；组合收益必须重新实测，不相加上表与历史百分比。
+生产默认仍不变，九档目标未达成，goal active，未push。
