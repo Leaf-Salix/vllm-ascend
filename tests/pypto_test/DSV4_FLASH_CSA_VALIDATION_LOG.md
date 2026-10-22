@@ -22184,3 +22184,76 @@ v10 B1/C05及v11 C05/短档CPU通过；v11尚待设备结果，不据CPU宣称�
 不变，报告明确数值参考和未新增SPMD样本；v11性能比较用已通过的v9长档/v8短档
 控制组。独立状态模式仍直接对照SPMD，另补已存在构造器的ascending_history样例。
 所有已排队副本保持冻结；未运行16卡，未push，完整性能及架构收尾继续推进。
+
+### 735.64：Scalar计划与删除组前缀功能通过，但暂不作为性能改动接入
+
+私有v11删除8项GM group_plan，通过AICPU任务Scalar参数传递组数、最大历史、叶数、
+叶宽和余叶数。G/balanced/roots为同一根入口constexpr，不再把它们写入GM后核对。
+同时删除无人消费的B+1请求组前缀，组数直接传给系数与Score；组描述符从4*T分区
+起点读取，scale链表基址同步调整。没有修改原叶区间、可见性、Top-K归并规则或容差。
+未启用的短Vector Score发布helper一并在私有候选中移除，现有policy仍拒绝该路径。
+
+两项性能任务及独立状态任务全部退出0。C05与短档每侧各10窗，使用已验收MPMD
+控制组直接对照，不新增SPMD性能样本。输出/Top-K/cache/state、图与保护区均逐bit
+一致。独立状态模式仍直接对照SPMD，11个同址metadata场景和4步连续状态全部通过，
+其中新增的ascending_history明确覆盖正序页，另有原倒序页及碎片页回退。
+证据见[scalar_plan_evidence.json](csa_mpmd_aicpu_20261022/scalar_plan_evidence.json)。
+
+| 阶段场景 | 控制组中位数μs | v11中位数μs | 控制组均值/最大μs | v11均值/最大μs |
+|---|---:|---:|---:|---:|
+| C05 128K/B24/S6 | 1257.61 | 1279.74 | 1259.938 / 1277.78 | 1277.422 / 1293.10 |
+| 旧8K/B32混长 | 979.08 | 988.05 | 981.920 / 995.88 | 988.554 / 1013.74 |
+
+减少GM字段不等于总性能受益。当前不把v11覆盖到正式入口，正式实现保持已验证的
+v9（d263bc3f2），v11作为后续分组任务直接传参的功能基础保留。核内Score/系数段
+有小幅缩短，但整体时序没有受益；不能只据局部变化宣布优化成功。
+
+接着准备私有v12：沿v9的任务和buffer布局，让AICPU在已有组规划中归纳“所有实际
+组均为完整G6”谓词，只在成立时派发固定live=6的Cube二进制，混长仍用原动态路径。
+不新增Host metadata，不改变分叶/归并，不把固定S6强加给混长输入；先验证CPU编译，
+再做同场景MPMD控制组对照。该思路只是一项待验证的核内特化，当前未声明性能收益。
+
+### 735.65：按当前八档六列规范冻结已验收实现并补齐数据
+
+用户要求按正式 CSA_PERFORMANCE_TEST_SPEC.md 出一版数据，暂不启动新的算法候选。
+冻结 TND-MPMD d263bc3f2（v9、AICPU 动态依赖、无阶段软同步）；v11 未保留，
+v12 仅 CPU 通过，均不进入性能表。BSH 沿用已验证快照与兼容修正。另一会话的
+TND-SPMD score_group_order_v4 已有原始服务 complete/PASS、v3 同址状态 PASS，
+故选该最新完整验证快照；其余七档由既有生成代码等价证据限定适用范围。
+
+公共 SDK 固定 csa-shared-20261022-logical-codegen，不在测量中更换。
+Native 八档各 30 窗复用 CANN9.2 实测；C05 MPMD-L1 复用同一 v9 两任务全部
+20 窗，C08 SPMD 复用等价开启分档十窗。其余 PTO 旧表 SDK 为 e891351e，
+不能改标 26e94e0，按逐格缺项补测。百分比依最新 cc9d844a5 规范以 TND-SPMD
+中位数为分母，不与优化 Goal 的其他场景或权重混用。
+
+独立目录 [csa_performance_20261022_aicpu](csa_performance_20261022_aicpu/README.md)
+保存规范、版本、逐格清单、所有原始样本和队列记录。新任务每侧十次单 replay
+L1，含 AICPU 列同进程同图另采三十次全流 Profiler；已合格侧不重复计时。
+首次四档 TND 及对应 BSH 已按 task-submit 分配单卡，当前仍在编译/采集，
+本条不预记最终 PASS 或完整八档数据。没有运行 16 卡，没有 push。
+
+### 735.66：当前 AICPU 多 task 八档六列采集完成
+
+本轮 15 个单卡补测任务全部 completed/exit0。最终八行表见
+[PERFORMANCE.md](csa_performance_20261022_aicpu/PERFORMANCE.md)，完整来源、
+实际分档、公共 SDK 及全部原始样本见
+[PERFORMANCE.json](csa_performance_20261022_aicpu/PERFORMANCE.json)。
+只按规范展示每格中位数，末列为 `(Native - TND-SPMD) / TND-SPMD`，不增加综合行。
+
+46 个有效格、2 个 BSH 混长 N/A，共 790 个样本；每格至少 10 次。
+其中 Native 八格各 30 窗，TND-MPMD 含 AICPU 八格各 30 窗；L1 各格 10 窗，
+C05 已接受 v9 两次全部有效记录合并为 20 窗。没有剔除慢窗口，也没有将窗口
+均值冒充单次测量。已有合格侧跳过重复计时，其余 PTO 只补工具链不匹配的格子。
+
+所有新增任务的 eager、图重放、post-L1，以及 TND post-Profiler 的输出、TopK、
+score、cache/state 和保护区检查通过；PTO 对照张量均逐 bit 一致。Native 延用
+自身 eager/graph 验收和既有跨实现浮点差异，不声明 Native/PTO bit 一致或整模型
+token 一致。Native 八格均确认 CANN9.2、npugraph_ex dynamic=False、inplace_pass、
+静态编译、实际 SuperKernel/NZ 内核及多流；没有只依据开关文字贴标签。
+
+按原始 incore 首尾和全设备 CSV 重算全部格，与保存的所有样本一致，
+[只读核验收据](csa_performance_20261022_aicpu/VALIDATION.json)通过。
+Ruff 和 shell 语法检查通过。当前 TND-MPMD 的八档完整 L1 均慢于选定 TND-SPMD，
+架构恢复并不等于性能目标达成；本轮按用户要求冻结结果，没有临时改算法追数。
+仅本地详细中文提交，未 push，未启动新的优化候选或 16 卡测试。
