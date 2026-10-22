@@ -40,6 +40,13 @@ def main():
     needle = "pl.system.signal_wait(signal, [offset], expected)"
     assert code.count(needle) == 1
     signals.write_text(code.replace(needle, "pl.system.signal_wait(signal, [offset], expected, backoff_ticks=150)"))
+    score = source / "pypto/deepseek_v4_flash_csa_spmd/indexer_score_stages.py"
+    code = score.read_text()
+    needle = "[TOPK_CANDIDATES_PER_LEAF // (2 * score_tile), score_tile]"
+    assert code.count(needle) == 2
+    score.write_text(
+        code.replace(needle, "[TOPK_CANDIDATES_PER_LEAF // (2 * BUFFERED_LONG_SCORE_TILE), BUFFERED_LONG_SCORE_TILE]")
+    )
     original = TND_TREE / "tests/pypto_test/csa_spmd_tnd_opt_20261022/runs/combined_v1"
     spmd_destination = source / "pypto/deepseek_v4_flash_csa_spmd_tnd"
     spmd_destination.mkdir()
@@ -122,6 +129,7 @@ def main():
                 last_kernel_commit="df8d43a81",
                 backoff_ticks=150,
                 compatibility="已验证native_wait_signal_v1.patch，替代原150tick生成代码适配",
+                short_typefix="另一个session已验证short_history_inactive_b1_typefix.patch；task_20261021_204807_386597714",
             ),
             bsh_mpmd=dict(snapshot=revision),
             sampling=dict(warmup=3, l1_windows_per_side=10, replays_per_window=1, outer_profile_replays=30),

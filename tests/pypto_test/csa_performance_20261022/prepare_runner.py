@@ -128,3 +128,11 @@ def prepare_runner(here, repo):
     for name in ("run_native.py", "scenarios.py", "cases.json"):
         shutil.copyfile(source / name, native_source / name)
     shutil.copyfile(repo / "tests/pypto_test/csa_five_way_latest_20261020/measure.py", native_source / "measure.py")
+    for dirname in ("bsh_sources_v2", "bsh_short_sources"):
+        destination = here / dirname
+        destination.mkdir()
+        for name in ("run_pto.py", "scenarios.py", "outer_profile.py", "cases.json", "manifest.json", "csa_measure.py"):
+            shutil.copyfile(source / name, destination / name)
+        shutil.copyfile(here / "bsh_entry.py", destination / "bsh_entry.py")
+        if dirname == "bsh_short_sources":
+            shutil.copytree(source / "pypto", destination / "pypto")

@@ -62,6 +62,18 @@ def main():
             if status != "completed (exit=0)":
                 raise ValueError(status)
             report = read(path)
+            log_path = Path(job["output"]) / "task.log"
+            if not log_path.exists():
+                with log_path.open("w") as stream:
+                    subprocess.run(["task-submit", "--log", job["task_id"]], stdout=stream, check=True)
+            lines = log_path.read_text(errors="replace").splitlines()
+            binding = [
+                json.loads(line.split("CSA_SHARED_TOOLCHAIN ", 1)[1])
+                for line in lines
+                if line.startswith("CSA_SHARED_TOOLCHAIN ")
+            ]
+            assert len(binding) == 1 and binding[0]["status"] == "validated"
+            assert binding[0]["release"] == manifest["shared_toolchain"]["release"]
             if family == "native":
                 assert report["status"] == "MEASURED" and report["case"] == case
                 spec = importlib.util.spec_from_file_location(
@@ -89,7 +101,18 @@ def main():
                     assert outer["span_includes_all_streams"] and outer["replays"] == 30
                     measured["TND-MPMD-AICPU"] = (outer["span_us_all"], [outer["raw_csv"]])
             for name, (samples, raw) in measured.items():
+                if name in job.get("exclude_columns", []):
+                    invalid.append(dict(**job, column=name, reason=job["exclusion_reason"], report=str(path)))
+                    continue
                 assert len(samples) >= 10 and all(s > 0 for s in samples)
+                source_reports = [str(path)]
+                source_tasks = [job["task_id"]]
+                if name in job.get("merge_columns", []) and row[name]["status"] == "PASS":
+                    previous = row[name]
+                    samples = previous["samples_us"] + samples
+                    raw = previous["raw"] + raw
+                    source_reports = previous.get("source_reports", [previous["source_report"]]) + source_reports
+                    source_tasks = previous.get("source_tasks", [previous["task_id"]]) + source_tasks
                 row[name] = dict(
                     status="PASS",
                     reuse=False,
@@ -103,6 +126,20 @@ def main():
                     implementation=family,
                     manifest="manifest.json",
                     correctness="完整结果中的eager/graph/post-L1及保护区检查通过",
+                    device=report.get("device_id", report.get("device")),
+                    actual_toolchain_selection=binding[0],
+                    task_log=str(log_path),
+                    source_date="2026-10-22",
+                    source_reports=source_reports,
+                    source_tasks=source_tasks,
+                    sample_definition="一次完整链路graph replay；无Host复位/编译/warmup时间",
+                    sampling=manifest["sampling"],
+                    source_mapping="manifest.json中的" + family,
+                    raw_source_label_note=(
+                        "旧runner的sources.mpmd字段仍写入CLI candidate；BSH实际按family分支调用冻结BSH NativeCSACall"
+                        if family == "bsh"
+                        else None
+                    ),
                 )
         except (AssertionError, ValueError, OSError, KeyError) as error:
             invalid.append(dict(**job, reason=str(error), report=str(path)))

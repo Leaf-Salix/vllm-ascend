@@ -47,10 +47,18 @@
     "snapshot": "61af469e87ab11ef728ebb977e7cecb47dcf4c8f",
     "last_kernel_commit": "df8d43a81",
     "backoff_ticks": 150,
-    "compatibility": "已验证native_wait_signal_v1.patch，替代原150tick生成代码适配"
+    "compatibility": "已验证native_wait_signal_v1.patch，替代原150tick生成代码适配",
+    "short_typefix": {
+      "source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/cohort_shared_h8192_b32_s6_v122_source/original_spmd/indexer_score_stages.py",
+      "device_evidence_task": "task_20261021_204807_386597714",
+      "device_passed": true,
+      "scope": "修正未激活长档临时Tile的静态声明；长档score_tile=1024两种表达式相同，复用长档已采记录",
+      "difference": "仅两处临时shape改用BUFFERED_LONG_SCORE_TILE=1024"
+    }
   },
   "bsh_mpmd": {
-    "snapshot": "61af469e87ab11ef728ebb977e7cecb47dcf4c8f"
+    "snapshot": "61af469e87ab11ef728ebb977e7cecb47dcf4c8f",
+    "entry_selector": "csa_compile_constants(tokens)；仅C01为SINGLE_M16_QA=True，其余S6档False"
   },
   "sampling": {
     "warmup": 3,
@@ -58,5 +66,25 @@
     "replays_per_window": 1,
     "outer_profile_replays": 30
   },
-  "scope": "单卡单层性能数据采集；不恢复优化Goal、不做16卡、不自动push"
+  "scope": "单卡单层性能数据采集；不恢复优化Goal、不做16卡、不自动push",
+  "common_execution": {
+    "model": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+    "layer": 4,
+    "TP": 1,
+    "seed": 1024,
+    "weight_nz_mode": 2,
+    "activation": "BF16",
+    "atomic_add": false,
+    "deterministic_level": 0,
+    "EPLB": false,
+    "CANN": "/data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2",
+    "framework_versions": {
+      "torch": "2.10.0",
+      "torch-npu": "2.10.0.post2",
+      "vllm": "0.25.1+empty"
+    },
+    "PTO_runtime": "tensormap_and_ringbuffer",
+    "l1_dep_gen": false,
+    "hardware": "Ascend A3，24AIC+48AIV；每个L1原始记录含core_types和clock_freq_hz"
+  }
 }

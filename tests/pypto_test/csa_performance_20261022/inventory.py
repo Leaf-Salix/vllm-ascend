@@ -17,6 +17,7 @@ def main():
     spec.loader.exec_module(module)
     cases = json.loads((HERE / "cases.json").read_text())["cases"]
     cells = {}
+    tasks = json.loads((TESTS / "csa_five_way_latest_20261020/TASKS.json").read_text())
     for case in cases:
         case_id = case["id"]
         cells[case_id] = {}
@@ -52,6 +53,13 @@ def main():
                 graph=evidence["graph"],
                 input_contract=case,
                 fixture="原Native seed1024场景；Indexer scale使用非均匀37/251公式",
+                task_id="task_20261021_114120_30644583266" if case_id == "C01" else tasks[folder]["task"],
+                source_commit="a658188cde9c4d58081feb3a3fbe96307b21ff23"
+                if case_id == "C01"
+                else "beaefa6f6788a9448d49293238f6818c246f24f5",
+                toolchain="Native不依赖PyPTO/PTOAS/Simpler；框架/CANN详见versions/cann",
+                sample_definition="一次完整链路graph replay，Profiler全设备活动首尾，warmup不计入",
+                native_path_equivalence="beaefa6f..61af469e仅新增PTO路由与Host query字段；Native数学/tiling入参无改动",
             )
         for name in ("BSH-MPMD-L1", "BSH-SPMD", "TND-MPMD-AICPU", "TND-MPMD-L1", "TND-SPMD"):
             cells[case_id][name] = dict(

@@ -18,8 +18,9 @@ class BSHEntry:
             buffers={"idx_topk_scores": native["idx_topk_scores"], "idx_topk": native["idx_topk"], "x_out": output},
         )
         self.buffers = self.call.args
-        self.policy = SimpleNamespace(constexprs=lambda: {})
+        constants = adapter.csa_compile_constants(fixture["tokens"])
+        self.policy = SimpleNamespace(constexprs=lambda: dict(constants))
 
     def __call__(self, *, config=None):
-        self.adapter.decode_csa_tp1_layer_test(*self.call.core_args, config=config)
+        self.adapter.decode_csa_tp1_layer_test(*self.call.core_args, **self.policy.constexprs(), config=config)
         return self.call.args["x_out"]

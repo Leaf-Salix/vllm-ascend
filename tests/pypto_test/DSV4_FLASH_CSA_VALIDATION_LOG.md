@@ -21978,3 +21978,24 @@ Native六档历史各30窗通过路径和原始记录复核后直接复用；旧
 首轮Native因冻结测试入口漏带measure.py而在导入期失败，未执行算子；补齐独立
 native_sources_v2并经CPU导入检查后重跑。256K/B16与混长Native均退出0，各30窗；
 TND128K/B16及BSH128K/B1的两侧10窗、数值/状态/保护区通过，继续补其余缺项。
+
+
+### 735.57：八档六列数据收齐，46个性能格均满足10窗门槛
+
+[最终八行表](csa_performance_20261022/PERFORMANCE.md)、
+[全部样本和来源](csa_performance_20261022/PERFORMANCE.json)、
+[验证摘要](csa_performance_20261022/VALIDATION.json)已保存。Native八档各30窗，
+TND多task外层八档各30窗，PTO L1每格10窗；B1的BSH-SPMD保留两轮全部20窗。
+混长档两项BSH明确N/A，其余46格均有合格数值，无待采集或最终FAIL。全部任务终态。
+
+补测过程中查到两个旧入口问题：BSH B1直接调用漏带正式SINGLE_M16_QA分档，
+已改为调用csa_compile_constants选择并只补受影响B1，旧False样本不用于MPMD格；
+BSH短档正式目录缺少另一会话已上卡的静态Tile修正，导致未激活长档临时量3840→4096
+reshape编译失败。复用task_20261021_204807_386597714的原始通过快照，只补8K/B32。
+两处临时shape在长档score_tile=1024时与原声明相同，不把已有长档全部重测。
+原Native导入失败及这两项排除证据均保留，不删除慢窗口，不拼接最快候选。
+
+数值、TopK/score、cache/state、图重放和保护区检查通过；Native沿原return_value=False
+路径，不为采集额外打开分数输出或改变算法。最后一列严格用未舍入中位数计算
+(Native−TND-SPMD)/TND-SPMD；不增加几何平均，不解释为整网吞吐提升。
+本轮只修改测试与证据，生产算子和公共SDK未变，未恢复优化Goal，未跑16卡，未push。

@@ -45,8 +45,15 @@ PY
     exec "${bootstrap[@]}" "$here/native_sources_v2/run_native.py" --case "$case_name" --history "$history" --batch "$batch" --output "$out" --device "$TASK_DEVICE"
 elif [[ "$family" == tnd || "$family" == bsh ]]; then
     cd "$repo"
-    exec "${bootstrap[@]}" "$here/sources/run_pto.py" --family "$family" --case "$case_name" \
-        --candidate "$here/sources/pypto/deepseek_v4_flash_csa_tnd" --frozen "$here/sources" \
+    runner="$here/sources/run_pto.py"
+    frozen="$here/sources"
+    if [[ "$family" == bsh && "$case_name" == h131072_b1_s6 ]]; then runner="$here/bsh_sources_v2/run_pto.py"; fi
+    if [[ "$family" == bsh && "$case_name" == h8192_b32_s6 ]]; then
+        runner="$here/bsh_short_sources/run_pto.py"
+        frozen="$here/bsh_short_sources"
+    fi
+    exec "${bootstrap[@]}" "$runner" --family "$family" --case "$case_name" \
+        --candidate "$here/sources/pypto/deepseek_v4_flash_csa_tnd" --frozen "$frozen" \
         --cases "$here/cases.json" --output "$out" --device "$TASK_DEVICE"
 else
     exit 2
