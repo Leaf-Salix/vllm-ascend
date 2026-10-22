@@ -1,0 +1,111 @@
+{
+  "decision": "Use fixed-width helpers in a fresh v2 package before any NPU test",
+  "source_is_frozen": true,
+  "not_claimed_as_SDK_miscomputation": true,
+  "cases": {
+    "C04": {
+      "full_codegen_passed": true,
+      "device_execution": false,
+      "root_changes": [
+        {
+          "name": "idx_wkv",
+          "old": {
+            "name": "idx_wkv",
+            "direction": "In",
+            "shape": [
+              256,
+              4096
+            ],
+            "dtype": "bfloat16",
+            "layout": "ND"
+          },
+          "new": {
+            "name": "idx_wkv",
+            "direction": "In",
+            "shape": [
+              -1,
+              4096
+            ],
+            "dtype": "bfloat16",
+            "layout": "ND"
+          }
+        },
+        {
+          "name": "idx_value",
+          "old": {
+            "name": "idx_value",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              256
+            ],
+            "dtype": "fp32",
+            "layout": "ND"
+          },
+          "new": {
+            "name": "idx_value",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              -1
+            ],
+            "dtype": "fp32",
+            "layout": "ND"
+          }
+        }
+      ]
+    },
+    "C05": {
+      "full_codegen_passed": true,
+      "device_execution": false,
+      "root_changes": [
+        {
+          "name": "idx_wkv",
+          "old": {
+            "name": "idx_wkv",
+            "direction": "In",
+            "shape": [
+              256,
+              4096
+            ],
+            "dtype": "bfloat16",
+            "layout": "ND"
+          },
+          "new": {
+            "name": "idx_wkv",
+            "direction": "In",
+            "shape": [
+              -1,
+              4096
+            ],
+            "dtype": "bfloat16",
+            "layout": "ND"
+          }
+        },
+        {
+          "name": "idx_value",
+          "old": {
+            "name": "idx_value",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              256
+            ],
+            "dtype": "fp32",
+            "layout": "ND"
+          },
+          "new": {
+            "name": "idx_value",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              -1
+            ],
+            "dtype": "fp32",
+            "layout": "ND"
+          }
+        }
+      ]
+    }
+  }
+}
