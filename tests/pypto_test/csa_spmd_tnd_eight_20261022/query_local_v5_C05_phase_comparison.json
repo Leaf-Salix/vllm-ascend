@@ -1,0 +1,58 @@
+{
+  "performance_eligible": false,
+  "retained": "retained_C05_phase_sdk_v1.json",
+  "candidate": "query_local_v5_C05_phase.json",
+  "milestones": {
+    "IDX_SCALE": {
+      "retained_end_us": 256.08,
+      "candidate_end_us": 263.6,
+      "diagnostic_shift_us": 7.520000000000039
+    },
+    "SCORE_CUBE": {
+      "retained_end_us": 548.54,
+      "candidate_end_us": 542.48,
+      "diagnostic_shift_us": -6.059999999999945
+    },
+    "SCORE_VECTOR": {
+      "retained_end_us": 557.6,
+      "candidate_end_us": 551.4,
+      "diagnostic_shift_us": -6.2000000000000455
+    },
+    "TOPK": {
+      "retained_end_us": 580.32,
+      "candidate_end_us": 575.72,
+      "diagnostic_shift_us": -4.600000000000023
+    },
+    "ATTN_PLAN": {
+      "retained_end_us": 596.48,
+      "candidate_end_us": 591.38,
+      "diagnostic_shift_us": -5.100000000000023
+    },
+    "ATTN_CUBE": {
+      "retained_end_us": 808.12,
+      "candidate_end_us": 843.66,
+      "diagnostic_shift_us": 35.539999999999964
+    },
+    "ATTN_VECTOR": {
+      "retained_end_us": 813.5,
+      "candidate_end_us": 848.5,
+      "diagnostic_shift_us": 35.0
+    },
+    "OB": {
+      "retained_end_us": 953.6,
+      "candidate_end_us": 991.96,
+      "diagnostic_shift_us": 38.360000000000014
+    },
+    "OUT": {
+      "retained_end_us": 984.8,
+      "candidate_end_us": 1024.88,
+      "diagnostic_shift_us": 40.080000000000155
+    }
+  },
+  "interpretation": "Score finishes slightly earlier, while Attention and the final output finish later. The formal full-L1 regressions reject this candidate.",
+  "limitations": [
+    "These instrumented endpoint differences are not formal performance gains or causal effect sizes",
+    "QUERY now publishes after Attention, so neither QUERY nor ATTN_VECTOR interval labels are comparable",
+    "Query retile, extra scale reads, local handoff and interleaving changed together; their costs are not isolated"
+  ]
+}

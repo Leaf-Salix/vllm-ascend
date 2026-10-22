@@ -4635,3 +4635,111 @@ retained_merged_schedule.json保存八档原分母、当前采用值、每档比
 仍明显高于0.90验收线；没有重置分母或把局部百分比相加。生产集成清单为
 merged_schedule_integration.json。所有本轮NPU任务已终态，共享SDK未修改，
 未push；原10% goal继续active，下一轮继续从整链服务成本和数据供给分析机会。
+
+### 2026-10-23：按真实消费者检查依赖，尝试将主Query准备移入Attention
+
+继续使用merged_schedule_v1三个已保留机制，原八档分母及0.90目标不变。
+按当前比率0.9899876499反算：假设其余档位不变、受益档位相对降幅相同，
+只改善两档还需各降31.6952%，覆盖四档需各降17.3533%，覆盖八档需各降9.0898%。
+因此B16/B24是验证优先级，不能把仅在两档出现的微小收益当作完整目标的解决办法。
+
+补采保留版C05的三窗阶段诊断，任务task_20261023_053902_91322522932
+completed/exit0。插桩前CPP与已测critical_prefix_v1 C05完整代码一致，同SDK，
+前后逐bit和保护通过；retained_C05_phase_sdk_v1.json保存绑定与全部原始窗口。
+原C04诊断仍对应当前代码，未重测。以下仅为插桩后的里程碑跨度，不是独占
+计算时间，也不能用于收益计算：
+
+| 保留版诊断 | C04 B16 μs | C05 B24 μs |
+|---|---:|---:|
+| Query完成→Score Vector完成 | 186.40 | 269.66 |
+| Score Vector完成→Attention计划完成 | 36.98 | 38.88 |
+| Attention计划完成→Attention Vector完成 | 152.98 | 217.02 |
+| Attention Vector完成→最终输出完成 | 139.50 | 171.30 |
+
+两档QUERY发布间隔中位数约31μs，其中仍包括等待和控制。此候选的直接机会
+有限，不能预告为整链10%收益。Score和Attention的数据供给、实际服务成本
+及输出投影仍是后续需要覆盖的主体。analyze_retained_dependencies.py与
+retained_dependency_opportunities.json保存计算及限制。
+
+进一步排除几个重复或虚假的机会：QI的完整K1024×N256权重已在M64循环外
+驻留；Q_B全K预载与首M流式保留后续复用在此前BSH记录中均有无净收益实测；
+wait_row_owners已经等齐多个生产者后只做一次payload刷新，邻接阶段进一步
+合并acquire也已有负例。C05的OB核间完成跨度约48μs，但每个N512输出列块
+依赖(group*8+column)%24的三个真实owner；按列取最大就绪时间后机会明显
+收窄，不能把全核跨度当作可直接回收的时间。完整逐窗列就绪时间保留于上述JSON。
+
+新隔离候选query_local_v5将主Query的反量化/RMS/RoPE从Score前移到实际消费
+它的Attention核组。Score只消费Indexer Query，不依赖主q_flat。每组处理
+t=group+k*24，两AIV各处理32个head，均完成本query写回后通过FFTS事件6
+通知同组AIC；包含dummy容量行，AIC原本在检查有效mask前就会读取Query。
+AIV在Attention入口仍获取原QB依赖，不删除数据就绪约束；AIC删除全48个
+PHASE_QUERY等待，改为本query的通知。事件0/1及2..5、三槽顺序和排空不改。
+PHASE_QUERY记录移到AIV Attention末尾，不能再把它解释为原前缀阶段端点。
+
+tile从八token/单head改为单token/八head，保持每行512列规约、先激活scale
+再权重scale、RMS分支选择、RoPE顺序和BF16边界。读取权重scale的次数增加，
+同时q_proj读取更连续；它是调度与数据访问共同改变的候选，不能仅归因于
+少一道全局等待。GM q_flat仍存在，没有宣称片上零拷贝。现有q_heads外层别名
+现在被AIV写入，因此入口方向显式从In改为InOut；130个参数的槽序、shape、
+dtype、工作区以及return_aliases不变。此声明变化必须由实际服务路径再验证。
+
+候选仅在长历史G6、64<=Tcap<=192的资源域启用，当前八档覆盖C02/C04/C05/C06。
+首轮CPU作者预检v1的float调用、v2的非Mat异形TMOV、v3的只读别名方向、v4的
+incore reshape降成Tile均保留失败记录；没有改SDK、没有将这些未运行版本
+提交设备。v5使用原有外层二维别名并正确声明写方向。完整C04/C05编译通过，
+Cube Mat475136/Acc131072/Left65536/Right65536，AIV Vec180224字节；与保留版
+相同的关键峰值，没有扩大工作区。PTO代码中只新增事件6的一处MTE3 set与
+一处MTE2 wait，其余FFTS发出点逐项一致；详见query_local_v5_C04_codegen.json
+和query_local_v5_C05_codegen.json。
+
+27项CPU检查执行真实helper AST，对15个T（含1/7/8/9及容量边界）验证
+每个token/head唯一写者、完整覆盖、保护边界、原尾块分支和逐元素运算顺序，
+并检查原三项策略未丢失。CPU模型不能证明设备rsqrt舍入或事件活性。
+已提交C05任务task_20261023_055621_141049523995和C04任务
+task_20261023_055838_147095425686，按原规范执行逐bit/保护与十个完整L1窗口。
+当前尚未采用此候选，生产代码保持32a1426d9；结果待下文收口。
+
+#### 本轮结果：两档拒绝，后续转向单位工作成本
+
+两项性能任务均completed/exit0，eager/graph/post-L1的output、TopK、scores、
+所有cache/state及保护检查全部通过。复核20个原始L1窗口，均是完整72角色、
+一个MIX task的incore首尾差；实际候选CPP与对应CPU门禁代码匹配。结果见
+query_local_v5_results.json，保留全部样本：
+
+| 档位 | 原算法同SDK μs | 当前已保留 μs | Query局部准备 μs | 对已保留版回退 |
+|---|---:|---:|---:|---:|
+| C04 / 128K B16 S6 | 778.39 | 763.65 | 796.79 | +4.3397% |
+| C05 / 128K B24 S6 | 1014.46 | 1003.02 | 1043.43 | +4.0288% |
+
+两档均拒绝，不扩到C02/C06，也不做仅为采用而需要的额外服务/状态档位验证。
+生产仍保留三项机制，八档几何平均比率仍为0.9899876499，目标仍未达到。
+
+追加三窗候选C05诊断任务task_20261023_060513_164967611051，completed/exit0，
+前后严格检查通过，插桩前CPP与上述候选实测绑定。相对于同代码类保留版的
+诊断，Score Vector完成点提前约6.20μs、Attention计划提前5.10μs，但Attention
+Vector完成点推迟35.00μs，最终输出推迟40.08μs。它支持“前段少量提前、后段
+成本增加”的方向解释，不是独立收益样本；Query重切、scale额外读取、局部
+事件和流水交织同时改变，不能从该诊断进一步给每项成本分账。
+PHASE_QUERY已移到Attention末尾，其端点和ATTN_VECTOR的前置发布间隔不能
+与旧语义直接比较。query_local_v5_C05_phase_comparison.json保留这些限制。
+
+为后续数据路径评估补充attention_interface_traffic.json及生成脚本：在所有
+容量query活动、五个128候选块均有效的假设下，按每个接口分别统计逻辑payload，
+C04合计357 MiB，C05合计535.5 MiB。C05中KV cache→UB、UB→GM ring、GM→L1
+各90 MiB；PV写GM与Vector读回各90 MiB。K已经在L1供QK/PV复用，不重复计
+第二次GM→L1。另有score、probability、Query和packed写回。压缩候选行采集
+逻辑次数分别49152/73728，不将其直接等同硬件DMA指令数量。
+
+这些数值是接口payload账目，不是实测HBM流量：L2可以服务重复ring访问，
+同一数据跨多个接口会被重复计数，DMA填充、mi/li和Scalar metadata也未计入。
+不能拿535.5 MiB除以标称带宽来宣称硬件带宽瓶颈或预测提速。此前“KV直接
+送AIC L1”已因单Cube行搬运串行而回退，也不重复该方案。
+
+下一步优先获取实际TopK/物理行的连续run、页分布及跨query重叠率，再判断
+哪些数据复用值得改变核组分工；同时把Score/Attention的每单位工作成本与
+整段输出投影的数据往返作为主线。需要同时计算真实依赖、最忙核工作量、
+全部operand流量及新增指令，不能仅以少一道等待、少一次权重load或短路径
+判定优化。固定阶段的完成跨度也不直接等于动态调度可回收的空闲时间。
+
+本轮未修改共享SDK或生产算子，所有自有任务终态，未push。过程仍集中在本
+文档，失败预检与未测描述符归档在runs；原10% goal保持active。

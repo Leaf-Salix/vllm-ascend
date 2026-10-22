@@ -1,0 +1,45 @@
+{
+  "candidate": "query_local_v5",
+  "compile_dir": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/compile_query_local_C04_v5",
+  "reference_kernel": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/compile_merged_schedule_C04_v1/kernel",
+  "full_codegen_passed": true,
+  "device_execution": false,
+  "tensor_parameters": 130,
+  "packed_slots_shapes_and_return_aliases_unchanged": true,
+  "declared_access_change": {
+    "q_heads": "In -> InOut; AIV writes the existing alias of q_flat"
+  },
+  "resources": {
+    "cube_schedule": {
+      "mat": 475136,
+      "acc": 131072,
+      "vec": 16384,
+      "left": 65536,
+      "right": 65536
+    },
+    "vector_schedule": {
+      "vec": 180224
+    }
+  },
+  "added_event_sites": [
+    [
+      "wait",
+      "PIPE_MTE2",
+      "6",
+      ""
+    ],
+    [
+      "set",
+      "PIPE_MTE3",
+      "6",
+      "2"
+    ]
+  ],
+  "existing_ffts_sites_unchanged": true,
+  "query_store_sites": [
+    "          pto.tstore ins(%nope_inline5081__ssa_v0 : !pto.tile_buf<loc=vec, dtype=bf16, rows=8, cols=448, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%q_heads__ssa_v0_pview : !pto.partition_tensor_view<8x448xbf16>) loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/query_local_v5/query_local_stages.py\":88:9)",
+    "          pto.tstore ins(%rope_bf16_inline5079__ssa_v0 : !pto.tile_buf<loc=vec, dtype=bf16, rows=8, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%3971 : !pto.partition_tensor_view<8x64xbf16>) loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/query_local_v5/query_local_stages.py\":89:9)"
+  ],
+  "cpp_sha256": "134259e66f803aa93fd5f68b8d6a9c85ccebcbd51b36d58f71ecd5cc1e105cec",
+  "limitations": "CPU compilation is not device precision, event-liveness or performance validation"
+}
