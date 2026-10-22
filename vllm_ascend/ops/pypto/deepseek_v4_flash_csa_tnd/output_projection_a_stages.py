@@ -122,15 +122,15 @@ def o_projection_a_groups_stage_nz(
     group_begin: pl.Scalar[pl.INDEX],
     group_end: pl.Scalar[pl.INDEX],
 ):
-    """NZ O_A 的动态组区间；0≤begin≤end≤8，保持全局条带 owner 与原 K 链。"""
+    """NZ O_A动态组区间，任务内按本组条带分工，K链和写入位置保持不变。"""
     pack_stride = pl.tensor.dim(o_packed, 0) // O_GROUPS
     row_blocks = (tokens + PROJ_A_ROW_TILE - 1) // PROJ_A_ROW_TILE
     column_blocks = O_LORA // A_COL_TILE
     group_first = group_begin * row_blocks * column_blocks
     group_limit = group_end * row_blocks * column_blocks
-    # 不是每组重新从worker编号起算；保留全局logical%WORKERS才能保持负载
-    # 和量化消费者的owner公式。空组或本核无任务时，首项≥上界，循环自然为空。
-    first = worker_id + ((group_first + WORKERS - 1 - worker_id) // WORKERS) * WORKERS
+    # 每组由独立task负责，量化等待本组TaskId，不再依赖常驻核owner公式。
+    # group_begin=0的全量入口与原分工等价；单组入口只启动实际有工作的worker。
+    first = group_first + worker_id
     # NZ证明器不利用owner余数<WORKERS的区间事实；显式提供非负起点。
     # 合法输入下first本就非负，max不改变任何任务编号。
     for logical in pl.range(pl.max(0, first), group_limit, WORKERS):
@@ -192,13 +192,13 @@ def o_projection_groups_quant_stage(
     group_begin: pl.Scalar[pl.INDEX],
     group_end: pl.Scalar[pl.INDEX],
 ):
-    """量化动态组区间；尾零属于该组的最后活动块，必须先于本组通知完成。"""
+    """量化动态组区间；尾零属于本组最后活动块，在量化task返回前完成。"""
     task_rows = (tokens + QUANT_TASK_T_TILE - 1) // QUANT_TASK_T_TILE
     padded_rows = (tokens + ROW_TILE - 1) // ROW_TILE * ROW_TILE
     # T=0时循环为空，不计算负尾owner；每个group的活动行及padding各只有一个写者。
     group_first = group_begin * task_rows
     group_limit = group_end * task_rows
-    first = worker_id + ((group_first + WORKERS - 1 - worker_id) // WORKERS) * WORKERS
+    first = group_first + worker_id
     for logical in pl.range(first, group_limit, WORKERS):
         g = logical // task_rows
         block = logical % task_rows

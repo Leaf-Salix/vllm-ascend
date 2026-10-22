@@ -22068,3 +22068,38 @@ v3在planner和Top-K两侧明确编码整数0/1，不依赖BOOL扩展，也不�
 短档代表窗口HC结束65.44μs、下一任务127.20μs，中间无incore活动；Indexer query
 投影也明显晚于QR生产完成。应继续分析规划成本和派发先后，不能退回软同步融合。
 不以这两档代表全矩阵、不宣布达到超SPMD10%目标；公共工具链未变，未push。
+
+### 735.60：输出投影按八组恢复动态依赖，长短两档数值通过
+
+新增output_tasks，沿BSH-MPMD按八个互不相交的输出组提交O_A、量化、O_B。
+manual_scope中每组只写自身列和scale行，用TaskId显式连接三段；HCpost在scope
+外等待八个O_B及原HC的post/comb。保留原NZ权重、K256规约次序和量化数学，
+没有增加软同步。独立NZ O_B task保留完整权重，在核内按group/block计算偏移，
+解决嵌套inline捕获group时的NZ范围证明失败；最初两个CPU失败候选不作设备证据。
+
+实际长短档均为63个调度任务组，而生成源码仍只有42个submit调用点，其中输出
+三处位于八次循环内。不能把静态调用点数量当成实际任务组数量。源码/生成检查见
+[aicpu_v6_architecture.json](csa_mpmd_aicpu_20261022/aicpu_v6_architecture.json)。
+
+两档沿用旧优化合同的固定混长及padding输入，每侧10窗，三侧同一任务交替采集。
+SPMD、此前MPMD v3和输出分组v6的eager/图/post-L1输出、Top-K/score、cache/state
+逐bit一致，保护区通过。数据和全部窗口分段保存在
+[output_groups_evidence.json](csa_mpmd_aicpu_20261022/output_groups_evidence.json)。
+
+| 场景 | SPMD中位数μs | MPMD v3中位数μs | 分组v6中位数μs | v3均值/最大μs | v6均值/最大μs |
+|---|---:|---:|---:|---:|---:|
+| 128K/B16，T55/容量64 | 725.63 | 901.26 | 895.67 | 902.94 / 925.82 | 904.408 / 996.02 |
+| 8K/B32，T112/容量112 | 743.39 | 1059.48 | 1045.42 | 1061.44 / 1088.98 | 1045.83 / 1072.82 |
+
+长档第10窗996.02μs完整保留，未过滤。其前段结束于482.90μs，其他窗口约
+380–437μs；输出段165.90μs仍在本轮158–166μs范围。故本轮支持保留分组架构，
+但不能宣称长档均值或尾延迟改善；下一步要定位前段规划/派发和Score粒度。
+
+新规范C05 128K/B24/S6启用scale_page_coalescing后，CPU编译仍报
+GenerateExprString not implemented for expression type: And。把入口改成嵌套if
+未消除编译Pass产生的And，已撤销无效绕行。核对官方
+[issue #2984](https://github.com/hw-native-sys/pypto/issues/2984)及
+[PR #3000](https://github.com/hw-native-sys/pypto/pull/3000)：官方已在2026-10-15修复
+编排层And/Or/Xor/Not，当前公共e891351e尚未包含。准备下一版公共SDK，保持
+IR两边求值语义，采用原修复和回归；现有发布源码及运行任务不原地修改。
+此处尚未声称新SDK或大容量设备验证通过。新八档和原10%目标均未完成，未push。

@@ -83,8 +83,7 @@ from .kv_stages import (
     kv_project_stage,
 )
 from .metadata_stages import compact_offsets_and_count_stage
-from .output_projection_a_stages import o_projection_a_stage_nz, o_projection_group_quant_stage
-from .output_projection_b_stages import o_b_stage, o_dequant_hc_post_stage
+from .output_tasks import output_tasks
 from .qkv_stages import (
     BF16_WEIGHT_LAYOUT,
     QR_DENSE_M_TILE,
@@ -1135,18 +1134,23 @@ def decode_csa_tnd(
             LOCAL_ATTENTION_STATS,
             PLAN_PHYSICAL_ROWS,
         )
-    with pl.spmd(GROUPS, name_hint="o_proj_a", allow_early_resolve=True, sync_start=True, deps=[attn_tid]):
-        o_r = o_projection_a_stage_nz(packed, wo_a, o_r, tokens, pl.tile.get_block_idx(), GROUPS, OA_COLS)
-    with pl.spmd(VECTORS, name_hint="o_quant", allow_early_resolve=True, sync_start=True):
-        (o_quant, o_scales) = o_projection_group_quant_stage(
-            o_r, o_quant, o_scales, tokens, pl.tile.get_block_idx(), VECTORS, OB_ROWS
-        )
-    with pl.spmd(GROUPS, name_hint="o_proj_b", allow_early_resolve=True, sync_start=True):
-        o_partials = o_b_stage(o_quant, wo_b, o_partials, tokens, pl.tile.get_block_idx(), GROUPS, OB_ROWS)
-    with pl.spmd(pl.min(tokens, VECTORS), name_hint="hc_post", allow_early_resolve=True, sync_start=True):
-        output = o_dequant_hc_post_stage(
-            o_partials, o_scales, wo_b_scale, x, post, comb, output, pl.tile.get_block_idx(), VECTORS
-        )
+    (o_r, o_quant, o_scales, o_partials, output) = output_tasks(
+        packed,
+        wo_a,
+        wo_b,
+        wo_b_scale,
+        x,
+        post,
+        comb,
+        o_r,
+        o_quant,
+        o_scales,
+        o_partials,
+        output,
+        attn_tid,
+        OA_COLS,
+        OB_ROWS,
+    )
     return (
         x_fp32,
         inv,

@@ -132,6 +132,86 @@ def _o_b_nd_groups_stage(
 
 
 @pl.jit.inline(auto_scope=False)
+def o_b_nz_block(
+    o_r_i8_pad: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.INT8],
+    wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
+    partials: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * D], pl.INT32]],
+    tokens: pl.Scalar[pl.INDEX],
+    group: pl.Scalar[pl.INDEX],
+    d_block: pl.Scalar[pl.INDEX],
+    ROW_TILE: pl.constexpr,
+):
+    """一个输出组的D512条带；复用相同K256顺序与行块驻留数学。"""
+    g = group
+    col_g = g * O_LORA
+    d0 = pl.max(d_block, 0) * PROJ_B_D_TILE
+    proj_b_t_rows = (tokens + ROW_TILE - 1) // ROW_TILE
+    if ROW_TILE <= PROJ_B_MEDIUM_T_TILE:
+        # 小/中tile：每行块activation只入L1一次，复用到两个N256输出。
+        for tb in pl.range(proj_b_t_rows):
+            t0 = tb * ROW_TILE
+            activation_l1 = pl.load(
+                o_r_i8_pad,
+                [t0, col_g],
+                [ROW_TILE, O_LORA],
+                target_memory=pl.MemorySpace.Mat,
+            )
+            for nf in pl.range(PROJ_B_D_TILE // PROJ_B_MM_N_TILE):
+                n0 = d0 + nf * PROJ_B_MM_N_TILE
+                acc_b = pl.create_tile([ROW_TILE, PROJ_B_MM_N_TILE], dtype=pl.INT32, target_memory=pl.MemorySpace.Acc)
+                for kb in pl.pipeline(0, O_LORA // B_K_TILE, stage=2):
+                    k0 = kb * B_K_TILE
+                    wk0 = pl.max(g, 0) * O_LORA + k0
+                    b_weight_l1 = pl.load(
+                        wo_b,
+                        [wk0, n0],
+                        [B_K_TILE, PROJ_B_MM_N_TILE],
+                        target_memory=pl.MemorySpace.Mat,
+                    )
+                    b_act_l1 = pl.tile.slice(activation_l1, [ROW_TILE, B_K_TILE], [0, k0])
+                    # 两操作数仍是Mat，保留后端原K128 L0交错lowering，不强改L0操作。
+                    acc_b = pl.tile.matmul_acc(acc_b, b_act_l1, b_weight_l1, init_cond=(kb == 0))
+                pl.store(acc_b, [t0, g * D + n0], partials)
+    else:
+        # 大tile：N块在外，权重驻留后再逐行块计算；不能交换成上面的循环树。
+        for nf in pl.range(PROJ_B_D_TILE // PROJ_B_MM_N_TILE):
+            n0 = d0 + nf * PROJ_B_MM_N_TILE
+            weight_k0 = pl.max(g, 0) * O_LORA
+            weight_resident = wo_b[weight_k0 : weight_k0 + O_LORA, n0 : n0 + PROJ_B_MM_N_TILE]
+            for tb in pl.range(proj_b_t_rows):
+                t0 = tb * ROW_TILE
+                # 当前tb来自ceil(T/ROW_TILE)，所以有效行数在1..ROW_TILE。
+                # 这是删去T以外的算术padding，T内的dummy或inactive行仍完整计算。
+                # ND activation允许动态有效M；NZ权重的K/N范围没有变化。
+                active_rows = pl.min(ROW_TILE, tokens - t0)
+                b_act_full = pl.slice(
+                    o_r_i8_pad,
+                    [ROW_TILE, O_LORA],
+                    [t0, col_g],
+                    valid_shape=[active_rows, O_LORA],
+                )
+                full_acc = pl.matmul(b_act_full, weight_resident, out_dtype=pl.INT32)
+                # assemble沿用源Acc的有效行，不能仍按完整ROW_TILE写回。
+                # [T,P_MM)不再由此路径初始化；所有消费者必须只读取真实T。
+                partials = pl.assemble(partials, full_acc, [t0, g * D + n0])
+    return partials
+
+
+@pl.jit.incore
+def o_b_group_task(
+    o_r_i8_pad: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.INT8],
+    wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
+    partials: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * D], pl.INT32]],
+    tokens: pl.Scalar[pl.INDEX],
+    group: pl.Scalar[pl.INDEX],
+    ROW_TILE: pl.constexpr,
+):
+    """与BSH-MPMD相同：保留完整NZ权重，在核内按组及block计算偏移。"""
+    partials = o_b_nz_block(o_r_i8_pad, wo_b, partials, tokens, group, pl.tile.get_block_idx(), ROW_TILE)
+    return partials
+
+
+@pl.jit.inline(auto_scope=False)
 def _o_b_nz_groups_stage(
     o_r_i8_pad: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.INT8],
     wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
@@ -144,7 +224,6 @@ def _o_b_nz_groups_stage(
     group_end: pl.Scalar[pl.INDEX],
 ):
     """NZ：owner=(g*8+dc)%WORKERS；每任务保持全部实际行块的原驻留次序。"""
-    proj_b_t_rows = (tokens + ROW_TILE - 1) // ROW_TILE
     # 非负 worker+round*WORKERS 使 NZ group/K/N 偏移的非负性显式可证。
     worker = pl.max(worker_id, 0)
     group_first = pl.max(group_begin, 0) * (D // PROJ_B_D_TILE)
@@ -156,49 +235,7 @@ def _o_b_nz_groups_stage(
         work = worker + round_id * WORKERS
         if work >= group_first:
             g = work // (D // PROJ_B_D_TILE)
-            col_g = g * O_LORA
-            d0 = (work % (D // PROJ_B_D_TILE)) * PROJ_B_D_TILE
-            if ROW_TILE <= PROJ_B_MEDIUM_T_TILE:
-                # 小/中tile：每行块activation只入L1一次，复用到两个N256输出。
-                for tb in pl.range(proj_b_t_rows):
-                    t0 = tb * ROW_TILE
-                    activation_l1 = pl.load(
-                        o_r_i8_pad, [t0, col_g], [ROW_TILE, O_LORA], target_memory=pl.MemorySpace.Mat,
-                    )
-                    for nf in pl.range(PROJ_B_D_TILE // PROJ_B_MM_N_TILE):
-                        n0 = d0 + nf * PROJ_B_MM_N_TILE
-                        acc_b = pl.create_tile([ROW_TILE, PROJ_B_MM_N_TILE], dtype=pl.INT32,
-                                               target_memory=pl.MemorySpace.Acc)
-                        for kb in pl.pipeline(0, O_LORA // B_K_TILE, stage=2):
-                            k0 = kb * B_K_TILE
-                            wk0 = pl.max(g, 0) * O_LORA + k0
-                            b_weight_l1 = pl.load(
-                                wo_b, [wk0, n0], [B_K_TILE, PROJ_B_MM_N_TILE], target_memory=pl.MemorySpace.Mat,
-                            )
-                            b_act_l1 = pl.tile.slice(activation_l1, [ROW_TILE, B_K_TILE], [0, k0])
-                            # 两操作数仍是Mat，保留后端原K128 L0交错lowering，不强改L0操作。
-                            acc_b = pl.tile.matmul_acc(acc_b, b_act_l1, b_weight_l1, init_cond=(kb == 0))
-                        pl.store(acc_b, [t0, g * D + n0], partials)
-            else:
-                # 大tile：N块在外，权重驻留后再逐行块计算；不能交换成上面的循环树。
-                for nf in pl.range(PROJ_B_D_TILE // PROJ_B_MM_N_TILE):
-                    n0 = d0 + nf * PROJ_B_MM_N_TILE
-                    weight_k0 = pl.max(g, 0) * O_LORA
-                    weight_resident = wo_b[weight_k0 : weight_k0 + O_LORA, n0 : n0 + PROJ_B_MM_N_TILE]
-                    for tb in pl.range(proj_b_t_rows):
-                        t0 = tb * ROW_TILE
-                        # 当前tb来自ceil(T/ROW_TILE)，所以有效行数在1..ROW_TILE。
-                        # 这是删去T以外的算术padding，T内的dummy或inactive行仍完整计算。
-                        # ND activation允许动态有效M；NZ权重的K/N范围没有变化。
-                        active_rows = pl.min(ROW_TILE, tokens - t0)
-                        b_act_full = pl.slice(
-                            o_r_i8_pad, [ROW_TILE, O_LORA], [t0, col_g],
-                            valid_shape=[active_rows, O_LORA],
-                        )
-                        full_acc = pl.matmul(b_act_full, weight_resident, out_dtype=pl.INT32)
-                        # assemble沿用源Acc的有效行，不能仍按完整ROW_TILE写回。
-                        # [T,P_MM)不再由此路径初始化；所有消费者必须只读取真实T。
-                        partials = pl.assemble(partials, full_acc, [t0, g * D + n0])
+            partials = o_b_nz_block(o_r_i8_pad, wo_b, partials, tokens, g, work % (D // PROJ_B_D_TILE), ROW_TILE)
     return partials
 
 
@@ -217,9 +254,7 @@ def o_b_stage(
     ROW_TILE: pl.constexpr,
 ):
     """全八组兼容入口；与组就绪分支共用数学和动态行循环。"""
-    partials = o_b_groups_stage(
-        o_r_i8_pad, wo_b, partials, tokens, worker_id, WORKERS, ROW_TILE, 0, O_GROUPS
-    )
+    partials = o_b_groups_stage(o_r_i8_pad, wo_b, partials, tokens, worker_id, WORKERS, ROW_TILE, 0, O_GROUPS)
     return partials
 
 
