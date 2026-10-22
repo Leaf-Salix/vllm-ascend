@@ -29,18 +29,32 @@ def gather_scale_pages(
     lane = pl.tile.ci(0, [1, SCORE_TILE // 32], dtype=pl.INT32)
     logical = pl.add(lane, pl.cast(score_begin // 32, pl.INT32))
     logical = pl.minimum(logical, pl.cast(pl.max((cache_len - 1) // 32, 0), pl.INT32))
-    logical_valid = pl.and_(pl.cmp(logical, 0, cmp_type=5), pl.cmp(logical, pl.cast(columns, pl.INT32), cmp_type=2))
+    # The pinned A3 ISA implements INT32 TCMPS using equality only. FP32 ordered
+    # comparisons are exact for the caller's capacity limits below 2**24; values
+    # outside that interval remain outside the valid integer interval after cast.
+    logical_fp32 = pl.cast(logical, pl.FP32)
+    logical_valid = pl.and_(
+        pl.cmp(logical_fp32, 0.0, cmp_type=5),
+        pl.cmp(logical_fp32, pl.cast(pl.cast(columns, pl.INT32), pl.FP32), cmp_type=2),
+    )
     linear = pl.add(logical, pl.cast(batch * columns, pl.INT32))
-    # A2/A3 TSELS needs one physical source row in the same element dtype.
-    tmp = pl.tile.create([1, SCORE_TILE // 32], dtype=pl.INT32)
-    safe_linear = pl.tile.sels(logical_valid, linear, tmp, -1)
+    # TSEL keeps its scratch writes on the vector pipe. Test this independently
+    # of TSELS, whose scalar scratch writes can interact with reused UB storage.
+    tmp = pl.tile.create([1, 16], dtype=pl.UINT32)
+    invalid = pl.tile.full([1, SCORE_TILE // 32], dtype=pl.INT32, value=-1)
+    zeros = pl.tile.full([1, SCORE_TILE // 32], dtype=pl.INT32, value=0)
+    safe_linear = pl.tile.sel(logical_valid, linear, invalid, tmp)
     physical = pl.tile.mgather(table, safe_linear, coalesce="elem", gather_oob="zero")
+    physical_fp32 = pl.cast(physical, pl.FP32)
     physical_valid = pl.and_(
         logical_valid,
-        pl.and_(pl.cmp(physical, 0, cmp_type=5), pl.cmp(physical, pl.cast(cache_pages, pl.INT32), cmp_type=2)),
+        pl.and_(
+            pl.cmp(physical_fp32, 0.0, cmp_type=5),
+            pl.cmp(physical_fp32, pl.cast(pl.cast(cache_pages, pl.INT32), pl.FP32), cmp_type=2),
+        ),
     )
-    safe_physical = pl.tile.sels(physical_valid, physical, tmp, 0)
+    safe_physical = pl.tile.sel(physical_valid, physical, zeros, tmp)
     scale_row = pl.add(pl.mul(safe_physical, pl.cast(page_bytes // 64, pl.INT32)), 4096 // 64)
-    safe_scale_row = pl.tile.sels(physical_valid, scale_row, tmp, -1)
+    safe_scale_row = pl.tile.sel(physical_valid, scale_row, invalid, tmp)
     scales = pl.tile.mgather(scale_rows, safe_scale_row, coalesce="row", gather_oob="zero")
     return pl.tile.reshape(pl.tile.reinterpret_view(scales, pl.FP16), [1, SCORE_TILE])

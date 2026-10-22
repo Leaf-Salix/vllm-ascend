@@ -39,7 +39,8 @@ def transform_score(source):
 cache_pages = pl.tensor.dim(idx_native_kv_cache, 0)
 table_columns = pl.tensor.dim(idx_block_table, 1)
 if (page_bytes >= 4160 and page_bytes % 64 == 0 and cache_pages * (page_bytes // 64) < 2147483647
-        and table_columns > 0 and pl.tensor.dim(idx_block_table, 0) * table_columns < 2147483647):
+        and cache_pages < 16777216 and 0 < table_columns and table_columns < 16777216
+        and pl.tensor.dim(idx_block_table, 0) * table_columns < 2147483647):
     gathered_scale_half = gather_scale_pages(
         idx_scale_rows, idx_block_table, single_batch, single_score_begin,
         single_cache_len, cache_pages, page_bytes, score_tile,
@@ -59,7 +60,7 @@ else:
 def main():
     here = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--name", default="scale_gather_v4")
+    parser.add_argument("--name", default="scale_gather_v5")
     args = parser.parse_args()
     if not args.name.isidentifier():
         raise ValueError("Experiment name must be a simple identifier")

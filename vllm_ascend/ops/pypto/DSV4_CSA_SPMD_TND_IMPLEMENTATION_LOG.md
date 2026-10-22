@@ -3568,3 +3568,48 @@ OPP 检查，未导入候选、未执行算子。启动器误从本 worktree 定
 同一冻结候选重新提交为 `task_20261022_165739_25359074832`，仍指定 8 号卡。
 输出使用新 attempt `runs/h131072_b16_s6_scale_gather_v4_env2`；旧任务及初始化
 失败保存在 jobs.json/current_state.json，不归因于候选算法，不计入性能样本。
+
+### 17:39：Scale 设备失败转微型定位；N128 已完成编译和关键依赖审查
+
+`task_20261022_165739_25359074832` 已 completed/exit1：冻结参考 eager 的输出、
+状态与保护检查通过，候选首次同步报 507015/VEC instruction parameter invalid，
+尚未产生性能窗口。原始 result.json、日志与本任务的 kernel dump 均保留在
+`runs/h131072_b16_s6_scale_gather_v4_env2/`，未把该候选列为保留优化。
+
+直接核对公共 Simpler 所绑定的 PTO-ISA `327cd5869f3a7c4d2c6a1b945b2aed06e7665c5d`
+发现 A2/A3 `TCmps.hpp` 的 INT32 分支实际调用相等比较，不能用于本候选的 GE/LT。
+这是明确的语义缺陷，但尚不能认定它就是 VEC 异常的唯一原因。`MGather.hpp`
+显式支持 INT8，Row/Zero 的非法行以 Scalar 写零；已排除“INT8 清零必然使用
+不支持的向量 duplicate”这一未经证实的假设，没有修改公共 SDK。
+
+helper 改用 FP32 做边界比较，同时保留 INT32 地址及选择。调用端限制容量小于
+2**24，并保留原索引乘法范围检查；新增六组边界证明，包含 INT32 极值及 FP32
+舍入边界，连同地址字节合同和测量循环共 28 项 CPU 检查通过。构造仅含原 helper
+的独立设备诊断，比较碎片/非法/尾页的原始字节，不声称 CSA 性能。
+首个诊断 `task_20261022_173315_40566603033` 在编译期发现 INDEX→FP32 Scalar
+转换不支持，未执行候选 kernel。修为先转 INT32 后转 FP32，CPU meta 全量编译通过，
+冻结到 `runs/scale_probe_v6_source` 后提交 `task_20261022_173811_16954222671`。
+
+第二个独立候选 N128 仅扩展原长历史 G6/SPLIT_SCORE_ROWS 区间：Score N64→N128，
+一个 QK Acc 依次接收两段 K128 点积，WS 的两段 K192 累加顺序及 FP16 舍入不变；
+WS Right 在自身消费前装载，减少共存空间。它与 scale 候选没有叠加。
+v1 超出 L0B（81920>65536B）；v2 改将 Key 下一块只预取至 L1，已完成全量编译。
+`score_n128_single_acc_v2_codegen.json` 检查 UB 180224B、Mat 475136B、
+Left/Right 65536B、Acc 131072B，外部 kernel ABI 与历史 C04 相同；实际 C++
+24 次 QK 写回与复用保留 M→FIX/FIX→M 依赖，8 处 WS Right 复用保留 M→MTE1。
+这只审查关键依赖，不替代设备正确性，也不保证减少 panel 必然胜过新增等待。
+
+v2 的 Host 策略构造错误（dataclass 没有 to_l0 参数）在排队阶段发现，取消尚未执行
+的 `task_20261022_173551_3898926889`。修为在 constexprs 中由已选 split/N128
+生成 TO_L0；冻结 v3。八档及 T30/T36 两边界真实 select_policy CPU 前检通过，
+40 个非 policy 模块与完整 C04 编译描述均与 v2 相同，因此复用其编译审查。
+新任务 `task_20261022_173834_1885489714` 使用历史同卡 8，仅测 C04 的候选十窗口。
+截至此记录仍无本轮已保留的新设备优化，完整八档 10% 目标尚未证明。
+
+17:48 补记：scale 微型 v6 的首个普通页案例逐字节通过；重复尾页案例首行
+64B 不一致，任务 completed/exit1。未扩大到完整 CSA。设备端 TSELS 的 scratch
+含 Scalar 写入，因此另测纯 Vector 的 TSEL 路径，不据此直接宣布根因。
+v7 两次 CPU 前检分别修复 full 参数顺序及显式 Tile 类型，v7r2 全量编译通过，
+提交 `task_20261022_174755_7079965369`。诊断器现在保留每例失败的 actual/
+expected 字节，并汇总五例结果；普通错误不提前丢弃后续案例。N128 v3 当前
+任务 running，沿用原句柄，不重复提交。上述候选均未改生产默认或 push。

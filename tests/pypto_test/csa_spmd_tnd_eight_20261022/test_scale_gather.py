@@ -36,14 +36,15 @@ def execute_helper():
     for argument in function.args.args:
         argument.annotation = None
 
-    def sels(mask, src, tmp, scalar):
-        assert tmp.dtype == src.dtype and tmp.size >= src.shape[1]
-        return np.where(mask, src, np.array(scalar, dtype=src.dtype))
+    def sel(mask, lhs, rhs, tmp):
+        assert tmp.dtype == np.uint32 and tmp.size >= 16
+        return np.where(mask, lhs, rhs)
 
     tile = SimpleNamespace(
         ci=lambda start, shape, dtype: np.arange(start, start + np.prod(shape), dtype=dtype).reshape(shape),
         create=lambda shape, dtype: np.empty(shape, dtype=dtype),
-        sels=sels,
+        full=lambda shape, dtype, value: np.full(shape, value, dtype=dtype),
+        sel=sel,
         mgather=memory_gather,
         reshape=lambda value, shape: value.reshape(shape),
         reinterpret_view=lambda value, dtype: value.view(dtype),
@@ -55,6 +56,7 @@ def execute_helper():
         INT32=np.int32,
         UINT32=np.uint32,
         FP16=np.float16,
+        FP32=np.float32,
         cast=lambda value, dtype: dtype(value),
         add=np.add,
         mul=np.multiply,
@@ -99,3 +101,15 @@ def test_scale_page_bytes_and_boundaries(page_bytes, columns):
                 actual = helper(scale_rows, table, batch, score_begin, cache_len, len(cache), page_bytes, 1024)
                 expected = legacy_bytes(cache, table, batch, score_begin, cache_len)
                 np.testing.assert_array_equal(actual.reshape(-1).view(np.uint8), expected)
+
+
+@pytest.mark.parametrize("capacity", [1, 2, 31, 32, 65535, (1 << 24) - 1])
+def test_float_predicates_preserve_bounded_integer_membership(capacity):
+    values = np.array(
+        [-(1 << 31), -1, 0, 1, capacity - 1, capacity, capacity + 1, (1 << 24), (1 << 31) - 1],
+        dtype=np.int32,
+    )
+    expected = (values >= 0) & (values < capacity)
+    converted = values.astype(np.float32)
+    actual = (converted >= 0.0) & (converted < np.float32(capacity))
+    np.testing.assert_array_equal(actual, expected)

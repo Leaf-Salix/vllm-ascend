@@ -26,20 +26,31 @@
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
   "pending_tasks": {
-    "task_20261022_165739_25359074832": {
+    "task_20261022_173834_1885489714": {
+      "task_id": "task_20261022_173834_1885489714",
+      "candidate": "score_n128_single_acc_v3",
       "case_id": "C04",
-      "candidate": "scale_gather_v4",
+      "status": "running",
       "device": 8,
-      "last_status": "submitted",
-      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b16_s6_scale_gather_v4_env2",
-      "retry_reason": "Fixed verified launcher environment failure before any kernel execution"
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b16_s6_score_n128_single_acc_v3",
+      "codegen_evidence": "score_n128_single_acc_v2_codegen.json",
+      "preflight": "score_n128_single_acc_v3_preflight.json"
+    },
+    "task_20261022_174755_7079965369": {
+      "task_id": "task_20261022_174755_7079965369",
+      "candidate": "scale_probe_v7r2",
+      "status": "submitted",
+      "performance_eligible": false,
+      "device": "auto",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/scale_probe_v7r2",
+      "reason": "Compare pure-vector TSEL path after repeated-tail mismatch of TSELS; CPU compilation passed"
     }
   },
   "next_steps": [
-    "Collect the existing C04 task handle; do not resubmit because observation times out",
-    "Check strict regression, all ten samples and frozen historical median before expanding",
+    "Collect frozen scale microprobe v6; inspect byte parity before another full CSA run",
+    "Collect existing C04 N128 v3 task; strict regression and ten full L1 windows before expansion",
     "Continue SPMD phase/owner analysis for B1 and mixed-length tails; MPMD timing is not SPMD phase timing",
-    "Finish one accepted candidate across all eight cases and required metadata/service regressions; G<=0.90 unproven"
+    "Validate an adopted combination across eight cases and metadata/service regressions; G<=0.90 unproven"
   ],
   "knowledge_query": {
     "status": "index_missing",
@@ -47,10 +58,10 @@
     "ready_receipt": false
   },
   "cpu_checks": {
-    "passed": 22,
+    "passed": 28,
     "device_execution": false
   },
-  "updated_at": "2026-10-22T16:58:38.643012+08:00",
+  "updated_at": "2026-10-22T17:48:50.985238+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -60,6 +71,17 @@
       "device_execution": false,
       "reason": "Launcher sourced worktree-local Native template OPP path; dependency exists only in the primary checkout",
       "action": "Source the same primary Native OPP used by the frozen eight-case measurement; preflight passed"
+    },
+    {
+      "task_id": "task_20261022_165739_25359074832",
+      "candidate": "scale_gather_v4",
+      "case_id": "C04",
+      "status": "completed (exit=1)",
+      "device_execution": true,
+      "candidate_execution_failed": true,
+      "valid_windows": 0,
+      "reason": "Candidate synchronize raised 507015 VEC instruction parameter invalid; frozen reference eager passed",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b16_s6_scale_gather_v4_env2"
     }
   ]
 }
