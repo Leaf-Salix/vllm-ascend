@@ -2,7 +2,8 @@
 """Native TND 的零拷贝绑定和多 task 工作区准备。
 
 只使用 Tensor shape/stride/dtype 与已有 Host 描述符。逐请求 Q/L、
-compact 行、Indexer 叶与 Attention 页计划在设备任务中计算，计入完整 L1。
+compact 行和Indexer分叶在AICPU编排层计算，Attention页计划属于实际计算任务。
+规划仍在CSA调用内，分别记录完整device跨度与L1，不移到测试准备过程。
 输入 cache/state、权重、slots 和页表保持 Native 原存储；不读回 device
 metadata，也不扩张真实 query 为固定 S6。
 
@@ -16,8 +17,6 @@ import torch
 
 from vllm_ascend import envs
 
-from .middle_phase import SIGNAL_COUNT as MIDDLE_SIGNAL_COUNT
-from .output_group import OUTPUT_SIGNAL_COUNT
 from .policy import CSAMPMDPolicy, select_policy
 
 
@@ -215,21 +214,6 @@ class PreparedDynamicCSA:
             "li_ring": ((24 * 3 * 64, 1), torch.float32),
             "packed": ((8 * p128, 4096), torch.bfloat16),
             "ffts": ((256,), torch.int64),
-            "query_signal": ((1,), torch.int32),
-            "hc_signal": ((4 * 3 * self.policy.hc_groups * 128 if self.policy.fused_dag else 1,), torch.int32),
-            "middle_signal": (
-                (MIDDLE_SIGNAL_COUNT if self.policy.fused_dag and self.policy.balanced else 1,),
-                torch.int32,
-            ),
-            "idx_front_signal": (
-                (11 * 3 * self.policy.idx_front_groups * 128 if self.policy.fused_dag else 1,),
-                torch.int32,
-            ),
-            "main_front_signal": (
-                (6 * 3 * self.policy.main_front_groups * 128 if self.policy.fused_dag else 1,),
-                torch.int32,
-            ),
-            "output_signal": ((OUTPUT_SIGNAL_COUNT,), torch.int32),
             "o_r": ((mm, 8192), torch.float32),
             "o_quant": ((mm, 8192), torch.int8),
             "o_scales": ((8, p128), torch.float32),
@@ -245,15 +229,6 @@ class PreparedDynamicCSA:
             if value.shape != shape or value.dtype != dtype or value.device != device or not value.is_contiguous():
                 raise ValueError(f"allocator返回错误的工作区：{name}")
             self.buffers[name] = self.allocations[name] = value
-            if name in (
-                "hc_signal",
-                "middle_signal",
-                "query_signal",
-                "output_signal",
-                "idx_front_signal",
-                "main_front_signal",
-            ):
-                value.zero_()
         self.buffers.update(
             q_heads=self.buffers["q_flat"].view(t * 64, 512),
             idx_query_rope_heads=self.buffers["idx_query_rope"].view(p16 * 64, 128),

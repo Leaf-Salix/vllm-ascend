@@ -42,13 +42,10 @@
     A3非整列TMOV限制。尾组/失效位置的整块系数为零，且不读取其 payload。
     group%WORKERS 决定系数块唯一 AIV writer；消费者从四项描述符直接取组，
     不再对每叶重复扫描全部请求。描述符只缓存当前组几何，不替代逐lane的
-    causal遮罩，不新增独立GM Tensor。计划只由所选集合 worker0
-    写一次，不能同时让 AIC0 和 AIV0 写。其他角色先等待计划发布，再读取；
-    系数还需等待 query scale/weights。helper 返回不代表跨核缓存已可见。
-    Q/L/positions/group_offsets 必须来自同一轮且在整个 score 阶段保持不变；
-    描述符由同一Scalar唯一写者写出，发布前清理DCache并完成DSB，消费者
-    在既有PHASE_META等待后获取。相邻描述符可以共用缓存行，不能多核同时写。
-    coeff 不能在 Cube 消费完之前复用。普通阶段通知不提供逐槽消费 ACK。
+    causal遮罩。当前计划由AICPU编排计算一次，再提交读取它的计算任务；
+    query scale/weights到系数、系数到Score的依赖交给运行时。Q/L、positions
+    和描述符来自同一次调用，Score完成前保持不变。相邻描述符可以共用缓存行，
+    编排层是唯一写者，不使用阶段信号或轮询。描述表仍是待缩减的迁移接口。
 
 有效性与验证边界
     request_bounds 负责请求有效性；positions 必须等于 H+(query-begin)，
@@ -187,7 +184,12 @@ def indexer_group_plan_stage(
         pl.write(plan, [3], pl.cast(leaf_tiles, pl.INT32))
         pl.write(plan, [4], pl.cast(extra, pl.INT32))
         pl.write(plan, [5], pl.cast(GROUP_SIZE, pl.INT32))
-        pl.write(plan, [6], pl.cast(BALANCED, pl.INT32))
+        # AICPU static_cast<bool>得到1，而当前PTO后端对i1做extsi得到-1。
+        # 这是跨执行域的整数ABI，不依赖布尔扩展方式，明确约定0/1。
+        balanced_tag = pl.cast(0, pl.INT32)
+        if BALANCED:
+            balanced_tag = pl.cast(1, pl.INT32)
+        pl.write(plan, [6], balanced_tag)
         pl.write(plan, [7], pl.cast(ROOTS_PER_LEAF, pl.INT32))
     return offsets, plan
 

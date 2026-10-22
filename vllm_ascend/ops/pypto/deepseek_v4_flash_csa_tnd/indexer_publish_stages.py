@@ -63,12 +63,16 @@ def indexer_visible_root_count(
     leaf_tiles = pl.cast(pl.read(plan, [3]), pl.INDEX)
     extra_leaves = pl.cast(pl.read(plan, [4]), pl.INDEX)
     max_history = pl.cast(pl.read(plan, [1]), pl.INDEX)
+    # 与AICPU planner约定整数0/1，不能把BOOL的符号扩展当作整数ABI。
+    balanced_tag = pl.cast(0, pl.INT32)
+    if BALANCED:
+        balanced_tag = pl.cast(1, pl.INT32)
     # 不同策略的根布局不能靠有效总T猜。读取前先核对产生这些根的统一计划。
     if (
         ROOTS_PER_LEAF >= 1
         and ROOTS_PER_LEAF <= 2
         and pl.read(plan, [7]) == ROOTS_PER_LEAF
-        and pl.read(plan, [6]) == pl.cast(BALANCED, pl.INT32)
+        and pl.read(plan, [6]) == balanced_tag
     ):
         if visible > 0 and visible <= max_history and max_history <= MAX_CANDIDATES:
             if leaves > 0 and leaves <= MAX_LEAVES and leaf_tiles > 0:

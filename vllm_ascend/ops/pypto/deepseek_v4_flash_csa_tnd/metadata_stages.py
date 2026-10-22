@@ -28,9 +28,8 @@
     必须只选一个集合的 worker 0 写 offsets，不能让两个角色各自的 0 并发写。
     取行 helper 则在压缩消费者的 AIV 内返回 UB Tile，不跨核返回 tile 存储。
     offsets 的前缀有跨请求依赖，首版保持单写者，避免每个请求再扫描全部
-    前驱形成 O(B²)。调用者安排它与数学并行，并在完成后发布阶段信号。
-    消费者先等 offsets/count 可见再调用取行或 Hadamard；各函数不创建 task 或
-    notify。RoPE 输入由 Native 生产，其 stream/event 依赖仍由外层保证。
+    前驱形成 O(B²)。当前由AICPU编排同步调用，完成后提交消费者。
+    消费者通过任务输入读取offsets/count，再调用取行或Hadamard；不使用阶段信号。RoPE 输入由 Native 生产，其 stream/event 依赖仍由外层保证。
     offsets 即使为负也是合法中间量，必须加 (position+1)//4 后才作下标。
     设请求历史起点 H=L-(Q[r+1]-Q[r])，前面请求已输出 prefix 个紧凑行，
     本请求关闭数为 floor(L/4)-floor(H/4)，offset=prefix-floor(H/4)-1。
@@ -95,7 +94,7 @@ def compact_offsets_stage(
     """指定集合的 worker 0 写 offsets[B]；所有输入均为当前调用的 device 值。
 
     其它 worker 的空返回不表示 offsets 已生成；真正的生产者完成整个请求
-    扫描后，外层才能发布该阶段。dummy 槽写零仅清除旧值，不把它变成活动请求。
+    扫描后，编排层才会提交消费者。dummy 槽写零仅清除旧值，不把它变成活动请求。
     """
     if worker_id == 0:
         offsets, _count = _scan_compact_offsets(bounds, lengths, offsets, token_capacity)
@@ -111,7 +110,7 @@ def compact_offsets_and_count_stage(
     token_capacity: pl.Scalar[pl.INDEX],
     worker_id: pl.Scalar[pl.INDEX],
 ):
-    """同一扫描写 offsets 与实际行数，外层一次发布这两个 GM 输出。
+    """同一扫描写offsets与实际行数，AICPU编排完成写入后提交消费者。
 
     count 来自合法 Q/L 的关闭候选数，不能因 stale position 缩减，否则会
     改变后续请求的 Native compact 偏移。norm 先初始化各请求的候选行，再

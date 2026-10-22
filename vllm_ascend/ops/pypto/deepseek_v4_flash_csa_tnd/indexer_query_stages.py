@@ -400,3 +400,24 @@ def indexer_query_dequant_rope_wide_stage(
                             tail_rope_bf16
                         )
     return qr_bf16_2d
+
+
+@pl.jit.inline(auto_scope=False)
+def indexer_query_hadamard_four_tokens_stage(
+    query_rope: pl.Tensor[[ROPE_HEAD_ROWS_DYN, 128], pl.BF16],
+    hadamard: pl.Tensor[[128, 128], pl.BF16],
+    query_had: pl.InOut[pl.Tensor[[HADAMARD_ROWS_DYN, 128], pl.FP32]],
+    tokens: pl.Scalar[pl.INDEX],
+    worker: pl.Scalar[pl.INDEX],
+    WORKERS: pl.constexpr,
+):
+    """M256只合并独立行；每行的K128乘加、输出舍入和head顺序保持不变。"""
+    rows = tokens * 64
+    weight = hadamard[0:128, 0:128]
+    for block in pl.range(worker, (rows + 255) // 256, WORKERS):
+        first = block * 256
+        valid = pl.min(256, rows - first)
+        source = pl.slice(query_rope, [256, 128], [first, 0], valid_shape=[valid, 128])
+        result = pl.matmul(source, weight, out_dtype=pl.FP32)
+        query_had = pl.assemble(query_had, result, [first, 0])
+    return query_had

@@ -51,8 +51,8 @@
     大 M128 路径不再初始化 [T,P_MM) partial 尾区；唯一消费者按真实 T
     逐行加载 [1,4096]，不得把这段未写区域当作有效输出或跨调用初值。
     终端 AIV 必须等待所读 token 的八组 O_B partial、八个 activation scale、
-    HC pre post/comb 完成并可见。ND/NZ 的 owner 不同，不能套单纯行 tile 的
-    wait_row_owners。返回 Tensor 引用只表达数据流，不等于其它核已经完成。
+    HC pre post/comb 完成并可见。独立HCpost task通过Tensor依赖等待全部输入，
+    不按ND/NZ的核归属自行轮询生产者。
     只写实际 T 的输出；大于当前使用范围的工作区保持原值。输入/输出默认
     不重叠；alias、容量、合法 ROW_TILE 和正 WORKERS 由捕获前统一验证。
 

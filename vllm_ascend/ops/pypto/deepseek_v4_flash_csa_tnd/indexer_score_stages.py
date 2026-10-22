@@ -2565,7 +2565,7 @@ def indexer_score_vector_lane_stage(
                 single_valid = pl.min(single_capacity, single_visible - single_begin)
                 single_steps = (single_valid + score_tile - 1) // score_tile
                 # 叶起点按1024对齐，且META已检查整请求所有有效页。
-                # 当前角色在外层取得PHASE_META，方向/页号来自同一次调用。
+                # 方向/页号由本次AICPU编排写入，Score提交前已完成布局检查。
                 # 不再对每叶、每lane重复做Vector证明；0方向保留原逐页路径。
                 single_page_begin = single_begin // BLOCK_SIZE
                 single_page_count = (single_valid + BLOCK_SIZE - 1) // BLOCK_SIZE

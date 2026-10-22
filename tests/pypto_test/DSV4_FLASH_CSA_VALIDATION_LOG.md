@@ -21999,3 +21999,72 @@ reshape编译失败。复用task_20261021_204807_386597714的原始通过快照�
 路径，不为采集额外打开分数输出或改变算法。最后一列严格用未舍入中位数计算
 (Native−TND-SPMD)/TND-SPMD；不增加几何平均，不解释为整网吞吐提升。
 本轮只修改测试与证据，生产算子和公共SDK未变，未恢复优化Goal，未跑16卡，未push。
+
+### 735.58：按用户新目标纠正TND多task架构，禁止算法层软同步
+
+用户在审查八档L1后指出：当前实现偏向分段常驻SPMD，不能以“仍有多个task”
+代替BSH-MPMD的独立任务与动态依赖图。新Goal要求跨task只用AICPU调度，删除
+GM信号、phase/代际及轮询工作区；单个数学task内必要的硬件流水同步保留。
+本阶段启动基线为`67134f28b`，公共SDK仍为csa-shared-20261021-upstream-fixes，
+具体版本和两套测试口径索引见
+[baseline.json](csa_mpmd_aicpu_20261022/baseline.json)。旧结果和粗粒度源码保留原历史。
+
+128K/B16/S6同口径原始记录：BSH为67个独立任务组、970条incore记录，当前TND为
+12个独立任务组、385条incore记录。前者不能与核数或源码函数个数混淆。需要恢复的边界：
+
+| 当前大任务 | 恢复的计算任务与依赖 |
+|---|---|
+| hc_prefix | widen/RMS、linear、reduce、gates、mix/norm；Sinkhorn独立 |
+| index_front | Indexer投影、pool/state、norm/RoPE、Hadamard、量化/cache；query和weights各自成链 |
+| main_front | 主Compressor各阶段、Q_B及dequant/RoPE、KV及norm/cache独立 |
+| middle | Score局部Cube/Vector数学流水、Top-K归并、页计划、Attention独立 |
+| output_chain | O_A、量化、O_B、HC_post独立，后续按数据切片恢复可调度分组 |
+
+metadata处理：请求/组/叶标量规划迁至AICPU；紧凑行偏移和实际关闭数仍需正确计算；
+Native Q/L、slots、页表直接复用。scale页写入计划保护同页64B读改写唯一所有权，
+不能直接删掉。先迁移标量规划并保持数据合同，再缩减冗余GM表和恢复参数/切片粒度。
+不新增Host回读，不把图捕获时的Q/L冻结，不把AICPU时间隐藏到测试复位过程。
+
+当前仅开始重构，未声明新实现编译或设备通过。首轮先恢复全链独立调度、删除软同步，
+再验证混长和同址metadata。新八档性能按现行规范采集，旧10%目标场景、权重与参考
+保持原义分别判断。本Goal仅单卡，阶段中文Signed-off-by提交，不自动push。
+
+### 735.59：删除阶段软同步，长短两档正确性通过；性能仍未达标
+
+首阶段删除11个软同步/常驻流水模块及6类signal根参数、分配、清零和policy分支。
+HC、Indexer/Main各计算阶段、Score/Top-K/Attention、O_A/量化/O_B/HCpost恢复独立
+任务。保留已验证四token Hadamard数学，将其从软同步容器移入纯计算模块。
+Score与Attention内部仍用必要的硬件FIFO/FFTS，不存在算法层GM轮询。
+长档生成42处runtime submit，原csa_row_offsets不再是AICore task；标量规划由
+AICPU的get/set_tensor_data执行。对应源码/生成编排检查见
+[aicpu_v3_architecture.json](csa_mpmd_aicpu_20261022/aicpu_v3_architecture.json)。
+
+CPU首轮遇到编排后端未实现And表达式，改成等价嵌套if，未修改公共SDK。
+原scale页证明含Vector归约，不能直接放到编排；改为首尾筛选后逐页整数校验，
+保持正/逆序、碎片回退和保守容量边界。此路径仍需后续连续/碎片页专门验证，
+本次两档采用的scale_page_coalescing均为False。
+
+长档v2首次eager失败：cache/state及保护区全部通过，Top-K有效行全部失效。
+小型中间值对照明确定位唯一规划差异：group_plan[6]在SPMD是-1、AICPU是1；
+其余group_offsets、紧凑偏移/count、query量化、head weights和coefficients逐bit相同。
+PTO后端将BOOL转INT32生成为arith.extsi i1→i32，而AICPU用static_cast得到1。
+v3在planner和Top-K两侧明确编码整数0/1，不依赖BOOL扩展，也不放宽数值规则。
+证据见[aicpu_v2_diagnostic.json](csa_mpmd_aicpu_20261022/aicpu_v2_diagnostic.json)。
+
+两档均为旧优化合同的固定混长/padding场景，**不是新八档S6表的同名行**。
+每侧10个交替单次L1窗口，以下为中位数，全部样本、min/mean/max及任务号保存在
+[stage1_evidence.json](csa_mpmd_aicpu_20261022/stage1_evidence.json)。
+
+| 场景 | 候选 | SPMD L1中位数μs | MPMD L1中位数μs | 数值与保护区 |
+|---|---|---:|---:|---|
+| 128K/B16，实际T55/容量64，请求容量17 | v3 | 721.40 | 922.52 | eager/图/post-L1全部逐bit，保护区通过 |
+| 8K/B32，实际T112/容量112，请求容量33 | v2 | 733.73 | 1039.61 | eager/图/post-L1全部逐bit，保护区通过 |
+
+诊断启动器一次替换断言失败后误提交了未加dump的副本，已主动终止该任务并记录，
+不算有效验证。正确诊断仅导出每侧约1.5MB中间量，没有复制大KV或新增性能数据。
+
+当前只是架构纠正检查点：仍需把全量Score/输出等任务进一步按数据范围拆分，
+减少临时GM规划表，验证同址metadata与连续状态，补最新八档含AICPU的性能。
+短档代表窗口HC结束65.44μs、下一任务127.20μs，中间无incore活动；Indexer query
+投影也明显晚于QR生产完成。应继续分析规划成本和派发先后，不能退回软同步融合。
+不以这两档代表全矩阵、不宣布达到超SPMD10%目标；公共工具链未变，未push。
