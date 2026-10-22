@@ -67,7 +67,11 @@ def main():
     (destination / "vllm_ascend" / binaries[0].name).symlink_to(binaries[0])
     vendor = repo / "vllm_ascend/_cann_ops_custom"
     if vendor.exists():
-        (destination / "vllm_ascend/_cann_ops_custom").symlink_to(vendor, target_is_directory=True)
+        installed = destination / "vllm_ascend/_cann_ops_custom"
+        installed.mkdir(exist_ok=True)
+        for child in vendor.iterdir():
+            if not (installed / child.name).exists():
+                (installed / child.name).symlink_to(child, target_is_directory=child.is_dir())
     runner = destination / "tests/pypto_test/offline_pd/run.py"
     code = runner.read_text()
     needle = '"worker_extension_cls": "offline_pd.observer.OfflineCSAObserver"'
