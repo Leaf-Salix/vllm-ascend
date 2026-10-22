@@ -1,0 +1,138 @@
+{
+  "full_compile_passed": true,
+  "device_execution": false,
+  "source": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/compile_output_tall_C05_v1",
+  "resources": {
+    "cube_schedule": {
+      "pl.Mem.Vec": 16384,
+      "pl.Mem.Left": 65536,
+      "pl.Mem.Acc": 131072,
+      "pl.Mem.Right": 65536,
+      "pl.Mem.Mat": 475136
+    },
+    "vector_schedule": {
+      "pl.Mem.Vec": 180224
+    }
+  },
+  "oa_tile_views": [
+    {
+      "shape": "[192, 128]",
+      "dtype": "pl.FP32",
+      "memory": "pl.MemRef(mem_acc_366, pl.const(0, pl.INT64), 98304)",
+      "space": "pl.Mem.Acc"
+    },
+    {
+      "shape": "[192, 256]",
+      "dtype": "pl.BF16",
+      "memory": "pl.MemRef(mem_mat_819, pl.const(163840, pl.INT64), 98304)",
+      "space": "pl.Mem.Mat"
+    },
+    {
+      "shape": "[192, 256]",
+      "dtype": "pl.BF16",
+      "memory": "pl.MemRef(mem_mat_819, pl.const(65536, pl.INT64), 98304)",
+      "space": "pl.Mem.Mat"
+    },
+    {
+      "shape": "[192, 64]",
+      "dtype": "pl.BF16",
+      "memory": "pl.MemRef(mem_left_364, pl.const(0, pl.INT64), 24576)",
+      "space": "pl.Mem.Left"
+    },
+    {
+      "shape": "[192, 64]",
+      "dtype": "pl.BF16",
+      "memory": "pl.MemRef(mem_left_364, pl.const(24576, pl.INT64), 24576)",
+      "space": "pl.Mem.Left"
+    },
+    {
+      "shape": "[256, 128]",
+      "dtype": "pl.BF16",
+      "memory": "pl.MemRef(mem_mat_819, pl.const(163840, pl.INT64), 65536)",
+      "space": "pl.Mem.Mat"
+    },
+    {
+      "shape": "[256, 128]",
+      "dtype": "pl.BF16",
+      "memory": "pl.MemRef(mem_mat_819, pl.const(262144, pl.INT64), 65536)",
+      "space": "pl.Mem.Mat"
+    },
+    {
+      "shape": "[256, 128]",
+      "dtype": "pl.BF16",
+      "memory": "pl.MemRef(mem_mat_819, pl.const(327680, pl.INT64), 65536)",
+      "space": "pl.Mem.Mat"
+    },
+    {
+      "shape": "[64, 128]",
+      "dtype": "pl.BF16",
+      "memory": "pl.MemRef(mem_right_377, pl.const(0, pl.INT64), 16384)",
+      "space": "pl.Mem.Right"
+    },
+    {
+      "shape": "[64, 128]",
+      "dtype": "pl.BF16",
+      "memory": "pl.MemRef(mem_right_377, pl.const(16384, pl.INT64), 16384)",
+      "space": "pl.Mem.Right"
+    },
+    {
+      "shape": "[64, 128]",
+      "dtype": "pl.BF16",
+      "memory": "pl.MemRef(mem_right_377, pl.const(32768, pl.INT64), 16384)",
+      "space": "pl.Mem.Right"
+    },
+    {
+      "shape": "[64, 128]",
+      "dtype": "pl.BF16",
+      "memory": "pl.MemRef(mem_right_377, pl.const(49152, pl.INT64), 16384)",
+      "space": "pl.Mem.Right"
+    }
+  ],
+  "oa_weight_load_sites": [
+    {
+      "variable": "wa_first_inline3091__tile",
+      "expression": "pl.tile.load(wo_a__ssa_v0, [g_inline3106__ssa_v0, n0_inline3094__ssa_v0 // 16, 0, 0, 0], [1, 8, 16, 16, 16], [1, 8, 16, 16, 16], target_memory=pl.Mem.Mat, cache=1)"
+    },
+    {
+      "variable": "wa_k_chunk_inline3105__tile_2",
+      "expression": "pl.tile.load(wo_a__ssa_v0, [g_inline3106__ssa_v0, n0_inline3094__ssa_v0 // 16, k0_inline3089__ssa_v0_2 // 16, 0, 0], [1, 8, 16, 16, 16], [1, 8, 16, 16, 16], target_memory=pl.Mem.Mat, cache=1)"
+    },
+    {
+      "variable": "wa_k_chunk_inline3105__tile",
+      "expression": "pl.tile.load(wo_a__ssa_v0, [g_inline3106__ssa_v0, n0_inline3094__ssa_v0 // 16, k0_inline3089__ssa_v0 // 16, 0, 0], [1, 8, 16, 16, 16], [1, 8, 16, 16, 16], target_memory=pl.Mem.Mat, cache=1)"
+    },
+    {
+      "variable": "wa_k_chunk_inline3105__tile_1",
+      "expression": "pl.tile.load(wo_a__ssa_v0, [g_inline3106__ssa_v0, n0_inline3094__ssa_v0 // 16, k0_inline3089__ssa_v0_1 // 16, 0, 0], [1, 8, 16, 16, 16], [1, 8, 16, 16, 16], target_memory=pl.Mem.Mat, cache=1)"
+    }
+  ],
+  "oa_k_loops": [
+    {
+      "targets": "(acc_a_inline3090__tile_l0_ko, (acc_a_inline3090__tile_l0_c,))",
+      "range": "pl.range(0, 256, 128, init_values=(acc_a_inline3090__tile_l0_init,))"
+    },
+    {
+      "targets": "(kb_inline3100__idx_v0, (acc_a_inline3090__iter_v1,))",
+      "range": "pl.range(1, 15, 2, init_values=(acc_a_inline3090__tile,))"
+    },
+    {
+      "targets": "(acc_a_inline3090__iter_v1_l0_ko_2, (acc_a_inline3090__iter_v1_l0_c_2,))",
+      "range": "pl.range(0, 256, 128, init_values=(acc_a_inline3090__rv_v2_main,))"
+    },
+    {
+      "targets": "(acc_a_inline3090__iter_v1_l0_ko, (acc_a_inline3090__iter_v1_l0_c,))",
+      "range": "pl.range(0, 256, 128, init_values=(acc_a_inline3090__iter_v1,))"
+    },
+    {
+      "targets": "(acc_a_inline3090__iter_v1_l0_ko_1, (acc_a_inline3090__iter_v1_l0_c_1,))",
+      "range": "pl.range(0, 256, 128, init_values=(acc_a_inline3090__iter_v1_1,))"
+    }
+  ],
+  "abi_unchanged": true,
+  "notes": [
+    "One M192 accumulator and BF16 K64 Left/Right tiles are present in the actual full compiler output",
+    "K256 outer stage=2 and ordered K64 inner reductions remain; numerical equality still requires device checks",
+    "Logical tile load sizes do not prove actual HBM byte counts; no hardware performance claim",
+    "All workspace root arguments and return ABI match C05 baseline"
+  ]
+}

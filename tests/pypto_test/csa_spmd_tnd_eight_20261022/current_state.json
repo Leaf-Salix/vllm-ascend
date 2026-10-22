@@ -31,13 +31,14 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {},
+  "pending_tasks": {
+    "C05_output_tall_v1": "task_20261023_013451_23777723578"
+  },
   "next_steps": [
-    "User requests macro-level optimization: analyze complete-DAG costs and data movement before more parameter experiments",
-    "Reuse current C05 phase evidence; distinguish task arrival, service, FIFO waiting and completion instead of summing phase endpoints",
-    "Jointly model O_A/quant/O_B work placement and repeated weight loads; reject old row-only and O_B-only negative variants",
-    "For cross-stage scheduling, preserve leaf-level locality and global work balance; do not rerun the rejected fine-step wave design",
-    "Prioritize C04/C05, preserve retained C04 improvement and frozen combined_v1 denominator; all eight cases still count equally; no push"
+    "Collect C05 output_tall_v1 strict full-chain checks and ten-window median against original same-SDK 1014.46us",
+    "Finish C04 disabled-path codegen equivalence to retained production",
+    "If complete-L1 gain is material, validate metadata/continuous state and canonical service, then C06/C07 and resource boundaries",
+    "Continue C04 prefix/Score/Attention macro-cost analysis; original eight-case goal and retained C04 gain remain; no push"
   ],
   "knowledge_query": {
     "status": "index_missing",
@@ -58,9 +59,10 @@
     "output_tail_balance": 17,
     "uniform_geometry": 71,
     "output_quant_schedule": 14,
-    "uniform_meta": 63
+    "uniform_meta": 63,
+    "output_tall": 34
   },
-  "updated_at": "2026-10-23T01:17:56.044701+08:00",
+  "updated_at": "2026-10-23T01:37:46.067987+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -201,6 +203,15 @@
       "full_codegen_passed": true,
       "device_execution": false,
       "decision": "Defer per-block proof; prefer the less repeated leaf proof first"
+    },
+    "output_tall_v1": {
+      "source": "output_tall_v1.json",
+      "case": "C05",
+      "full_codegen_passed": true,
+      "codegen_audit": "output_tall_v1_codegen.json",
+      "cpu_checks": 34,
+      "adopted": false,
+      "C04_off_cpp_equal": true
     }
   },
   "local_stage_commit": "3a0f423c6",
