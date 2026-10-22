@@ -31,15 +31,13 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {
-    "C04_retained_phase_sdk_v1": "task_20261023_014328_266874830877"
-  },
+  "pending_tasks": {},
   "next_steps": [
-    "Collect original C04 retained phase task_20261023_014328_266874830877; analyze with --measured-candidate and exact CPP path in phase_analyzer_candidate_reference_checks.json",
-    "Use current C04 diagnostic to separate prefix arrivals and Score steady work; preserve existing retained optimization",
-    "C05 output model balance improved but final median only 0.35%; do not adopt or scan neighboring M/N without new evidence",
-    "For C05, assess coarse leaf/query progress plus both TopK and Attention dependency granularity; account for AIC/AIV availability, cache readiness and resident state before implementing",
-    "Keep original eight-case equal-weight 10% objective, frozen combined_v1 denominator, strict checks and no-push requirement"
+    "Evaluate joint non-QA BF16 projection grid using existing Native weights and output buffers; keep QA early",
+    "First prove actual compiled resources, writer coverage and all existing consumers waiting for the new writer set",
+    "Keep exact arithmetic validation: original compressor/KV K512 versus proposed K256 needs device proof",
+    "Existing phase/PMU/readiness data are diagnostics only; do not replace full L1 or infer free overlap",
+    "Eight-case goal, original denominator, retained C04 leaf optimization and no push remain"
   ],
   "knowledge_query": {
     "status": "index_missing",
@@ -61,9 +59,10 @@
     "uniform_geometry": 71,
     "output_quant_schedule": 14,
     "uniform_meta": 63,
-    "output_tall": 34
+    "output_tall": 34,
+    "pipe_reader": 10
   },
-  "updated_at": "2026-10-23T02:02:08.936692+08:00",
+  "updated_at": "2026-10-23T03:01:22.845983+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -84,6 +83,24 @@
       "valid_windows": 0,
       "reason": "Candidate synchronize raised 507015 VEC instruction parameter invalid; frozen reference eager passed",
       "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b16_s6_scale_gather_v4_env2"
+    },
+    {
+      "task_id": "task_20261023_021935_38554996813",
+      "case_id": "C04",
+      "status": "completed (exit=1)",
+      "candidate": "hardware_pipe_reader_v1",
+      "device_execution": true,
+      "reason": "CSV has no Step Id; parsing interrupted post-profile validation; original data retained",
+      "action": "v2 binds records through explicit trace markers and checks post-profile state before parsing"
+    },
+    {
+      "task_id": "task_20261023_021935_385554318608",
+      "case_id": "C05",
+      "status": "completed (exit=1)",
+      "candidate": "hardware_pipe_reader_v1",
+      "device_execution": true,
+      "reason": "CSV has no Step Id; parsing interrupted post-profile validation; original data retained",
+      "action": "v2 binds records through explicit trace markers and checks post-profile state before parsing"
     }
   ],
   "rejected_candidates": [
@@ -273,14 +290,12 @@
     }
   ],
   "pending_observation": {
-    "observed_at": "2026-10-23T02:02:08.936692+08:00",
+    "observed_at": "2026-10-23T03:01:22.845968+08:00",
     "tasks": {
-      "task_20261023_013451_23777723578": "completed (exit=0)",
-      "task_20261023_014251_264666425693": "completed (exit=0)",
-      "task_20261023_014328_266874830877": "pending"
+      "task_20261023_023331_4141726772": "completed (exit=0)",
+      "task_20261023_023331_414564088": "completed (exit=0)"
     },
-    "own_pending_tasks": 1,
-    "source": "task-submit --status; original handles preserved"
+    "own_pending_tasks": 0
   },
   "prepared_uniform_state": "uniform_meta_state_v1.json",
   "macro_review": {
@@ -307,6 +322,9 @@
     }
   ],
   "diagnostic_results": {
-    "C05_output_tall_v1": "output_tall_v1_C05_phase.json"
+    "C05_output_tall_v1": "output_tall_v1_C05_phase.json",
+    "C04_retained_phase": "retained_C04_phase_sdk_v1.json",
+    "C04_current_pipe": "current_C04_pipe_sdk_v2.json",
+    "C05_current_pipe": "current_C05_pipe_sdk_v2.json"
   }
 }

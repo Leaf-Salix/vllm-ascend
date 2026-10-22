@@ -1,0 +1,54 @@
+{
+  "device_execution": false,
+  "performance_eligible": false,
+  "scope": "Source-level five non-QA BF16 projection grid; original shared x tile counted once for compressor pairs",
+  "constraints": [
+    "No data precomputation or Host metadata readback",
+    "Native weight roots and output buffers retained; no weight concatenation cache",
+    "QA and split-K head weights remain unchanged",
+    "K512 to K256 grouping is not assumed bit-equivalent before actual validation",
+    "Actual generated TLOAD/TEXTRACT and live memory must be audited before hardware testing"
+  ],
+  "cases": {
+    "C04": {
+      "tokens": 96,
+      "old_non_qa_matmul_chains": 172,
+      "new_non_qa_matmul_chains": 24,
+      "old_weight_logical_MiB": 68,
+      "new_weight_logical_MiB": 24,
+      "old_activation_logical_MiB": 21.0,
+      "new_activation_logical_MiB": 18.0,
+      "row_tile": 128
+    },
+    "C05": {
+      "tokens": 144,
+      "old_non_qa_matmul_chains": 252,
+      "new_non_qa_matmul_chains": 24,
+      "old_weight_logical_MiB": 96,
+      "new_weight_logical_MiB": 24,
+      "old_activation_logical_MiB": 31.5,
+      "new_activation_logical_MiB": 27.0,
+      "row_tile": 192
+    },
+    "C06": {
+      "tokens": 168,
+      "old_non_qa_matmul_chains": 292,
+      "new_non_qa_matmul_chains": 24,
+      "old_weight_logical_MiB": 112,
+      "new_weight_logical_MiB": 24,
+      "old_activation_logical_MiB": 36.75,
+      "new_activation_logical_MiB": 31.5,
+      "row_tile": 192
+    },
+    "C07": {
+      "tokens": 192,
+      "old_non_qa_matmul_chains": 300,
+      "new_non_qa_matmul_chains": 24,
+      "old_weight_logical_MiB": 108,
+      "new_weight_logical_MiB": 24,
+      "old_activation_logical_MiB": 42.0,
+      "new_activation_logical_MiB": 36.0,
+      "row_tile": 192
+    }
+  }
+}

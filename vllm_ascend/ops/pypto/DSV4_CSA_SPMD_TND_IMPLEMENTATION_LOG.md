@@ -4355,3 +4355,70 @@ query门槛才可到8步。这仍未解决实际核占用、因果cache依赖或
 并保留完整叶的Query/Coeff驻留，不能恢复已失败的逐step波次交错；B16先看
 真实前段到达与Score稳态供数。`score_readiness_model.json`保留完整数组与
 假设，不把33→8写成性能加速。原八档10%目标active，生产未改变，未push。
+
+
+### 2026-10-23：当前两档阶段/硬件证据收齐，选择前段联合投影方向
+
+上一轮完成了联合输出候选、阶段诊断和依赖粒度模型，属于实际进展。核对
+goal仍active、工作树起点干净、公共SDK仍logical-codegen/validated。
+C04阶段任务task_20261023_014328_266874830877 completed/exit0，三窗和完整
+精度/保护通过；未插桩CPP与已采用763.65μs版本的实际CPP唯一匹配，见
+`retained_C04_phase_sdk_v1.json`。其中Score AIC完成离散度6.94μs，Attention
+AIV为10.42μs；META最后位置18.50、QUERY271.42、SCORE_VECTOR457.82、
+ATTN_VECTOR647.78、OUT787.28μs。均是插桩定位，不能替代完整L1或相加认领收益。
+
+对照旧两wave模型也再次确认：均衡固定owner即便零交接成本，Score+Attention
+串行服务总量仍可能不变；完整叶切换还会增加流水启动/排空。故没有仅因
+“首个query可更早就绪”就实现设备队列。先补当前版本的真实流水占用，
+避免拿较早SDK的PMU给当前算子归因。
+
+新增PMU壳复用当前完整fixture、权重、源/SDK校验、图与逐bit检查，只将正式
+L1采样替换为三次candidate图重放。按[官方Profiler Level1接口说明](https://www.hiascend.com/doc_center/source/en/CANNCommunityEdition/910/devaids/Profiling/atlasprofiling_16_0033.html)
+采PipeUtilization，保留原始CSV/trace、实际编译配置路径及全72角色代际检查。
+没有调用begin_dfx，没有生成新的L1分母或候选性能窗口。
+
+首版C04/C05任务task_20261023_021935_38554996813和
+task_20261023_021935_385554318608均在CSV解析时exit1：当前kernel_details.csv
+没有旧版Step Id列，导致采样后数据检查未执行。两份已采原始记录及冻结v1壳
+保留，不把这次失败说成算子或SDK精度故障。v2按三个显式
+CSA_TND_CURRENT_PMU trace区间一一绑定MIX记录，并将解析放在采样后检查之后。
+缺marker、越界/重叠marker、缺核、重复step、NaN/无效计数等10项CPU检查通过；
+实际v1 CSV可离线解析，但缺失的采样后检查仍不能补记PASS。
+
+修正后的C04 task_20261023_023331_4141726772、C05
+task_20261023_023331_414564088均completed/exit0。各三次全24 AIC+48 AIV记录，
+eager/graph/post-PMU输出、Top-K/score、cache/state及保护逐bit通过；三次采样
+的全核代际恰增加3，512B槽padding保持。显式选择candidate编译目录，与同SDK
+已测C04保留实现/C05原版的完整CPP核对一致。结果为current_C04_pipe_sdk_v2.json、
+current_C05_pipe_sdk_v2.json，原始三样本均保留。
+
+| 当前实现 | AIC MAC μs | AIC Scalar μs | AIC MTE1 μs | AIC MTE2 μs | AIC FIX μs | AIV Vector μs | AIV Scalar μs |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| C04 / 128K B16 | 192.852 | 354.232 | 254.844 | 368.195 | 187.978 | 187.982 | 413.974 |
+| C05 / 128K B24 | 289.240 | 437.211 | 394.037 | 457.079 | 277.847 | 279.495 | 514.095 |
+
+这是工具对完整核的汇总，非72条逐核流水，也不定位到某个投影；各pipe可
+重叠，Scalar可能含忙等，不能相加或用外层Duration减去它们得到可省时间。
+当前AIC/AIV ICache miss原值分别为0.003/0.006、0.003/0.005，也不等于
+stall微秒。该数据支持下一步同时减少重复搬运和零散指令，而非只平均任务数。
+
+另核对组件路线以避免重做已知问题：[PyPTO #3038](https://github.com/hw-native-sys/pypto/issues/3038)
+仍OPEN，当前view仍只派生canonical stride，不能绕过保护把Native页尾scale
+当连续Key。L2 BYPASS当前PTOAS0.69只有在提供offset时才调整源地址；
+[PTOAS #1537](https://github.com/hw-native-sys/PTOAS/issues/1537)已记录旧runtime偏移未初始化的风险并关闭修复。
+未硬编码地址偏移或把策略标签当作有效指令。#1625的槽范围修正及后续两级
+预取已有完整正负设备记录，不能原样再测。公共SDK始终未修改/重建。
+
+下一候选聚焦Q_A之后的五路BF16投影：Indexer value/gate、主value/gate和
+原KV。它们都读取同一normed[T,4096]，输出总宽3072；Q_A和split-K head权重
+保留原路径。拟用每块128列、单M128/M192的24任务格子共同分配，沿用现有
+Native权重根与原输出缓冲，不新增权重拼接缓存或Host metadata回读。这样既
+减少跨M重复读权重，也把主投影/KV前移到同一准备阶段，避免它们继续串在
+Indexer query或Q_B之后。不是把旧单个KV轮换/后移负例重命名。
+
+源码层面的初步模型见joint_prefix_work_model.json：C04非QA完整K归约链
+172→24，权重逻辑读取68→24MiB、激活21→18MiB；C05为252→24、权重96→24、
+激活31.5→27MiB。原成对投影的X按源码共享计一次，实际生成DMA/指令仍须
+核对，不能直接折算收益。该方向会改变K512到K256的分段和写者分配，必须
+验证片上资源、所有消费者依赖及完整设备逐bit精度；当前尚无实现采用或
+性能结论。所有本轮任务已终态，原八档10%目标继续active，未push。
