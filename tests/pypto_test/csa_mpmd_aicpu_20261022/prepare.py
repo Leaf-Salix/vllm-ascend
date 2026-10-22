@@ -13,6 +13,24 @@ REPO = HERE.parents[2]
 PREVIOUS = HERE.parent / "csa_mpmd_tnd_20261021"
 
 
+def enable_short_state_case(text):
+    """加入独立的8320/B32状态场景；原性能输入与状态矩阵步骤不变。"""
+    old = '("h131072_b16", "h131072_b28")'
+    assert text.count(old) == 1
+    text = text.replace(old, '("h131072_b16", "h131072_b28", "h8320_b32_state")')
+    text = text.replace(
+        "状态矩阵只从长B16/B28构造SPMD/MPMD两侧功能场景，不能混入其它对照",
+        "状态矩阵只使用冻结的长档或短档功能场景，不能混入其它对照",
+    )
+    old = "    check_case(case)\n"
+    assert text.count(old) == 1
+    return text.replace(
+        old,
+        old + '    if case.get("state_validation_only", False) and not args.state_validation:\n'
+        '        raise ValueError("该场景只用于同址状态验证，不得混入性能矩阵")\n',
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("name")
@@ -40,7 +58,7 @@ def main():
     text = runner.read_text()
     # 完整性能对照每侧10个窗口；单独状态验证仍由原入口控制，不增加重复运行。
     assert text.count("range(5)") == 1
-    runner.write_text(text.replace("range(5)", "range(10)"))
+    runner.write_text(enable_short_state_case(text.replace("range(5)", "range(10)")))
     helpers = destination / "helpers"
     helpers.mkdir()
     pending = {"dsv4_csa_env", "dsv4_csa_native_case", "dsv4_csa_single_layer", "dsv4_csa_validation"}
