@@ -1029,3 +1029,39 @@ pl.spmd/split_aiv/aic_gather就自动省去GM。本轮没有为该假设改写At
 
 当前所有任务已终态，无CPU/设备pending。生产默认未变，仍未形成最终九档
 G<=0.90及完整新服务验收；goal继续active，未push。
+
+
+### 内部RoPE索引常驻：生产者证明与完整生成物审计通过，三档已提交
+
+目标继续为九档等权G<=0.90：八档S6和固定128K/B16混长，分母仍是冻结v122。
+新query_resident_swap基于query_resident_weights，只将q_swap_one、
+q_swap_repeated和q_abs_swap移到Query工作循环前；读取内部rope_swap的第0行。
+新增tokens>0保护，空输入不读不存在的第0行。逐query的cos/sin、逐work的
+可写gather scratch、完整原tail helper及所有同步/ABI均保持。
+
+三个CPU合同通过：执行实际q_rope_prepare_stage的数学，覆盖T0/1/6/7/8/9、
+T24/48/56/65/72/96/144/168/192/193和1/7/16/48个worker，随机sin不同，
+所有有效行仍为(1,0,3,2,...)；恢复三条索引准备语句后整个旧Query函数AST相同；
+核对原PHASE_ROPE生产、发布、获取先于消费者，等待范围覆盖row0生产者。
+producer用min(workers,token_tiles)分配，row0始终由worker0写；原获取还包含
+业务cacheinvalid/fence和本轮generation，没有增加新通知协议。
+
+B16完整CPU编译通过；参考cannbot已读的resident状态复用卡，按真实物理UB
+地址核查，不把MemRef名当独立bank。新索引为[51200,53248)，两路展开和最后
+单work均无覆盖，包括scratch和别名分配；C++只有一次索引TLOAD，三个TGATHER
+均读同一驻留tile。MTE2→V事件成对且在转换前获取。固定a2a3 TGather.hpp的
+FP32分支将byte-offset暂存和gather结果写到dst，不修改src1索引。权重驻留
+独立复审也通过；整体Vec上界仍163872B，packed_meta与父版完全相同。
+
+复现入口prepare_query_resident_swap.py，CPU合同test_query_resident_swap.py，
+审计audit_query_resident_swap.py及原audit_query_resident_weights.py。报告
+query_resident_swap_resources.json和query_resident_swap_weight_resources.json。
+这些是源码/生成物证据，不是设备正确性或性能通过。Ruff检查通过。
+
+完整72核L1、同轮冻结v122、五个交替窗口任务：
+- B16/S6：task_20261022_083320_6419639195
+- 固定混长T56：task_20261022_083333_65038322156
+- 8K/B32/S6：task_20261022_083346_6590615021
+
+均由冻结harness的submit_probe.py经task-submit自动分卡，不改公共SDK。
+当前待终态；无生产采用，不相加父版或独立候选收益。
