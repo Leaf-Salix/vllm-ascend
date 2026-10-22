@@ -6,7 +6,13 @@
 无需安装 vLLM、vLLM-Ascend 或编译 Native 自定义算子。
 
 CSA-SPMD、CSA-SPMD-TND、CSA-MPMD-TND共用本目录的`manifest.json`。
-当前发布`csa-shared-20261021-upstream-fixes`已完成构建、定向回归及长短两档单卡验证。
+当前选择`csa-shared-20261022-logical-codegen`，状态为`validated`：已完成独立构建、
+113项编排回归和大容量CSA CPU编译，128K/B24/S6及混长B16的单卡数值、状态和图验证通过。PyPTO仅增加官方#3000的
+逻辑表达式生成修复；PTOAS和Simpler不变。详见
+[升级证据](../csa_mpmd_aicpu_20261022/upstream_logical_refresh/manifest.json)。
+大容量MPMD的AICPU逐页校验仍存在性能问题，SDK验证通过不代表算子性能达标。
+此前`csa-shared-20261021-upstream-fixes`的源码和构建产物原样保留，已启动进程继续
+使用启动时绑定的路径；新启动器统一读取当前清单。历史结果仍标记原版本。
 其中路径同时指定源码和实际构建产物；目录名保留开发时名称，三个session不再各选一套SDK。
 
 ```bash
