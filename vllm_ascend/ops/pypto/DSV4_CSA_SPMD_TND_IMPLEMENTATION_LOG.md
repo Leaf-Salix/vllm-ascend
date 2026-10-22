@@ -3929,3 +3929,32 @@ L1之外outer profiler差异单列。没有伪造源码hash或替换任何原始
 DSB和末尾PIPE_ALL。潜在缩距只作signal_layout_research.json假设，未改源码
 或提交设备任务。尤其不能删除通知前PIPE_ALL：通知后的barrier不保证信号
 发布前业务写回完成；现有阶段插桩使用槽内16～19字，若缩到16字也必须重做。
+
+### 22:47 本轮重点优化收尾：仅保留128K/B16的新页证明
+
+C02 guarded v1在原记录同卡9 completed/exit0，严格逐bit、图及保护全过，
+十窗972.05μs对复用969.17μs为+0.2972%。保持原始采样报告ratio=null，由
+同SDK/同case/同卡及外部等价证书计算比较，不伪装新的基线测量。
+
+最终`leaf_scale_guard_v2`只进一步收紧Host历史资源范围：压缩长度上界
+`cache_rows<=6*8192`，即原8192候选叶不超过6个的区间；当前八档只有C04
+开启，C02恢复原策略，其余六个关闭档也不变。v2所有核内模块逐字等于v1，
+C04全部constexpr仍相同，原性能、12+4动态状态及服务验证可以复用；C02
+关闭完整CPU产物与同SDK历史基线的C++/packed/Host/ABI完全一致。104项
+Host分档/历史边界测试通过，未按B16单点枚举，也未宣称区间内每点同等收益。
+
+已将最终版本集成到本会话隔离worktree的正式TND-SPMD目录，共6个算子文件
+（含1个新增leaf helper）。同时承接原先已验证、已作为本轮分母的combined_v1
+三项逻辑，不把它们重复计成新收益；保留原service/query-bound修复。更新说明
+和格式时仅规范import/module文档及未使用变量名，完整非文档AST和导入集合
+一致；生产目录C04开启与C02关闭完整编译再次匹配冻结产物，见
+leaf_guard_production_style_audit.json / leaf_guard_production_codegen.json。
+
+正式CPU合同、variant及query-bound检查130项通过。原5项G2 QB预期同步到
+本轮冻结基线已经采用的窄N/4前缀核策略，新加15项叶证明分档边界；未改阈值
+以迁就性能或数值。针对源码的Ruff及git diff检查通过，没有重复NPU计时。
+本轮只保留1项新优化：C04完整L1 778.39→763.65μs（-1.89365%），其余
+7个业务档保留基线策略/生成代码。B24无可靠收益，未采用弱正向或负例。
+所有设备任务与CPU编译已收齐，无活动本会话任务。八档10%总目标仍active且
+未达成，正式G不靠跨SDK数据构造；不更新goal为complete，不push。采用证书
+为retained_leaf_scale.json，完整原始窗口及过程继续保留。

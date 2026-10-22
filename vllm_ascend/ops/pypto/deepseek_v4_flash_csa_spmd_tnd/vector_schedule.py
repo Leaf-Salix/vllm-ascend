@@ -11,10 +11,10 @@ Tensor；不能用T/固定S反推请求，Native dummy及不等长请求由各�
 HC归约、门值、混合归一化，然后Sinkhorn；HC行依赖路径只等本核
 消费的四个K片及一到两个RAW owner，数学、发布协议与其它阶段依赖不变。归一化先发布，让QA与Sinkhorn
 重叠，再进入QR、RoPE与KV/query处理。这里只算
-请求分组、compact前缀和scale页所有权；SCALE_PAGE_COALESCING启用时，
-同一planner还证明整请求页表连续性，写group_offsets尾部2*B项供Score复用。
-关闭不额外扫描证明页表或分配这块尾区；碎片页保持原逐页读取。TopK依赖的
-Attention有效块计划仍保留到TopK之后。
+请求分组、compact前缀和scale页所有权。SCALE_PAGE_COALESCING启用且
+LEAF_SCALE_LAYOUT关闭时，同一planner证明整请求页表，写尾部2*B项供Score复用。
+叶内模式由Score AIV对自己的实际页范围证明，不运行这段META布局扫描；尾区
+仍按统一工作区合同保留。碎片页回退原逐页读取，Attention有效块计划留到TopK之后。
 
 第二段：默认先Indexer压缩pool/norm，再Indexer query反量化/head权重，
 提前消费主压缩，然后Indexer query量化/系数、compact key量化与scale提交，
@@ -320,6 +320,7 @@ def vector_schedule(
     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
     SCALE_PAGE_COALESCING: pl.constexpr = False,
+    LEAF_SCALE_LAYOUT: pl.constexpr = False,
     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
     SHORT_HALF_SCORE_UB: pl.constexpr = False,
     SHORT_TOPK_PREFIX: pl.constexpr = False,
@@ -391,7 +392,17 @@ def vector_schedule(
     pl.system.set_ffts(ffts)
     tokens = pl.tensor.dim(x, 0)
     x_fp32, inv = hc_widen_rms_range(x, x_fp32, inv, widen_tail, worker, VECTORS)
-    signal = publish_phase(signal, PHASE_INPUT, core, CORES, generation)
+    if BALANCED and QUERY_GROUP == 2:
+        if worker < (tokens + 7) // 8:
+            signal = publish_phase(signal, PHASE_INPUT, core, CORES, generation)
+        elif worker == pl.min((tokens + 7) // 8, VECTORS - 1):
+            # The idle metadata planner still acquires this invocation's Q/L/pages.
+            # Other idle roles acquire business data at the existing QA wait.
+            pl.system.fence()
+            pl.system.cacheinvalid()
+            pl.system.fence()
+    else:
+        signal = publish_phase(signal, PHASE_INPUT, core, CORES, generation)
 
     # 公共metadata只有Q/L/positions依赖，可与HC投影重叠。选择第一个没有HC M8条带的
     # AIV；若48核都有工作，则选47号，先完成其本轮全部widen并发布，再计算计划。
@@ -441,8 +452,8 @@ def vector_schedule(
             pl.tensor.dim(idx_scales, 0),
             VECTORS,
         )
-        if BALANCED and SCALE_PAGE_COALESCING:
-            # 整个请求的连续页证明与数值无关，移到同一 META producer；
+        if BALANCED and SCALE_PAGE_COALESCING and not LEAF_SCALE_LAYOUT:
+            # 整请求模式由同一 META producer 证明；叶内模式在此编译关闭。
             # 每叶两条 AIV 复用结果。碎片/越界/失活请求记录0方向，保留原读取。
             group_offsets = indexer_scale_layout_plan_stage(
                 idx_bounds,
@@ -576,7 +587,8 @@ def vector_schedule(
         worker,
         VECTORS,
     )
-    signal = publish_phase(signal, PHASE_QR, core, CORES, generation)
+    if not (BALANCED and QUERY_GROUP == 2) or worker < (tokens + 7) // 8:
+        signal = publish_phase(signal, PHASE_QR, core, CORES, generation)
     # RoPE只依赖输入sin；放在QR发布后，与AIC的QB阶段并行，不等待QB。
     rope_signed, rope_swap = q_rope_prepare_stage(rope_sin, rope_signed, rope_swap, worker, VECTORS)
     inverse_sin = attention_inverse_rope_sign_stage(rope_sin, inverse_sin, worker, VECTORS)
@@ -595,7 +607,8 @@ def vector_schedule(
             VECTORS,
             PLAN_PHYSICAL_ROWS,
         )
-    signal = publish_phase(signal, PHASE_ROPE, core, CORES, generation)
+    if not (BALANCED and QUERY_GROUP == 2) or worker < (tokens + 7) // 8:
+        signal = publish_phase(signal, PHASE_ROPE, core, CORES, generation)
     # 主Query与Indexer query数学独立；先完成后者的RoPE/pool/norm，
     # 让AIC继续query Hadamard并在其主Q_B期间做量化/系数。QR/ROPE获取
     # 随第一个消费者前移，不能只移动计算却遗漏跨核数据可见性。
@@ -864,6 +877,7 @@ def vector_schedule(
         TO_L0,
         BALANCED,
         SCALE_PAGE_COALESCING,
+        LEAF_SCALE_LAYOUT,
         0,
         1,
         SHORT_HALF_SCORE_UB,

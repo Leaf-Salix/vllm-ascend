@@ -43,7 +43,8 @@
     编排内部建立，避免作为独立外部参数触发部分重叠别名检查；不复制数据。业务
     写回发生后先发布、读方等待后才用别名，不能单凭Python对象别名假设可见。
     group_offsets至少pad16(pad16(B+1)+4*T)+48+4*T个INT32；
-    SCALE_PAGE_COALESCING启用时尾部另加2*B项，关闭时保留原容量。
+    SCALE_PAGE_COALESCING启用时尾部另加2*B项，关闭时保留原容量；
+    LEAF_SCALE_LAYOUT仍保留这块尾区容量，但不读写META证明。
     依次为前缀/组描述符/scale页writer链表头/合法关闭行地址/连续页布局；
     最后每请求两项(first_page,direction)由META唯一writer覆盖后发布，
     balanced Score复用证明；方向0保留原逐页读取，旧分区偏移均不变化。
@@ -287,6 +288,7 @@ def _csa_core_group(
     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
     SCALE_PAGE_COALESCING: pl.constexpr = False,
+    LEAF_SCALE_LAYOUT: pl.constexpr = False,
     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
     SPLIT_SCORE_ROWS: pl.constexpr = False,
     OUTPUT_WORK_BALANCE: pl.constexpr = False,
@@ -586,6 +588,7 @@ def _csa_core_group(
             EARLY_ATTENTION_GEOMETRY,
             LOCAL_ATTENTION_STATS,
             SCALE_PAGE_COALESCING,
+            LEAF_SCALE_LAYOUT,
             PLAN_PHYSICAL_ROWS,
             SHORT_HALF_SCORE_UB,
             SHORT_TOPK_PREFIX,
@@ -821,6 +824,7 @@ def decode_csa_spmd(
     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
     SCALE_PAGE_COALESCING: pl.constexpr = False,
+    LEAF_SCALE_LAYOUT: pl.constexpr = False,
     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
     SPLIT_SCORE_ROWS: pl.constexpr = False,
     OUTPUT_WORK_BALANCE: pl.constexpr = False,
@@ -1075,6 +1079,7 @@ def decode_csa_spmd(
             EARLY_ATTENTION_GEOMETRY,
             LOCAL_ATTENTION_STATS,
             SCALE_PAGE_COALESCING,
+            LEAF_SCALE_LAYOUT,
             PLAN_PHYSICAL_ROWS,
             SPLIT_SCORE_ROWS,
             OUTPUT_WORK_BALANCE,
