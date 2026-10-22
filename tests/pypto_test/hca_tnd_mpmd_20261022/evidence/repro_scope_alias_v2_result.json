@@ -1,0 +1,12 @@
+{
+  "device_execution": false,
+  "outside": {
+    "lowering": false,
+    "orchestration": false,
+    "error": "1 function(s) failed to compile:\n\n  Function  | Error\n  ----------+--------------------------------------------------------------\n  outside   | Task dependency deps=[ready] cannot be honored: its TaskId\n            | is produced inside a scope that has already closed at this\n            | point, so the ordering edge would be lost and the consumer\n            | could read stale data. Note that pl.range / pl.parallel loop\n            | bodies and if/else branches each open their own scope, so\n            | this fires even with no pl.scope() in the source. Either\n            | consume the TaskId inside the scope that produces it (for\n            | example, keep producer and consumer in one\n            | pl.manual_scope()), or hoist the producer out of the inner\n            | scope. For a TaskId produced in a loop body, consume it in\n            | that same body or accumulate the ids into an Array[N,\n            | TASK_ID] and depend on that after the loop.\n            | [/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-\n            | 0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/repro_scope_a\n            | lias.py:31:5]\n  ----------+--------------------------------------------------------------\n\n  Full details: /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/runs/repro_scope_alias_v2/outside/report/codegen_errors.txt"
+  },
+  "inside": {
+    "lowering": true,
+    "orchestration": true
+  }
+}

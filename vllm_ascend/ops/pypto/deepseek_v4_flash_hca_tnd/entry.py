@@ -9,12 +9,12 @@
 """TND HCA 完整 attention 半层：一个入口、多个由 AICPU 管理的任务。
 
 数据流：mHC pre / RMS → Q_A/QR、Q_B/RoPE、KV 和 C128 压缩并行分支
-→ 原始滑窗与压缩历史 attention → O_A / 分组量化 / O_B → mHC post。
+→ 原始滑窗与压缩历史 attention → O_A / 整token量化 / O_B → mHC post。
 FFN 不在本算子的范围内。矩阵投影与 mHC 的数学函数复用本仓库已有 HCA。
 
 请求语义由 Native 的设备 query_bounds、seq_lens、positions、slots 和页表确定。
 T 是 token 容量，不是 B×6；同一次调用允许各请求取不同的 S1～S6。
-request_geometry 只建立本次 token 的请求归属，图重放时重新读取设备 metadata。
+request_geometry 只建立本次 token 的请求归属，每次调用重新读取设备 metadata。
 它不复制 KV/state、不把 compact RoPE 展开为每 token 缓冲，也不读取 Host 数据值。
 
 跨任务通过 Tensor 依赖和显式 TaskId 排序，由 Simpler/AICPU 派发；不使用 GM

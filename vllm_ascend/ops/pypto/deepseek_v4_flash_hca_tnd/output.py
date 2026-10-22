@@ -1,125 +1,49 @@
 # SPDX-License-Identifier: Apache-2.0
-"""复用公共 O 投影主体，将反量化与 mHC post 放在同一个 Vector 任务内。"""
+"""HCA TND输出尾链：Native量化语义与按token区间选择的Cube分块。
+
+整体思路
+--------
+1. 八组O_A并行，仍使用已有NZ权重及矩阵流水；输出先落BF16，随后统一量化。
+   Native将八组投影结果拼成一个8192列token后取amax，不能各组独立量化。
+2. 量化任务等齐O_A生产者；最多48个Vector按token分工，一个token独占64B尺度行。
+   8段行max→8×8列max全程留在Vector，避免Scalar FP32 max的PTOAS helper缺陷。
+3. O_B按token有效行数和输出列分工。T<=32用M32，33<=T<=96用M96，均为
+   N128、完整K8192；T>96用M128、N256、K分两段。末块valid_shape只计算有效行。
+   分两段减少激活重复供数，INT32域相加后才转FP32，不改变整数点积结果。
+4. Vector按channel尺度、token尺度反量化并落BF16，随后融合四路HC_post。
+   各阶段由Tensor/TaskId依赖排序，没有新增GM轮询或主机读取。
+
+最坏整数绝对和8192*128*128=134217728，低于INT32上限。这里恢复Native的
+可见舍入/量化边界，不能与历史八组FP32反量化求和版本要求输出逐bit相同。
+动态T及Native布局不变；外部B、query长度由上游TND几何处理，本段不假设T=B*S。
+精度证据和区间选择的正负性能结果见同目录OPTIMIZATION_LOG.md。
+"""
 
 import pypto.language as pl
 
 from ..deepseek_v4_flash_csa.decode_o_proj import (
-    INT8_AMAX_EPS,
-    INT8_SCALE_MAX,
-    O_GROUP_IN,
-    O_GROUPS,
-    O_LORA,
-    PROJ_A_LARGE_N_TILE,
-    PROJ_A_MM_N_TILE,
-    PROJ_A_ROW_TILE,
-    PROJ_B_MEDIUM_T_TILE,
-    PROJ_B_MM_T_TILE,
-    PROJ_B_SMALL_T_TILE,
-    QUANT_TASK_T_TILE,
-    QUANT_TOKEN_TILE,
-    T_PAD,
-    D,
-    proj_a_mm,
-    proj_b_mm,
+    D, O_GROUPS, O_GROUP_IN, O_LORA, T_PAD, PROJ_A_ROW_TILE,
+    PROJ_A_MM_N_TILE, PROJ_A_LARGE_N_TILE,
+    PROJ_B_SMALL_T_TILE, PROJ_B_MEDIUM_T_TILE, PROJ_B_MM_T_TILE,
+    INT8_AMAX_EPS, INT8_SCALE_MAX, proj_a_mm,
 )
+from ..deepseek_v4_flash_csa.hc_post import hc_post_block
 from ..deepseek_v4_flash_csa.nz_mode import QUANT_WEIGHT_LAYOUT, WO_A_WEIGHT_LAYOUT
 
 T_DYN = pl.dynamic("HCA_O_POST_TOKENS")
 HC_MULT = 4
 HC_DIM = HC_MULT * D
-TOKEN_TILE = 8
-# B16/S6 按 16 行分工，覆盖 48 个 Vector 核，避免收尾只使用半数核。
-TASK_TOKENS = 16
-COL_TILE = 512
+O_WIDTH = O_GROUPS * O_LORA
+OB_L1_K = 512
+VECTORS = 48
+SCALE_ROW = 16
 
 
-@pl.jit.inline
-def _decode_o_proj_tp1_parts(
-    o_packed: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
-    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, WO_A_WEIGHT_LAYOUT],
-    wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
-    t_dim: pl.Scalar[pl.INDEX],
-    heads_dep: pl.Scalar[pl.TASK_ID],
-    ROW_TILE: pl.constexpr,
-    A_COL_TILE: pl.constexpr,
-    PIPELINE_OA: pl.constexpr,
-):
-    """HCA 的分组 O 投影任务组织，复用 CSA 矩阵乘，保留 HCA 收尾依赖。"""
-    proj_a_rows = (t_dim + PROJ_A_ROW_TILE - 1) // PROJ_A_ROW_TILE
-    proj_b_t_rows = (t_dim + ROW_TILE - 1) // ROW_TILE
-    proj_b_padded_rows = proj_b_t_rows * ROW_TILE
-
-    # 保持已有 HCA 性能版的分组量化和 INT32 部分和。
-    # 与 Native 整个 token 共用一个量化标度的数值路径存在差别，不能宣称逐 bit 相同。
-    o_r_pad = pl.create_tensor([T_PAD, O_GROUPS * O_LORA], dtype=pl.FP32)
-    o_r_i8_pad = pl.create_tensor([T_PAD, O_GROUPS * O_LORA], dtype=pl.INT8)
-    act_scale_dq = pl.create_tensor([O_GROUPS, T_PAD], dtype=pl.FP32)
-    # 第 g 组对输出 n 列的整数贡献写到 partials[:, g*D+n]。
-    # 每组独占写区，无需 atomic add，也不需要先清零整个输出。
-    partials = pl.create_tensor([T_PAD, O_GROUPS * D], dtype=pl.INT32)
-    proj_b_tids = pl.array.create(O_GROUPS, pl.TASK_ID)
-
-    with pl.manual_scope():
-        for g in pl.parallel(O_GROUPS):
-            row_base_o = g * T_PAD
-            out_col_g = g * O_LORA
-
-            o_r_pad, pa_tid = proj_a_mm(
-                o_packed, wo_a, o_r_pad, g, row_base_o, out_col_g,
-                t_dim, proj_a_rows, heads_dep, A_COL_TILE, PIPELINE_OA,
-            )
-
-            col_g = g * O_LORA
-            # 性能版按上游把 amax 与量化融进同一个 SPMD，并让每个 group 用自己的标度。
-            # 已封存的精度版另起 oproj_token_scale 任务、跨全部 O_GROUPS 取同一个 amax，并多做
-            # 两次 BF16 往返，那是为复刻 Native A3 dynamic_quant 的语义；本版本不要求
-            # 与 Native 逐 bit 一致，于是省掉那遍全量扫描和往返。
-            with pl.spmd(
-                (t_dim + QUANT_TASK_T_TILE - 1) // QUANT_TASK_T_TILE,
-                name_hint="quant",
-                deps=[pa_tid],
-                allow_early_resolve=True,
-            ) as q_tid:
-                quant_start = pl.tile.get_block_idx() * QUANT_TASK_T_TILE
-                for qt in pl.pipeline(
-                    quant_start, pl.min(quant_start + QUANT_TASK_T_TILE, t_dim), QUANT_TOKEN_TILE, stage=2
-                ):
-                    oc_amax = o_r_pad[qt : qt + QUANT_TOKEN_TILE, col_g : col_g + O_LORA]
-                    g_row_max = pl.reshape(pl.row_max(pl.abs(oc_amax)), [1, QUANT_TOKEN_TILE])
-                    g_amax_floor = pl.full([1, QUANT_TOKEN_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS)
-                    g_amax = pl.maximum(g_amax_floor, g_row_max)
-                    g_scale_num = pl.full([1, QUANT_TOKEN_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX)
-                    g_sq_row = pl.div(g_scale_num, g_amax)
-                    act_scale_dq[g : g + 1, qt : qt + QUANT_TOKEN_TILE] = pl.mul(g_amax, 1.0 / INT8_SCALE_MAX)
-                    g_sq_col = pl.reshape(g_sq_row, [QUANT_TOKEN_TILE, 1])
-                    oc_q = o_r_pad[qt : qt + QUANT_TOKEN_TILE, col_g : col_g + O_LORA]
-                    oq_scaled = pl.row_expand_mul(oc_q, g_sq_col)
-                    oq_i32 = pl.cast(oq_scaled, target_type=pl.INT32, mode="rint")
-                    oq_half = pl.cast(oq_i32, target_type=pl.FP16, mode="round")
-                    oq_i8 = pl.cast(oq_half, target_type=pl.INT8, mode="trunc")
-                    o_r_i8_pad[qt : qt + QUANT_TOKEN_TILE, col_g : col_g + O_LORA] = oq_i8
-                # 清零最后一个有效 O_B 行块的内部量化尾部，不扩大最终输出写区。
-                if quant_start + QUANT_TASK_T_TILE >= t_dim:
-                    for zt in pl.range(t_dim, proj_b_padded_rows, QUANT_TOKEN_TILE):
-                        zero_half = pl.full([QUANT_TOKEN_TILE, O_LORA], dtype=pl.FP16, value=0.0)
-                        zero_i8 = pl.cast(zero_half, target_type=pl.INT8, mode="trunc")
-                        zero_rows = pl.min(QUANT_TOKEN_TILE, proj_b_padded_rows - zt)
-                        o_r_i8_pad = pl.assemble(o_r_i8_pad, pl.set_validshape(zero_i8, zero_rows, O_LORA), [zt, col_g])
-
-            partials, pb_tid = proj_b_mm(
-                o_r_i8_pad, wo_b, partials, g, col_g, proj_b_t_rows, q_tid, t_dim, ROW_TILE,
-            )
-            proj_b_tids[g] = pb_tid
-
-    parts_ready = pl.system.task_dummy(deps=[proj_b_tids[i] for i in range(O_GROUPS)])
-    return partials, act_scale_dq, parts_ready
-
-
-@pl.jit.inline
-def _o_proj_hc_post_tiled(
+@pl.jit.inline(auto_scope=False)
+def _native_output(
     packed: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
     wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, WO_A_WEIGHT_LAYOUT],
-    wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
+    wo_b: pl.Tensor[[O_WIDTH, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
     wo_scale: pl.Tensor[[D], pl.FP32],
     residual: pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16],
     post: pl.Tensor[[T_DYN, HC_MULT], pl.FP32],
@@ -127,83 +51,101 @@ def _o_proj_hc_post_tiled(
     output: pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16],
     heads_dep: pl.Scalar[pl.TASK_ID],
     MM_ROWS: pl.constexpr,
-    MM_COLS: pl.constexpr,
+    OA_COLUMNS: pl.constexpr,
+    OB_COLUMNS: pl.constexpr,
+    OB_SPLITS: pl.constexpr,
+    OB_L0_K: pl.constexpr,
 ):
     tokens = pl.tensor.dim(residual, 0)
-    partials, scales, ready = _decode_o_proj_tp1_parts(
-        packed, wo_a, wo_b, tokens, heads_dep, MM_ROWS, MM_COLS, PIPELINE_OA=True,
-    )
+    oa_rows = (tokens + PROJ_A_ROW_TILE - 1) // PROJ_A_ROW_TILE
+    projected = pl.create_tensor([T_PAD, O_WIDTH], dtype=pl.FP32)
+    quantized = pl.create_tensor([T_PAD, O_WIDTH], dtype=pl.INT8)
+    # 每个token独占64B，避免不同AIV短行scale写共享存储块；仅首元素用于消费。
+    token_scales = pl.create_tensor([T_PAD, SCALE_ROW], dtype=pl.FP32)
+    integer_output = pl.create_tensor([OB_SPLITS * T_PAD, D], dtype=pl.INT32)
+    producers = pl.array.create(O_GROUPS, pl.TASK_ID)
+    with pl.manual_scope():
+        for group in pl.parallel(O_GROUPS):
+            projected, tid = proj_a_mm(
+                packed, wo_a, projected, group, group * T_PAD, group * O_LORA,
+                tokens, oa_rows, heads_dep, OA_COLUMNS, PIPELINE_OA=True,
+            )
+            producers[group] = tid
+
+    with pl.spmd(pl.min(tokens, VECTORS), name_hint="hca_native_token_quant",
+                 deps=[producers], allow_early_resolve=True) as quant_ready:
+        for token in pl.range(pl.tile.get_block_idx(), tokens, VECTORS):
+            raw = pl.load(projected, [token, 0], [1, O_WIDTH])
+            native_bf16 = pl.cast(raw, pl.BF16, mode="rint")
+            rounded = pl.reshape(pl.cast(native_bf16, pl.FP32), [O_GROUPS, O_LORA])
+            # A3列向量需要32B对齐：先算8段的max，8x1恰为32B。再将每段
+            # 复制到8列并沿行归约，得到8份相同的全行amax；全过程留在Vector。
+            reduce_tmp = pl.create_tile([O_GROUPS, O_LORA], dtype=pl.FP32)
+            segment_max = pl.row_max(pl.abs(rounded), reduce_tmp)
+            replicated = pl.row_expand_mul(pl.tile.full([O_GROUPS, 8], dtype=pl.FP32, value=1.0), segment_max)
+            all_max = pl.col_max(replicated)
+            amax = pl.maximum(all_max, pl.tile.full([1, 8], dtype=pl.FP32, value=INT8_AMAX_EPS))
+            numerator = pl.tile.full([1, 8], dtype=pl.FP32, value=INT8_SCALE_MAX)
+            # 与Native一致分别计算量化乘数和反量化scale，不倒数回推另一个。
+            multiplier = pl.div(numerator, amax)
+            dequant_scale = pl.mul(amax, 1.0 / INT8_SCALE_MAX)
+            scaled = pl.row_expand_mul(rounded, pl.reshape(multiplier, [O_GROUPS, 1]))
+            integer = pl.cast(scaled, pl.INT32, mode="rint")
+            half = pl.cast(integer, pl.FP16, mode="round")
+            byte = pl.cast(half, pl.INT8, mode="trunc")
+            pl.store(pl.reshape(byte, [1, O_WIDTH]), [token, 0], quantized)
+            scale_row = pl.concat(dequant_scale, dequant_scale)
+            pl.store(scale_row, [token, 0], token_scales)
+
+    rows = (tokens + MM_ROWS - 1) // MM_ROWS
+    with pl.spmd(rows * (D // OB_COLUMNS) * OB_SPLITS, name_hint="hca_native_ob_split",
+                 deps=[quant_ready], allow_early_resolve=True) as ob_ready:
+        unit = pl.tile.get_block_idx()
+        split = unit % OB_SPLITS
+        column_unit = unit // OB_SPLITS
+        row0 = column_unit // (D // OB_COLUMNS) * MM_ROWS
+        col0 = pl.max(0, column_unit % (D // OB_COLUMNS)) * OB_COLUMNS
+        active = pl.min(MM_ROWS, tokens - row0)
+        seed_storage = pl.create_tile([MM_ROWS, OB_COLUMNS], dtype=pl.INT32,
+                                      target_memory=pl.MemorySpace.Acc, compact=True)
+        seed = pl.tile.set_validshape(seed_storage, active, OB_COLUMNS)
+        for outer, (outer_acc,) in pl.pipeline((O_WIDTH // OB_SPLITS) // OB_L1_K, stage=2, init_values=(seed,)):
+            k0 = split * (O_WIDTH // OB_SPLITS) + outer * OB_L1_K
+            lhs = pl.load(quantized, [row0, k0], [MM_ROWS, OB_L1_K],
+                          valid_shape=[active, OB_L1_K], target_memory=pl.MemorySpace.Mat)
+            rhs = pl.load(wo_b, [k0, col0], [OB_L1_K, OB_COLUMNS], target_memory=pl.MemorySpace.Mat)
+            for inner, (inner_acc,) in pl.pipeline(OB_L1_K // OB_L0_K, stage=2, init_values=(outer_acc,)):
+                offset = inner * OB_L0_K
+                left = pl.tile.extract(lhs, 0, offset, [MM_ROWS, OB_L0_K],
+                                       target_memory=pl.MemorySpace.Left)
+                right = pl.tile.extract(rhs, offset, 0, [OB_L0_K, OB_COLUMNS],
+                                        target_memory=pl.MemorySpace.Right)
+                updated = pl.tile.matmul_acc(inner_acc, left, right, init_cond=(outer == 0 and inner == 0))
+                done_inner = pl.yield_(updated)
+            done_outer = pl.yield_(done_inner)
+        pl.store(done_outer, [split * T_PAD + row0, col0], integer_output)
+
     residual_flat = pl.reshape(residual, [tokens, HC_DIM])
     output_flat = pl.reshape(output, [tokens, HC_DIM])
-    blocks = (tokens + TASK_TOKENS - 1) // TASK_TOKENS
-    with pl.spmd(
-        blocks * (D // COL_TILE), name_hint="hca_oproj_hc_post",
-        deps=[ready], allow_early_resolve=True,
-    ):
-        worker = pl.tile.get_block_idx()
-        row0 = worker // (D // COL_TILE) * TASK_TOKENS
-        col0 = worker % (D // COL_TILE) * COL_TILE
-        weight_scale = pl.reshape(pl.load(wo_scale, [col0], [COL_TILE]), [1, COL_TILE])
-        for row in pl.range(row0, pl.min(row0 + TASK_TOKENS, tokens), TOKEN_TILE):
-            valid = pl.min(TOKEN_TILE, tokens - row)
-            acc = pl.tile.full([TOKEN_TILE, COL_TILE], dtype=pl.FP32, value=0.0)
-            for group in pl.pipeline(O_GROUPS, stage=2):
-                part = pl.load(partials, [row, group * D + col0], [TOKEN_TILE, COL_TILE])
-                scale = pl.reshape(pl.load(scales, [group, row], [1, TOKEN_TILE]), [TOKEN_TILE, 1])
-                acc = pl.add(acc, pl.row_expand_mul(pl.cast(part, pl.FP32), scale))
-            attention = pl.col_expand_mul(acc, weight_scale)
-            # 保留原先 attention 输出落 BF16、mHC post 再转 FP32 的舍入点。
-            attention = pl.cast(pl.cast(attention, pl.BF16, mode="rint"), pl.FP32)
-            # Native 门控是行主序；整块读取后收集各列，生成独立的连续权重向量。
-            post_rows = pl.load(post, [row, 0], [TOKEN_TILE, 8], valid_shape=[valid, HC_MULT])
-            comb_rows = pl.load(comb, [row, 0], [TOKEN_TILE, HC_MULT * HC_MULT],
-                                valid_shape=[valid, HC_MULT * HC_MULT])
-            # 四个输入HC分量只加载、转FP32一次，供四个输出顺序复用。
-            residual_0 = pl.cast(pl.load(
-                residual_flat, [row, 0 * D + col0], [TOKEN_TILE, COL_TILE],
-                valid_shape=[valid, COL_TILE],
-            ), pl.FP32)
-            residual_1 = pl.cast(pl.load(
-                residual_flat, [row, 1 * D + col0], [TOKEN_TILE, COL_TILE],
-                valid_shape=[valid, COL_TILE],
-            ), pl.FP32)
-            residual_2 = pl.cast(pl.load(
-                residual_flat, [row, 2 * D + col0], [TOKEN_TILE, COL_TILE],
-                valid_shape=[valid, COL_TILE],
-            ), pl.FP32)
-            residual_3 = pl.cast(pl.load(
-                residual_flat, [row, 3 * D + col0], [TOKEN_TILE, COL_TILE],
-                valid_shape=[valid, COL_TILE],
-            ), pl.FP32)
-            post_columns = pl.transpose(post_rows, axis1=0, axis2=1)
-            comb_columns = pl.transpose(comb_rows, axis1=0, axis2=1)
-            for out_h in pl.unroll(HC_MULT):
-                post_weight = pl.reshape(
-                    pl.tile.slice(post_columns, [1, TOKEN_TILE], [out_h, 0]), [TOKEN_TILE, 1],
-                )
-                value = pl.row_expand_mul(attention, post_weight)
-                coefficient_0 = pl.reshape(
-                    pl.tile.slice(comb_columns, [1, TOKEN_TILE], [0 * HC_MULT + out_h, 0]),
-                    [TOKEN_TILE, 1],
-                )
-                value = pl.add(value, pl.row_expand_mul(residual_0, coefficient_0))
-                coefficient_1 = pl.reshape(
-                    pl.tile.slice(comb_columns, [1, TOKEN_TILE], [1 * HC_MULT + out_h, 0]),
-                    [TOKEN_TILE, 1],
-                )
-                value = pl.add(value, pl.row_expand_mul(residual_1, coefficient_1))
-                coefficient_2 = pl.reshape(
-                    pl.tile.slice(comb_columns, [1, TOKEN_TILE], [2 * HC_MULT + out_h, 0]),
-                    [TOKEN_TILE, 1],
-                )
-                value = pl.add(value, pl.row_expand_mul(residual_2, coefficient_2))
-                coefficient_3 = pl.reshape(
-                    pl.tile.slice(comb_columns, [1, TOKEN_TILE], [3 * HC_MULT + out_h, 0]),
-                    [TOKEN_TILE, 1],
-                )
-                value = pl.add(value, pl.row_expand_mul(residual_3, coefficient_3))
-                result = pl.cast(value, pl.BF16, mode="rint")
-                pl.store(pl.set_validshape(result, valid, COL_TILE), [row, out_h * D + col0], output_flat)
+    with pl.spmd(pl.min(tokens, VECTORS), name_hint="hca_native_output_post",
+                 deps=[ob_ready], allow_early_resolve=True):
+        channels = pl.reshape(pl.load(wo_scale, [0], [D]), [1, D])
+        for token in pl.range(pl.tile.get_block_idx(), tokens, VECTORS):
+            # 两段在INT32域相加后才转FP32；与完整K8192累加严格等价。
+            # 若先各自转FP32，再相加，会额外引入舍入边界，不能这样改。
+            first = pl.load(integer_output, [token, 0], [1, D])
+            if OB_SPLITS == 1:
+                acc = pl.cast(first, pl.FP32)
+            else:
+                second = pl.load(integer_output, [T_PAD + token, 0], [1, D])
+                acc = pl.cast(pl.add(first, second), pl.FP32)
+            by_channel = pl.col_expand_mul(acc, channels)
+            token_scale = pl.read(token_scales, [token, 0])
+            value = pl.mul(by_channel, token_scale)
+            # 保留Native O_B输出的BF16边界；HC_post仍按post*x及0→3残差左折叠。
+            bf16 = pl.create_tensor([1, D], dtype=pl.BF16)
+            bf16 = pl.cast(value, pl.BF16, mode="rint")
+            output_flat = hc_post_block(bf16, residual_flat, post, comb, output_flat, token, 0, 1, 1, D)
     return output
 
 
@@ -211,7 +153,7 @@ def _o_proj_hc_post_tiled(
 def o_proj_hc_post(
     packed: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
     wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, WO_A_WEIGHT_LAYOUT],
-    wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
+    wo_b: pl.Tensor[[O_WIDTH, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
     wo_scale: pl.Tensor[[D], pl.FP32],
     residual: pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16],
     post: pl.Tensor[[T_DYN, HC_MULT], pl.FP32],
@@ -221,18 +163,12 @@ def o_proj_hc_post(
 ):
     tokens = pl.tensor.dim(residual, 0)
     if tokens <= PROJ_B_SMALL_T_TILE:
-        output = _o_proj_hc_post_tiled(
-            packed, wo_a, wo_b, wo_scale, residual, post, comb, output, heads_dep,
-            PROJ_B_SMALL_T_TILE, PROJ_A_MM_N_TILE,
-        )
+        output = _native_output(packed, wo_a, wo_b, wo_scale, residual, post, comb, output, heads_dep,
+                                PROJ_B_SMALL_T_TILE, PROJ_A_MM_N_TILE, 128, 1, 256)
     elif tokens <= PROJ_B_MEDIUM_T_TILE:
-        output = _o_proj_hc_post_tiled(
-            packed, wo_a, wo_b, wo_scale, residual, post, comb, output, heads_dep,
-            PROJ_B_MEDIUM_T_TILE, PROJ_A_MM_N_TILE,
-        )
+        output = _native_output(packed, wo_a, wo_b, wo_scale, residual, post, comb, output, heads_dep,
+                                PROJ_B_MEDIUM_T_TILE, PROJ_A_MM_N_TILE, 128, 1, 256)
     else:
-        output = _o_proj_hc_post_tiled(
-            packed, wo_a, wo_b, wo_scale, residual, post, comb, output, heads_dep,
-            PROJ_B_MM_T_TILE, PROJ_A_LARGE_N_TILE,
-        )
+        output = _native_output(packed, wo_a, wo_b, wo_scale, residual, post, comb, output, heads_dep,
+                                PROJ_B_MM_T_TILE, PROJ_A_LARGE_N_TILE, 256, 2, 128)
     return output

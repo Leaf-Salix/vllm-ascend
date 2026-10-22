@@ -15,6 +15,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("name")
     parser.add_argument("--legacy-signature-compat", action="store_true")
+    parser.add_argument("--precision-probe", action="store_true")
+    parser.add_argument("--output-variant", type=Path, help="只在冻结包替换output模块，正式源码不变")
     args = parser.parse_args()
     if Path(args.name).name != args.name:
         raise ValueError("实验名必须是单段目录名")
@@ -29,10 +31,21 @@ def main():
         (operator / name).mkdir()
         for path in (source / name).glob("*.py"):
             shutil.copy2(path, operator / name / path.name)
+    if args.output_variant:
+        output_module = operator / "deepseek_v4_flash_hca_tnd/output.py"
+        shutil.copy2(output_module, output_module.with_name("output_base.py"))
+        shutil.copy2(args.output_variant.resolve(), output_module)
     shutil.copy2(HERE / "run_case.py", target / "run_case.py")
     shutil.copy2(HERE / "compressor_probe.py", target / "compressor_probe.py")
     shutil.copy2(HERE / "profile_eager.py", target / "profile_eager.py")
     shutil.copy2(HERE / "metadata_sequence.py", target / "metadata_sequence.py")
+    shutil.copy2(HERE / "precision_probe.py", target / "precision_probe.py")
+    shutil.copy2(HERE / "service_probe.py", target / "service_probe.py")
+    shutil.copy2(HERE / "host_probe.py", target / "host_probe.py")
+    if args.precision_probe:
+        from precision_probe import generate_entry
+
+        generate_entry(operator / "deepseek_v4_flash_hca_tnd")
     if args.legacy_signature_compat:
         path = operator / "deepseek_v4_flash_hca/o_proj_hc_post.py"
         text = path.read_text()
@@ -52,6 +65,8 @@ def main():
         "source_head": subprocess.check_output(["git", "-C", str(REPO), "rev-parse", "HEAD"], text=True).strip(),
         "includes_uncommitted_hca_tnd": True,
         "legacy_signature_compat": args.legacy_signature_compat,
+        "precision_probe": args.precision_probe,
+        "output_variant": str(args.output_variant.resolve()) if args.output_variant else None,
         "shared_toolchain": json.loads((HERE.parent / "csa_shared_toolchain/manifest.json").read_text()),
         "files": [{"path": str(p.relative_to(target)), "bytes": p.stat().st_size}
                   for p in sorted(target.rglob("*.py"))],

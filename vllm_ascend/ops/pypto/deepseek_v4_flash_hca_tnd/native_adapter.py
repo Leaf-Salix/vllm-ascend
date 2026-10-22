@@ -100,7 +100,7 @@ class NativeHCACall:
             ori_slots=token_capacity_view(req["swa"].slot_mapping, tokens, 2),
         )
         self.operators = operators
-        # 根 ABI 全部是 Native device Tensor；图捕获后只更新其内容。
+        # 根ABI全部为Native device Tensor；每次调用消费本轮设备内容。
         self.core_args = tuple(self.args[arg.name] for arg in operators.attention._schema.arguments)
 
     def __call__(self):

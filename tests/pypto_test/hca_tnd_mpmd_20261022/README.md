@@ -3,8 +3,17 @@
 正式源码：[deepseek_v4_flash_hca_tnd](../../../vllm_ascend/ops/pypto/deepseek_v4_flash_hca_tnd/)。
 目标为完整 HCA attention 半层，Native/PTO−1 超过 30%，不是某个子算子的局部收益。
 所有新测试共用 `csa_shared_toolchain/manifest.json`，正式第3层 W8A8、NZ2、seed=1024。
+用户最新明确：候选性能只比较完整HCA的L1 incore首尾。JIT重复分析等问题只提主仓issue，
+当前不继续修SDK或以Host提交时间指导核内候选。外部服务/Host脚本仅保留复现和历史证据。
 
 ## 当前阶段
+
+最新进展见[输出差异定位与修正](NATIVE_OUTPUT_PRECISION.md)及
+[完整配对结果](NATIVE_OUTPUT_SUMMARY.md)。八档输出均通过原容差；8K/B32原3处超差
+通过恢复Native O_A BF16及整token量化语义消除。正式`output.py`已采用该数学路径，
+大T的O_B使用N256、K分两段，整数相加后才转FP32。Native严格cache/state差异仍保留。
+真实`dsv4_hca_forward`在S1和混长/padding中接管成功，KV钩子顺序和按步compact缓存通过；
+这不等于完整PD传输、连续轨迹或整模型token验收。
 
 2026-10-22 首版及去除 HBG 工厂后的 CPU 后端编译通过，见 `runs/cpu_v5/result.json`
 和 `runs/cpu_eager_v1/result.json`。128K/B16 与旧 HCA 的输出/三组 cache/state 逐 bit 一致；
@@ -57,3 +66,26 @@ task-submit --device auto --max-time 1500 \
 它保留 Native storage 的失败项及 `passed=false`，不把性能测量改写成精度通过。
 `--control-source`可指定冻结TND控制组，与候选在同进程交错采完整L1；
 `--compare-legacy`与它互斥。新旧SDK不跨版本计算收益。
+
+`--native-output-math`仅用于这次已做相同输入拼接诊断的数学修正：保留旧版输出差异，
+但必须满足Native原输出容差、cache/state与控制精确相同、重复调用和写保护通过，才采诊断性能。
+正式修正版本之间的调度候选仍使用普通`--diagnostic-perf`，输出也必须逐bit相同。
+
+`--profile --profile-service`通过真实custom op计时，每次创建新的forward context，
+包含资格判定、compact metadata生产、设备描述符绑定和KV钩子；计时前先验证没有回退Native。
+两侧同时记录CPU包络、设备首尾和设备忙碌区间并集，不把Host派发空隙算成incore算力收益。
+采样后再次精确比较本侧结果及保护区，不能以只运行成功代替正确性验证。
+
+当前`--cpu`已补齐编排C++与全部incore C++的实际目标文件编译；早期同名阶段
+只做PyPTO/PTOAS生成，不代表实际AscendC编译。详见精度修正文档的失败记录。
+
+Host重复分析已经提交[PyPTO #3113](https://github.com/hw-native-sys/pypto/issues/3113)，
+说明和建议在`EAGER_HOST_LOOKUP_ISSUE.md`，无模型权重复现为`repro_eager_host_lookup.py`。
+测试中访问预热registration的代码没有进入正式适配层，未修改共享SDK。
+
+O_A的Native分块、48份均衡网格及33～96区间组合均保留为候选，未进入正式代码；
+首轮B16改善在扩档和区间组合中没有形成稳定收益。任务和报告分别见
+`OA_NATIVE_TASKS.json`、`OA_RANGES_TASKS.json`及正式目录的优化日志。
+区间组合中发现的scope/constexpr SSA编译问题已提交
+[PyPTO #3115](https://github.com/hw-native-sys/pypto/issues/3115)，复现文件
+`repro_constexpr_scope_yield.py`不占设备、不需要权重。
