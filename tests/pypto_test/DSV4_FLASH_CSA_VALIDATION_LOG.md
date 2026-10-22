@@ -21913,3 +21913,18 @@ B8 Main AIC均值80.02→76.91μs，但max101.44→101.81μs，AIV与完整Main
 跨度没有改善；该域暂不扩大。正式实现仍保持v49+长HC留核分支，v59保留为
 私有候选，未用本轮SPMD绝对数跨轮替换旧八档G。
 16卡MPMD原任务仍pending，继续等待队列；未因观察超时取消或另起同一任务。
+
+
+### 735.54：16卡首次因启动器漏建CANN缓存目录失败，未执行CSA
+
+原任务`task_20261022_083351_66250512196`由pending转running，16个DP/EP
+完成通信初始化并加载正式模型。Native BF16权重转NZ首次触发GE初始化时，
+报SetPrecisionMode error500001；内层EC0006明确指出ASCEND_CACHE_PATH
+指定的ascend_cache目录不存在。此前启动器只export该路径，没有mkdir。
+这是测试启动器缺陷，不能归为MPMD核内、精度或CANN版本不支持。
+
+队列已确认completed(exit=1)，全部16卡锁释放，未产生任何rank decode结果。
+失败日志保留，摘要见[model_v58_startup_failure.json](csa_mpmd_tnd_20261021/model_v58_startup_failure.json)。
+修复为启动前创建显式的CANN/PyPTO/vLLM缓存及日志目录；计算代码、固定请求、
+SDK和配置不变。重新排整机前先用单卡检查同一环境的Native格式转换，避免
+为同一个初始化错误再次加载全量权重。此前单层功能和八档L1结果不受影响。

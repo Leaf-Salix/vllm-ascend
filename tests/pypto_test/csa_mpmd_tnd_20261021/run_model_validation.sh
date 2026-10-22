@@ -36,6 +36,7 @@ export VLLM_ASCEND_PTO_CSA_ATOMIC_ADD=0 PTO_CSA_RUNTIME=tensormap_and_ringbuffer
 export HCCL_DETERMINISTIC=true DYNAMIC_EPLB=false EXPERT_MAP_RECORD=false
 export ASCEND_PROCESS_LOG_PATH="$output/ascend" PYPTO_PROG_BUILD_DIR="$output/build"
 export PYPTO_CACHE_DIR="$output/pypto_cache" VLLM_CACHE_ROOT="$output/vllm_cache" ASCEND_CACHE_PATH="$output/ascend_cache"
+mkdir -p "$ASCEND_PROCESS_LOG_PATH" "$ASCEND_CACHE_PATH" "$PYPTO_CACHE_DIR" "$VLLM_CACHE_ROOT" "$PYPTO_PROG_BUILD_DIR"
 export ASCEND_OPP_PATH="$(python "$source_tree/tests/pypto_test/dsv4_hca_prepare_opp.py" --destination "$output/private_opp")"
 python "$source_tree/tests/pypto_test/offline_pd/run.py" decode \
     --bank "$bank" --output "$output" --backend pto --pto-attention csa --mixed-requests \
