@@ -3958,3 +3958,35 @@ leaf_guard_production_style_audit.json / leaf_guard_production_codegen.json。
 所有设备任务与CPU编译已收齐，无活动本会话任务。八档10%总目标仍active且
 未达成，正式G不靠跨SDK数据构造；不更新goal为complete，不push。采用证书
 为retained_leaf_scale.json，完整原始窗口及过程继续保留。
+
+
+### 等长TND独立分支：用户授权与首个候选
+
+用户明确允许多batch实际Seqlen一致、等效BSH时采用独立分支；128K/B16和
+B24仍优先，八档等权10%及原combined_v1分母不变。此前signal slot footprint
+只有只读研究，尚未改码或上卡，先转向这项新授权。
+
+`uniform_geometry_v1`以已采用的生产提交79fae6db0为父版本，保留C04单有效
+行叶证明，只改request_geometry、attention_plan和attention_stream三个模块。
+沿现有PLAN_PHYSICAL_ROWS资源域，每个实际工作AIV每次调用检查全部Q/L：
+B>1，Q从0开始、严格等间距S>0、B*S=T，全部KV length相同且>=S。通过后
+请求定位改为query//S；其它输入仍走原query_request扫描。早期Attention
+几何可复用一次证明处理八行，后续AIV在多个query之间复用自身的核内Scalar。
+不跨replay保存谓词，不回读device内容到Host，不新增GM工作区/任务/同步。
+原positions因果校验、页表保护及全部数学保持。此版保守地要求query和KV
+两种长度都相等，未把只有shape或query长度相等当成充分条件。
+
+同源helper对独立owner集合oracle的71项CPU测试通过：S1至S16、B1/2/8/16/
+24/28/32，逐个中间Q/L篡改、padding/重叠/短存储、同址真/假反复切换及随机
+非法边界均覆盖。CPU完整代码生成进行中，尚无设备正确性或新收益结论。
+新候选不是已采用版本，不覆盖原始冻结结果；manifest和生成脚本位于已有
+csa_spmd_tnd_eight_20261022目录。
+
+B16/B24完整CPU代码生成均通过；C04的AIC函数、两侧packed入口和orchestration
+与已采用生产版一致（仅忽略pto位置注释），变化在AIV内部几何分支。B24初次
+CPU启动描述符文件名写错，未进入解析/设备，改为经完整policy核对的已有描述符
+后成功。设备任务B16=`task_20261022_231311_146232724441`（卡8），
+B24=`task_20261022_231741_162492223535`（卡0），各10有效窗及全部样本；
+仍对原combined_v1的同SDK基线比较，另观察是否超过已采用C04的763.65μs。
+同址验证器已准备16组metadata和4步连续解码，增加等长→不同KV长→等长、
+等长→失活padding→等长转换，仅当候选值得继续时执行设备门禁。
