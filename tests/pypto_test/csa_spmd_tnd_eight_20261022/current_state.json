@@ -24,31 +24,40 @@
   "push_authorized": false,
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
-  "pending_cpu": {
-    "session_id": 19590,
-    "candidate": "compact_score_peeled_v1",
-    "output": "runs/compile_compact_score_peeled_C04_v1_prepared"
-  },
+  "pending_cpu": null,
   "pending_tasks": {
-    "task_20261022_204306_347423614603": {
-      "task_id": "task_20261022_204306_347423614603",
-      "candidate": "frozen_combined_v1",
-      "case_id": "C04",
-      "kind": "same_implementation_new_sdk_calibration",
-      "device": 8,
-      "status": "pending",
-      "harness_manifest": "sdk_measurement_harness_v1.json",
-      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b16_s6_baseline_sdk_v1"
-    },
-    "task_20261022_204306_347428319389": {
-      "task_id": "task_20261022_204306_347428319389",
-      "candidate": "frozen_combined_v1",
+    "task_20261022_211820_67056725661": {
+      "task_id": "task_20261022_211820_67056725661",
       "case_id": "C05",
-      "kind": "same_implementation_new_sdk_calibration",
-      "device": "auto",
+      "candidate": "defer_kv_v1",
+      "kind": "complete_l1_comparison",
       "status": "pending",
-      "harness_manifest": "sdk_measurement_harness_v1.json",
-      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b24_s6_baseline_sdk_v1"
+      "device": 0,
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b24_s6_defer_kv_v1",
+      "reference_result": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b24_s6_baseline_sdk_v1/result.json",
+      "harness_manifest": "sdk_measurement_harness_v1.json"
+    },
+    "task_20261022_211934_72225422027": {
+      "task_id": "task_20261022_211934_72225422027",
+      "case_id": "C04",
+      "candidate": "leaf_scale_one_row_v1",
+      "kind": "complete_l1_comparison",
+      "status": "pending",
+      "device": 8,
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b16_s6_leaf_scale_one_row_v1",
+      "reference_result": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b16_s6_baseline_sdk_v1/result.json",
+      "harness_manifest": "sdk_measurement_harness_v1.json"
+    },
+    "task_20261022_211934_72236616480": {
+      "task_id": "task_20261022_211934_72236616480",
+      "case_id": "C05",
+      "candidate": "leaf_scale_one_row_v1",
+      "kind": "complete_l1_comparison",
+      "status": "pending",
+      "device": 0,
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b24_s6_leaf_scale_one_row_v1",
+      "reference_result": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b24_s6_baseline_sdk_v1/result.json",
+      "harness_manifest": "sdk_measurement_harness_v1.json"
     }
   },
   "next_steps": [
@@ -70,9 +79,10 @@
     "group_order_production_UT_passed": 126,
     "compact_score_loops": "CPU codegen fails Mat self-move; no device run",
     "provenance_and_measurement": 16,
-    "leaf_scale_contracts": 15
+    "leaf_scale_contracts": 15,
+    "leaf_and_deferred_kv_contracts": 39
   },
-  "updated_at": "2026-10-22T20:54:56.366593+08:00",
+  "updated_at": "2026-10-22T21:23:16.841636+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -107,6 +117,14 @@
       "case_id": "C04",
       "ratio_to_frozen": 1.037540545080961,
       "evidence": "scale_gather_v7_result.json"
+    },
+    {
+      "candidate": "leaf_scale_v1",
+      "cases": {
+        "C04": 1.0127699482264672,
+        "C05": 1.0072550913786644
+      },
+      "evidence": "leaf_scale_v1_results.json"
     }
   ],
   "promising_candidates": [],
@@ -165,5 +183,19 @@
       "device_execution": false,
       "decision": "Defer per-block proof; prefer the less repeated leaf proof first"
     }
-  }
+  },
+  "local_stage_commit": "cd7a96149",
+  "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
+  "same_sdk_candidate_reanalysis": [
+    {
+      "candidate": "local_scale_v1",
+      "ratio_to_frozen": 0.9883348963886995,
+      "gain_pct": 1.1665103611300465
+    },
+    {
+      "candidate": "score_n128_two_acc_v1",
+      "ratio_to_frozen": 1.1078251262220735,
+      "gain_pct": -10.782512622207353
+    }
+  ]
 }

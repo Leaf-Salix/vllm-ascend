@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Peel fixed first/last QK panels to avoid conditional Mat carries in a compact loop."""
 
+import argparse
 import ast
 import copy
 import hashlib
@@ -8,7 +9,7 @@ import json
 from pathlib import Path
 
 
-def specialized_body(loop, stage):
+def specialized_body(loop, stage, specialize_prefetch=False):
     class KnownPanelConditions(ast.NodeTransformer):
         def visit_If(self, node):
             condition = ast.unparse(node.test)
@@ -17,6 +18,10 @@ def specialized_body(loop, stage):
                 "buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols": stage != "last",
                 "buf_qk_panel + 1 < score_tile // qk_panel_cols": stage != "last",
             }
+            if specialize_prefetch:
+                known.update(
+                    {"key_prefetch_panels > 0": True, "key_prefetch_to_l0": True, "not key_prefetch_to_l0": False}
+                )
             if condition in known:
                 chosen = node.body if known[condition] else node.orelse
                 module = ast.Module(body=chosen, type_ignores=[])
@@ -32,16 +37,19 @@ def specialized_body(loop, stage):
     return KnownPanelConditions().visit(module).body
 
 
-def transform(source):
+def transform(source, specialize_prefetch=False):
     tree = ast.parse(source)
     fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_indexer_score_cube_split_store")
     loop = next(n for n in ast.walk(fn) if isinstance(n, ast.For) and ast.unparse(n.target) == "buf_qk_panel")
     assert ast.unparse(loop.iter) == "pl.unroll(score_tile // qk_panel_cols)"
     middle = copy.deepcopy(loop)
     middle.iter = ast.parse("pl.range(1, score_tile // qk_panel_cols - 1)", mode="eval").body
-    middle.body = specialized_body(loop, "middle")
-    statements = [*ast.parse("buf_qk_panel = 0").body, *specialized_body(loop, "first"), middle]
-    statements += [*ast.parse("buf_qk_panel = score_tile // qk_panel_cols - 1").body, *specialized_body(loop, "last")]
+    middle.body = specialized_body(loop, "middle", specialize_prefetch)
+    statements = [*ast.parse("buf_qk_panel = 0").body, *specialized_body(loop, "first", specialize_prefetch), middle]
+    statements += [
+        *ast.parse("buf_qk_panel = score_tile // qk_panel_cols - 1").body,
+        *specialized_body(loop, "last", specialize_prefetch),
+    ]
     guarded = ast.If(
         test=ast.parse("key_prefetch_panels == 1 and key_prefetch_to_l0", mode="eval").body,
         body=statements,
@@ -57,18 +65,23 @@ def transform(source):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--version", choices=("v1", "v2"), default="v1")
+    args = parser.parse_args()
     here = Path(__file__).resolve().parent
     baseline = json.loads((here / "baseline.json").read_text())
     source = {p.name: p.read_text() for p in (here / "runs/baseline").glob("*.py")}
     assert {n: hashlib.sha256(s.encode()).hexdigest() for n, s in source.items()} == baseline["files"]
-    source["indexer_score_stages.py"] = transform(source["indexer_score_stages.py"])
-    target = here / "runs/compact_score_peeled_v1"
+    source["indexer_score_stages.py"] = transform(source["indexer_score_stages.py"], args.version == "v2")
+    target = here / f"runs/compact_score_peeled_{args.version}"
     target.mkdir(exist_ok=False)
     for name, content in source.items():
         (target / name).write_text(content)
     original = json.loads(Path(baseline["cases"]["C04"]["source_report"]).read_text())
     descriptor = dict(buffers=original["descriptors"]["spmd"], policy=original["policies"]["spmd"])
-    (here / "descriptors/C04_compact_score_peeled_v1.json").write_text(json.dumps(descriptor, indent=2) + "\n")
+    (here / f"descriptors/C04_compact_score_peeled_{args.version}.json").write_text(
+        json.dumps(descriptor, indent=2) + "\n"
+    )
     report = dict(
         source=str(target),
         baseline="baseline.json",
@@ -78,8 +91,9 @@ def main():
         mechanism="Full six-query branch: peel first/last, compact middle fourteen panels; retain panel math order",
         unchanged="Live-half branch, original fallback, tile dimensions, ABI and FIFO protocol",
         limitations="CPU feasibility experiment after conditional Mat self-move; no device benefit established",
+        specialize_known_prefetch_conditions=args.version == "v2",
     )
-    with (here / "compact_score_peeled_v1.json").open("x") as stream:
+    with (here / f"compact_score_peeled_{args.version}.json").open("x") as stream:
         stream.write(json.dumps(report, indent=2) + "\n")
     print(target)
 

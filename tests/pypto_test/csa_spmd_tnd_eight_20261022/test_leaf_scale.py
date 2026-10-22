@@ -9,8 +9,9 @@ import numpy as np
 import pytest
 
 
-def leaf_proof():
-    source = Path(__file__).with_name("runs") / "leaf_scale_v1/leaf_scale_layout_stages.py"
+@pytest.fixture(params=["leaf_scale_v1", "leaf_scale_one_row_v1"])
+def proof(request):
+    source = Path(__file__).with_name("runs") / request.param / "leaf_scale_layout_stages.py"
     if not source.is_file():
         pytest.skip("Materialize the frozen leaf candidate first")
     node = next(n for n in ast.parse(source.read_text()).body if isinstance(n, ast.FunctionDef))
@@ -65,8 +66,7 @@ def oracle(table, request, begin, count, physical):
 
 @pytest.mark.parametrize("count", [1, 31, 32, 33, 127, 255, 256])
 @pytest.mark.parametrize("direction", [1, -1])
-def test_every_middle_page_and_reverse_direction(count, direction):
-    proof = leaf_proof()
+def test_every_middle_page_and_reverse_direction(proof, count, direction):
     table = (1000 + direction * np.arange(320)).astype(np.int32).reshape(1, -1)
     args = (0, 17, count, 2048)
     assert proof(table, *args) == oracle(table, *args)
@@ -77,8 +77,7 @@ def test_every_middle_page_and_reverse_direction(count, direction):
             assert proof(altered, *args) == oracle(altered, *args)
 
 
-def test_bounds_and_exact_integer_limit():
-    proof = leaf_proof()
+def test_bounds_and_exact_integer_limit(proof):
     table = ((1 << 24) - 320 + np.arange(320)).astype(np.int32).reshape(1, -1)
     for request in (-1, 0, 1):
         for begin in (-1, 0, 64, 319, 320):
