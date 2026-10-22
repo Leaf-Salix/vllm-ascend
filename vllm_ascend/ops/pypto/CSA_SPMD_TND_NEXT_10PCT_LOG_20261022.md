@@ -940,3 +940,92 @@ harness的布局/保留区验证。原META完成之后的IDX_QUANT/IDX_SCALE获�
 
 本轮仍为有证据的实质进展，无外部阻塞。当前只有同址归因一个任务待收，
 无CPU任务；生产默认不变、未push，九档G仍未形成，goal继续active。
+
+
+### 同址Query诊断与第二个完整S6边界；容量细化只保留为候选
+
+070839同址任务completed/exit0，严格输出/Top-K/score、状态、保护、图和代际
+检查通过。790.76→782.88μs，-0.99651%，4/5快。收取器明确验证原九档gate
+因shared_workspace=True拒绝；此结果只支持归因，不能替代正式独立工作区
+验收。原harness把baseline.buffers设为candidate.buffers，binding每次调用
+从该字典传参，未另改计时/恢复位置。结果与完整窗口见
+query_contiguous_heads_v4_shared_diagnostic_results.json，旧Native差异另列。
+
+又测非B16的完整S6容量边界：task_20261022_072146_218734617423，B12/S6/T72，
+实际G6/flag=True，completed/exit0，全部严格检查通过。706.90→706.22μs，
+-0.09619%，3/5快，仅接近零的小幅证据，不据此宣称稳定改善。边界专用收取器
+增加这一明确非cohort输入，原九档case集合完全不动；八项拒绝错误分档、
+时钟/核数/次序/共享区和phase-clock的测试仍通过。
+
+准备过query_head_capacity_guard，仅在原64..96长G6资源域再要求
+T容量=request容量×query上界。只改policy，不从该乘积推断实际Q/L或请求归属，
+动态计算与尾行回退完整保留。两个CPU策略/源码合同通过，T80关闭完整编译
+及实际v122生成C++/ABI/host逐字核对通过。B16/T96和B12/T72的kernel文件及
+所有constexpr值与已测guard一致；没有再重复编译这两个相同输入。该细化
+没有采用到生产，B12证据很小，转而优先处理新发现的实际重复读取。
+
+### 新机制：同一AIV的8-head权重scale只载入一次
+
+连续head映射的work=worker+k*WORKERS。H=64、每work八head，当WORKERS为8的
+倍数时，work%8恒等于worker%8；当前48个AIV每轮都读同一组8-head权重scale。
+v4却把16KiB重新载入每次迭代。query_resident_weights独立基于v4，只改Query
+helper：一次读入readonly Vec tile，循环内复用；WORKERS不是8倍数时保持原
+逐work读取，T不整除8时仍走整个原helper。没有改scale乘法顺序、RMS、RoPE、
+BF16边界、同步或Tensor ABI。
+
+两个CPU合同通过：实际源表达式枚举多种worker数与T，确认可驻留/必须回退的
+所有权差异；还原这一个load移动后，整个旧数学body的AST完全一致。B16
+完整CPU编译成功，packed_meta与v4相同。逻辑权重读取量T96由v4的12MiB变为
+768KiB，原v122为1.5MiB；这是逻辑元素量，不是HBM流量或耗时预测。
+
+按cannbot resident_softmax_state_slot_recurrence_and_reuse_events的生命周期
+核查思路审计最终生成物（该卡仍draft/未定位platform，不搬用硬件结论）：
+- resident_head_scale物理UB[65536,81920)，16KiB，整个Query循环前只有一次TLOAD。
+- 重复主循环中该物理区间只有两个只读别名，既无输出覆盖也无scratch/tmp占用。
+  加强检查按实际UB偏移判断重叠，不能把不同MemRef名当成独立UB地址空间。
+- 奇数最后单work尾轮可以在最后一次MUL读取时原地覆盖该区间；它在主循环后，
+  之后没有任何原scale消费者。没有把合法的最后一次复用误判成循环内破坏。
+- 原行索引准备的V消费者先通过V→MTE2的配对事件退休，之后才加载权重；
+  生成的Query输入TLOAD全部晚于权重TLOAD，原MTE2→V获取覆盖前序MTE2工作。
+- 整体Vec地址上界仍163872B，没有新增GM根/参数/返回。
+
+审计一度因PTOAS合并了展开的_1/_2名字提示而停止；改为核对真实C++分支中的
+INT32 8×512输入Tile/TLOAD，未删除控制或事件检查。逐步审计报告保留，最终
+入口query_resident_weights_resources_v4.json；这仍只是静态机制证据，真机
+正确性与完整耗时由下列任务另证。Ruff及两个新合同检查通过。
+
+### 驻留版三档终态：B16正向，混长仍回退，不全域采用
+
+三个任务都completed/exit0，严格冻结v122输出/Top-K/score、所有cache/state、
+保护、图及代际检查通过，Native原有差异不改标：
+
+| 任务 / 场景 | v122中位μs | 驻留版中位μs | 耗时变化 | 配对更快 |
+|---|---:|---:|---:|---:|
+| 075108_326400111708 / 128K B16 S6 | 799.88 | 789.18 | -1.33770% | 5/5 |
+| 075109_32650589990 / 固定混长T56 | 735.92 | 747.40 | +1.55995% | 2/5 |
+| 075110_326637827 / 8K B32 S6 | 930.10 | 928.36 | -0.18708% | 2/5 |
+
+完整数据query_resident_weights_initial_results.json及
+query_resident_weights_mixed_results.json。不能跨轮把驻留版与v4绝对值相减，
+也不能将少读权重等同于全域收益。只保留B16方向，混长不采用；短B32幅度很小
+且窗口混合，不给强正向结论。此前combined_v3继续隔离，不上卡或采用。
+
+### 下一实际省工点及平台边界复审
+
+继续追踪发现，连续head helper每work还重新读取/展开rope_swap、加行偏移并
+转换为q_abs_swap。该swap是内部q_rope_prepare_stage写出的固定列配对，所有行
+相同，不同于随位置变化的外部cos/sin。vector_schedule已在609行附近获取全部
+PHASE_ROPE写者，之后才进入Indexer/Main Query。下一候选可在证明生产者行
+一致后只准备一次readonly q_abs_swap；仍每query读cos/sin，保留每次gather的
+可写scratch，不根据位置相等或T/B推断外部sin/cos数值。此处尚未生成或上卡，
+不预记收益，也不更改其余Goal约束。
+
+只读排除了一个较大但无新传输机制的改写：固定PyPTO的
+`docs/en/dev/passes/24-expand_mixed_kernel.md`与TPUSH/TPOP契约明确a2a3经GM，
+固定PTO-ISA `include/pto/npu/a2a3/TPush.hpp`的producer为TSTORE到GM、consumer
+为TLOAD。不能套用a5的消费者SRAM路径，也不能声称把当前手写Group换成
+pl.spmd/split_aiv/aic_gather就自动省去GM。本轮没有为该假设改写Attention或
+更改共享SDK；这条结论只针对当前固定实现，不扩为所有硬件能力断言。
+
+当前所有任务已终态，无CPU/设备pending。生产默认未变，仍未形成最终九档
+G<=0.90及完整新服务验收；goal继续active，未push。

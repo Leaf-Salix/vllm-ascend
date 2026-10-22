@@ -17,6 +17,7 @@ BOUNDARIES = {
     (5,) * 16: False,
     (6, 2) + (4,) * 14: True,
     (6, 4) + (5,) * 14: True,
+    (6,) * 12: True,
 }
 
 
@@ -26,8 +27,8 @@ def measurement(result):
     enabled = BOUNDARIES[queries]
     assert result["policy"]["QUERY_CONTIGUOUS_HEADS"] is enabled
     assert result["policy"]["QUERY_GROUP"] == (6 if enabled else 2)
-    assert result["history"] == 131072 and result["batch"] == result["request_capacity"] == 16
-    assert result["history_lengths"] == [131072] * 16
+    assert result["history"] == 131072 and result["batch"] == result["request_capacity"] == len(queries)
+    assert result["history_lengths"] == [131072] * len(queries)
     assert result["token_capacity"] == result["actual_tokens"] == sum(queries)
     assert not result.get("constant_indexer_history") and not result.get("wait_policy_experiment")
     assert not result.get("phase_clock") and not result["comparison_reference"].get("diagnostic_phase_clock")
@@ -54,7 +55,7 @@ def measurement(result):
         enabled=enabled,
         classification="active boundary" if enabled else "disabled control",
         history=131072,
-        batch=16,
+        batch=len(queries),
         query_lengths=list(queries),
         token_capacity=sum(queries),
         query_group=result["policy"]["QUERY_GROUP"],
