@@ -12,26 +12,27 @@ B1 G6/24叶方案的v31随机输入收益已被v35同分TopK/输出回归否决�
 
 ## 最新完整八档
 
-a241fa61 BSH静态形状修复；候选为O_A/O_B互补分工v4。B1/B16经完整C++和Host orchestration等价证明复用，其余六档新测。该分档已进入本工作树，整体10%目标尚未达到。
-完整证据：[cohort_output_balance_v4_result.json](cohort_output_balance_v4_result.json)。
-等权GM(TND/BSH)=0.991928345，门槛0.90，
+a241fa61 BSH静态形状修复+150tick；候选为输出分工v4+短前缀TopK+短G2半叶UB。两个改变档位新测，六个完整C++/Host相同档位保留原成对五窗口；无跨轮择优。已采用，整体10%目标仍未达到。
+完整证据：[cohort_borrowed_combined_v106_result.json](cohort_borrowed_combined_v106_result.json)。
+等权GM(TND/BSH)=0.988089028，门槛0.90，
 性能验收为FAIL（未达标）。后续单项试验不替换本轮任一档。
 
 | 场景 | BSH µs | TND µs | 耗时变化 |
 | --- | ---: | ---: | ---: |
 | 128K/B1/S6 | 371.62 | 351.96 | -5.29% |
 | 128K/B4/S6 | 492.26 | 483.16 | -1.85% |
-| 128K/B8/S6 | 630.82 | 625.78 | -0.80% |
+| 128K/B8/S6 | 622.28 | 617.16 | -0.82% |
 | 128K/B16/S6 | 791.40 | 780.18 | -1.42% |
 | 128K/B24/S6 | 1008.46 | 1019.12 | +1.06% |
 | 128K/B28/S6 | 1162.84 | 1156.10 | -0.58% |
-| 8K/B16/S6 | 634.46 | 653.54 | +3.01% |
+| 8K/B16/S6 | 641.12 | 640.38 | -0.12% |
 | 8K/B32/S6 | 920.58 | 917.04 | -0.38% |
 
 ## 完整L1性能
 
 五个轮换窗口的中位数，单位µs。百分比为TND相对原单SPMD的耗时变化；
 正值更慢。计全72核首尾，包含等待和阶段间隙。多task只参与其支持的S6。
+标注 incremental comparison 的行以已采用 TND 为参照，只判断候选增量，不能用于 BSH 八档验收。
 
 | 场景 | 基线 | 原SPMD | TND | 变化 | 多task | 本任务功能/采样 | 原始结果 |
 | --- | --- | ---: | ---: | ---: | ---: | --- | --- |
@@ -100,6 +101,20 @@ a241fa61 BSH静态形状修复；候选为O_A/O_B互补分工v4。B1/B16经完�
 | 8K/B16/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 631.92 | 634.28 | +0.37% | 不适用 | PASS | [结果](runs/short_hc_consumer_h8192_b16_s6_v81/result.json) |
 | 128K/B1/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 369.48 | 352.12 | -4.70% | 不适用 | PASS | [结果](runs/b1_output_prefix_s6_and_s1_s6_v81/result.json) |
 | 128K/B24/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 1016.18 | 1015.68 | -0.05% | 不适用 | PASS | [结果](runs/large_output_balance_h131072_b24_s6_v82/result.json) |
+| 128K/B1/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 367.30 | 361.62 | -1.55% | 不适用 | PASS | [结果](runs/single_m16_qa_b1_s6_and_s1_s6_v86/result.json) |
+| mixed [6, 6, 4] / 128K 独立工作区 | BSH150@a241fa61+静态形状修复 | 499.24 | 498.02 | -0.24% | 不适用 | PASS | [结果](runs/single_m16_qa_t16_mixed664_v86/result.json) |
+| 128K/B16/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 784.24 | 785.46 | +0.16% | 不适用 | PASS | [结果](runs/borrowed_score_stream_h131072_b16_s6_v90/result.json) |
+| 128K/B28/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 1142.46 | 1160.02 | +1.54% | 不适用 | PASS | [结果](runs/borrowed_score_owner_h131072_b28_s6_v90/result.json) |
+| 128K/B1/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 358.08 | 366.26 | +2.28% | 不适用 | PASS | [结果](runs/qa_incremental_b1_s6_v93b/result.json) |
+| 128K/B16/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 785.02 | 788.22 | +0.41% | 不适用 | PASS | [结果](runs/ws_incremental_b16_s6_v93b/result.json) |
+| 8K/B16/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 647.54 | 643.64 | -0.60% | 不适用 | PASS | [结果](runs/short_half_ub_h8192_b16_s6_v95/result.json) |
+| 128K/B28/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 1151.84 | 1152.62 | +0.07% | 不适用 | PASS | [结果](runs/topk_prefix_h131072_b28_s6_v99/result.json) |
+| 128K/B8/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 642.68 | 622.60 | -3.12% | 不适用 | PASS | [结果](runs/topk_prefix_h131072_b8_s6_v101/result.json) |
+| 128K/B8/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 622.28 | 617.16 | -0.82% | 不适用 | PASS | [结果](runs/cohort_borrowed_combined_h131072_b8_s6_v106/result.json) |
+| 8K/B16/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 641.12 | 640.38 | -0.12% | 不适用 | PASS | [结果](runs/cohort_borrowed_combined_h8192_b16_s6_v106/result.json) |
+| 128K/B1/S6 独立工作区 | TND combined v106 (incremental comparison only) | 366.50 | 355.42 | -3.02% | 不适用 | 未完成 | [结果](runs/qb_wide_b1_s6_and_s1_s6_v109/result.json) |
+| 128K/B8/S6 独立工作区 | TND combined v106 (incremental comparison only) | 613.56 | 609.60 | -0.65% | 不适用 | PASS | [结果](runs/qb_wide_h131072_b8_s6_v109/result.json) |
+| 128K/B4/S6 独立工作区 | TND combined v106 (incremental comparison only) | 487.38 | 489.72 | +0.48% | 不适用 | PASS | [结果](runs/qb_wide_h131072_b4_s6_v110/result.json) |
 
 ## 任务与原始证据
 
@@ -209,8 +224,29 @@ a241fa61 BSH静态形状修复；候选为O_A/O_B互补分工v4。B1/B16经完�
 | `task_20261021_112147_186635723381` | [short_hc_consumer_h8192_b16_s6_v81](runs/short_hc_consumer_h8192_b16_s6_v81/result.json) | completed (exit=0) | complete | PASS |
 | `task_20261021_112239_19267186046` | [b1_output_prefix_s6_and_s1_s6_v81](runs/b1_output_prefix_s6_and_s1_s6_v81/result.json) | completed (exit=0) | complete | PASS |
 | `task_20261021_112912_227563513845` | [large_output_balance_h131072_b24_s6_v82](runs/large_output_balance_h131072_b24_s6_v82/result.json) | completed (exit=0) | complete | PASS |
-| `task_20261021_121214_66656511685` | [single_m16_qa_b1_s6_and_s1_s6_v86](runs/single_m16_qa_b1_s6_and_s1_s6_v86/result.json) | 未知 | 缺少结果 | 否 |
-| `task_20261021_121215_667954606` | [single_m16_qa_t16_mixed664_v86](runs/single_m16_qa_t16_mixed664_v86/result.json) | 未知 | 缺少结果 | 否 |
+| `task_20261021_121214_66656511685` | [single_m16_qa_b1_s6_and_s1_s6_v86](runs/single_m16_qa_b1_s6_and_s1_s6_v86/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_121215_667954606` | [single_m16_qa_t16_mixed664_v86](runs/single_m16_qa_t16_mixed664_v86/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_140935_275270122118` | [borrowed_score_stream_h131072_b16_s6_v90](runs/borrowed_score_stream_h131072_b16_s6_v90/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_140935_275288020871` | [borrowed_score_owner_h131072_b28_s6_v90](runs/borrowed_score_owner_h131072_b28_s6_v90/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_141858_318904115435` | [qa_incremental_b1_s6_v93](runs/qa_incremental_b1_s6_v93/result.json) | 未知 | 缺少结果 | 否 |
+| `task_20261021_141858_318908415657` | [ws_incremental_b16_s6_v93](runs/ws_incremental_b16_s6_v93/result.json) | 未知 | 缺少结果 | 否 |
+| `task_20261021_142045_325426029053` | [qa_incremental_b1_s6_v93b](runs/qa_incremental_b1_s6_v93b/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_142045_32543028090` | [ws_incremental_b16_s6_v93b](runs/ws_incremental_b16_s6_v93b/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_144229_86824910253` | [short_half_ub_h8192_b16_s6_v95](runs/short_half_ub_h8192_b16_s6_v95/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_150402_219144119122` | [short_half_ub_t65_r16_matrix_v98](runs/short_half_ub_t65_r16_matrix_v98/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_151458_2930389393` | [topk_prefix_h131072_b28_s6_v99](runs/topk_prefix_h131072_b28_s6_v99/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_154139_748519735` | [topk_prefix_h131072_b8_s6_v101](runs/topk_prefix_h131072_b8_s6_v101/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_155419_187365031349` | [short_half_ub_ties_device_v100b](runs/short_half_ub_ties_device_v100b/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_160738_306213119230` | [topk_prefix_t41_r12_matrix_v103](runs/topk_prefix_t41_r12_matrix_v103/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_162057_10868510136` | [topk_prefix_ties_device_v104](runs/topk_prefix_ties_device_v104/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_162824_11408309460` | [cohort_borrowed_combined_h131072_b8_s6_v106](runs/cohort_borrowed_combined_h131072_b8_s6_v106/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_162824_11409259262` | [cohort_borrowed_combined_h8192_b16_s6_v106](runs/cohort_borrowed_combined_h8192_b16_s6_v106/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_165204_1559193337` | [qb_wide_b1_s6_and_s1_s6_v109](runs/qb_wide_b1_s6_and_s1_s6_v109/result.json) | completed (exit=1) | tnd_metadata_and_continuous_state | 否 |
+| `task_20261021_165204_15601729493` | [qb_wide_h131072_b8_s6_v109](runs/qb_wide_h131072_b8_s6_v109/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_170809_210455428383` | [qb_wide_b1_s1_s6_matrix_v110](runs/qb_wide_b1_s1_s6_matrix_v110/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_170809_210475710362` | [qb_wide_t41_r12_matrix_v110](runs/qb_wide_t41_r12_matrix_v110/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_171014_231115820997` | [qb_wide_h131072_b4_s6_v110](runs/qb_wide_h131072_b4_s6_v110/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_172027_32968638376` | [prefix_two_b1_s6_and_s1_s6_v112](runs/prefix_two_b1_s6_and_s1_s6_v112/result.json) | running | original_spmd_attribution | 否 |
 
 各任务完整命令和固定launcher SHA256见 `jobs.json`。
 Native超阈值元素、Top-K替换、cache/state及保护区明细仍在原始result.json；

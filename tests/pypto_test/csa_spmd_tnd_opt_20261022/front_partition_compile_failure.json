@@ -1,0 +1,11 @@
+{
+  "source": "front_partition_i8",
+  "passed": false,
+  "device_execution": false,
+  "parse_passed": true,
+  "error": "NZ layout requires the slice offset on shape[-1] to be non-negative, and this one cannot be proven to be. A negative offset is clamped to 0 at the partition view rather than rejected, so it would read the wrong fractal silently. Provable forms are a non-negative constant, the SPMD block index, a loop variable whose start and step are both non-negative, and any sum or product built from those — note that a difference never qualifies. Slice from a non-negative offset, or annotate the tensor as pl.ND. [/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_opt_20261022/runs/front_partition_i8/query_projection_stages.py:195:17]\nCheck failed: IsProvableNonNegative(offset, facts, &sign_budget) at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-mpmd-upstream-20261021/include/pypto/ir/transforms/utils/tensor_view_semantics.h:594",
+  "result": "tests/pypto_test/csa_spmd_tnd_opt_20261022/runs/compile_front_partition_i8_b16/result.json",
+  "result_sha256": "c5e69859be8227a3429217ceebec831aa81fba26346e8ecd872fbe19655ca3b2",
+  "resolution": "v2 changes only Q_B worker to modulo domain; SDK and NZ annotation unchanged",
+  "replacement": "front_partition_i8_v2"
+}

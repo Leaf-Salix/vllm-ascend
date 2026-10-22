@@ -1,0 +1,85 @@
+--- a/bsh_probe.py
++++ b/bsh_probe.py
+@@ -85,9 +85,8 @@
+     sys.modules[name] = module
+     spec.loader.exec_module(module)
+     parent.wait_codegen = module
+-    if module.WAIT_BACKOFF_TICKS != 150:
+-        raise ValueError("The frozen accepted BSH baseline must use 150 ticks")
+-    original = module.rewrite_wait_source
++    def original(source):
++        raise ValueError("Both incremental TND sides must use native 150-tick lowering")
+ 
+     def rewrite_or_accept_native(source):
+         if "PTOAS__WAIT_GE_BACKOFF<" in source:
+@@ -124,6 +123,13 @@
+         result_path = args.output / "result.json"
+         if result_path.exists():
+             result = json.loads(result_path.read_text())
++            reference = json.loads((args.wait_policy_source.parent.parent /
++                                         "comparison_reference.json").read_text())
++            for relative, expected in reference["files"].items():
++                actual = args.wait_policy_source.parent / relative
++                if hashlib.sha256(actual.read_bytes()).hexdigest() != expected:
++                    raise RuntimeError(f"Frozen TND reference changed: {relative}")
++            result["comparison_reference"] = reference
+             files = list((args.output / "build_output").glob("decode_csa_spmd_*/kernels/*/*.cpp"))
+             audit = []
+             for path in files:
+@@ -137,7 +143,7 @@
+                         native_lowering=native,
+                         legacy_rewrite=legacy,
+                         initial_fast_polls=(4 if fast_polls_present else 0),
+-                        passed=(native or legacy)
++                        passed=native and not legacy
+                         and fast_polls_present == bool(native and args.wait_first_fast_polls)
+                         and "pto::comm::TWAIT(" not in source
+                         and "volatile __gm__ int32_t*" in source
+@@ -149,7 +155,7 @@
+                 "ticks": 150,
+                 "actual_ccec_sources": audit,
+                 "scope": (
+-                    "BSH fixed150; native TND fixed150 unless the separately recorded fast-poll experiment is enabled"
++                    "Incremental TND pair; fixed150 on both sides. Not a BSH performance-gate result."
+                 ),
+             }
+             result["wait_policy_experiment"] = (
+--- a/run_probe.sh
++++ b/run_probe.sh
+@@ -63,7 +63,7 @@
+     [[ ${#bsh_roots[@]} == 3 ]]
+     pypto_root=${bsh_roots[0]}
+     ptoas_root=${bsh_roots[1]}
+-    baseline_source=${bsh_roots[2]}
++    baseline_source=/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/incremental_ws_harness_v93b/reference
+ fi
+ if [[ $native_toolchain == true ]]; then
+     pypto_root="$workspace/.worktrees/pypto-csa-tnd-perf-20261021"
+@@ -75,6 +75,7 @@
+     printf '拒绝覆盖结果目录：%s\n' "$out" >&2
+     exit 2
+ fi
++[[ $bsh_mode == true && $mode == probe && $native_toolchain == true ]]
+ source "$workspace/env-dsv4-0251rc1.sh"
+ export TORCH_DEVICE_BACKEND_AUTOLOAD=0 PYTHONDONTWRITEBYTECODE=1
+ export VLLM_ASCEND_ENABLE_NZ=2 VLLM_ASCEND_PTO_CSA_ATOMIC_ADD=0
+@@ -103,7 +104,7 @@
+ 
+ repo, snapshot, launcher = map(Path, sys.argv[1:4])
+ mode = sys.argv[4]
+-harness = Path('/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/ws_layout_harness_v90')
++harness = Path('/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/incremental_ws_harness_v93b')
+ snapshot.mkdir(parents=True, exist_ok=False)
+ shutil.copyfile(launcher, snapshot / "launcher.sh")
+ package = Path(sys.argv[5]).resolve()
+@@ -111,8 +112,8 @@
+ baseline = Path(sys.argv[6]).resolve()
+ shutil.copytree(baseline, snapshot / "original_spmd",
+                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+-if sys.argv[7]:
+-    shutil.copyfile(sys.argv[7], snapshot / "bsh_baseline_manifest.json")
++shutil.copyfile(harness / "comparison_reference.json",
++                snapshot / "comparison_reference.json")
+ for path in (
+     harness / "run_probe.py",
+     harness / "service_probe.py",

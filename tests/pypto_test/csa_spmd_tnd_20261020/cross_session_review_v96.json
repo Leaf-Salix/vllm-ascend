@@ -1,0 +1,56 @@
+{
+  "sessions": {
+    "CSA-多task": {
+      "id": "01a0c3f6-3686-7611-95d5-37bed175d574",
+      "latest_reviewed": "2026-10-21T06:44:05Z",
+      "new_work": "Starting separate TND MPMD implementation against frozen84751e34; no new accepted performance result yet. Its new weighted/16card goal does not alter this thread."
+    },
+    "接入vllm-ascend": {
+      "id": "01a0c422-2ef1-7f91-a239-96f637f6c740",
+      "latest_reviewed": "2026-10-21T05:06:59Z",
+      "latest_work": "Native B1 evidence commit84751e34; accepted SPMD stilla241fa61, no new math adoption"
+    }
+  },
+  "candidates": [
+    {
+      "name": "TopK exact short-prefix",
+      "source_commit": "6ba55b45",
+      "donor": "c49ee5b2/source_topk_payload",
+      "adopted_in_multitask": true,
+      "already_in_current_tnd": false,
+      "old_spmd_evidence_us": {
+        "B8": [
+          634.96,
+          617.44
+        ],
+        "B28": [
+          1178.64,
+          1157.64
+        ],
+        "B4": [
+          478.02,
+          481.78
+        ],
+        "B24": [
+          1026.02,
+          1028.16
+        ]
+      },
+      "action": "Port bounded helper and guarded call to current TND, firstB28; retain exact ties/fallback and deviceQ/L. Do not copy oldschedule or infer additive speedup."
+    },
+    {
+      "name": "HCpost workers and sync_start",
+      "action": "Already inherited one-token/AIV traversal in current output_projection_b_stages; multitask sync_start is not a new intra-SPMD stage primitive."
+    },
+    {
+      "name": "ShortG2 half-leafUB",
+      "action": "v95 port and CPU audit complete; new actual8K/B16 result647.54->643.64us,4/5faster; retain for further correctness beforeadoption."
+    },
+    {
+      "name": "QA N64, WS pool/scale, Score-owner",
+      "action": "Already ported and measured in v92-v94; no incremental adopted gain, do not rerun unchanged."
+    }
+  ],
+  "formal_bsh_baseline": "a241fa61 + inactive-B1 typefix + fixed150; unchanged",
+  "push_permitted": false
+}

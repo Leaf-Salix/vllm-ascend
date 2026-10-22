@@ -1,0 +1,68 @@
+{
+  "goal_status": "paused",
+  "baseline": "frozen_tnd_v122",
+  "formal_case_count": 9,
+  "formal_geometric_mean_ratio": null,
+  "target_ratio": 0.9,
+  "production_operator_changed": false,
+  "push_authorized": false,
+  "positive_candidates": [
+    "b1_idle_publish",
+    "live_half",
+    "batched_sort3_v2",
+    "combined_v1",
+    "b1_sort_unused_fills",
+    "main_vector_late",
+    "front_partition_i8_v2_mixed_only",
+    "query_contiguous_heads_v4_b16",
+    "query_resident_weights_b16",
+    "output_quant_reuse_b1",
+    "page_proof_single_row_b16"
+  ],
+  "next_steps": [
+    "Stopped after completing all work already in flight, as explicitly requested; do not start or submit more work without a resume instruction"
+  ],
+  "pending_tasks": {},
+  "pending_cpu": null,
+  "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
+  "git_note": "Shared origin tracking ref changed externally to 059dab4a (reflog update by push at 02:06:49). This session did not fetch/push/rebase; local optimization commits preserved.",
+  "most_validated_combination": "combined_v1",
+  "rejected_new_candidates": [
+    "b1_sort_stream",
+    "oa_rows48",
+    "oa_rows64",
+    "short_half_ub96",
+    "key_page_proof",
+    "front_partition_i8_v2_s6",
+    "front_partition_i8_v3_s6",
+    "score_query_pipeline",
+    "score_ws_pool_b16_no_benefit",
+    "query_contiguous_heads_v4_mixed_no_benefit",
+    "query_contiguous_heads_v4_short_b32_regression",
+    "query_head_guard_64_96_active_boundaries",
+    "query_resident_weights_global_mixed_regression",
+    "output_quant_reuse_global_b16_and_short_b32",
+    "combined_v4_b16_regression_and_b1_gain_not_retained"
+  ],
+  "completed_score_producer_diagnostic": "score_producer_sim_results.json",
+  "withheld_combination": {
+    "source": "runs/combined_v3",
+    "reason": "Query guard has actual G6 boundary regressions; compiled only, do not submit"
+  },
+  "deferred_candidates": {
+    "query_head_capacity_guard": "B16 positive evidence retained; non-B16 B12 is -0.096% with only 3/5 faster; not adopted",
+    "combined_v3": "Contains rejected broad Query guard; CPU compiled only, do not submit",
+    "query_resident_swap": "Correct in all three trials; B16 -0.369% 3/5, mixed +0.143% 2/5, short B32 -0.576% 4/5; not globally adopted",
+    "combined_v4": "Exact in three cases and B1 S1-S6; B1 +0.069%, B16 +1.272% (0/5 faster), mixed -0.075%; do not adopt",
+    "combined_v5": "CPU B1/B16 complete; full generated C++/packed wrappers/host/meta match measured B1 quant-only and B16 combined_v1 respectively; no NPU run/adoption",
+    "page_proof_single_row": "B16 -1.008% with 5/5 faster; B28 -0.098% with 3/5 faster; exact full checks passed. No expanded page matrix, production adoption or nine-case gate before user-requested stop."
+  },
+  "stop_request": "User paused goal and requested finishing only the current optimization attempt before stopping",
+  "remaining_work_on_resume": [
+    "Nine equal-weight G<=0.90 remains unproven; do not add independent gains or move frozen-v122 baseline",
+    "Page proof single-row candidate has local B16 evidence only; affected dynamic page/layout coverage remains before adoption",
+    "combined_v5 has CPU codegen equivalence for B1/B16 only; no NPU run or final cohort; mixed/other-domain equivalence not established",
+    "Final same-candidate nine-case performance and affected correctness/service/continuous-state acceptance remain incomplete"
+  ],
+  "log_anchor": "csa-tnd-next-10pct-log-20261022"
+}

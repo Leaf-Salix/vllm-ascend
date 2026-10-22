@@ -1,0 +1,12 @@
+--- a/policy.py
++++ b/policy.py
+@@ -228,7 +228,8 @@
+         # 实际有效query/长度/页表仍在device读取，不按B4/B8等测试点枚举。
+         split_score_rows=long_history and group == 6 and tokens >= SCORE_SPLIT_MIN_TOKENS,
+         # Candidate only: reuse the existing G6 resource boundary; real retention is device-side.
+-        short_topk_prefix=long_history and group == 6 and tokens >= SCORE_SPLIT_MIN_TOKENS,
++        short_topk_prefix=(long_history and group == 6
++                           and SCORE_SPLIT_MIN_TOKENS <= tokens < EARLY_GEOMETRY_MIN_TOKENS),
+         # B1 reuses its existing balanced half-leaf domain. Multiple-request
+         # redistribution is limited to long G6 and the existing 64..96-token
+         # resource interval. Short G2/B16 regressed despite exact outputs;

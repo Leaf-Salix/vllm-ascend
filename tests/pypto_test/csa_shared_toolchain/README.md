@@ -23,6 +23,11 @@ TND MPMD的`csa_mpmd_tnd_20261021/launch.sh`。
 工作进程继承统一的Python模块查找路径，优先于历史editable安装。
 入口打印实际选择；BSH旧清单只保留算子源码参考，新的SDK选择由公共清单决定。
 
+独立 worktree 通过向上寻找 `env-dsv4-0251rc1.sh` 定位工作区，仍读取主检出
+`vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_shared_toolchain/manifest.json`。
+TND 的 `run_compile_cpu.sh` 和 `run_isolated_probe.sh` 也使用该公共选择；
+历史 `runs/` 中冻结的启动器及结果保持原版本。
+
 `status=validating`表示本轮升级仍在验证，不能作为已验收版本使用。
 若PTOAS产物缺失，公共入口立即报错，不从PATH退回其他版本。
 完成定向回归和受影响单卡运行后，将版本及证据记入清单。

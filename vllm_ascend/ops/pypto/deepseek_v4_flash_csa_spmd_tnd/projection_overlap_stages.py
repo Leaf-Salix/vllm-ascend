@@ -122,6 +122,7 @@ def projection_overlap_stage(
     worker: pl.Scalar[pl.INDEX],
     generation: pl.Scalar[pl.INT32],
     BRANCH_GROUPS: pl.constexpr,
+    QB_WIDE_N: pl.constexpr = False,
 ):
     """0<R<24；Host只选择R，动态行数及所有输入依赖仍留在核内。"""
     tokens = pl.tensor.dim(normed, 0)
@@ -168,7 +169,7 @@ def projection_overlap_stage(
         # 后部连续N个物理核对N取模是双射，既覆盖全部列块，也让NZ地址从
         # 非负表达式构成。消费者等待全部Q_B实际生产者，不依赖置换前的编号。
         qb_worker = worker % (GROUPS - BRANCH_GROUPS)
-        q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, qb_worker, GROUPS - BRANCH_GROUPS)
+        q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, qb_worker, GROUPS - BRANCH_GROUPS, QB_WIDE_N)
         signal = publish_phase(signal, PHASE_QB, worker, CORES, generation)
     # 同一组24个KV逻辑worker做循环置换，保持全部M/N块唯一归属。常见的
     # 最多12个非空worker落在Q_B一侧，不继续堆到Hadamard辅助核；即便

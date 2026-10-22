@@ -99,6 +99,10 @@ SHORT_SCORE_TILE = 768
 SHORT_PREFETCH_HALF_SORT_LIMIT = 2048
 # 沿已有QA的小M16并行区间边界，两个完整M16行块起再启用Score新流水。
 SCORE_SPLIT_MIN_TOKENS = 32
+# At most two query-group work items per each of the 24 physical groups.
+SHORT_HALF_SCORE_GROUP_LIMIT = 48
+# Two M256 query-Hadamard tiles cover the existing first M8 token block.
+TWO_HADAMARD_MAX_TOKENS = 8
 
 
 @dataclass(frozen=True)
@@ -123,6 +127,10 @@ class CSASPMDPolicy:
     plan_physical_rows: bool = False
     split_score_rows: bool = False
     output_work_balance: bool = False
+    short_topk_prefix: bool = False
+    short_half_score_ub: bool = False
+    qb_wide_n: bool = False
+    prefix_branch_groups: int = 4
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -147,6 +155,10 @@ class CSASPMDPolicy:
             "PLAN_PHYSICAL_ROWS": self.plan_physical_rows,
             "SPLIT_SCORE_ROWS": self.split_score_rows,
             "OUTPUT_WORK_BALANCE": self.output_work_balance,
+            "SHORT_TOPK_PREFIX": self.short_topk_prefix,
+            "SHORT_HALF_SCORE_UB": self.short_half_score_ub,
+            "QB_WIDE_N": self.qb_wide_n,
+            "PREFIX_BRANCH_GROUPS": self.prefix_branch_groups,
         }
 
 
@@ -198,6 +210,15 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         roots=1 if (long_history and group == 6) or single_request_leaves else 2,
         oa_cols=128 if tokens <= 96 else 256,
         ob_rows=ob_rows,
+        # Does not infer real query lengths; only the existing Host token-capacity tier.
+        # Keep the original Q_B in the small-M16 QA domain, which regressed in the paired test.
+        qb_wide_n=(long_history and tokens < EARLY_GEOMETRY_MIN_TOKENS
+                   and not parallel_small_qa),
+        prefix_branch_groups=2 if long_history and tokens <= TWO_HADAMARD_MAX_TOKENS else 4,
+        # Host upper bound only; real mixed-query membership remains on device.
+        short_half_score_ub=(not long_history and group == 2
+                             and requests * ((max_query_tokens + 1) // 2)
+                             <= SHORT_HALF_SCORE_GROUP_LIMIT),
         # 沿已有G6分界选择两M16尾块的并行；G2已观察回退，不按B4/B5白名单。
         qa_m16_parallel=parallel_small_qa,
         cooperative_prefix=True,
@@ -225,6 +246,10 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         # 前段资源区间；依据完整实测取舍，不把回退唯一归因于QA或假定最优。
         # 实际有效query/长度/页表仍在device读取，不按B4/B8等测试点枚举。
         split_score_rows=long_history and group == 6 and tokens >= SCORE_SPLIT_MIN_TOKENS,
+        # Full-chain gains validated below the existing 64-token resource boundary.
+        # The retained prefix length and request membership remain device-side.
+        short_topk_prefix=(long_history and group == 6
+                           and SCORE_SPLIT_MIN_TOKENS <= tokens < EARLY_GEOMETRY_MIN_TOKENS),
         # B1 reuses its existing balanced half-leaf domain. Multiple-request
         # redistribution is limited to long G6 and the existing 64..96-token
         # resource interval. Short G2/B16 regressed despite exact outputs;

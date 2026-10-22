@@ -56,11 +56,18 @@ def main():
             native_frozen_output=result.get("native_frozen_output"),
             original_spmd_attribution=result.get("original_spmd_attribution", {}).get("candidate_exactly_matches"),
             baseline_kind=(
-                "BSH150@" + (baseline_commit[:8] if baseline_commit else "未识别版本")
-                + ("+静态形状修复" if baseline_local_fix else "")
-                if result.get("bsh_wait_policy_audit", {}).get("passed")
-                else "raw TWAIT" if result.get("wait_backoff") is False else "legacy probe"
+                result.get("comparison_reference", {}).get("label")
+                or (
+                    "BSH150@"
+                    + (baseline_commit[:8] if baseline_commit else "未识别版本")
+                    + ("+静态形状修复" if baseline_local_fix else "")
+                    if result.get("bsh_wait_policy_audit", {}).get("passed")
+                    else "raw TWAIT"
+                    if result.get("wait_backoff") is False
+                    else "legacy probe"
+                )
             ),
+            comparison_reference=result.get("comparison_reference"),
             baseline_commit=baseline_commit,
             baseline_local_compile_fix=baseline_local_fix,
             wait_policy_experiment=result.get("wait_policy_experiment"),
@@ -204,6 +211,7 @@ def main():
         "",
         "五个轮换窗口的中位数，单位µs。百分比为TND相对原单SPMD的耗时变化；",
         "正值更慢。计全72核首尾，包含等待和阶段间隙。多task只参与其支持的S6。",
+        "标注 incremental comparison 的行以已采用 TND 为参照，只判断候选增量，不能用于 BSH 八档验收。",
         "",
         "| 场景 | 基线 | 原SPMD | TND | 变化 | 多task | 本任务功能/采样 | 原始结果 |",
         "| --- | --- | ---: | ---: | ---: | ---: | --- | --- |",

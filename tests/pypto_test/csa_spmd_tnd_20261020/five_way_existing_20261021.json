@@ -1,0 +1,694 @@
+{
+  "created_at": "2026-10-21T13:22:42.325907+08:00",
+  "new_device_execution": false,
+  "statistic": "median",
+  "latency_unit": "us",
+  "formula": "(native_us - tnd_spmd_l1_us) / tnd_spmd_l1_us * 100",
+  "scope": "8 S6 cases, TP1/single card, W8A8/NZ2/layer4; HC_pre+RMSNorm+CSA+HC_post",
+  "native": "Oct20 seven-case30-sample Profiler full-device/multistream span; Oct21 B1 supplement",
+  "mpmd": "Oct21 accepted qa_shape_gate_v1/a658188c; candidate role is now adopted; both columns same version",
+  "mpmd_outer": "5 NPU Event samples around graph.replay, includes AICPU/runtime; not Profiler span",
+  "mpmd_l1": "5 existing full-chain L1 earliest-incore to latest-end windows",
+  "bsh_spmd_and_tnd": "Paired v4 complete cohort; a241fa61+static B1 shape fix/native150 vs adopted output balance",
+  "caveats": [
+    "Five columns were not measured together; source revisions and toolchains differ",
+    "Native/MPMD outer are outer scope; remaining three columns are incore L1 scope",
+    "Outer minus L1 is not a measured pure AICPU cost",
+    "Percentage uses TND denominator and unrounded inputs; not same-scope end-to-end acceleration",
+    "Unadopted QA/WS/Score-owner TND candidates are excluded"
+  ],
+  "rows": [
+    {
+      "history": 131072,
+      "batch": 1,
+      "query_tokens": 6,
+      "native_us": 632.75,
+      "bsh_mpmd_outer_us": 450.37999749183655,
+      "bsh_mpmd_l1_us": 370.68,
+      "bsh_spmd_l1_us": 371.62,
+      "tnd_spmd_l1_us": 351.96,
+      "native_minus_tnd_over_tnd_pct": 79.77895215365383,
+      "samples": {
+        "native": [
+          643.75,
+          628.5,
+          628.75,
+          635.25,
+          632.5,
+          627.5,
+          626.75,
+          654.75,
+          635.0,
+          634.5,
+          637.25,
+          656.0,
+          637.25,
+          633.0,
+          680.5,
+          626.25,
+          628.0,
+          629.25,
+          639.0,
+          624.75,
+          625.5,
+          631.25,
+          638.5,
+          635.75,
+          628.5,
+          650.75,
+          626.75,
+          648.25,
+          629.75,
+          632.25
+        ],
+        "mpmd_outer": [
+          450.37999749183655,
+          451.6800045967102,
+          434.1199994087219,
+          444.2799985408783,
+          497.33999371528625
+        ],
+        "mpmd_l1": [
+          370.34,
+          370.68,
+          374.88,
+          368.16,
+          374.32
+        ],
+        "spmd_original": [
+          377.58,
+          370.22,
+          371.62,
+          365.46,
+          373.6
+        ],
+        "spmd_tnd": [
+          351.96,
+          354.52,
+          350.16,
+          352.08,
+          348.0
+        ]
+      },
+      "source_files": [
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_five_way_latest_20261020/results/h131072_b1/native_supplement_20261021_v1/report.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/qa_shape_gate_v1/h131072_b1_shape_gate_v1/result.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/output_work_balance_b1_s6_and_s1_s6_v67/result.json"
+      ],
+      "source_sha256": [
+        "8a1199cf2aa4e7ec04cc420b401659b1a1eb209c7b886db284d1fc8536c3fb8f",
+        "53a26b34899557424cd45e340c9f924e527865bd01d7913d3339a4b321f3a607",
+        "95d454ab3bea1cbd1eb954e51682af3baf7daace5a456db8ddbd017f461e02f2"
+      ],
+      "tnd_task_id": "task_20261021_091603_291753515374"
+    },
+    {
+      "history": 131072,
+      "batch": 4,
+      "query_tokens": 6,
+      "native_us": 791.25,
+      "bsh_mpmd_outer_us": 555.6600093841553,
+      "bsh_mpmd_l1_us": 473.24,
+      "bsh_spmd_l1_us": 492.26,
+      "tnd_spmd_l1_us": 483.16,
+      "native_minus_tnd_over_tnd_pct": 63.76562629356734,
+      "samples": {
+        "native": [
+          775.5,
+          788.0,
+          797.75,
+          811.75,
+          773.25,
+          788.0,
+          792.0,
+          828.0,
+          787.5,
+          784.5,
+          821.25,
+          792.0,
+          792.25,
+          789.25,
+          787.75,
+          791.25,
+          769.5,
+          822.75,
+          786.0,
+          788.25,
+          806.0,
+          786.0,
+          790.5,
+          791.5,
+          818.5,
+          794.25,
+          786.0,
+          794.0,
+          791.25,
+          791.75
+        ],
+        "mpmd_outer": [
+          633.3199739456177,
+          555.6600093841553,
+          537.6799702644348,
+          551.9400238990784,
+          593.5400128364563
+        ],
+        "mpmd_l1": [
+          473.24,
+          468.74,
+          482.84,
+          473.22,
+          479.7
+        ],
+        "spmd_original": [
+          492.26,
+          468.94,
+          495.32,
+          472.72,
+          498.58
+        ],
+        "spmd_tnd": [
+          472.9,
+          475.9,
+          490.68,
+          491.6,
+          483.16
+        ]
+      },
+      "source_files": [
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_five_way_latest_20261020/results/h131072_b4/native_v1/report.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/qa_shape_gate_v1/h131072_b4_shape_gate_v1/result.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/cohort_output_balance_h131072_b4_s6_v74/result.json"
+      ],
+      "source_sha256": [
+        "8d633b4aaea7d4019a3f1b981d780d35dbd452343f0f47a440daaf3dc01e59f1",
+        "48f1affff928d701cc7ee717ba0bdf14797dfea76fc9e9bddbb2f095db27f2f2",
+        "147d3015bf02e3686bb4fdcfdb756feee7f95dc26400855f9e8725cdff9737ec"
+      ],
+      "tnd_task_id": "task_20261021_101618_280762024924"
+    },
+    {
+      "history": 131072,
+      "batch": 8,
+      "query_tokens": 6,
+      "native_us": 887.625,
+      "bsh_mpmd_outer_us": 727.1400094032288,
+      "bsh_mpmd_l1_us": 606.76,
+      "bsh_spmd_l1_us": 630.82,
+      "tnd_spmd_l1_us": 625.78,
+      "native_minus_tnd_over_tnd_pct": 41.842979961008666,
+      "samples": {
+        "native": [
+          875.0,
+          889.25,
+          887.5,
+          888.75,
+          883.5,
+          890.0,
+          883.0,
+          884.25,
+          887.25,
+          895.5,
+          887.0,
+          915.5,
+          888.75,
+          885.5,
+          885.5,
+          889.5,
+          883.5,
+          887.75,
+          887.75,
+          886.5,
+          884.25,
+          916.75,
+          889.25,
+          887.75,
+          893.75,
+          890.5,
+          885.25,
+          889.0,
+          885.0,
+          886.75
+        ],
+        "mpmd_outer": [
+          928.5399913787842,
+          663.2999777793884,
+          674.4199991226196,
+          727.1400094032288,
+          909.9799990653992
+        ],
+        "mpmd_l1": [
+          604.66,
+          606.76,
+          602.88,
+          613.14,
+          609.36
+        ],
+        "spmd_original": [
+          628.94,
+          638.52,
+          626.64,
+          635.04,
+          630.82
+        ],
+        "spmd_tnd": [
+          624.74,
+          625.06,
+          625.78,
+          629.36,
+          634.64
+        ]
+      },
+      "source_files": [
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_five_way_latest_20261020/results/h131072_b8/native_v1/report.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/qa_shape_gate_v1/h131072_b8_shape_gate_v1/result.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/cohort_output_balance_h131072_b8_s6_v74/result.json"
+      ],
+      "source_sha256": [
+        "64165af5534888a19a81e1613dabb68b170414fae7aefbc0ddee6d734bb1d7c5",
+        "a9a487a811ae0274d6427470a0d01c3302ae26f628e24569428733e36b3cb32b",
+        "e0466084db9ef443a1f588f12d9212d030f151b1e564bdaaadb77d62627081bf"
+      ],
+      "tnd_task_id": "task_20261021_101619_280897124735"
+    },
+    {
+      "history": 131072,
+      "batch": 16,
+      "query_tokens": 6,
+      "native_us": 1177.875,
+      "bsh_mpmd_outer_us": 1003.6200284957886,
+      "bsh_mpmd_l1_us": 837.78,
+      "bsh_spmd_l1_us": 791.4,
+      "tnd_spmd_l1_us": 780.18,
+      "native_minus_tnd_over_tnd_pct": 50.9747750519111,
+      "samples": {
+        "native": [
+          1177.25,
+          1168.25,
+          1180.0,
+          1182.75,
+          1177.0,
+          1174.25,
+          1183.25,
+          1172.5,
+          1174.25,
+          1179.75,
+          1173.5,
+          1174.5,
+          1160.0,
+          1176.25,
+          1195.0,
+          1180.0,
+          1171.25,
+          1182.0,
+          1178.5,
+          1181.0,
+          1176.0,
+          1178.75,
+          1170.75,
+          1172.0,
+          1179.25,
+          1212.0,
+          1182.5,
+          1182.75,
+          1179.75,
+          1172.0
+        ],
+        "mpmd_outer": [
+          983.6400151252747,
+          999.3199706077576,
+          1045.4800128936768,
+          1003.6200284957886,
+          1068.0999755859375
+        ],
+        "mpmd_l1": [
+          820.18,
+          840.28,
+          840.52,
+          823.74,
+          837.78
+        ],
+        "spmd_original": [
+          794.48,
+          791.76,
+          789.32,
+          791.4,
+          787.6
+        ],
+        "spmd_tnd": [
+          780.18,
+          790.54,
+          778.32,
+          778.0,
+          783.4
+        ]
+      },
+      "source_files": [
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_five_way_latest_20261020/results/h131072_b16/native_v1/report.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/qa_shape_gate_v1/h131072_b16_shape_gate_v1/result.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/output_work_balance_h131072_b16_s6_v67/result.json"
+      ],
+      "source_sha256": [
+        "88300f850d607c7a59adb0191036ac8a03966a414c3db3963b9f44509748c948",
+        "a81e7127b615fa61cafc4a14e6c104c6867cb01128eba3e86e01364c81d560c2",
+        "22883c89d27daf41a0bfad4e407ad3431f60e71224e2f3d0d5a171e4139bbc7a"
+      ],
+      "tnd_task_id": "task_20261021_091605_291986121743"
+    },
+    {
+      "history": 131072,
+      "batch": 24,
+      "query_tokens": 6,
+      "native_us": 1342.25,
+      "bsh_mpmd_outer_us": 1161.7000102996826,
+      "bsh_mpmd_l1_us": 1054.32,
+      "bsh_spmd_l1_us": 1008.46,
+      "tnd_spmd_l1_us": 1019.12,
+      "native_minus_tnd_over_tnd_pct": 31.706766622183846,
+      "samples": {
+        "native": [
+          1348.25,
+          1347.0,
+          1339.75,
+          1341.25,
+          1339.25,
+          1342.75,
+          1345.5,
+          1343.25,
+          1346.0,
+          1341.25,
+          1336.0,
+          1346.5,
+          1339.25,
+          1350.5,
+          1341.75,
+          1346.75,
+          1345.75,
+          1339.25,
+          1337.75,
+          1351.0,
+          1336.5,
+          1341.5,
+          1349.5,
+          1340.0,
+          1343.5,
+          1339.75,
+          1344.75,
+          1342.75,
+          1340.25,
+          1339.25
+        ],
+        "mpmd_outer": [
+          1184.980034828186,
+          1161.7000102996826,
+          1133.180022239685,
+          1143.7000036239624,
+          1243.1399822235107
+        ],
+        "mpmd_l1": [
+          1054.32,
+          1013.6,
+          1060.72,
+          1055.18,
+          1027.12
+        ],
+        "spmd_original": [
+          1012.02,
+          1015.2,
+          1007.26,
+          1008.46,
+          1007.08
+        ],
+        "spmd_tnd": [
+          1019.12,
+          1011.9,
+          1020.7,
+          1019.2,
+          1017.94
+        ]
+      },
+      "source_files": [
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_five_way_latest_20261020/results/h131072_b24/native_v1/report.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/qa_shape_gate_v1/h131072_b24_shape_gate_v1/result.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/cohort_output_balance_h131072_b24_s6_v75/result.json"
+      ],
+      "source_sha256": [
+        "a85856289b8c04edd04385f16841305a6fb3c8ee7dda7ab665768b014cd5fc85",
+        "9d253e87f1767dc64782f28fb0da619aab61a699a7d460dcd6672fe64a14fee6",
+        "5f002792a65e8c64621a5940b86dfdf2173919dbb1f37b3b8baefb3de6fcd06b"
+      ],
+      "tnd_task_id": "task_20261021_102626_32708358896"
+    },
+    {
+      "history": 131072,
+      "batch": 28,
+      "query_tokens": 6,
+      "native_us": 1704.375,
+      "bsh_mpmd_outer_us": 1325.9400129318237,
+      "bsh_mpmd_l1_us": 1177.24,
+      "bsh_spmd_l1_us": 1162.84,
+      "tnd_spmd_l1_us": 1156.1,
+      "native_minus_tnd_over_tnd_pct": 47.42453074993514,
+      "samples": {
+        "native": [
+          1698.75,
+          1688.5,
+          1728.0,
+          1701.75,
+          1700.75,
+          1700.0,
+          1707.25,
+          1702.25,
+          1711.5,
+          1694.0,
+          1694.75,
+          1712.25,
+          1704.25,
+          1708.0,
+          1726.25,
+          1696.0,
+          1735.0,
+          1699.0,
+          1708.0,
+          1705.75,
+          1702.75,
+          1701.25,
+          1707.5,
+          1731.75,
+          1708.0,
+          1726.0,
+          1700.75,
+          1704.5,
+          1728.0,
+          1699.25
+        ],
+        "mpmd_outer": [
+          1355.4199934005737,
+          1267.680048942566,
+          1325.9400129318237,
+          1288.9599800109863,
+          1453.0199766159058
+        ],
+        "mpmd_l1": [
+          1160.9,
+          1177.24,
+          1143.3,
+          1186.3,
+          1181.66
+        ],
+        "spmd_original": [
+          1162.84,
+          1165.12,
+          1167.48,
+          1162.66,
+          1158.02
+        ],
+        "spmd_tnd": [
+          1151.02,
+          1155.12,
+          1160.38,
+          1158.66,
+          1156.1
+        ]
+      },
+      "source_files": [
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_five_way_latest_20261020/results/h131072_b28/native_v1/report.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/qa_shape_gate_v1/h131072_b28_shape_gate_v1/result.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/cohort_output_balance_h131072_b28_s6_v75/result.json"
+      ],
+      "source_sha256": [
+        "737d2b0612a3668b7eec9ed22b4710fe83dea591782220a93ab12408e4252f1a",
+        "7cbba325e330881341eba02e37c63b810d13fbd1566a3c6758bba48fa2a292d5",
+        "a6e0688161898a45664b429b2ae2f8755420e0ef6987e958c3cdcf6b54459491"
+      ],
+      "tnd_task_id": "task_20261021_102627_32720263427"
+    },
+    {
+      "history": 8192,
+      "batch": 16,
+      "query_tokens": 6,
+      "native_us": 803.25,
+      "bsh_mpmd_outer_us": 721.340000629425,
+      "bsh_mpmd_l1_us": 650.2,
+      "bsh_spmd_l1_us": 634.46,
+      "tnd_spmd_l1_us": 653.54,
+      "native_minus_tnd_over_tnd_pct": 22.9075496526609,
+      "samples": {
+        "native": [
+          799.0,
+          799.5,
+          810.5,
+          820.0,
+          809.25,
+          802.5,
+          799.5,
+          803.5,
+          803.75,
+          791.5,
+          801.0,
+          801.25,
+          785.75,
+          801.75,
+          803.0,
+          791.5,
+          803.5,
+          807.75,
+          788.0,
+          799.25,
+          805.5,
+          804.25,
+          818.25,
+          805.5,
+          806.75,
+          802.5,
+          860.5,
+          807.0,
+          804.5,
+          797.75
+        ],
+        "mpmd_outer": [
+          725.6600260734558,
+          705.5000066757202,
+          721.340000629425,
+          718.9000248908997,
+          744.9600100517273
+        ],
+        "mpmd_l1": [
+          631.92,
+          651.58,
+          656.18,
+          636.14,
+          650.2
+        ],
+        "spmd_original": [
+          634.46,
+          638.62,
+          633.5,
+          633.12,
+          644.04
+        ],
+        "spmd_tnd": [
+          651.34,
+          653.54,
+          661.78,
+          649.02,
+          671.68
+        ]
+      },
+      "source_files": [
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_five_way_latest_20261020/results/h8192_b16/native_v1/report.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/qa_shape_gate_v1/h8192_b16_shape_gate_v1/result.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/cohort_output_balance_h8192_b16_s6_v76/result.json"
+      ],
+      "source_sha256": [
+        "42a4f2169b1e3fab7debe5194c2a6bfccb5de12d4ec5307555296bf39c27e183",
+        "a60744aba3ca3bc35be6fe2350b6d7b12cebb7488feddab2b8ce3e8f823e8006",
+        "31a49d9847bf56e4ae29f39e040d2e5c632823994288be0c4601bef455558f08"
+      ],
+      "tnd_task_id": "task_20261021_103655_374384014461"
+    },
+    {
+      "history": 8192,
+      "batch": 32,
+      "query_tokens": 6,
+      "native_us": 1107.0,
+      "bsh_mpmd_outer_us": 1062.6399517059326,
+      "bsh_mpmd_l1_us": 958.96,
+      "bsh_spmd_l1_us": 920.58,
+      "tnd_spmd_l1_us": 917.04,
+      "native_minus_tnd_over_tnd_pct": 20.71447265113845,
+      "samples": {
+        "native": [
+          1126.5,
+          1107.0,
+          1107.0,
+          1108.25,
+          1101.5,
+          1114.25,
+          1090.75,
+          1106.0,
+          1128.0,
+          1105.5,
+          1105.75,
+          1172.25,
+          1105.0,
+          1101.25,
+          1109.75,
+          1104.0,
+          1101.0,
+          1133.25,
+          1110.25,
+          1114.75,
+          1103.0,
+          1113.25,
+          1123.75,
+          1107.25,
+          1100.0,
+          1131.5,
+          1127.25,
+          1103.25,
+          1091.75,
+          1103.75
+        ],
+        "mpmd_outer": [
+          1057.7199459075928,
+          1111.1600399017334,
+          1065.1999711990356,
+          1062.6399517059326,
+          1059.1399669647217
+        ],
+        "mpmd_l1": [
+          946.72,
+          967.96,
+          952.16,
+          958.96,
+          989.98
+        ],
+        "spmd_original": [
+          919.2,
+          921.76,
+          920.42,
+          920.58,
+          922.86
+        ],
+        "spmd_tnd": [
+          912.7,
+          917.04,
+          918.46,
+          908.06,
+          927.42
+        ]
+      },
+      "source_files": [
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_five_way_latest_20261020/results/h8192_b32/native_v1/report.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/qa_shape_gate_v1/h8192_b32_shape_gate_v1/result.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/cohort_output_balance_h8192_b32_s6_v76/result.json"
+      ],
+      "source_sha256": [
+        "4f5991d4d84f8566b0237ab99f060a44cee02293d48edb5290fc8773344bdfdf",
+        "a5456d0bcb5aab18dc0ee33d9bd4271d7e36bd4a04193289cea0ec94e514b4c6",
+        "2a92565f6309219a4a6649ffd2e1f22099fd5e16db3d8826da301154dd072077"
+      ],
+      "tnd_task_id": "task_20261021_103656_37456895465"
+    }
+  ]
+}

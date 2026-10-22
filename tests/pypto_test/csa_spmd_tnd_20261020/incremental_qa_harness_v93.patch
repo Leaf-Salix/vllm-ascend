@@ -1,0 +1,89 @@
+--- a/bsh_probe.py
++++ b/bsh_probe.py
+@@ -124,6 +124,13 @@
+         result_path = args.output / "result.json"
+         if result_path.exists():
+             result = json.loads(result_path.read_text())
++            reference = json.loads((args.wait_policy_source.parent.parent /
++                                         "comparison_reference.json").read_text())
++            for relative, expected in reference["files"].items():
++                actual = args.wait_policy_source.parent / relative
++                if hashlib.sha256(actual.read_bytes()).hexdigest() != expected:
++                    raise RuntimeError(f"Frozen TND reference changed: {relative}")
++            result["comparison_reference"] = reference
+             files = list((args.output / "build_output").glob("decode_csa_spmd_*/kernels/*/*.cpp"))
+             audit = []
+             for path in files:
+@@ -149,7 +156,7 @@
+                 "ticks": 150,
+                 "actual_ccec_sources": audit,
+                 "scope": (
+-                    "BSH fixed150; native TND fixed150 unless the separately recorded fast-poll experiment is enabled"
++                    "Incremental TND pair; fixed150 on both sides. Not a BSH performance-gate result."
+                 ),
+             }
+             result["wait_policy_experiment"] = (
+--- a/submit_probe.py
++++ b/submit_probe.py
+@@ -68,7 +68,7 @@
+     task_id = completed.stdout.strip()
+     if not task_id.startswith("task_") or len(task_id.splitlines()) != 1:
+         raise RuntimeError(f"Unexpected task-submit response: {task_id}")
+-    path = here / "jobs.json"
++    path = Path('/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/jobs.json')
+     jobs = json.loads(path.read_text())
+     jobs.append(
+         {
+--- a/run_probe.sh
++++ b/run_probe.sh
+@@ -63,7 +63,7 @@
+     [[ ${#bsh_roots[@]} == 3 ]]
+     pypto_root=${bsh_roots[0]}
+     ptoas_root=${bsh_roots[1]}
+-    baseline_source=${bsh_roots[2]}
++    baseline_source=/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/incremental_qa_harness_v93/reference
+ fi
+ if [[ $native_toolchain == true ]]; then
+     pypto_root="$workspace/.worktrees/pypto-csa-tnd-perf-20261021"
+@@ -75,6 +75,7 @@
+     printf '拒绝覆盖结果目录：%s\n' "$out" >&2
+     exit 2
+ fi
++[[ $bsh_mode == true && $mode == probe && $native_toolchain == true ]]
+ source "$workspace/env-dsv4-0251rc1.sh"
+ export TORCH_DEVICE_BACKEND_AUTOLOAD=0 PYTHONDONTWRITEBYTECODE=1
+ export VLLM_ASCEND_ENABLE_NZ=2 VLLM_ASCEND_PTO_CSA_ATOMIC_ADD=0
+@@ -103,6 +104,7 @@
+ 
+ repo, snapshot, launcher = map(Path, sys.argv[1:4])
+ mode = sys.argv[4]
++harness = Path('/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/incremental_qa_harness_v93')
+ snapshot.mkdir(parents=True, exist_ok=False)
+ shutil.copyfile(launcher, snapshot / "launcher.sh")
+ package = Path(sys.argv[5]).resolve()
+@@ -110,16 +112,16 @@
+ baseline = Path(sys.argv[6]).resolve()
+ shutil.copytree(baseline, snapshot / "original_spmd",
+                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+-if sys.argv[7]:
+-    shutil.copyfile(sys.argv[7], snapshot / "bsh_baseline_manifest.json")
++shutil.copyfile(harness / "comparison_reference.json",
++                snapshot / "comparison_reference.json")
+ for path in (
+-    repo / "tests/pypto_test/csa_spmd_tnd_20261020/run_probe.py",
+-    repo / "tests/pypto_test/csa_spmd_tnd_20261020/service_probe.py",
+-    repo / "tests/pypto_test/csa_spmd_tnd_20261020/service_metadata_replay.py",
+-    repo / "tests/pypto_test/csa_spmd_tnd_20261020/tnd_performance.py",
+-    repo / "tests/pypto_test/csa_spmd_tnd_20261020/bsh_probe.py",
+-    repo / "tests/pypto_test/csa_spmd_tnd_20261020/metadata_matrix.py",
+-    repo / "tests/pypto_test/dsv4_csa_single_layer.py",
++    harness / "run_probe.py",
++    harness / "service_probe.py",
++    harness / "service_metadata_replay.py",
++    harness / "tnd_performance.py",
++    harness / "bsh_probe.py",
++    harness / "metadata_matrix.py",
++    harness / "dsv4_csa_single_layer.py",
+ ):
+     shutil.copyfile(path, snapshot / path.name)
+ if mode in ("performance", "phase_profile"):

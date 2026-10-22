@@ -200,6 +200,8 @@ def cube_schedule(
     COOPERATIVE_PREFIX: pl.constexpr = False,
     SPLIT_SCORE_ROWS: pl.constexpr = False,
     OUTPUT_WORK_BALANCE: pl.constexpr = False,
+    QB_WIDE_N: pl.constexpr = False,
+    PREFIX_BRANCH_GROUPS: pl.constexpr = 4,
 ):
     # 恢复原分task五份流式权重的BYPASS；预定义incore使用函数属性表达。
     # 当前PyPTO此属性只接受(参数序号,策略整数)，1表示CachePolicy.BYPASS。
@@ -311,7 +313,8 @@ def cube_schedule(
             normed, main_wkv, main_wgate, main_value, main_score,
             weights_proj, weights_partial, idx_query_rope_heads, hadamard,
             idx_query_had, qr_matmul, wq_b, q_proj, idx_lengths, idx_count,
-            idx_normed, idx_had, wkv, kv_fp32, signal, worker, generation, 4,
+            idx_normed, idx_had, wkv, kv_fp32, signal, worker, generation, PREFIX_BRANCH_GROUPS,
+            QB_WIDE_N,
         )
     else:
         weights_partial = indexer_weights_project_stage(normed, weights_proj, weights_partial, worker, GROUPS)
@@ -336,7 +339,7 @@ def cube_schedule(
         )
         signal = publish_phase(signal, PHASE_IDX_QUERY_HAD, worker, CORES, generation)
         # Q_B列块n归n%24；每个owner处理所有实际M128行块。返回原GM别名给cluster。
-        q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, worker, GROUPS)
+        q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, worker, GROUPS, QB_WIDE_N)
         signal = publish_phase(signal, PHASE_QB, worker, CORES, generation)
 
         # 主QB之后优先完成已就绪的Indexer compact Hadamard，随后做独立主压缩。

@@ -40,6 +40,70 @@ def test_output_balance_capacity_domains(tokens, requests, max_query, length, ex
     assert policy.constexprs()["OUTPUT_WORK_BALANCE"] is expected
 
 
+@pytest.mark.parametrize(
+    "tokens,requests,max_query,length,topk_prefix,half_score_ub",
+    [
+        (31, 6, 6, 131078, False, False),
+        (32, 6, 6, 131078, True, False),
+        (41, 12, 6, 131078, True, False),
+        (48, 8, 6, 131078, True, False),
+        (63, 11, 6, 131078, True, False),
+        (64, 11, 6, 131078, False, False),
+        (48, 10, 5, 131077, False, False),
+        (6, 1, 6, 131078, False, False),
+        (168, 28, 6, 131078, False, False),
+        (9, 3, 6, 8198, False, True),
+        (65, 16, 6, 8198, False, True),
+        (96, 16, 6, 8198, False, True),
+        (96, 17, 6, 8198, False, False),
+        (80, 16, 5, 8197, False, True),
+        (80, 17, 5, 8197, False, False),
+        (192, 32, 6, 8198, False, False),
+        (216, 36, 6, 8198, False, False),
+        (96, 16, 6, 32771, False, True),
+        (96, 16, 6, 32772, False, False),
+    ],
+)
+def test_borrowed_score_optimization_domains(tokens, requests, max_query, length, topk_prefix, half_score_ub):
+    """Cover graph capacities, work upper bounds and inactive resource branches."""
+    policy = select_policy(tokens=tokens, requests=requests, max_query_tokens=max_query, max_seq_len=length)
+    assert policy.short_topk_prefix is topk_prefix
+    assert policy.short_half_score_ub is half_score_ub
+    assert policy.constexprs()["SHORT_TOPK_PREFIX"] is topk_prefix
+    assert policy.constexprs()["SHORT_HALF_SCORE_UB"] is half_score_ub
+
+
+@pytest.mark.parametrize(
+    "tokens,requests,max_query,length,wide_n,branch_groups",
+    [
+        (1, 1, 1, 131073, True, 2),
+        (6, 1, 6, 131078, True, 2),
+        (8, 2, 6, 131078, True, 2),
+        (9, 2, 6, 131078, True, 4),
+        (23, 4, 6, 131078, True, 4),
+        (24, 4, 6, 131078, False, 4),
+        (31, 6, 6, 131078, False, 4),
+        (32, 6, 6, 131078, True, 4),
+        (41, 12, 6, 131078, True, 4),
+        (48, 8, 6, 131078, True, 4),
+        (63, 11, 6, 131078, True, 4),
+        (64, 11, 6, 131078, False, 4),
+        (96, 16, 6, 131078, False, 4),
+        (6, 1, 6, 8198, False, 4),
+        (48, 8, 6, 32771, False, 4),
+        (48, 8, 6, 32772, True, 4),
+        (192, 32, 6, 8198, False, 4),
+    ],
+)
+def test_qb_width_and_prefix_resource_boundaries(tokens, requests, max_query, length, wide_n, branch_groups):
+    """Preserve the measured negative QA domain and the two-Hadamard work bound."""
+    policy = select_policy(tokens=tokens, requests=requests, max_query_tokens=max_query, max_seq_len=length)
+    assert policy.qb_wide_n is wide_n
+    assert policy.prefix_branch_groups == branch_groups
+    assert policy.constexprs()["QB_WIDE_N"] is wide_n
+    assert policy.constexprs()["PREFIX_BRANCH_GROUPS"] == branch_groups
+
+
 def native_case():
     """真实混长[2,6,1]描述符与Native共享key/scale页，不分配NPU。"""
     tokens, requests, pages = 9, 3, 4

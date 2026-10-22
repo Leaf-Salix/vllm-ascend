@@ -321,6 +321,8 @@ def vector_schedule(
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
     SCALE_PAGE_COALESCING: pl.constexpr = False,
     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+    SHORT_HALF_SCORE_UB: pl.constexpr = False,
+    SHORT_TOPK_PREFIX: pl.constexpr = False,
 ):
     pl.func_attr({"split_aiv": True})
     x_fp32_gm = x_fp32
@@ -864,6 +866,8 @@ def vector_schedule(
         SCALE_PAGE_COALESCING,
         0,
         1,
+        SHORT_HALF_SCORE_UB,
+        SHORT_TOPK_PREFIX,
     )
     signal = publish_phase(signal, PHASE_SCORE_VECTOR, core, CORES, generation)
     if COOPERATIVE_PREFIX:
