@@ -4132,3 +4132,14 @@ graph/post-L1的非计时snapshot追加读取实际META标记并要求等于1，
 或BOOL编码导致未启用却误记收益。C04卡8任务task_20261023_003650_1390799683，
 C05卡0任务task_20261023_003836_22329631593，当前队列状态按task-submit跟踪。
 CPU通过不代表设备/状态验收，原生产不变，目标仍active，未push。
+
+同址验证器已从既有uniform_state_harness_v1派生，仅新增逐轮真实META标记
+与CPU侧独立Q/L谓词比较，继续保留全部16组metadata、4步连续解码以及
+输出/Top-K/score/cache/state、地址/代际/保护检查。等长→不同L→等长与
+等长→padding→等长都读取实际槽值，未将Host预期代替device结果。准备证据
+uniform_meta_state_v1.json；当前尚未提交此功能任务，等待性能是否值得推进。
+
+最新task-submit确认C04/C05原任务均pending，16卡CI任务
+`task_20261023_000924_333970730698`仍running；没有取消、重复提交或换源。
+此为已核实的队列等待，不作为失败、无进展阻塞或性能结果。源码阶段提交
+91173e5cc，验证准备另行本地提交，均不push。
