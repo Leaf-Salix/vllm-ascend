@@ -4,7 +4,9 @@
 与多 task MPMD。无需安装 vLLM、vLLM-Ascend、ATB，也无需编译 Native 自定义算子。
 算子源码目前存放在 `nalinaly/vllm-ascend` 仓库；下文只从该仓获取 PTO 源码和测试工具。
 
-单卡入口读取正式模型第 4 层权重，用 PyTorch 构造 Q/L、RoPE、页表、slots 及 cache/state。
+单卡入口支持真实权重和本地随机 checkpoint：真实权重读取模型第 4 层；
+**没有权重时按第 3.1 节生成测试数据，同样可以上卡、运行图重放并导出泳道。**
+Q/L、RoPE、页表、slots 及 cache/state 均由 PyTorch 构造。
 两侧使用同一输入和初态，检查 eager、NPUGraph replay、采样后状态，并记录完整 CSA L1。
 不启用 superkernel 或 npugraph_ex static kernel；PyPTO/PTOAS/CCEC 的算子编译仍需执行。
 
@@ -24,11 +26,14 @@
 | CANN | 9.2.0-beta.2 |
 | Python / Torch / torch_npu | 3.10.19 / 2.10.0 / 2.10.0.post2 |
 | SDK Host 编译器 / CMake | GCC 15.2.0 / CMake 4.4.2 |
-| 正式权重 | `DeepSeek-V4-Flash-0731-w8a8`，使用第 4 层；接收方自行准备 |
+| 权重输入（二选一） | [真实权重：DeepSeek-V4-Flash-0731-w8a8](https://www.modelscope.cn/models/Eco-Tech/DeepSeek-V4-Flash-0731-w8a8) 第 4 层；或按第 3.1 节生成随机 checkpoint |
 
 需要已安装的 A3 驱动与 CANN、GCC 15、Python 开发头文件、git、make。
 实测驱动为 26.0.rc1、ascendhal 7.35.23。模型目录需包含原始 ModelSlim 权重索引、
 `config.json` 和第 4 层对应的 safetensors 分片。无须原作者的 KV 文件或实验 bundle。
+
+本流程从新 Python 环境和源码构建开始；驱动、CANN、GCC 需预先准备。
+模型权重可自行下载，也可用第 3.1 节的随机 checkpoint 做功能验证。
 
 ## 2. 浅拉取源码
 
@@ -118,6 +123,36 @@ python -m pip install \
 
 `attrs/decorator/scipy` 等是 CANN Python 编译组件的依赖。这里无需 Transformers、
 Triton、模型插件或 Native OPP 包。第一次设备运行仍会编译 PTO 内核。
+
+### 3.1 没有模型权重：生成随机 checkpoint（可上卡）
+
+只想跑通编译、单 SPMD/MPMD 对照、图重放和泳道，选择此路径即可；有真实权重则跳过。
+完成上面的 Python 安装后调用 [生成脚本](csa_torch_repro/generate_random_checkpoint.py)，**不下载或读取任何模型文件，不占用 NPU**。
+它生成固定 seed 的 28 个张量及最小配置，约 191 MiB；INT8 权重使用正 scale 和零 offset，
+矩阵转置及 NZ 转换仍由原测试入口完成，两种实现使用同一套数据。
+
+```bash
+# 固定算子提交不含新脚本；仅从本手册所在分支提取脚本，不切换算子版本。
+git -C "$CSA_REPO" fetch --depth=1 origin dsv4-flash-pto-v0.25.1rc1
+git -C "$CSA_REPO" show FETCH_HEAD:tests/pypto_test/csa_torch_repro/generate_random_checkpoint.py \
+  > "$CSA_WORKSPACE/generate_random_checkpoint.py"
+python "$CSA_WORKSPACE/generate_random_checkpoint.py" \
+  --output "$CSA_WORKSPACE/random-csa-weights"
+```
+
+然后将 `repro-local.sh` 中的 `CSA_MODEL` 那一行**替换**为：
+
+```bash
+export CSA_MODEL="$CSA_WORKSPACE/random-csa-weights"
+```
+
+继续执行第 4～6 节，第 6 节运行标签建议用 `randomfirst`，避免与真实权重结果混淆。
+无需修改算子或测试入口；`random-csa-weights/SYNTHETIC_WEIGHTS.json` 标记数据来源。
+生成目录已存在时脚本会报错，不会覆盖已有文件；需要重跑算子时直接复用该目录。
+
+**验收边界：**只检查两种实现对随机数据的一致性及保护区，不证明模型精度，
+也不保证覆盖真实数据的所有分支。Top-K、压缩和访存具有数据相关性，
+随机权重下的耗时不能当作真实权重性能；这里的最小配置也不能用于整模型推理。
 
 ## 4. 构建 PTO 工具链
 
