@@ -66,3 +66,11 @@ python tests/pypto_test/csa_performance_20261022_aicpu/validate.py
 ```
 
 本轮只采集单卡数据，不新增优化、不运行 16 卡、不自动 push。
+
+## 八档单次 L1 下载
+
+已从所有有效样本中为每档选择最接近中位数的一次真实执行，导出到：
+`/data/pyptouser/qinchuanyu/pto-eager/downloads/CSA_TND_MPMD_L1_8cases_20261022_AICPU/`。
+八个 JSON 按档位编号，图内使用实际计算名称及输出组编号；每个物理核上的全部
+incore 记录和任务间隙都保留，直接使用 incore begin/end，不把派发/本地准备混入条形。
+命名依据、原始记录和每档所选时间见 [download_manifest.json](download_manifest.json)。

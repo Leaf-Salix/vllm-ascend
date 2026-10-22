@@ -22257,3 +22257,22 @@ token 一致。Native 八格均确认 CANN9.2、npugraph_ex dynamic=False、inpl
 Ruff 和 shell 语法检查通过。当前 TND-MPMD 的八档完整 L1 均慢于选定 TND-SPMD，
 架构恢复并不等于性能目标达成；本轮按用户要求冻结结果，没有临时改算法追数。
 仅本地详细中文提交，未 push，未启动新的优化候选或 16 卡测试。
+
+### 735.67：八档 TND-MPMD 单次 L1 泳道汇总与名称还原
+
+按用户要求，各档选择最接近完整样本中位数的一次真实执行，汇总到工作区
+`downloads/CSA_TND_MPMD_L1_8cases_20261022_AICPU/`。八个 JSON 共约 2.9 MB，
+只使用一次执行，不拼接、不新增设备测试；C05 是 v11 实验里的 v9 控制组。
+导出记录见 [download_manifest.json](csa_performance_20261022_aicpu/download_manifest.json)。
+
+原转换器未采集 deps 时仅显示 task(rXtY)，且条形包含 local setup；本次从原始
+L1 的 incore begin/end 重建，保留每个物理核和全部计算记录，首个 incore 归零。
+对应生成编排明确给出各提交点和函数 ID。依据公共 Simpler 的 TaskId 编码与
+scope 深度：外层任务在 ring1，八组 O_A→quant→O_B 的 manual scope 在 ring2，
+两个 ring 独立计数。不能把 TaskId 数值排序当成全局提交顺序；例如 C04 的
+r1t38 是 HC_post，r2t23 是第七组 O_B。名称按该实际结构还原并核对全部任务集合、
+AIC/AIV 类型和记录数量，未根据执行开始时间猜名，也未伪造依赖箭头。
+
+图内显示 hc_pre 各阶段、投影、Compressor、Indexer、TopK、Attention、八组输出
+和 HC_post。C01/C03/C08 各 62 组，其余各 63 组，粒度保持独立 task。
+导出全量记录数、TaskId 计数及首尾跨度与原始数据相同，Ruff 检查通过。
