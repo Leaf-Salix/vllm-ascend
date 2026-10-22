@@ -4020,3 +4020,30 @@ const_fold.h:218；将受保护除法的分母写为pl.max(width,1)的对照可�
 本会话本轮两项设备任务及所有CPU编译已结束，无待收结果。八档10%总目标
 仍active且未达成；未push。后续SDK问题沿用本次用户授权，确认与查重后直接
 上报相应上游，并在本统一记录中保留链接，不另外拆出过程MD。
+
+
+### 64B与512B核实：撤回缩槽候选，保持已验证协议
+
+用户指出Scalar DCache行与MTE/GM访问粒度不能混为一谈。查阅[A2/A3官方
+避免同地址访问说明](https://www.hiascend.com/doc_center/source/en/CANNCommunityEdition/900/programug/Ascendcopdevg/atlas_ascendc_best_practices_10_00013.html)确认：MTE2、MTE3和Scalar的GM请求均按512B
+粒度处理，落在同一对齐512B区域的并发访问可能串行。[架构说明](https://www.hiascend.com/doc_center/source/en/CANNCommunityEdition/850/opdevg/Ascendcopdevg/atlas_ascendc_10_0008.html)
+中的64B指Scalar DCache行；通用L2行大小随硬件变化，不能把该页的范围值
+写成已查实的本机A3 L2物理参数。[缓存路径说明](https://www.hiascend.com/document/detail/en/CANNCommunityEdition/910/API/ascendcopapi/docs/en/api/SIMD-API/basic_api/cache_control/system_cache_overview.md)也表明Scalar经DCache
+后仍访问L2/GM，512B关注点并非MTE独有。
+
+因此，64B私有槽避免多个写者共用Scalar DCache行，与512B分隔减少GM请求
+竞争是两个层次。缩槽把8个不同控制槽放进一个512B区间，不能仅靠分配字节
+减少推断同步提速。本轮撤回signal_slots16_v1设备测试，生产128个INT32/
+512B槽保持不变，尚未提交任何本会话NPU任务。C04完整CPU生成成功仅表示
+可编译；辅助72角色探针因自身INT32 errors + INDEX常量类型不匹配停在解析，
+不是SDK故障证据。预备源码与两份描述符归档在既有runs目录，未丢弃证据。
+
+用户提供的[A5 atomic使用手册](https://github.com/nalinaly/simpler/blob/3699b7ae4ff47abcfa1e2916881d4309cf39c00f/tests/atomic_probe/ATOMIC_USAGE_GUIDE.md)已按commit与blob固定参考。其64B规则
+着重所有权/一致性；DCCI脏行可能覆盖新值，DSB不能代替写回或跨核交权。
+A5特定atomic发布省DSB等实测不直接外推A3。CSA实际Set仍是DCCI→volatile
+GM store→DCCI→DSB_DDR，wait为DCCI与Scalar读取；原PIPE_ALL、阶段维护及
+等待均未删除。后续审查将分别核对控制字、业务payload与整行所有权，再决定
+是否有冗余操作；不把手册的保守工程规则当成当前A3已经复现故障。
+
+审计和链接见signal_layout_audit.json。本轮没有新增性能样本、没有共享SDK
+修改，也没有改变已采用算子。原八档10%目标继续active且未完成。

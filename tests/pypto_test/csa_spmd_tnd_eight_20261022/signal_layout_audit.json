@@ -1,0 +1,62 @@
+{
+  "checked_at": "2026-10-22T23:53:03.857086+08:00",
+  "decision": "Withdraw signal_slots16_v1 as a performance candidate before device submission; retain production 512B spacing",
+  "device_execution": false,
+  "production_changed": false,
+  "facts": [
+    {
+      "kind": "official A2/A3 performance contract",
+      "fact": "MTE2, MTE3 and Scalar GM requests use a 512-byte address granularity; concurrent addresses in the same aligned region can serialize",
+      "source": "https://www.hiascend.com/doc_center/source/en/CANNCommunityEdition/900/programug/Ascendcopdevg/atlas_ascendc_best_practices_10_00013.html"
+    },
+    {
+      "kind": "official Scalar cache description",
+      "fact": "Scalar data cache uses 64-byte lines; generic L2 line sizes vary by hardware",
+      "source": "https://www.hiascend.com/doc_center/source/en/CANNCommunityEdition/850/opdevg/Ascendcopdevg/atlas_ascendc_10_0008.html"
+    },
+    {
+      "kind": "official cache path description",
+      "fact": "Scalar reads DCache then L2/GM; MTE2 reads through L2. Thus 512B concern also applies to Scalar traffic",
+      "source": "https://www.hiascend.com/document/detail/en/CANNCommunityEdition/910/API/ascendcopapi/docs/en/api/SIMD-API/basic_api/cache_control/system_cache_overview.md"
+    },
+    {
+      "kind": "A5 user-supplied empirical guide, not an A3 measurement",
+      "fact": "64B line ownership, dirty DCCI writeback and separate control/data; platform-specific atomic and DSB observations require matching evidence",
+      "source": "https://github.com/nalinaly/simpler/blob/3699b7ae4ff47abcfa1e2916881d4309cf39c00f/tests/atomic_probe/ATOMIC_USAGE_GUIDE.md",
+      "blob_sha": "f4b24d8651c03ed0fbe52a8534c0a0a0f6f0deb7",
+      "local_copy": "runs/A5_ATOMIC_USAGE_GUIDE_reference.md"
+    }
+  ],
+  "inference": "64B private slots do not share a Scalar DCache line, but eight slots share a 512B GM request region; smaller allocation alone is not evidence of lower synchronization cost",
+  "not_proven": [
+    "Exact A3 L2 physical line size from the cited generic architecture page",
+    "64B slots always slower",
+    "Current A3 TNOTIFY protocol incorrect because an A5 guide uses a stronger conservative policy",
+    "A5 atomic/DSB exceptions portable to A3"
+  ],
+  "local_path_audit": {
+    "phase_stride_words": 128,
+    "phase_stride_bytes": 512,
+    "current_set": "volatile GM store with signal-line DCCI before/after and DSB_DDR",
+    "current_wait": "DCCI and Scalar load; existing backoff 150 retained",
+    "pre_notify": "PIPE_ALL retained",
+    "entire_cache_maintenance": "Existing phase helpers retained; no deletion based on A5 conclusions"
+  },
+  "experimental_cpu": {
+    "full_C04_codegen_passed": true,
+    "full_C04_result": "runs/compile_signal_slots16_C04_v1/result.json",
+    "stress_probe_passed": false,
+    "stress_probe_result": "runs/compile_signal_probe16_v1/result.json",
+    "stress_error": "Probe implementation reassigns INT32 errors with INDEX after errors + 1; parser rejection, no device run, not treated as a confirmed SDK bug"
+  },
+  "next_action": "Keep 512B and audit actual publish/acquire operations against data owners and pipeline completions before designing a different candidate",
+  "preparation_archive": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/signal_layout_preparation_archive",
+  "preparation_files": {
+    "launch_signal_probe.sh": "9cd8af27923a9dd97b1a1017927163f4c1c8772d4adafe8ef778befc53289a8b",
+    "prepare_signal_slots.py": "b8eee47195c63c98a5e2e1c855d3bbdf9c4e5717851a97dbe68f52a7cc3eafef",
+    "signal_slots_probe_v1.json": "82b31196bd1db1f29e70cfabdc6f2101fefc3ad56fc11622a08c3dfb3c1c6716",
+    "C04_signal_slots16_v1.json": "57d76ce543fa499b7223cbf6a55f895aca676dd2eecd9dbf5efa20bea3300997",
+    "probe_signal_slots.py": "e0b237010c6083ba0c135f179f1e96aacdef2362fe1d37ddee641f0f511425fa",
+    "C05_signal_slots16_v1.json": "c1af03fbbf97a56974b653bcb99dd07dd735510d68cece86c7299241ea260182"
+  }
+}
