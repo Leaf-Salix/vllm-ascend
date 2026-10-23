@@ -194,6 +194,7 @@ def cube_schedule(
     BALANCED: pl.constexpr,
     ROOTS: pl.constexpr,
     OA_COLS: pl.constexpr,
+    OA_ROWS: pl.constexpr,
     OB_ROWS: pl.constexpr,
     OUTPUT_GROUP_PIPELINE: pl.constexpr,
     HC_ROW_DEPENDENCIES: pl.constexpr,
@@ -312,8 +313,16 @@ def cube_schedule(
         # Leave the existing four Hadamard cores free to advance the Indexer chain.
         # Twenty independent main/KV column blocks run on the Q_B core group.
         main_value, main_score, kv_fp32 = joint_bf16_prefix_stage(
-            normed, main_wkv, main_wgate, main_value, main_score, wkv, kv_fp32,
-            worker, GROUPS, PREFIX_PROJECTION_ROWS,
+            normed,
+            main_wkv,
+            main_wgate,
+            main_value,
+            main_score,
+            wkv,
+            kv_fp32,
+            worker,
+            GROUPS,
+            PREFIX_PROJECTION_ROWS,
         )
         signal = publish_phase(signal, PHASE_MAIN_PROJECT, worker, CORES, generation)
         signal = publish_phase(signal, PHASE_KV_PROJECT, worker, CORES, generation)
@@ -330,11 +339,31 @@ def cube_schedule(
             kv_fp32,
             signal,
         ) = projection_overlap_stage(
-            normed, main_wkv, main_wgate, main_value, main_score,
-            weights_proj, weights_partial, idx_query_rope_heads, hadamard,
-            idx_query_had, qr_matmul, wq_b, q_proj, idx_lengths, idx_count,
-            idx_normed, idx_had, wkv, kv_fp32, signal, worker, generation, PREFIX_BRANCH_GROUPS,
-            QB_WIDE_N, JOINT_BF16_PREFIX,
+            normed,
+            main_wkv,
+            main_wgate,
+            main_value,
+            main_score,
+            weights_proj,
+            weights_partial,
+            idx_query_rope_heads,
+            hadamard,
+            idx_query_had,
+            qr_matmul,
+            wq_b,
+            q_proj,
+            idx_lengths,
+            idx_count,
+            idx_normed,
+            idx_had,
+            wkv,
+            kv_fp32,
+            signal,
+            worker,
+            generation,
+            PREFIX_BRANCH_GROUPS,
+            QB_WIDE_N,
+            JOINT_BF16_PREFIX,
         )
     else:
         weights_partial = indexer_weights_project_stage(normed, weights_proj, weights_partial, worker, GROUPS)
@@ -451,7 +480,7 @@ def cube_schedule(
     packed_workers = pl.min(tokens, GROUPS) * 2
     signal = wait_row_owners(signal, PHASE_ATTN_VECTOR, CORES, generation, 0, packed_workers, 1, VECTORS, GROUPS, 1)
     if OUTPUT_GROUP_PIPELINE:
-        oa_per_group = ((tokens + 127) // 128) * (1024 // OA_COLS)
+        oa_per_group = ((tokens + OA_ROWS - 1) // OA_ROWS) * ((1024 + OA_COLS - 1) // OA_COLS)
         # 固定8是模型的输出组数，不是B/S档位。每组内部任务数由本次T决定；
         # 首项公式保留全局logical%24分核及原每核组序，不把所有核绑到同一组。
         # 本核完成某组即可通知AIV；该AIC继续其它组的O_A，与已就绪组量化重叠。
@@ -460,7 +489,7 @@ def cube_schedule(
             oa_owned = worker + ((oa_first + GROUPS - 1 - worker) // GROUPS) * GROUPS
             if oa_owned < oa_first + oa_per_group:
                 o_r = o_projection_a_groups_stage_nz(
-                    packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS, oa_group, oa_group + 1
+                    packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS, OA_ROWS, oa_group, oa_group + 1
                 )
                 signal = publish_phase(signal, PHASE_OA_GROUP_BASE + oa_group, worker, CORES, generation)
         quant_per_group = (tokens + 31) // 32
@@ -529,7 +558,7 @@ def cube_schedule(
                     )
     else:
         # 保留整阶段路径供区间策略与同轮对照；两分支复用全部数学helper。
-        o_r = o_projection_a_stage_nz(packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS)
+        o_r = o_projection_a_stage_nz(packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS, OA_ROWS)
         signal = publish_phase(signal, PHASE_OA, worker, CORES, generation)
         quant_tasks = 8 * ((tokens + 31) // 32)
         signal = wait_row_owners(signal, PHASE_O_QUANT, CORES, generation, 0, quant_tasks, 1, VECTORS, GROUPS, 1)

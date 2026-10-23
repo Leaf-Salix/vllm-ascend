@@ -28,6 +28,9 @@ from dataclasses import dataclass
 
 # At most six original 8192-candidate leaves before balancing.
 LEAF_LAYOUT_MAX_CACHE_ROWS = 6 * 8192
+DEFAULT_OA_ROWS = 128
+RECTANGLE_OA_ROWS = 160
+RECTANGLE_OA_COLS = 192
 DEFAULT_PHYSICAL_PLAN_COLUMNS = 2048
 EXTENDED_PHYSICAL_PLAN_COLUMNS = 2080
 
@@ -55,6 +58,7 @@ class CSASPMDPolicy:
     roots: int
     oa_cols: int
     ob_rows: int
+    oa_rows: int = DEFAULT_OA_ROWS
     output_group_pipeline: bool = True
     hc_row_dependencies: bool = True
     attention_query_metadata: bool = False
@@ -87,6 +91,7 @@ class CSASPMDPolicy:
             "BALANCED": self.balanced,
             "ROOTS": self.roots,
             "OA_COLS": self.oa_cols,
+            "OA_ROWS": self.oa_rows,
             "OB_ROWS": self.ob_rows,
             "OUTPUT_GROUP_PIPELINE": self.output_group_pipeline,
             "HC_ROW_DEPENDENCIES": self.hc_row_dependencies,
@@ -167,6 +172,8 @@ def select_policy(
         and DEFAULT_PHYSICAL_PLAN_COLUMNS < compressed_table_columns <= EXTENDED_PHYSICAL_PLAN_COLUMNS
     ):
         plan_table_columns = EXTENDED_PHYSICAL_PLAN_COLUMNS
+    # One M tile removes repeated weight loads; actual rows remain device-side.
+    output_rectangle = DEFAULT_OA_ROWS < tokens <= RECTANGLE_OA_ROWS
     return CSASPMDPolicy(
         query_group=group,
         qk_panel=64 if group == 6 else 128,
@@ -174,7 +181,8 @@ def select_policy(
         prefetch=1 if long_history or short_key_prefetch else 0,
         balanced=(long_history and group == 6) or single_request_leaves,
         roots=1 if (long_history and group == 6) or single_request_leaves else 2,
-        oa_cols=128 if tokens <= 96 else 256,
+        oa_cols=RECTANGLE_OA_COLS if output_rectangle else (128 if tokens <= 96 else 256),
+        oa_rows=RECTANGLE_OA_ROWS if output_rectangle else DEFAULT_OA_ROWS,
         ob_rows=ob_rows,
         # Does not infer real query lengths; only the existing Host token-capacity tier.
         # Shared-SDK three-way evidence supports the existing long-G6 [32,64) domain.

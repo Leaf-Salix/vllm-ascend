@@ -52,11 +52,12 @@ def match_build(run, cpu):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("candidate")
+    parser.add_argument("--retained", default="retained_physical_capacity.json")
     args = parser.parse_args()
     here = Path(__file__).resolve().parent
     source = json.loads((here / f"{args.candidate}.json").read_text())
     tasks = json.loads((here / f"{args.candidate}_tasks.json").read_text())
-    retained = json.loads((here / "retained_physical_capacity.json").read_text())
+    retained = json.loads((here / args.retained).read_text())
     assert tasks and set(tasks) <= {"C04", "C05"}
     cases = {}
     for case, task in tasks.items():
@@ -110,6 +111,7 @@ def main():
         )
     report = dict(
         candidate=args.candidate,
+        retained_reference=args.retained,
         adopted=False,
         cases=cases,
         retained_geometric_mean_ratio_unchanged=retained["equal_weight_geometric_mean_ratio"],

@@ -311,6 +311,7 @@ def vector_schedule(
     BALANCED: pl.constexpr,
     ROOTS: pl.constexpr,
     OA_COLS: pl.constexpr,
+    OA_ROWS: pl.constexpr,
     OB_ROWS: pl.constexpr,
     OUTPUT_GROUP_PIPELINE: pl.constexpr,
     HC_ROW_DEPENDENCIES: pl.constexpr,
@@ -995,7 +996,7 @@ def vector_schedule(
     )
     signal = publish_phase(signal, PHASE_ATTN_VECTOR, core, CORES, generation)
     if OUTPUT_GROUP_PIPELINE:
-        oa_per_group = ((tokens + 127) // 128) * (1024 // OA_COLS)
+        oa_per_group = ((tokens + OA_ROWS - 1) // OA_ROWS) * ((1024 + OA_COLS - 1) // OA_COLS)
         quant_per_group = (tokens + 31) // 32
         # 仍按(group,32行块)全局编号%48分配AIV，不让每组都只用0号核。
         # 只对本核有工作量的组等待/量化/发布；空组无消费者，也不发送假就绪。
@@ -1024,7 +1025,7 @@ def vector_schedule(
                 # 完成业务流水及DCache维护。本组单独槽位不与其它组重复发布。
                 signal = publish_phase(signal, PHASE_O_QUANT_GROUP_BASE + quant_group, core, CORES, generation)
     else:
-        oa_tasks = 8 * ((tokens + 127) // 128) * (1024 // OA_COLS)
+        oa_tasks = 8 * ((tokens + OA_ROWS - 1) // OA_ROWS) * ((1024 + OA_COLS - 1) // OA_COLS)
         signal = wait_row_owners(signal, PHASE_OA, CORES, generation, 0, oa_tasks, 1, GROUPS, 0, 1)
         o_quant, o_scales = o_projection_group_quant_stage(o_r, o_quant, o_scales, tokens, worker, VECTORS, OB_ROWS)
         signal = publish_phase(signal, PHASE_O_QUANT, core, CORES, generation)
