@@ -277,7 +277,7 @@
     },
     "v24": {
       "source": "experiments/v24_internal_service_capacity/source",
-      "state": "running",
+      "state": "completed_exit_1",
       "change": "group_offsets统一预留2B个INT32尾槽，原数学策略不变；所有尺寸直接由外部Tensor维度构成",
       "npu_validated": false,
       "task": "task_20261024_030756_251976919366",
@@ -293,7 +293,25 @@
         ],
         "task_window": 4096
       },
-      "service_binding": true
+      "service_binding": true,
+      "failure": "heap大容量误配到ring0；实际分配在ring1，used=11443200，capacity=16777216，requested=22456320；配置问题，非数值结论"
+    },
+    "v24_ring1": {
+      "source": "experiments/v24_internal_service_capacity/source",
+      "task": "task_20261024_031432_271551524352",
+      "state": "running",
+      "output": "runs/internal_service_v24_ring1",
+      "ring_config": {
+        "heap_mb": [
+          16,
+          256,
+          16,
+          16
+        ],
+        "task_window": 4096
+      },
+      "service_binding": true,
+      "change": "仅修正runtime外层scope后的heap目标ring；源码和SDK保持与v24完全一致"
     }
   }
 }

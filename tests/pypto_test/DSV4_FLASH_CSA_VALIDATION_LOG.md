@@ -23468,10 +23468,10 @@ v24统一预留group_offsets尾部2B个INT32，是否使用仍按原SCALE_PAGE_C
 策略。B16/S1相对旧逻辑只多128逻辑字节，在当前1024字节内部打包对齐下容量
 不增加；启用策略的S6/B24本来就需这些槽。完整编译与设备结果待追加。
 
-内存配置核对：Simpler scope_stack_top从-1开始，根SIMPLER_SCOPE中的所有
-内部alloc_tensors使用ring0；当前总临时容量可放入256MiB。下一轮实际服务单卡
-拟用heap_mb=[256,16,16,16]、window4096，不把四ring均256MiB的原型配置带到
-整模型。该配置尚未设备通过，不能写成已验收。SPMD信号容量从原PHASE_COUNT、
+内存配置核对曾误判生成函数的scope为最外层，错误配置了
+heap_mb=[256,16,16,16]、window4096。该判断现已撤回：真实kernel运行时外层
+还有scope，设备日志确认新内部Tensor在ring1分配。修正配置为
+heap_mb=[16,256,16,16]；须重新通过单卡后才能用于整模型。SPMD信号容量从原PHASE_COUNT、
 CORES、SIGNAL_SLOT_WORDS派生，每调用在设备初始化，图重放包含初始化与依赖。
 
 同节补记：v24的SPMD T144/B24正常入口已通过实际kernel ABI完整编译，日志
@@ -23480,3 +23480,11 @@ CORES、SIGNAL_SLOT_WORDS派生，每调用在设备初始化，图重放包含�
 单卡实际服务绑定任务`task_20261024_030756_251976919366`已开始，两个实现
 共用d44925c1、固定三场景和[256,16,16,16]MiB配置；旧外部冻结v21只作数值参考。
 诊断入口增加Top-K分数逐bit对照，普通入口保持Top-K完全内部申请。
+
+同节容量失败补记：任务task_20261024_030756_251976919366已exit=1，卡已释放。
+旧外部参考完成后，内部MPMD诊断入口发生ring1 heap deadlock：used=11443200、
+capacity=16777216、requested=22456320 bytes。证据位于
+`runs/internal_service_v24-ascend/log/debug/device-0/device-2520872_20261024030832603.log`。
+这是大heap分配到错误ring的测试配置错误，不是输出/状态比较失败；SPMD还未执行。
+原结构化结果已补终态，不能保留RUNNING让后续误判。相同冻结源码改为
+[16,256,16,16]重新排队，不修改SDK或数学实现，也不采用二分容量试探。

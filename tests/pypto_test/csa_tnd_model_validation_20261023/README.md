@@ -126,3 +126,8 @@ v21保留原有直接编排，只给scale page commit增加显式incore类型边
 `[256,16,16,16] MiB`、window4096，检查两种TND、三个容量场景、Top-K分数及图重放。
 当前设备结论以`jobs.json`和`runs/internal_service_v24/result.json`为准；
 不把旧v21的MPMD原型PASS当作这版两种服务都PASS。
+
+首次v24服务单卡因heap大容量误配ring0而退出；设备日志明确实际内部申请在ring1。
+该配置推断已撤回。修正任务`task_20261024_031432_271551524352`使用同一冻结源码、
+同一SDK，仅把heap改为`[16,256,16,16] MiB`。不能将首次任务残留的RUNNING
+或其旧外部参考计算当作内部服务通过。

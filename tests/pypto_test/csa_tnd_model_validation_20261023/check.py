@@ -64,6 +64,13 @@ def check(root):
                 r["decode_submissions"] > 0 or r["decode_graph_checks"]["allowed"] > 0
                 for r in observation["tnd_bindings"]
             ), "生成阶段缺少实际PTO提交或重放证据"
+            if config.get("internal_workspace"):
+                assert observation["tnd_physical_workspace_bytes"] == 0, "仍有Python侧TND临时工作区"
+                assert all(
+                    binding["workspace_bytes"] == 0
+                    for layer in observation["tnd_bindings"]
+                    for binding in layer["bindings"]
+                ), "内部工作区版本不能保留外部scratch"
         rows.append(
             {
                 "rank": rank,
