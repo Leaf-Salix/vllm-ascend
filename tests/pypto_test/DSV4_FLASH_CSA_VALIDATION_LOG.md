@@ -23048,3 +23048,46 @@ SPMD `task_20261023_184538_37863528133`。本节提交时尚在排队，不能�
 PTO观测另记生成期实际提交和图合同allowed/rejected计数，避免把FULL标签
 冒充图重放。功能门槛、全部token/逐请求DSpark事件、简单题答案三类分别检查。
 B16结论完整前不启动B24。详细入口、冻结差异、预检查和任务号见该目录。
+
+### 735.97 Native B16真实decode通过，继续处理TND工作区累计（2026-10-23）
+
+Native任务`task_20261023_184325_26426522274`已exit=0。当前冻结代码、公共SDK、
+CANN9.2、0.92预算，npugraph_ex开启、静态编译关闭，16卡×B16每请求192token：
+
+| 检查 | 结果 |
+|---|---|
+| 请求/输出token | 256 / 49,152，全部完整 |
+| S6满档forward | 每rank48次，16个rank均覆盖 |
+| 抢占 | 0 |
+| 平均接受长度 | 3.806501547987616 |
+| 接受0/1/2/3/4/5的次数 | 544 / 784 / 1440 / 720 / 720 / 6128 |
+| 有明确答案的简单请求 | 32/32满足重复句子前缀 |
+| 各DP对rank0输出token差异 | 0 |
+| 对旧Native clean2输出token差异 | 0；不用于跨配置性能比较 |
+
+实际worker记录静态编译False、图模式FULL_DECODE_ONLY、level1、HCCL确定性、
+Native CSA/HCA；日志中静态模块虽已导入，安装的静态包数量为0。rank0可用KV
+21.06GiB，图捕获用0.54GiB；生成结束时设备free约3.42GiB。该结果只证明
+Native基线，不代替两种PTO接入的功能和输出一致性。详细证据见
+`csa_tnd_model_validation_20261023/native_b16_summary.json`和其原始结果路径。
+
+排队期间进一步定位旧OOM：clean2的生成文件
+`torch_compile_cache/005b5631e7/rank_0_0/backbone/artifact_compile_range_1_256_subgraph_0`
+第136行正是`npu_hc_pre_v2_6`，属于第3层FFN HC_pre；第1604行也与trace的
+kernel调用栈对应。210MiB是Native HC_pre的失败申请，不能说成CSA某个tensor。
+定位行保存在`historical_oom_location.json`。TND服务按容量缓存各层绑定，
+S1/S6临时工作区会累计；这是从当前服务生命周期与容量得到的诊断，尚未用
+新16卡PTO运行证明峰值归因。
+
+为避免重复消耗整机档期，执行前取消v03两组PTO任务，准备最小复用修复：
+同一模型顺序执行的CSA层复用同名、同形状、同dtype临时GM；Native cache/state、
+权重、输出保持原存储；SPMD signal及运行时ffts独立，微批并发不启用共享。
+不改MPMD task切分、AICPU调度或算术。CPU实例化估算21层单一S6容量B16可省
+约2.509GiB、B24约3.891GiB；不是设备实测峰值。服务custom-op的两种入口×
+独占/共享四个CPU检查通过。
+
+单卡`task_20261023_190556_147460128643`验证B16 S1/S6、两层交替、eager与
+graph的输出、TopK、cache/state逐bit和保护区，当前仍排队。后续16卡MPMD
+`task_20261023_192605_27404711194`与SPMD
+`task_20261023_192605_27405926637`均加入启动前PASS闸门：单卡未通过则立即退出，
+不启动整模型。修复尚未完成设备验收，不宣称PTO通过，也未开始B24。

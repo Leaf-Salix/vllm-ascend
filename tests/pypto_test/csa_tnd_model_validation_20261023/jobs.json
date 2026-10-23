@@ -7,22 +7,48 @@
     "native": {
       "task": "task_20261023_184325_26426522274",
       "source": "experiments/v02_resume_b16/source",
-      "output": "runs/v02_native_b16"
+      "output": "runs/v02_native_b16",
+      "state": "completed_exit_0",
+      "summary": "native_b16_summary.json"
     },
     "mpmd_tnd": {
       "task": "task_20261023_184537_37845812143",
       "source": "experiments/v03_decode_observation/source",
-      "output": "runs/v03_mpmd_b16"
+      "output": "runs/v03_mpmd_b16",
+      "state": "cancelled_before_execution",
+      "reason": "先修复已定位的跨层工作区累计，再单卡验证后提交整模型"
     },
     "spmd_tnd": {
       "task": "task_20261023_184538_37863528133",
       "source": "experiments/v03_decode_observation/source",
-      "output": "runs/v03_spmd_b16"
+      "output": "runs/v03_spmd_b16",
+      "state": "cancelled_before_execution",
+      "reason": "先修复已定位的跨层工作区累计，再单卡验证后提交整模型"
     }
   },
   "cancelled_before_execution": [
     "task_20261023_184326_2643406209",
     "task_20261023_184326_2643887999"
   ],
-  "scope": "v02与v03框架/算子/配置相同；v03仅补生成阶段实际提交与图合同计数"
+  "scope": "v02与v03框架/算子/配置相同；v03仅补生成阶段实际提交与图合同计数",
+  "workspace_single_card": {
+    "task": "task_20261023_190556_147460128643",
+    "source": "experiments/v04_workspace/source",
+    "output": "runs/workspace_v04",
+    "scope": "B16 S1/S6、两层交替、eager与graph；独占对共享逐bit比较"
+  },
+  "b16_workspace_fix": {
+    "mpmd_tnd": {
+      "task": "task_20261023_192605_27404711194",
+      "source": "experiments/v05_workspace_model/source",
+      "output": "runs/v05_mpmd_b16",
+      "required_single_card_gate": "runs/workspace_v04/result.json"
+    },
+    "spmd_tnd": {
+      "task": "task_20261023_192605_27405926637",
+      "source": "experiments/v05_workspace_model/source",
+      "output": "runs/v05_spmd_b16",
+      "required_single_card_gate": "runs/workspace_v04/result.json"
+    }
+  }
 }
