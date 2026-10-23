@@ -8,6 +8,7 @@ CPU compilation itself is never treated as a performance observation.
 
 import argparse
 import json
+import math
 import statistics
 from pathlib import Path
 
@@ -76,8 +77,12 @@ def main():
         median, retained_median, original_median = map(
             statistics.median, (candidate_values, current_values, original_values)
         )
-        assert retained_median == retained["cases"][case]["current_median_us"]
-        assert original_median == retained["cases"][case]["baseline_median_us"]
+        assert math.isclose(retained_median, retained["cases"][case]["current_median_us"], rel_tol=0, abs_tol=1e-9)
+        frozen_denominator = retained["cases"][case]["baseline_median_us"]
+        # An even median can be 778.3900000000001 although the frozen JSON is
+        # 778.39. Accept binary rounding only, keep all raw samples and use the
+        # unchanged official denominator for the goal ratio.
+        assert math.isclose(original_median, frozen_denominator, rel_tol=0, abs_tol=1e-9)
         candidate_match = match_build(run, here / task["cpu_kernel"])
         retained_match = match_build(current_result.parent, here / task["retained_cpu_kernel"])
         cases[case] = dict(
@@ -92,7 +97,8 @@ def main():
             retained_median_us=retained_median,
             original_median_us=original_median,
             change_vs_retained_pct=100 * (median / retained_median - 1),
-            ratio_to_original=median / original_median,
+            frozen_denominator_us=frozen_denominator,
+            ratio_to_original=median / frozen_denominator,
             all_samples_us=candidate_values,
             retained_samples_us=current_values,
             original_samples_us=original_values,

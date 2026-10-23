@@ -50,23 +50,22 @@
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
   "pending_tasks": {
-    "task_20261023_121507_140089517903": {
+    "task_20261023_124733_265710723223": {
       "case": "C04",
-      "candidate": "hc_cooperative_v2",
+      "candidate": "hc_cooperative_v4",
       "mode": "complete_L1_candidate",
       "performance_eligible": true
     },
-    "task_20261023_121508_14009351506": {
+    "task_20261023_124733_265715716319": {
       "case": "C05",
-      "candidate": "hc_cooperative_v2",
+      "candidate": "hc_cooperative_v4",
       "mode": "complete_L1_candidate",
       "performance_eligible": true
     }
   },
   "next_steps": [
     "Preserve four retained mechanisms and the original eight-case denominator; 10% goal remains active",
-    "Collect the two hc_cooperative_v2 priority tasks; use existing retained full-L1 references and all strict checks; no baseline remeasurement",
-    "Use analyze_priority_candidate.py hc_cooperative_v2 after both original tasks finish; v4 has passed CPU gates but is not submitted",
+    "Collect original hc_cooperative_v4 task handles and run analyze_priority_candidate.py hc_cooperative_v4; preserve all raw windows and the original denominator",
     "Reduce measured full-chain service work or exploit demonstrated resource complementarity; no more simple DMA/Vector reorderings",
     "Do not implement whole-leaf-round Attention insertion on existing owners: optimistic serialized-resource model already increases C05 waiting",
     "Do not repeat negative head partitioning or direct HC tail-copy removal without a new mechanism",
@@ -108,7 +107,7 @@
     "hc_cooperative_math_ownership": 11,
     "hc_cooperative_packed_math_ownership": 11
   },
-  "updated_at": "2026-10-23T12:30:55+08:00",
+  "updated_at": "2026-10-23T12:48:42+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -269,6 +268,15 @@
       "case": "C01",
       "evidence": "hc_direct_tail_v2_C01_result.json",
       "reason": "Strict complete chain passes; full L1 361.33 vs 358.02 us, +0.924529%, not adopted"
+    },
+    {
+      "candidate": "hc_cooperative_v2",
+      "cases": [
+        "C04",
+        "C05"
+      ],
+      "evidence": "hc_cooperative_v2_results.json",
+      "reason": "All strict checks pass; full L1 regresses +0.948078%/+1.591195%; packed handoff is a separate candidate"
     }
   ],
   "promising_candidates": [
@@ -464,8 +472,9 @@
         "hc_cooperative_v2_C04_codegen.json",
         "hc_cooperative_v2_C05_codegen.json"
       ],
-      "status": "complete_L1_pending",
-      "mechanism": "Four K4096 AIV owners per M8; original 32-step RMS left fold and split-specific Cube input acquire"
+      "status": "rejected_complete_L1",
+      "mechanism": "Four K4096 AIV owners per M8; original 32-step RMS left fold and split-specific Cube input acquire",
+      "measurement": "hc_cooperative_v2_results.json"
     },
     "hc_cooperative_v4": {
       "source": "hc_cooperative_v4.json",
@@ -478,8 +487,9 @@
         "hc_cooperative_v4_C04_codegen.json",
         "hc_cooperative_v4_C05_codegen.json"
       ],
-      "status": "CPU_gates_passed_not_submitted_wait_v2",
-      "mechanism": "Pack unchanged RMS chunks into four writer packets and one consumer load; original ordered fold retained"
+      "status": "complete_L1_pending",
+      "mechanism": "Pack unchanged RMS chunks into four writer packets and one consumer load; original ordered fold retained",
+      "tasks": "hc_cooperative_v4_tasks.json"
     }
   },
   "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
@@ -632,7 +642,7 @@
   "current_sdk_C08_reference": "baseline_current_sdk_C08.json",
   "current_implementation": "physical_capacity_production_v1",
   "earlier_stage_commit": "3a0f423c6",
-  "latest_stage": "hc_cooperative_v2_verified_queue_wait_v4_packed_handoff_CPU_gates_complete",
+  "latest_stage": "hc_cooperative_v2_rejected_packed_v4_two_priority_L1_tasks_submitted",
   "retained_results": "retained_physical_capacity.json",
   "production_source_manifest": "physical_capacity_production_v1.json",
   "prior_production_commit": "32a1426d9",
