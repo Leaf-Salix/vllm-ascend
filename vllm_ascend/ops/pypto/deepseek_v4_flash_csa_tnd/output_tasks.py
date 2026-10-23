@@ -39,7 +39,10 @@ def output_tasks(
     OB_ROWS: pl.constexpr,
 ):
     tokens = pl.tensor.dim(residual, 0)
-    oa_units = (tokens + 127) // 128 * (1024 // OA_COLS)
+    if OA_COLS == 192:
+        oa_units = (tokens + 159) // 160 * 6
+    else:
+        oa_units = (tokens + 127) // 128 * (1024 // OA_COLS)
     quant_units = (tokens + 31) // 32
     ob_tids = pl.array.create(OUTPUT_GROUPS, pl.TASK_ID)
     # 对齐BSH：各组按就绪核启动，O_A→quant→O_B仍严格依赖；不为小组额外等待整组准入。

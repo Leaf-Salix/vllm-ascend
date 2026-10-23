@@ -22,11 +22,12 @@
     FP32/INT8 工作区共享 P_MM 容量合同但不共享存储；P_SCALE 独立且>=T。
     O_B 使用的 ROW_TILE 为32/96/128之一，P_MM>=ceil(T/ROW_TILE)*ROW_TILE，
     并须足以保存实际T行。packed总行数须整除8，各视图连续且不得非法别名。
-    所有容量轴均 pl.dynamic；固定8组、模型维度和128/256列tile不是B/S白名单。
+    所有容量轴均pl.dynamic；NZ增加M160/N192及静态N64尾块，适用容量128<T<=160。
     外层捕获前拒绝不一致容量/layout；不能让生产者跳写而消费者读取旧值。
 
 分工、数学与尾行
-    O_A 以(group,ceil(T/128)行块,N列块)展平，logical%WORKERS 为AIC owner；
+    O_A以(group,ceil(T/行tile)行块,N列块)展平；每组独立task按本组worker轮转。
+    常规行tile为128，矩形分支为160；N192末块只算/写64列，完整覆盖每组1024列。
     每块先K256 matmul，再原顺序追加15个K256，pipeline只重叠本核搬运。
     仅迁移当前实际启用的 PIPELINE_OA=False，不搬未启用的显式L0流水候选。
     量化以(group,32行块)展平轮转AIV，块内每8行流水；有效行数贯穿load、
@@ -111,7 +112,75 @@ def o_projection_a_stage_nd(
 
 
 @pl.jit.inline(auto_scope=False)
-def o_projection_a_groups_stage_nz(
+def _rectangle_o_projection_a_tile_nz(
+    o_packed: pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16],
+    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, pl.NZ],
+    o_r_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]],
+    g: pl.Scalar[pl.INDEX],
+    pa_src0: pl.Scalar[pl.INDEX],
+    pa_r0: pl.Scalar[pl.INDEX],
+    pa_rows: pl.Scalar[pl.INDEX],
+    out_col_g: pl.Scalar[pl.INDEX],
+    n0: pl.Scalar[pl.INDEX],
+    A_ROW_TILE: pl.constexpr,
+    A_COL_TILE: pl.constexpr,
+):
+    xa_first = pl.slice(o_packed, [A_ROW_TILE, A_K_TILE], [pa_src0, 0], valid_shape=[pa_rows, A_K_TILE])
+    wa_first = wo_a[g : g + 1, 0:A_K_TILE, n0 : n0 + A_COL_TILE]
+    acc_a = pl.matmul(xa_first, wa_first, out_dtype=pl.FP32)
+    for kb in pl.pipeline(1, O_GROUP_IN // A_K_TILE, stage=2):
+        k0 = kb * A_K_TILE
+        xa_k_chunk = pl.slice(o_packed, [A_ROW_TILE, A_K_TILE], [pa_src0, k0], valid_shape=[pa_rows, A_K_TILE])
+        wa_k_chunk = wo_a[g : g + 1, k0 : k0 + A_K_TILE, n0 : n0 + A_COL_TILE]
+        acc_a = pl.matmul_acc(acc_a, xa_k_chunk, wa_k_chunk)
+    o_r_pad = pl.assemble(o_r_pad, acc_a, [pa_r0, out_col_g + n0])
+    return o_r_pad
+
+
+@pl.jit.inline(auto_scope=False)
+def _rectangle_o_projection_a_groups_stage_nz(
+    o_packed: pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16],
+    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, pl.NZ],
+    o_r_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]],
+    tokens: pl.Scalar[pl.INDEX],
+    worker_id: pl.Scalar[pl.INDEX],
+    WORKERS: pl.constexpr,
+    A_COL_TILE: pl.constexpr,
+    A_ROW_TILE: pl.constexpr,
+    group_begin: pl.Scalar[pl.INDEX],
+    group_end: pl.Scalar[pl.INDEX],
+):
+    """NZ O_A 的动态组区间；0≤begin≤end≤8，本组task局部worker分工，保留原K链；跨组由AICPU调度。"""
+    pack_stride = pl.tensor.dim(o_packed, 0) // O_GROUPS
+    row_blocks = (tokens + A_ROW_TILE - 1) // A_ROW_TILE
+    column_blocks = (O_LORA + A_COL_TILE - 1) // A_COL_TILE
+    group_first = group_begin * row_blocks * column_blocks
+    group_limit = group_end * row_blocks * column_blocks
+    first = group_first + worker_id
+    for logical in pl.range(pl.max(0, first), group_limit, WORKERS):
+        g = pl.max(0, logical // (row_blocks * column_blocks))
+        pa_unit = logical % (row_blocks * column_blocks)
+        pa_rb = pa_unit // column_blocks
+        nf = logical % ((O_LORA + A_COL_TILE - 1) // A_COL_TILE)
+        pa_r0 = pa_rb * A_ROW_TILE
+        pa_rows = pl.min(A_ROW_TILE, tokens - pa_r0)
+        pa_src0 = g * pack_stride + pa_r0
+        out_col_g = g * O_LORA
+        n0 = pl.max(0, nf) * A_COL_TILE
+        # NZ末维必须静态；第六块只算/写64列，不越过本组的1024列。
+        if nf < 5:
+            o_r_pad = _rectangle_o_projection_a_tile_nz(
+                o_packed, wo_a, o_r_pad, g, pa_src0, pa_r0, pa_rows, out_col_g, n0, A_ROW_TILE, 192
+            )
+        else:
+            o_r_pad = _rectangle_o_projection_a_tile_nz(
+                o_packed, wo_a, o_r_pad, g, pa_src0, pa_r0, pa_rows, out_col_g, n0, A_ROW_TILE, 64
+            )
+    return o_r_pad
+
+
+@pl.jit.inline(auto_scope=False)
+def _original_o_projection_a_groups_stage_nz(
     o_packed: pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16],
     wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, pl.NZ],
     o_r_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]],
@@ -160,6 +229,29 @@ def o_projection_a_groups_stage_nz(
             wa_k_chunk = wo_a[g : g + 1, k0 : k0 + A_K_TILE, n0 : n0 + A_COL_TILE]
             acc_a = pl.matmul_acc(acc_a, xa_k_chunk, wa_k_chunk)
         o_r_pad = pl.assemble(o_r_pad, acc_a, [pa_r0, out_col_g + n0])
+    return o_r_pad
+
+
+@pl.jit.inline(auto_scope=False)
+def o_projection_a_groups_stage_nz(
+    o_packed: pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16],
+    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, pl.NZ],
+    o_r_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]],
+    tokens: pl.Scalar[pl.INDEX],
+    worker_id: pl.Scalar[pl.INDEX],
+    WORKERS: pl.constexpr,
+    A_COL_TILE: pl.constexpr,
+    group_begin: pl.Scalar[pl.INDEX],
+    group_end: pl.Scalar[pl.INDEX],
+):
+    if A_COL_TILE == 192:
+        o_r_pad = _rectangle_o_projection_a_groups_stage_nz(
+            o_packed, wo_a, o_r_pad, tokens, worker_id, WORKERS, A_COL_TILE, 160, group_begin, group_end
+        )
+    else:
+        o_r_pad = _original_o_projection_a_groups_stage_nz(
+            o_packed, wo_a, o_r_pad, tokens, worker_id, WORKERS, A_COL_TILE, group_begin, group_end
+        )
     return o_r_pad
 
 

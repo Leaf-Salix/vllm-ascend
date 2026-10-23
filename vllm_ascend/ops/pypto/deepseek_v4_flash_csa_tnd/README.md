@@ -17,6 +17,13 @@ compact行数和query组数减少空worker。数学helper共用、任务仍由AI
 长档保留AICPU与AICore的BOOL整数0/1编码修复。旧融合实现的结果不代替本实现验收。
 旧源码和八档性能保留在Git `67134f28b`与原证据目录中。
 
+在v22调度基础上，输出投影已接入SPMD验证过的矩形tile：仅已有token容量
+`128<T<=160`选择M160、五个N192及一个N64尾块，每组保留独立O_A→量化→O_B
+任务。C05的O_A实例64→48，K256累加与量化规则保持；同址metadata和连续状态
+逐bit通过。C05两批二十窗完整L1中位1103.58μs，含AICPU三十窗1176.00μs；
+后者未优于历史v22同档1171.125μs，不把局部收益描述为所有口径都改善。
+详细门禁和原始样本见实验目录`scheduling_v32_v34_qualified.json`。
+
 ## 任务与数据
 
 - HC的widen/RMS、linear、reduce、gates、mix/norm、Sinkhorn独立。
@@ -39,7 +46,7 @@ compact行数和query组数减少空worker。数学helper共用、任务仍由AI
 
 重构实验在`tests/pypto_test/csa_mpmd_aicpu_20261022/`，通过`prepare.py`冻结算子和
 测试入口；SDK统一采用公共manifest。CPU检查不占卡，NPU执行通过`task-submit`。
-最新八档表为该目录的`scheduling_v22_PERFORMANCE.md`，对应完整样本、同进程对照
+v22基线八档表为该目录的`scheduling_v22_PERFORMANCE.md`，对应完整样本、同进程对照
 与状态来源见`scheduling_v22_qualified.json`；v16记录仍保留供前后比较。
 Native、BSH和SPMD复用同条件合格记录；本轮只补变更的TND-MPMD两列。
 

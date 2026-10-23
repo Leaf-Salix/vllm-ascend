@@ -116,7 +116,8 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         prefetch=1 if long_history or short_key_prefetch else 0,
         balanced=(long_history and group == 6) or single_request_leaves,
         roots=1 if (long_history and group == 6) or single_request_leaves else 2,
-        oa_cols=128 if tokens <= 96 else 256,
+        # 已提交SPMD的M160/N192+N64；只按已有token容量选核内tile，实际寻址仍在设备。
+        oa_cols=192 if 128 < tokens <= 160 else 128 if tokens <= 96 else 256,
         ob_rows=ob_rows,
         # 首版沿用冻结参考的核内 QA tile 选择；MPMD 收益另行验证。
         qa_m16_parallel=parallel_small_qa,
