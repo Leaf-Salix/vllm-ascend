@@ -54,25 +54,14 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {
-    "packed_score_keys_C04": {
-      "task_id": "task_20261023_171002_9596929355",
-      "device": 8,
-      "output": "runs/h131072_b16_s6_packed_score_keys_v6",
-      "cpu_kernel": "runs/compile_packed_score_keys_C04_v6/kernel",
-      "retained_result": "runs/h131072_b16_s6_leaf_scale_one_row_v1/result.json",
-      "retained_cpu_kernel": "runs/compile_output_rectangle_production_C04_v1/kernel",
-      "original_result": "runs/h131072_b16_s6_baseline_sdk_v1/result.json",
-      "command": "bash /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/launch_sdk_measure_v2.sh candidate /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/packed_score_keys_v6 h131072_b16_s6 packed_score_keys_v6 /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b16_s6_baseline_sdk_v1/result.json"
-    }
-  },
+  "pending_tasks": {},
   "next_steps": [
-    "Complete CPU/resource/alias gates for the B16-only packed-key candidate inspired by recipes KV queue ownership",
-    "Collect current B16 Score FIFO diagnostic; keep all probe intervals ineligible for performance",
-    "Audit useful mechanisms against exact arithmetic, A3 memory lifetimes and preserved slot ownership",
-    "Keep projection/output and quant-coefficient prototype parked during this focused pass",
-    "Validate the selected B16 mechanism against the retained full-L1 baseline, then required regression gates",
-    "Do not push without new explicit request"
+    "Continue B16 Indexer/Attention in-core investigation using the pinned recipes sources and actual generated code",
+    "Packed AIV key supply is a measured negative; do not expand its state/service/case matrix or scan nearby buffering parameters",
+    "Attention follow-up must differ from measured direct-AIC gather, persistent-KV buffering and simple producer/consumer reorderings",
+    "Preserve original arithmetic, A3 resource bounds and cache/slot visibility; require mechanism evidence before another device candidate",
+    "Original eight-case 0.90 geomean objective and final regression remain active",
+    "No push without new explicit request"
   ],
   "knowledge_query": {
     "status": "index_missing",
@@ -114,7 +103,7 @@
     "score_fifo_probe": 8,
     "packed_score_keys_v6": 21
   },
-  "updated_at": "2026-10-23T17:07:03.843832+08:00",
+  "updated_at": "2026-10-23T17:22:45.609488+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -299,6 +288,15 @@
       "case_id": "C04",
       "evidence": "output_group_owners_v2_results.json",
       "reason": "Strict checks pass; complete L1 786.10 versus 763.65 us, +2.939828%, not adopted"
+    },
+    {
+      "candidate": "packed_score_keys_v6",
+      "case_id": "C04",
+      "evidence": "packed_score_keys_v6_results.json",
+      "median_us": 850.14,
+      "retained_median_us": 763.65,
+      "change_pct": 11.325869180907478,
+      "reason": "Strict checks passed but complete-L1 regressed; no domain expansion or production adoption"
     }
   ],
   "promising_candidates": [
