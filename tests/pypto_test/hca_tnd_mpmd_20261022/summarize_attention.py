@@ -27,14 +27,14 @@ CPU_RUNS = (
 )
 
 
-def attention_stages(run, side):
+def attention_stages(run, side, prefixes=("hca_unified_attention_aic", "hca_unified_attention_aiv")):
     """Worker View中的每次实际执行只计一次；不把Task View重复加进来。"""
     samples = collections.defaultdict(list)
     for path in sorted(run.glob(f"l1_*_{side}/swimlane.json")):
         events = [e for e in json.loads(path.read_text())["traceEvents"]
                   if e.get("ph") == "X" and e.get("pid") == 4]
         begin = min(e["ts"] for e in events)
-        for prefix in ("hca_unified_attention_aic", "hca_unified_attention_aiv"):
+        for prefix in prefixes:
             selected = [e for e in events if e["name"].startswith(prefix)]
             if selected:
                 samples[prefix].append({

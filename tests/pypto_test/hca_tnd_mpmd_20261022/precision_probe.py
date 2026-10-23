@@ -107,7 +107,11 @@ def trace_output(
         'from .entry import *\n\n' + ast.unparse(root) + extra_trace + '\n' + tail)
 
 
-def capture_native(layer):
+class NativeAttentionCaptured(RuntimeError):
+    """诊断主动在Native attention执行前停止，不代表模型或精度通过。"""
+
+
+def capture_native(layer, event_path=None, attention_dump=None):
     """只在独立诊断进程中包装Native实际方法；返回恢复函数。"""
     from vllm_ascend.device.device_op import DeviceOperator
 
@@ -118,24 +122,67 @@ def capture_native(layer):
     original_selector = DeviceOperator.get_dsa_sparse_attn_op
     attention_op = original_selector()
 
+    def boundary(label):
+        if event_path is None:
+            return
+        # 仅异常定位时分段同步；不用于性能测量，也不改变正式Native/PTO路径。
+        import torch
+
+        with Path(event_path).open("a") as file:
+            file.write(json.dumps({"boundary": label, "phase": "before_sync"}) + "\n")
+        torch.npu.synchronize()
+        with Path(event_path).open("a") as file:
+            file.write(json.dumps({"boundary": label, "phase": "after_sync"}) + "\n")
+
     def pre(*args, **kwargs):
+        boundary("before_hc_pre")
         values = original_pre(*args, **kwargs)
+        boundary("after_hc_pre")
         for name, value in zip(("mixed", "post", "comb"), values):
             data[name] = value.detach().clone()
         return values
 
     def norm(module, inputs, value):
+        boundary("after_rms")
         data["normalized"] = value.detach().clone()
 
     def output(value, target):
+        boundary("before_o_proj")
         data["packed"] = value.detach().clone()
         result = original_output(value, target)
+        boundary("after_o_proj")
         data["projected"] = result.detach().clone()
         return result
 
     def attention(query, *args, **kwargs):
+        boundary("before_attention")
         data["q"] = query.detach().clone()
-        return attention_op(query, *args, **kwargs)
+        # 只用于独立诊断：保存Native实际消费的cache与边界，避免把上游差异归咎于attention。
+        # 大快照只在本地stage_values.pt保留，不提交Git，不影响正式调用路径。
+        for name in ("ori_kv", "cmp_kv", "ori_block_table", "cmp_block_table",
+                     "cu_seqlens_q", "seqused_kv"):
+            value = kwargs.get(name)
+            if value is not None:
+                data["attention_" + name] = value.detach().clone()
+        boundary("after_attention_input_copies")
+        if attention_dump is not None:
+            import torch
+
+            def cpu(value):
+                if isinstance(value, torch.Tensor):
+                    return value.detach().cpu()
+                if isinstance(value, (tuple, list)):
+                    return type(value)(cpu(v) for v in value)
+                if isinstance(value, dict):
+                    return {k: cpu(v) for k, v in value.items()}
+                return value
+
+            torch.save({"query": cpu(query), "args": cpu(args), "kwargs": cpu(kwargs),
+                        "capture": "真实Native调用输入；在执行该attention前主动停止"}, attention_dump)
+            raise NativeAttentionCaptured(str(attention_dump))
+        result = attention_op(query, *args, **kwargs)
+        boundary("after_attention")
+        return result
 
     layer.hc_pre = pre
     impl._forward_o_proj = output
@@ -197,7 +244,9 @@ def run_probe(*, package, options, call, fixture, layer, config, output, baselin
                   "packed": packed}
     result["intermediates"] = {}
     for name, value in pto_values.items():
-        reference = native_tensors[name].reshape_as(value)
+        reference = native_tensors[name].reshape(-1, *value.shape[1:])
+        if reference.shape[0] < active:
+            raise ValueError(f"Native采集的{name}不覆盖所有实际token")
         value_cpu, ref_cpu = value.cpu(), reference.cpu()
         result["intermediates"][name] = {
             "all": compare_tensor(value_cpu[:active], ref_cpu[:active], 0.0, 0.0),
@@ -214,18 +263,73 @@ def run_probe(*, package, options, call, fixture, layer, config, output, baselin
         ("native_tail_native_gates", native_projected_from_pto, native_tensors["post"], native_tensors["comb"]),
         ("native_attention_pto_gates", native_tensors["projected"], captures["debug_post"], captures["debug_comb"]),
     ):
-        alternatives[label] = layer.hc_post(projected, fixture["hidden"], post, comb.view(tokens, 4, 4))
+        alternatives[label] = layer.hc_post(projected[:active], fixture["hidden"][:active], post[:active],
+                                            comb.reshape(-1, 4, 4)[:active])
     # 同一生产O尾链，输入替换成Native attention与门控，隔离上游误差。
     native_packed = torch.zeros_like(captures["debug_packed"])
-    native_packed.view(8, module.T_PAD, 4096)[:, :tokens].copy_(
-        native_tensors["packed"].view(tokens, 8, 4096).transpose(0, 1))
+    native_packed.view(8, module.T_PAD, 4096)[:, :active].copy_(
+        native_tensors["packed"].reshape(-1, 8, 4096)[:active].transpose(0, 1))
     tail_result = torch.empty_like(output)
     tail(native_packed, call.args["wo_a"], call.args["wo_b"], call.args["wo_b_scale"],
-         fixture["hidden"], native_tensors["post"], native_tensors["comb"].reshape(tokens, 16), tail_result)
+         fixture["hidden"][:active], native_tensors["post"][:active],
+         native_tensors["comb"].reshape(-1, 16)[:active], tail_result[:active])
     alternatives["pto_tail_native_attention_and_gates"] = tail_result
     torch.npu.synchronize()
     result["splices"] = {name: compare_tensor(value[:active].cpu(), final_reference, 0.01, 0.01)
                          for name, value in alternatives.items()}
+    if hasattr(importlib.import_module(package + ".attention"), "sparse_attn_hca_tp1"):
+        from importlib.util import find_spec
+
+        standalone_name = package + ".standalone_attention_probe"
+        if find_spec(standalone_name) is not None and "attention_ori_kv" in native_tensors:
+            standalone = importlib.import_module(standalone_name)
+            attention_only = pypto.torch.register(
+                standalone.attention_probe, "hca_tnd_stage_probe::attention_inputs", config=options,
+            )
+            result["attention_inputs"] = {}
+            result["attention_metadata"] = {
+                "native_cu_seqlens_q": native_tensors["attention_cu_seqlens_q"].cpu().tolist(),
+                "native_seqused_kv": native_tensors["attention_seqused_kv"].cpu().tolist(),
+                "pto_query_bounds": call.args["query_bounds"].cpu().tolist(),
+                "pto_seq_lens": call.args["seq_lens"].cpu().tolist(),
+            }
+            # 本入口由prepare从当前生产函数的签名生成；计算体仍是实际attention。
+            # 此项用于默认K128路径的C128边界定位，避免误把另一分档当同一生产路径。
+            if policy != "default":
+                raise ValueError("本Native输入拼接诊断当前只绑定默认K128，其他分档须显式生成相同策略")
+            for label, q_value, original, compressed in (
+                ("native_q_native_cache", native_tensors["q"], native_tensors["attention_ori_kv"],
+                 native_tensors["attention_cmp_kv"]),
+                ("native_q_pto_cache", native_tensors["q"], call.args["ori_cache"], call.args["cmp_cache"]),
+                ("pto_q_native_cache", pto_values["q"], native_tensors["attention_ori_kv"],
+                 native_tensors["attention_cmp_kv"]),
+                ("pto_q_pto_cache", pto_values["q"], call.args["ori_cache"], call.args["cmp_cache"]),
+            ):
+                out_packed = torch.zeros_like(captures["debug_packed"])
+                q_padded = torch.zeros((tokens, 32768), dtype=q_value.dtype, device=q_value.device)
+                q_padded[:active].copy_(q_value.reshape(-1, 32768)[:active])
+                attention_only(
+                    q_padded, original, call.args["ori_table"], compressed,
+                    call.args["cmp_table"], call.args["positions"], call.args["seq_lens"],
+                    call.args["query_bounds"], call.args["attn_sink"], call.args["freqs_cos"],
+                    call.args["freqs_sin"], out_packed,
+                )
+                logical = out_packed.view(8, module.T_PAD, 4096)[:, :tokens].transpose(0, 1).contiguous()
+                logical = logical.view(tokens, 64, 512)
+                with set_ascend_forward_context(fixture["metadata"], config, num_tokens=tokens, num_actual_tokens=active):
+                    projected = torch.empty((tokens, 4096), dtype=torch.bfloat16, device=output.device)
+                    impl._forward_o_proj(logical, projected)
+                reconstructed = layer.hc_post(projected[:active], fixture["hidden"][:active],
+                                               native_tensors["post"][:active],
+                                               native_tensors["comb"].reshape(-1, 4, 4)[:active])
+                torch.npu.synchronize()
+                result["attention_inputs"][label] = {
+                    "packed_vs_native": compare_tensor(logical[:active].cpu(),
+                                                        native_tensors["packed"].reshape(-1, 64, 512)[:active].cpu(), 0, 0),
+                    "native_tail_vs_native": compare_tensor(reconstructed[:active].cpu(), final_reference, 0.01, 0.01),
+                    "packed_vs_production": compare_tensor(logical[:active].cpu(), packed[:active].cpu(), 0, 0),
+                }
+                pto_values[label] = logical
     # 只存诊断激活；权重不重复落盘，结果不纳入Git。
     dump = Path(output_dir) / "stage_values.pt"
     torch.save({"native": {k: v.cpu() for k, v in native_tensors.items()},

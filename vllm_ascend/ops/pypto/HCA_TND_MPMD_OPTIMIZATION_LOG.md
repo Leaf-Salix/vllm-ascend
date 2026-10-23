@@ -601,3 +601,109 @@ T=33走long_attention；三次服务调用、KV钩子/compact复用、Native输�
 正式统一用6×16环，K128一次写两行、K512逐行写，逻辑顺序和总字节数相同。
 v1的constexpr误用、v2未选分支类型检查、v3列子视图失败均保存，v4才是验过的集成版本。
 本轮两个组件报告都附复现和修改建议，没有修改/重建共享SDK，没有提交PR。
+
+## 2026-10-23：继续按区间择优，排除累计max小收益并实现双query复用候选
+
+正式HCA仍为`37bbd0f3c`的K128/K512与投影区间策略。本轮未修改正式算子，
+SDK仍为`csa-shared-20261022-logical-codegen`，所有新设备执行为eager，无ACLGraph。
+用户允许更多区间，不要求全局替换；仍需明确适用边界和完整层证据，不能以单次中值
+波动新增档位。候选、失败、队列身份和原始证据位于`hca_tnd_mpmd_20261022/`。
+
+### 累计max与N64/H8：容量改善不等于完整层提速
+
+累计max把running max前移至概率BF16转换之前，PV更新不再缩放新结果；保持三槽、
+跨query与原Cube供数。N64/H8版本把输出累积分成8份N64，缩小Vector临时块。
+两者均完成三个根的编排/incore C++编译；独立混长FP64误差、失活零输出、重复与保护通过。
+
+| 对照项 | 控制μs | 候选μs | 更快配对 | 结论 |
+|---|---:|---:|---:|---|
+| 累计max，128K/B16 | 531.32 | 524.38 | 4/7 | 波动明显，未采用 |
+| 累计max，128K/B28 | 746.44 | 748.60 | 4/7 | 未采用 |
+| N64/H8相对累计max，128K/B16 | 526.54 | 534.10 | 3/7 | 未采用，不扩档 |
+
+Native输出通过原容差，cache/state相对控制精确；严格Native storage既有差异保留。
+累计max的B16平均AIC/AIV核时间反而约增加2.8/3.4μs，不能把完整层中值减少归功于
+该公式。静态Vec地址覆盖：正式178144B、累计max178272B、N64/H8为157280B；
+N64省约21KB仍不足再放一个64KB完整query累积，不能据此强行扩成双query/AIV。
+首个独立任务在SetDevice报507033，算子未执行；确认退出后才按同份冻结源码重提。
+
+### 纠正上一节混长C128结论：旧Native参考含不一致的padding
+
+原B5、Q=[1,5,6,1,2]、history=[127,16383,131073,0,16507]、T24/B8容量，
+不能把上一节的25702/11332个差异当作有效PTO精度结论。分段同步定位到Native SAS，
+此前mHC/RMS/QKV/C128及输入拷贝已完成；只截取输入、不再执行SAS后发现：
+Native Q只有15行，而cu_q尾为24，并含三个dummy请求。参考输入不一致，可能越界。
+这不是已经证明的Native算子bug，也不能通过修改PTO去复现不合法参考。
+
+测试v5仅裁metadata导致RoPE维度失配；v6把Native metadata/hidden/position/output
+统一取真实范围，两侧仍共享相同有效输入、物理cache和初态。PTO继续测试原T24/B8容量。
+v6消除MTE和大面积误差，剩**1个**输出超差`[12,0,17]`，max_abs=0.015625、
+RMSE=0.001655229；token12是history=0/Q1的冷请求，不能称为C128关闭行错误。
+
+同一生产数学的诊断与真实PTO输出/cache/state逐bit一致。Native attention+Native gates
+接PTO尾部完全精确；PTO attention接Native尾部仍复现该点。只替换Native Q或Native
+cache都通过原输出容差，两者均为PTO时才复现，剩余来自前置Q/KV差异组合。
+固定Native RMS的C128 state最大差5.364418e-7、compressed cache精确。源码也确认
+公共mHC已有平衡加法和RMS前BF16舍入，不把这两个已实现点作为新修复。
+旧失败完整保留，输入快照仅本地存放，路径/大小见清单，不提交Tensor快照或做hash。
+
+### 大颗粒双query候选：12组×2Cube×4AIV
+
+`build_attention_pair.py`生成完整实验`candidates/attention_pair512.py`，K128入口保留。
+每组偶数Cube做两个query的M128压缩QK，奇数Cube做PV；四个AIV各处理一个query的
+32heads，UB累积不翻倍。压缩KV被两条query复用，Raw起点不同则分别M64计算。
+PV按两个D256段计算，每段两份M128/N128 Acc，共128KB；重复读取概率是明确代价。
+信号与压缩KV搬运的净收益必须由完整L1确认，不预记加速。
+
+device pair计划按真实请求前缀配对，保留S1/S5/S6和奇数尾，禁止跨请求配对；
+length=0仍发出零输出工作，不访问其cache。12组×三槽×128heads交接区与旧容量相同。
+跨pair连续，不能逐pair排空；每槽四个AIV完成旧PV消费后，QK才能覆盖该槽。
+跨逻辑核组使用已有A3 signal_notify/wait，10种单写者信号各隔离512B，发布前
+PIPE_ALL排空业务写回并维护缓存；等待后处理读方缓存。每次调用由计划任务清零，
+MIX明确依赖计划及全部gather/QKV，sync_start准入并关闭early，避免占满核等未执行前驱。
+v7还在首次读取plan/header之前显式失效Scalar缓存，以支持下一步同址metadata变化。
+
+独立planner的v2/v3完整CPU通过。完整pair候选v1～v4依次修正本地DSL的INDEX写INT32、
+M128/M64同名Tile类型、嵌套分支缺外层yield、H×1向量常量行对齐；均保留失败日志，
+这些不是新确认的SDK bug。v5/v6三个JIT根及129份incore C++全部编译通过。
+v5设备任务在执行前发现packed被误标InOut、与根Out ABI不一致；v6改为实际仅写Out。
+
+v6独立S6和混长真机均完成：128K/16507、无效页、失活请求、重复和输出保护全部通过，
+对正式K512 **逐bit一致**；S6包含跨pair的流水推进。静态地址覆盖Mat262144、Acc131072、
+Left/Right各65536、Vec178144B。此统计不是PMU或性能结论。
+v7的128K/B16与B28完整层七窗配对已排队，需待输出/cache/state精确及保护通过才采L1。
+截至本条记录未取得v7完整层性能，未接入正式算子，不代表30%目标或全部精度已完成。
+
+任务与结果：`ATTENTION_ONLINE_TASKS.json`、`ATTENTION_BOUNDARY_TASKS.json`、
+`ATTENTION_PAIR_TASKS.json`、`ATTENTION_NEXT_RESULTS.md/json`。
+
+### 双query完整层结果与同步归因，仍不采用
+
+v7完整层输出、cache/state相对正式K512精确，Native输出通过原容差，重复及保护通过；
+但B16为518.04→593.60μs，B28为749.40→896.36μs，均0/7更快，不采用、不扩档。
+L1显示计划任务仅约4/6μs；attention的72核平均执行时间(含内部等待)约148/223→207/351μs。
+这定位到配对阶段，但不能直接把差值全称为Scalar等待或HBM代价。
+
+v8仅把100tick退避改为0，仍对同任务正式K512：B16为512.88→605.06μs，
+B28为756.52→867.38μs，均未超过正式版，说明退避并非唯一原因。SDK未改。
+
+v9收紧环的实际读写依赖：QK只覆盖score(k)，因此只需四个AIV已经发布P(k)，
+无需等旧PV累加完毕。Vector在第k+2拍已消费PV(k)，才会在第k+3拍发布P(k+3)，
+PV Cube又等全部P(k+3)才写V(k+3)，所以P/V缓冲也安全；删除四份冗余PV消费ACK。
+完整S6仍与控制逐bit一致。B16为528.90→593.66μs，B28为737.94→820.36μs，
+仍未采用；不同任务中值不能相减声称v9单项净收益。混长未扩测，不夸大v9覆盖。
+
+另纠正此前对early的保守推断：公共Simpler TMR的`orchestrator.cpp:535/573`和
+`scheduler.h:882`表明allow_early_resolve是生产者对消费者预派发的提示，
+sync_start gated cohort仍在全核可运行且前驱释放后才启动。关闭该提示不是安全要求，
+却会增加输入/输出的启动空隙。v10恢复plan和attention的early，保留sync_start及全部依赖；
+B16/B28已提交，尚待结果，不能把此前人为关闭的代价全部归咎于配对数学。
+
+### 等待设备时核对gather的串行mask构造
+
+正式压缩KV聚合每页用32次Scalar UB写入生成mask，新增独立Vector mask候选：
+用精确FP32列号和有效长度生成0/1，按[页数,32]整行拼接再reshape，保留负页、尾页和
+未初始化KV的保护；KV地址与搬运完全不变，也不引入新的task或外部适配。
+三个根的完整CPU后端通过，独立混长/无效页以及B16/B28完整层七窗已经提交。
+候选位于`candidates/attention_gather_vector_mask.py`，任务见`ATTENTION_GATHER_TASKS.json`。
+在真机输出与L1证据出来之前，正式源码仍不改变，也不会全局替换。
