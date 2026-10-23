@@ -74,7 +74,8 @@ def check(root):
         rows.append(
             {
                 "rank": rank,
-                "full_s6_graph_forwards": observation["model_forward_counts"][key],
+                # FULL是调用时的图模式标签，合同拒绝后仍可能实际执行eager。
+                "full_s6_graph_mode_forwards": observation["model_forward_counts"][key],
                 "actual_full_s6_steps": full_s6_steps if occupancy else None,
                 "decode_occupancy": occupancy,
                 "memory": observation["memory"],
@@ -88,7 +89,7 @@ def check(root):
         )
     report = {
         "status": "PASS",
-        "scope": "功能及实际S6路由通过；不代替Native/PTO输出正确性对照",
+        "scope": "功能及实际S6路由通过；不代替输出正确性或整模型图重放验收；FULL模式计数不证明实际重放",
         "variant": variant,
         "batch": batch,
         "requests": 16 * batch,

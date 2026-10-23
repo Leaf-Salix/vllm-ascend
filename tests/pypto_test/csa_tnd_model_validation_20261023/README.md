@@ -4,6 +4,31 @@
 先完成 128K/B16/S6 的 Native、TND-SPMD、TND-MPMD 三侧对照，再验证 B24。
 不改变已完成的 PyTorch 单卡复现手册，也不重复生成已审计的历史 KV。
 
+## 当前结论（2026-10-24，内部工作区版）
+
+两种TND均完成16卡128K/B16和B24真实decode：每卡33个真实满批S6 step，
+每请求192输出token，零抢占，21层CSA均实际提交PTO，Python侧临时工作区均为0。
+MPMD/SPMD的全部输出token与DSpark接受事件相同；简单问题与Native逐token一致，
+复杂问题仍有差异。这里的功能通过沿用用户已明确接受的精度口径，不代表Native/PTO浮点bit一致。
+
+| 档位 | 每侧请求数 | Native平均接受草稿数 | MPMD | SPMD | PTO相对Native完整token一致请求 | 其中简单请求 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 128K/B16 | 256 | 3.80650 | 3.79567 | 3.79567 | 64/256 | 32/32 |
+| 128K/B24 | 384 | 3.62189 | 3.73754 | 3.73754 | 144/384 | 64/64 |
+
+**模型级图重放未通过。** 四次新模型运行均由原有图合同拒绝replay后，经eager
+重新派发实际PTO完成decode；所有层graph allowed计数均为0。这与旧外部工作区版
+行为相同，不是此次内存改动新增的回退。算子单卡graph replay已经通过，但不能替代
+模型级graph replay。原始记录保留不改写，集中证据见`graph_execution_audit.json`。
+本轮没有性能验收结论。捕获期短历史与TND入口最低8192长度要求冲突是源码线索，
+尚未采集拒绝原因来确认；后续修图需独立处理，不能直接放开保护条件。
+
+完整三方问答：工作区`downloads/CSA_TND_INTERNAL_QA_20261024/`，
+01为B16、02为B24，HTML和Markdown均完整展示三个实现的实际192token回答。
+24个含128K背景的真实输入另存`完整模型输入/`，原始token及来源保存在JSON。
+结构化对照见`internal_b16_comparison.json`和`internal_b24_comparison.json`；
+`production_source_audit.json`确认正式代码与设备运行冻结包一致。
+
 ## 固定口径
 
 - 真实权重 `/data/model/DeepSeek-V4-Flash-0731-w8a8`，TP1、DP=EP16，DSpark 出5验6。
@@ -99,12 +124,12 @@ Tensor位于ring1；首次失败日志与全部过程保留在主验证日志，
 
 公共工具链`csa-shared-20261024-group-dims`已完成相关验证并标记validated。
 PyPTO为`d44925c1`；Simpler、PTOAS、CANN仍用公共清单与环境的固定版本。
-SDK验证通过不代表模型验证已通过。当前16卡B16任务：
+SDK验证通过不代表模型验证已通过。以下16卡B16任务现均已exit=0：
 
 - MPMD：`task_20261024_034554_36644472287`，结果`runs/v25_mpmd_b16`。
 - SPMD：`task_20261024_034603_366976914195`，结果`runs/v25_spmd_b16`。
 
-实际状态以队列和`jobs.json`为准。两侧共用预算0.92、HCCL1800、相同源码/SDK/heap。
+两侧共用预算0.92、HCCL1800、相同源码/SDK/heap。
 B16完整功能与输出对照完成后才提交16卡B24。新模型检查要求21层CSA实际接入、
 真实B×S6、192token完整输出、无抢占，并要求所有层外部scratch字节数为0。
 
@@ -132,9 +157,11 @@ Native正确性参考沿用`v02_native_b16`和`v12_native_b24`。新增
 每侧256请求共49152输出token，每卡33个真实满批S6 step，零抢占，21层外部scratch均0。
 两种PTO全部token及DSpark事件一致，也分别与各自旧外部版本一致。
 对Native，32个简单请求全部逐token一致；复杂问题保留既有差异，完整问答在
-`downloads/CSA_TND_INTERNAL_QA_20261024/`，当前含B16三方全文和完整模型输入。
+`downloads/CSA_TND_INTERNAL_QA_20261024/`，现含B16/B24三方全文和完整模型输入。
 
 B16门槛通过后才提交B24，沿用预算0.935、HCCL768及已验证ring配置：
 MPMD任务`task_20261024_041057_60730724515`，SPMD任务`task_20261024_041106_6128009168`。
-输出位于`runs/v25_mpmd_b24`、`runs/v25_spmd_b24`；实际状态以队列为准。
-B24尚未完成三方对照，目标仍未整体完成。
+输出位于`runs/v25_mpmd_b24`、`runs/v25_spmd_b24`，两任务均exit=0。
+B24三方对照及完整问答已完成，SPMD不再发生旧外部工作区版的收尾OOM。
+rank0收尾空闲显存MPMD为260.27MiB、SPMD为283.69MiB，这是本次实测值，
+不代表更长生成或其他batch也已验证。功能完成范围及模型图重放限制见本页首节。

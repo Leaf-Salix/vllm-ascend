@@ -23597,3 +23597,46 @@ B16达到用户已明确接受的口径：正常decode、简单token一致、完
 
 SPMD B24任务task_20261024_041106_6128009168已接续运行。这是最后一组整模型
 验证；只有它完成并通过三方对照、问答导出及最终审核后，才可以标记目标完成。
+
+
+### 735.114 内部工作区两种TND均完成B16/B24，披露模型图回退（2026-10-24）
+
+SPMD B24任务task_20261024_041106_6128009168已exit=0，卡已释放。
+384请求×192token共73728token完整输出，每卡33个真实24×S6 step，零抢占，
+21层CSA外部scratch均0。rank0收尾空闲283.69MiB；旧外部SPMD B24的收尾OOM
+不再出现。证据internal_spmd_b24_summary.json。没有完整旧SPMD B24输出，
+不能声称与该失败任务逐token完整比较通过。
+
+B24三方对照internal_b24_comparison.json：MPMD与SPMD全部输出token及384请求
+的DSpark事件一致。对Native，144/384请求完整token一致，其中64个简单请求全部
+逐token一致；复杂问题保留差异，位置token差异39136/73728，接受事件完全一致
+80/384请求。Native平均接受3.621890547，两种PTO均3.737538149。
+结合上一节B16，已满足本轮功能及用户认可的精度口径；不声称Native浮点bit对齐。
+Native沿用历史正确性参考，PTO专用SDK/heap差异完整记录，不作跨版本性能比较。
+
+问答全部导出到工作区downloads/CSA_TND_INTERNAL_QA_20261024/：01为B16、
+02为B24，三方HTML/Markdown分别展示实际回答；保留24个完整128K输入和原始输出
+token JSON。只有16个DP副本已证明逐token相同时才去重，复杂差异没有省略。
+192token是实际生成上限，不补写未完成回答。正式目录10个相关运行时文件与
+设备运行冻结v25源码AST一致；另一个会话的3个PTO HCA文件不参与本轮20层Native HCA。
+证据production_source_audit.json，不进行重复hash扫描。
+
+**最终审计纠正图模式解读：本轮四次16卡结果均不是模型级PTO graph replay通过。**
+每rank首层图合同allowed=0；B16 rejected=81、各CSA层实际提交49次；
+B24 rejected=90、各层实际提交58次。all()短路使后20层没有图检查，不能把其0计数
+当作放行。旧v09两种B16及v12 MPMD B24也有完全相同的拒绝/提交情况，说明该回退
+在内部工作区迁移前已存在。拒绝后acl_graph.py调用runnable，长历史仍进入PTO；
+所有21层真实提交成立，不能反过来说本次CSA实际全走Native。
+
+原始functional_check.json已记录all_csa_graph_replay_proven=false，保留不篡改。
+旧full_s6_graph_forwards只统计外层FULL标签，当前检查器改名为
+full_s6_graph_mode_forwards并明确通过范围；capture_time_selection也只是历史
+字段名，旧观测器实际统计所有eligible调用，并非只统计捕获。
+集中审计graph_execution_audit.json覆盖4次新任务和3次旧任务的全部16rank。
+算子单卡graph replay通过与模型图回退是不同层次的结论，不互相替代。
+
+源码线索：模型dummy capture默认以max_query_len构造短历史，服务支持范围要求
+max_seq_len>=8192，可能导致捕获Native并留下空TND合同。当前未做拒绝原因采样，
+因此不把该推断写成已证实根因，也不归因于PyPTO。修复模型级图重放属于尚未完成的
+独立事项；保留保护条件，不用放宽合同冒充成功。已向用户说明实际eager路径并询问
+是否将整模型图重放修复追加为本次完成条件，当前没有新增设备任务。

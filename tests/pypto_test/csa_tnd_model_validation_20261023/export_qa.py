@@ -41,6 +41,15 @@ def main():
             note = "本页独立展示Native、TND-MPMD和TND-SPMD的实际回答，不以某一侧回答代替另一侧。"
             if comparison.get("native_reference_reused"):
                 note += "Native沿用历史正确性参考，版本信息保存在对照报告中；这里不作性能比较。"
+            if any(
+                not all(
+                    row.get("all_csa_graph_replay_proven", False)
+                    for row in read(root / "functional_check.json")["ranks"]
+                )
+                for label, root in roots.items()
+                if label != "Native"
+            ):
+                note += "本次TND整模型结果未通过模型级图重放验收；算子单卡图重放通过不能代替这一项。"
             scenes.append((comparison["batch"], roots, note))
     else:
         scenes = [
@@ -165,6 +174,7 @@ nav{line-height:2.2}nav a{margin-right:16px}.note{padding:14px;background:#fff4d
         "- 问题后缀与本次已生成回答均完整保留；每条回答生成上限192token，所以可能没有答完，并非导出时截取。\n"
         "- `完整模型输入/`另存全部实际prompt，包含128K背景和问题，保留特殊token文本表示。\n"
         "- 各实现是否完成、是否复用历史Native参考，均在对应页面说明；不伪造或补写回答。\n"
+        "- 功能完成与模型图重放分开判断；有图重放限制时在页面注明，本目录不提供性能结论。\n"
         "- JSON保留输出token、原文及源结果路径；不包含权重或KV缓存。\n"
     )
     print(output)
