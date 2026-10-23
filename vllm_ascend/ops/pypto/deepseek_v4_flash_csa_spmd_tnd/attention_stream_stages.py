@@ -84,6 +84,7 @@ from ..deepseek_v4_flash_csa.config import FLASH as M
 from .attention_plan_stages import (
     COMPRESSED_COLUMNS_DYN,
     ORIGINAL_COLUMNS_DYN,
+    PHYSICAL_PLAN_COLUMNS,
     PLAN_CAP_DYN,
     QUERY_BOUNDS_DYN,
     REQUESTS_DYN,
@@ -244,12 +245,15 @@ def attention_qk_pv_vector_lane_stage(
     CACHE_QUERY_METADATA: pl.constexpr = False,
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+    PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
 ):
     """双AIV各32头/64候选；同一mask和事件次序保证与AIC配对。"""
     t_dim = pl.tensor.dim(position_ids, 0)
     physical_mode = physical_plan_supported(
-        pl.tensor.dim(cmp_block_table, 1), pl.tensor.dim(cmp_kv_flat, 0) // BLOCK_SIZE,
+        pl.tensor.dim(cmp_block_table, 1),
+        pl.tensor.dim(cmp_kv_flat, 0) // BLOCK_SIZE,
         PLAN_PHYSICAL_ROWS,
+        PLAN_TABLE_COLUMNS=PLAN_TABLE_COLUMNS,
     )
     qk_core = core_id
     qk_aiv = lane_id
@@ -309,12 +313,12 @@ def attention_qk_pv_vector_lane_stage(
                     # 并行采64行；zero模式保留负哨兵/容量外地址的零填充。
                     physical_column = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv
                     physical_rows = pl.load(
-                        cmp_sparse_indices, [qk_t, physical_column], [1, ATTN_K_TILE // 2],
+                        cmp_sparse_indices,
+                        [qk_t, physical_column],
+                        [1, ATTN_K_TILE // 2],
                         target_memory=pl.MemorySpace.Vec,
                     )
-                    qk_kv_half = pl.tile.mgather(
-                        cmp_kv_flat, physical_rows, coalesce="row", gather_oob="zero"
-                    )
+                    qk_kv_half = pl.tile.mgather(cmp_kv_flat, physical_rows, coalesce="row", gather_oob="zero")
                 else:
                     # 只有原SWA/逻辑回退需要先清零；物理分支由MGATHER完整写出，
                     # 不让旧零Tile与新64KiB结果跨分支同时存活。
@@ -467,15 +471,21 @@ def attention_qk_pv_vector_lane_stage(
                     # 编译器依赖。不放开内存规划的安全门槛，也不经GM绕行。
                     pv_m = pl.reshape(
                         pl.tile.extract(
-                            stats_cache_ready, (pv_work % QK_TRANSFER_SLOTS) * 2, 0,
-                            [1, H // 2], target_memory=pl.MemorySpace.Vec,
+                            stats_cache_ready,
+                            (pv_work % QK_TRANSFER_SLOTS) * 2,
+                            0,
+                            [1, H // 2],
+                            target_memory=pl.MemorySpace.Vec,
                         ),
                         [H // 2, 1],
                     )
                     pv_l = pl.reshape(
                         pl.tile.extract(
-                            stats_cache_ready, (pv_work % QK_TRANSFER_SLOTS) * 2 + 1, 0,
-                            [1, H // 2], target_memory=pl.MemorySpace.Vec,
+                            stats_cache_ready,
+                            (pv_work % QK_TRANSFER_SLOTS) * 2 + 1,
+                            0,
+                            [1, H // 2],
+                            target_memory=pl.MemorySpace.Vec,
                         ),
                         [H // 2, 1],
                     )

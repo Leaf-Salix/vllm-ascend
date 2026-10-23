@@ -62,6 +62,7 @@ import pypto.language as pl
 
 from .attention_dependencies import wait_attention_plan_rows
 from .attention_plan_stages import (
+    PHYSICAL_PLAN_COLUMNS,
     attention_geometry_prepare_stage,
     attention_inverse_rope_sign_stage,
     attention_slot_plan_stage,
@@ -325,6 +326,7 @@ def vector_schedule(
     SHORT_HALF_SCORE_UB: pl.constexpr = False,
     SHORT_TOPK_PREFIX: pl.constexpr = False,
     SCORE_GROUP_ORDER: pl.constexpr = False,
+    PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
 ):
     pl.func_attr({"split_aiv": True})
     x_fp32_gm = x_fp32
@@ -608,6 +610,7 @@ def vector_schedule(
             worker,
             VECTORS,
             PLAN_PHYSICAL_ROWS,
+            PLAN_TABLE_COLUMNS=PLAN_TABLE_COLUMNS,
         )
     if not (BALANCED and QUERY_GROUP == 2) or worker < (tokens + 7) // 8:
         signal = publish_phase(signal, PHASE_ROPE, core, CORES, generation)
@@ -947,6 +950,7 @@ def vector_schedule(
         ATTENTION_QUERY_METADATA,
         EARLY_ATTENTION_GEOMETRY,
         PLAN_PHYSICAL_ROWS,
+        PLAN_TABLE_COLUMNS=PLAN_TABLE_COLUMNS,
     )
     signal = publish_phase(signal, PHASE_ATTN_PLAN, core, CORES, generation)
 
@@ -987,6 +991,7 @@ def vector_schedule(
         ATTENTION_QUERY_METADATA,
         LOCAL_ATTENTION_STATS,
         PLAN_PHYSICAL_ROWS,
+        PLAN_TABLE_COLUMNS=PLAN_TABLE_COLUMNS,
     )
     signal = publish_phase(signal, PHASE_ATTN_VECTOR, core, CORES, generation)
     if OUTPUT_GROUP_PIPELINE:

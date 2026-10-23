@@ -1,13 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 """动态TND CSA单SPMD的资源策略。
 
-tokens、requests是已分配容量；max_query_tokens和max_seq_len是Host已知上界。
+tokens、requests及compressed_table_columns是已分配容量；max_query_tokens和
+max_seq_len是Host已知上界。
 它们只选择tile、常量分支和工作区尺寸，实际Q/L、请求归属、可见历史、页表和
 有效任务仍由device metadata决定；不通过D2H把动态内容变成Host调度表。
 
 G2/G6、N64/N128、长短Score、QA/QB分工、Attention统计驻留和输出互补分工
 沿已有验证区间选择。单请求可使用独立资源档位，全部数学、页保护、FIFO及
 阶段完成协议仍由相应helper和调度函数保持。
+
+PLAN_TABLE_COLUMNS在物理plan策略已开启且页表宽度为2049..2080时选择2080，
+其余仍为2048。生产者/消费者共用该constexpr与device容量检查，不截短页表，
+也不根据历史长度猜测已分配列数；超过容量仍保留原逻辑地址回退。
 
 SCALE_PAGE_COALESCING启用时，连续页读取必须有本轮device证明。新增
 LEAF_SCALE_LAYOUT只用于长G6、64<=T容量<=96且压缩长度上界<=6*8192：
@@ -23,6 +28,8 @@ from dataclasses import dataclass
 
 # At most six original 8192-candidate leaves before balancing.
 LEAF_LAYOUT_MAX_CACHE_ROWS = 6 * 8192
+DEFAULT_PHYSICAL_PLAN_COLUMNS = 2048
+EXTENDED_PHYSICAL_PLAN_COLUMNS = 2080
 
 # 沿CSA已有投影行块选择窗口；不是按B/S/history测试点枚举。
 EARLY_GEOMETRY_MIN_TOKENS = 64
@@ -68,6 +75,7 @@ class CSASPMDPolicy:
     joint_bf16_prefix: bool = False
     prefix_projection_rows: int = 128
     score_group_order: bool = False
+    plan_table_columns: int = DEFAULT_PHYSICAL_PLAN_COLUMNS
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -100,11 +108,17 @@ class CSASPMDPolicy:
             "JOINT_BF16_PREFIX": self.joint_bf16_prefix,
             "PREFIX_PROJECTION_ROWS": self.prefix_projection_rows,
             "SCORE_GROUP_ORDER": self.score_group_order,
+            "PLAN_TABLE_COLUMNS": self.plan_table_columns,
         }
 
 
-def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_len: int) -> CSASPMDPolicy:
+def select_policy(
+    *, tokens: int, requests: int, max_query_tokens: int, max_seq_len: int, compressed_table_columns: int | None = None
+) -> CSASPMDPolicy:
     """仅依据已有Host信息选策略；有效分组数、叶数及全部访问地址由AIV/AIC计算。"""
+    if compressed_table_columns is not None:
+        if type(compressed_table_columns) is not int or compressed_table_columns <= 0:
+            raise ValueError("compressed_table_columns must be a positive allocated dimension")
     values = (tokens, requests, max_query_tokens, max_seq_len)
     if any(type(v) is not int or v <= 0 for v in values):
         raise ValueError("tokens/requests/max_query_tokens/max_seq_len须为已有的正整数描述符")
@@ -145,6 +159,14 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         and (EARLY_GEOMETRY_MIN_TOKENS <= tokens <= LOCAL_STATS_MAX_TOKENS)
         and cache_rows <= LEAF_LAYOUT_MAX_CACHE_ROWS
     )
+    plan_physical_rows = tokens >= EARLY_GEOMETRY_MIN_TOKENS
+    plan_table_columns = DEFAULT_PHYSICAL_PLAN_COLUMNS
+    if (
+        plan_physical_rows
+        and compressed_table_columns is not None
+        and DEFAULT_PHYSICAL_PLAN_COLUMNS < compressed_table_columns <= EXTENDED_PHYSICAL_PLAN_COLUMNS
+    ):
+        plan_table_columns = EXTENDED_PHYSICAL_PLAN_COLUMNS
     return CSASPMDPolicy(
         query_group=group,
         qk_panel=64 if group == 6 else 128,
@@ -202,7 +224,8 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         # 小T的计划生产者更少，搬移地址工作未稳定获益，保留原逻辑表示。
         # 此处只选策略；容量合法性和全部地址仍由device元数据决定，三阶段
         # 共享同一谓词，不能仅开启生产者或消费者。区间实测与限制见优化日志。
-        plan_physical_rows=tokens >= EARLY_GEOMETRY_MIN_TOKENS,
+        plan_physical_rows=plan_physical_rows,
+        plan_table_columns=plan_table_columns,
         # 小T保持原Score，中大T使用早FIX与单次WS写回。分界沿已有M16
         # 前段资源区间；依据完整实测取舍，不把回退唯一归因于QA或假定最优。
         # 实际有效query/长度/页表仍在device读取，不按B4/B8等测试点枚举。

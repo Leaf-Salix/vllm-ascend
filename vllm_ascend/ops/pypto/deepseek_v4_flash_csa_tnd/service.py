@@ -18,7 +18,9 @@ class CSAServiceRuntime(TNDServiceRuntime):
         return prepare_weights(attention, None, layer, root_function=decode_csa_tnd)
 
     @staticmethod
-    def _select_policy(**descriptors):
+    def _select_policy(*, compressed_table_columns=None, **descriptors):
+        # The shared service supplies this SPMD-only UB capacity descriptor.
+        # MPMD keeps its existing task resource policy and kernel arguments.
         return select_policy(**descriptors)
 
     @staticmethod

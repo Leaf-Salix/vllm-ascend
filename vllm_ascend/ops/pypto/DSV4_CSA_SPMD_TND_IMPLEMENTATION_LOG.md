@@ -5130,3 +5130,39 @@ C02证明值得优先寻找“描述符越界导致整段回退”的结构性�
 他人任务。CPU阶段签名提交430035ebc，生产及正式收益暂不变。新增
 audit_capacity_validation.py将逐项检查完成后的20+4状态、非法页恢复、
 真实服务、源码/SDK和执行CPP证据；脚本存在不表示这些设备门禁已通过。
+
+### 2026-10-23：正式保留C02容量分档，八档综合耗时降低1.46631%
+
+两项device9任务均completed/exit0。状态任务101533_4702752956完成20种
+metadata和4步连续状态：reference/candidate共48组逐bit数值、全部缓存写
+保护、同址重放、代际递增、geometry合同通过。每次candidate重放还独立校验
+物理索引和压缩块mask；表宽2051，负页和越界页场景各16条首query的四个
+压缩块失效而SWA保留，随后的恢复场景正常。不存在把invalid block跳过后
+漏掉对应通知或沿用上轮indices的现象。
+
+服务任务101534_47081128521完成真实模型准备、custom-op、ACLGraphWrapper
+捕获和两次同址重放，实际选择PLAN_TABLE_COLUMNS=2080；输出、Top-K、
+score/cache逐bit，工作区复用、无Python重复提交、空调用及Native回退均通过。
+执行四份CPP与已测容量档一致。继承的service harness只记录冻结源码路径、
+policy和实际生成物，没有启动时source_hashes；审计明确记为false，并核对
+未修改的冻结包和全部CPP，不补写虚构的同时点hash，也不为此重跑设备。
+完整门禁证书：physical_capacity_tier_v1_validation.json。
+
+正式工作树接入七个SPMD模块并整理文档/导入/格式，冻结
+physical_capacity_production_v1。44模块除module文档与导入排序/分组之外，
+AST与设备验证版一致；2048和2080两个代表完整CPU编译的四份CPP及ABI也
+逐字等价，证据physical_capacity_production_v1_codegen.json。此前八档编译
+证书继续有效；七个不变档不重复采时。
+
+正式CPU测试初次为163过、1失败：MPMD的CSAServiceRuntime继承SPMD基类，
+新compressed_table_columns参数被传到其旧select_policy。修复MPMD服务
+适配层，仅显式接收并忽略SPMD专用容量参数，MPMD策略、数学、核参数均不变。
+随后164项正式合同测试全过，包含真实custom-op的SPMD/MPMD两条CPU路由。
+这是本轮接入兼容修复，不作为PyPTO/PTOAS/Simpler问题提交。Ruff和diff检查通过。
+
+正式留存第四项机制：按实际已分配页表宽度选容量，仅本八档的C02改变核路径。
+复用同卡/同SDK的十窗实测933.34μs，对原969.17μs降低3.69698%；所有原始
+窗口和样本在pilot结果中保留，未把状态/服务时间计入性能，也未换基线分母。
+其他七档维持原已保留值。新权威结果retained_physical_capacity.json：八档
+等权几何平均比值0.985336943775587，完整L1耗时降低1.46630562244%。
+原10%目标未达成，goal继续active；自有CPU/NPU任务全部终态，无push。

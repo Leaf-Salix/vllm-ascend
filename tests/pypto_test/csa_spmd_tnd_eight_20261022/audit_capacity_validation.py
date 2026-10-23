@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Qualify completed C02 state/service evidence before production adoption."""
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -27,7 +28,18 @@ def main():
         assert raw["passed"] and raw["stage"] == "complete" and raw["device_execution"]
         assert raw["case"]["id"] == "C02" and not raw["performance_eligible"]
         require_same_sdk(raw["shared_toolchain"], pilot["shared_toolchain"])
-        assert raw["source_hashes"]["candidate"] == source["files"]
+        assert Path(raw["sources"]["candidate"]).resolve() == Path(source["source"]).resolve()
+        if mode == "state":
+            assert raw["source_hashes"]["candidate"] == source["files"]
+        else:
+            # The inherited service harness records the frozen package path,
+            # actual policy and generated code, but no launch-time source hashes.
+            # Check its unchanged frozen package explicitly, without inventing
+            # a contemporaneous hash record or repeating device validation.
+            actual_source = {
+                p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(source["source"]).glob("*.py")
+            }
+            assert actual_source == source["files"]
         assert raw["policies"]["candidate"]["PLAN_TABLE_COLUMNS"] == 2080
         for check in raw["checks"].values():
             assert all(check["guards"].values())
@@ -47,6 +59,8 @@ def main():
             passed=True,
             performance_measured=False,
             matching_compiled_artifacts=matching,
+            launch_time_source_hashes_recorded=mode == "state",
+            frozen_source_manifest="physical_capacity_tier_v1.json",
         )
         if mode == "state":
             state = raw["state_validation"]

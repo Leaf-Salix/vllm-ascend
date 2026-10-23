@@ -33,9 +33,7 @@ from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.service_config import 
 )
 def test_output_balance_capacity_domains(tokens, requests, max_query, length, expected):
     """The adopted ownership change is confined to its validated resource domains."""
-    policy = select_policy(
-        tokens=tokens, requests=requests, max_query_tokens=max_query, max_seq_len=length
-    )
+    policy = select_policy(tokens=tokens, requests=requests, max_query_tokens=max_query, max_seq_len=length)
     assert policy.output_work_balance is expected
     assert policy.constexprs()["OUTPUT_WORK_BALANCE"] is expected
 
@@ -161,6 +159,26 @@ def test_joint_prefix_uses_only_long_g6_single_m192_domain(tokens, requests, max
     assert policy.constexprs()["JOINT_BF16_PREFIX"] is enabled
     assert policy.constexprs()["PREFIX_PROJECTION_ROWS"] == rows
     assert not (policy.joint_bf16_prefix and policy.score_group_order)
+
+
+@pytest.mark.parametrize("tokens", [6, 56, 96])
+@pytest.mark.parametrize("columns", [None, 1, 2048, 2049, 2050, 2080, 2081, 4096])
+def test_physical_plan_capacity_uses_allocated_table_width(tokens, columns):
+    descriptors = dict(tokens=tokens, requests=16, max_query_tokens=6, max_seq_len=262150)
+    selected = select_policy(**descriptors, compressed_table_columns=columns)
+    default = select_policy(**descriptors)
+    expected = 2080 if tokens >= 64 and columns is not None and 2048 < columns <= 2080 else 2048
+    assert selected.plan_table_columns == expected
+    selected_values, default_values = selected.constexprs(), default.constexprs()
+    assert selected_values.pop("PLAN_TABLE_COLUMNS") == expected
+    assert default_values.pop("PLAN_TABLE_COLUMNS") == 2048
+    assert selected_values == default_values
+
+
+@pytest.mark.parametrize("columns", [True, 0, -1, 2050.0])
+def test_physical_plan_capacity_rejects_invalid_descriptors(columns):
+    with pytest.raises(ValueError, match="compressed_table_columns"):
+        select_policy(tokens=96, requests=16, max_query_tokens=6, max_seq_len=262150, compressed_table_columns=columns)
 
 
 def native_case():

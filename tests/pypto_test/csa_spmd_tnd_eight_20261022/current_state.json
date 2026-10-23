@@ -36,35 +36,27 @@
       "candidate": "mixed_score_group_order",
       "case_id": "C08",
       "evidence": "retained_merged_schedule.json"
+    },
+    {
+      "candidate": "physical_capacity_production_v1",
+      "case_id": "C02",
+      "evidence": "retained_physical_capacity.json"
     }
   ],
   "production_operator_changed": true,
-  "formal_geometric_mean_ratio": 0.9899876498714436,
+  "formal_geometric_mean_ratio": 0.985336943775587,
   "push_authorized": false,
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {
-    "task_20261023_101533_4702752956": {
-      "case": "C02",
-      "candidate": "physical_capacity_tier_v1",
-      "mode": "state",
-      "performance_eligible": false,
-      "status": "pending"
-    },
-    "task_20261023_101534_47081128521": {
-      "case": "C02",
-      "candidate": "physical_capacity_tier_v1",
-      "mode": "service",
-      "performance_eligible": false,
-      "status": "pending"
-    }
-  },
+  "pending_tasks": {},
   "next_steps": [
-    "Complete C02 capacity tier state and service validation; integrate only after all gates pass",
-    "Retain the original seven case kernels and the measured C02 2080-column kernel by exact code equivalence",
-    "Prioritize reduced data movement and complete critical-path service cost; previous Attention overlap experiments were rejected",
-    "Preserve the original eight-case denominator and no-push constraint; 0.90 goal remains unachieved"
+    "Preserve four retained mechanisms and the original eight-case denominator; 10% goal remains active",
+    "For C04/C05 prioritize changes that reduce full-chain resource service cost; do not repeat rejected DMA/Vector reorderings",
+    "Budget B24 complete-leaf/query readiness against remaining Score resource use before implementing coarse interleaving",
+    "Inspect small-batch critical-path evidence before query/head partitioning; account for duplicated KV traffic and changed packed-row ownership",
+    "Use explicit capacity/path-coverage audits to find fallback costs; do not blindly enable small-T physical plans previously weak or negative",
+    "No push without a new explicit request"
   ],
   "knowledge_query": {
     "status": "index_missing",
@@ -94,9 +86,12 @@
     "merged_production_contracts": 136,
     "query_local_math_ownership_policy": 27,
     "kv_access_analysis": 4,
-    "plan_gather_valid": 27
+    "plan_gather_valid": 27,
+    "capacity_tier_isolated_contracts": 165,
+    "capacity_state_observer": 3,
+    "capacity_production_contracts": 164
   },
-  "updated_at": "2026-10-23T10:17:02.841716+08:00",
+  "updated_at": "2026-10-23T10:43:05.696874+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -399,12 +394,15 @@
     },
     "physical_capacity_tier_v1": {
       "source": "physical_capacity_tier_v1.json",
-      "adopted": false,
+      "adopted": true,
       "cpu_checks": 165,
       "state_observer_preflight_checks": 3,
       "codegen": "physical_capacity_tier_v1_codegen.json",
       "all_eight_compiled_cpp_and_abi_equal": true,
-      "status": "state_and_service_tasks_submitted"
+      "status": "adopted_as_physical_capacity_production_v1",
+      "state_task": "task_20261023_101533_4702752956",
+      "state_validation_passed": true,
+      "device_validation": "physical_capacity_tier_v1_validation.json"
     }
   },
   "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
@@ -423,7 +421,8 @@
   "locally_retained_candidates": [
     "leaf_scale_guard_v2",
     "critical_prefix_long_g6_m192",
-    "mixed_score_group_order"
+    "mixed_score_group_order",
+    "physical_capacity_production_v1"
   ],
   "C05_decision": "Adopt long-G6 M192 critical prefix after full-L1 and state/service checks",
   "disabled_code_equivalence": "leaf_scale_guard_disabled_classes.json",
@@ -477,8 +476,8 @@
   "pending_observation": {
     "own_pending_tasks": 0,
     "tasks": {
-      "task_20261023_091309_221636318785": "completed (exit=0)",
-      "task_20261023_091308_221552610679": "completed (exit=0)"
+      "task_20261023_101533_4702752956": "completed (exit=0)",
+      "task_20261023_101534_47081128521": "completed (exit=0)"
     }
   },
   "prepared_uniform_state": "uniform_meta_state_v1.json",
@@ -504,7 +503,13 @@
     "mgather_overlap": "mgather_overlap_codegen_evidence.json",
     "structural_priorities": "structural_priorities.json",
     "attention_prefetch_status": "C05 codegen/resources/ABI pass; intended overlap absent; no NPU submission",
-    "physical_plan_capacity_coverage": "physical_plan_capacity_coverage.json"
+    "physical_plan_capacity_coverage": "physical_plan_capacity_coverage.json",
+    "capacity_adoption": "retained_physical_capacity.json",
+    "additional_equal_reduction_needed_after_capacity_pct": {
+      "2": 30.396517014888545,
+      "4": 16.57129811323237,
+      "8": 8.660686510808702
+    }
   },
   "parked_candidates": [
     {
@@ -541,8 +546,10 @@
     "new_device_measurements_for_reuse": 0
   },
   "current_sdk_C08_reference": "baseline_current_sdk_C08.json",
-  "current_implementation": "merged_schedule_v1",
+  "current_implementation": "physical_capacity_production_v1",
   "earlier_stage_commit": "3a0f423c6",
-  "production_commit": "32a1426d9",
-  "latest_stage": "capacity_tier_codegen_pass_state_service_pending"
+  "latest_stage": "physical_capacity_C02_adopted_all_gates_passed",
+  "retained_results": "retained_physical_capacity.json",
+  "production_source_manifest": "physical_capacity_production_v1.json",
+  "prior_production_commit": "32a1426d9"
 }
