@@ -61,4 +61,20 @@ python tests/pypto_test/csa_performance_20261023/collect.py
 
 该脚本只读取既有JSON、L1与Profiler CSV，不初始化设备或执行新测试。
 大型trace不重复复制，逐格保留可访问路径和task ID。旧表及原优化验收口径不覆盖。
-本次仅按用户指令汇总性能；优化Goal保持paused，不新增优化、不运行16卡、不push。
+汇总阶段仅按用户指令整理性能；优化Goal保持paused，不新增优化、不运行16卡。
+推送按用户后续明确指令执行。
+
+## 八档单次L1下载
+
+按用户追加要求，v22八档L1已单独导出到：
+
+`/data/pyptouser/qinchuanyu/pto-eager/downloads/CSA_TND_MPMD_v22_L1_8cases_20261023/`
+
+同名`.zip`可一次下载。目录内只有八个泳道JSON和README，文件按01～08、历史长度、
+B、S6/混长T56及版本命名。每档从本表全部合格窗口中选择最接近中位数的一次真实
+执行，保留全部incore实例、实际物理核和任务间隙；没有拼接多窗或合成阶段时间。
+
+Score/Attention标注AIC/AIV，O_A、量化、O_B标注输出组号。C05/C08使用配对任务的
+v22控制组，C07使用v16/v22配对中的v22候选；已依据同次生成编排明确区分源码。
+具体原始路径、所选单次耗时及版本判据见[download_manifest.json](download_manifest.json)。
+用[export_l1_download.py](export_l1_download.py)导出，不占卡；既有目录不会被覆盖。
