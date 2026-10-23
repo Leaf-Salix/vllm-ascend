@@ -1,0 +1,81 @@
+{
+  "candidate": {
+    "source_head": "0d96e36b01959df6b2d85dc2e7859798192d9252",
+    "candidate_includes_worktree_changes": true,
+    "reference_commit": "84751e34cb1f27eff9e4d3fdf03f8495982f1cdf",
+    "shared_toolchain": {
+      "release": "csa-shared-20261022-logical-codegen",
+      "status": "validated",
+      "sessions": [
+        "CSA-SPMD",
+        "CSA-SPMD-TND",
+        "CSA-MPMD-TND"
+      ],
+      "pypto": {
+        "source": ".worktrees/pypto-csa-shared-20261022",
+        "commit": "26e94e05627eb47710dcc214bae1774b8829df8a"
+      },
+      "ptoas": {
+        "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+        "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+        "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+      },
+      "simpler": {
+        "source": ".worktrees/simpler-csa-core-args-256-20261016",
+        "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+      },
+      "evidence": "../csa_mpmd_aicpu_20261022/upstream_logical_refresh/manifest.json",
+      "published_for_validation_at": "2026-10-22T18:00:10+08:00",
+      "validated_at": "2026-10-22T18:14:28+08:00"
+    },
+    "windows_per_side": 10,
+    "change": "Additionally disable allow_early_resolve only on chunk attention-plan producer; retain true dependencies, sync_start and math. Candidate not scheduled until v31 result is inspected.",
+    "candidate": "aicpu_v33_attention_ready_cohorts",
+    "parent_candidate": "aicpu_v31_score_ready_cohorts",
+    "production_head": "b758e96956c4730a784d079206c22eb1f88c8de4",
+    "frozen": true,
+    "parent_snapshot_metadata": {
+      "scope": "用户要求当前轮收尾后停止；只做此已修改候选必要设备验收，不开启新优化",
+      "experiment": "aicpu_v30_query_chunk_pipeline",
+      "control": "aicpu_v26_uniform_score_geometry",
+      "cpu_receipt": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/cpu_v30c_h131072_b24_s6/result.json",
+      "closure_fixes": [
+        "main_compressor_tasks中normed/main_offsets声明为只读，避免Out参数数量偶合导致返回dtype错配",
+        "manual parallel内不重绑定原位写Tensor，消除虚假loop-carried别名，真实依赖由TaskId保留"
+      ]
+    },
+    "experiment": "aicpu_v33_attention_ready_cohorts",
+    "control": "aicpu_v31_score_ready_cohorts",
+    "scope": "128K/B24/S6 full CSA L1, isolated Attention-cohort admission experiment; device submission waits for v31 result",
+    "cpu_receipt": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/cpu_v33_h131072_b24_s6/result.json"
+  },
+  "patch_against_v31": "--- v31/entry.py\n+++ v33/entry.py\n@@ -1403,7 +1403,7 @@\n                 with pl.spmd(\n                     pl.min((query_end - query_begin + 7) // 8, 24),\n                     name_hint=\"csa_attention_plan_query_chunk\",\n-                    allow_early_resolve=True,\n+                    allow_early_resolve=False,\n                     sync_start=True,\n                     deps=[topk_tid],\n                 ) as plan_tid:\n",
+  "device_job": null,
+  "cpu_validation": {
+    "result": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/cpu_v33_h131072_b24_s6/result.json",
+    "stage": "cpu_backend_compiled",
+    "passed": true,
+    "policy": {
+      "QUERY_GROUP": 6,
+      "QK_PANEL": 64,
+      "SCORE_TILE": 1024,
+      "PREFETCH": 1,
+      "TO_L0": true,
+      "BALANCED": true,
+      "ROOTS": 1,
+      "OA_COLS": 256,
+      "OB_ROWS": 128,
+      "ATTENTION_QUERY_METADATA": false,
+      "HC_CONSUMER_REDUCE": false,
+      "QA_M16_PARALLEL": false,
+      "EARLY_ATTENTION_GEOMETRY": true,
+      "LOCAL_ATTENTION_STATS": false,
+      "SCALE_PAGE_COALESCING": true,
+      "PLAN_PHYSICAL_ROWS": true,
+      "SPLIT_SCORE_ROWS": true,
+      "LIMIT_EMPTY_WORKERS": false,
+      "BSH_PROJECTION_ORDER": false
+    },
+    "device_execution": false
+  }
+}

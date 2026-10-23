@@ -22825,3 +22825,24 @@ CPU完整后端及涉及Python的Ruff通过，实际生成代码包含M160×N192
 单卡task_20261023_160954_16402756805与生产v22同进程各采十窗，输入固定为
 128K/B24/S6，检查eager、graph、post-L1结果及保护区。两项试验均等待正常队列，
 源码已冻结，不改排队包；设备数值与收益尚未得出，不更新生产或验收表。
+
+### 735.87：队列等待期间准备Attention单因素后继，不重复提交设备任务
+
+本次继续前先重读完整Goal；上轮有实际逐窗诊断、冻结实现和CPU编译证据，属于
+进展。本轮多次通过task-submit确认v31/v32两个原任务仍pending，前方整机任务
+占用全部卡；未因等待时间长重启、取消或重复提交，也不改变运行/排队源码。
+
+v33独立复制冻结v31，只将分块attention_plan的allow_early_resolve改为False，
+其余数学、TaskId与sync_start不变。它针对735.85已有的Attention重复占核现象，
+保留为后继单因素验证；CPU完整后端与Ruff通过，尚未上卡，待v31结果再决定。
+精确补丁、CPU策略和来源写入
+[scheduling_v33_preparation.json](csa_mpmd_aicpu_20261022/scheduling_v33_preparation.json)。
+新manifest把继承的v30暂停说明/旧CPU收据放入parent_snapshot_metadata，明确
+当前候选与控制组；已排队v31包保持冻结，其旧字段仅表示父快照来源，实际本轮
+候选、控制、CPU和设备任务以scheduling_v31_preparation.json的顶层绑定为准。
+
+只读审查最新SPMD提交还发现两项后续反哺空间：fad8ccb64按已分配compressed
+页表宽度选择2048/2080容量，避免C02无谓退回逻辑地址；79fae6db0的叶内scale
+证明在长G6、64<=T<=96且压缩上界<=6个8192叶时有已验证收益。当前MPMD仍是
+2048常量及原scale路径，不能把SPMD收益直接计入MPMD；本轮没有为这两项新建
+设备任务或声称完成移植。先收齐已排队实验，生产仍v22，完整性能目标未达成。
