@@ -57,7 +57,7 @@ def main():
     source = json.loads((here / f"{args.candidate}.json").read_text())
     tasks = json.loads((here / f"{args.candidate}_tasks.json").read_text())
     retained = json.loads((here / "retained_physical_capacity.json").read_text())
-    assert set(tasks) == {"C04", "C05"}
+    assert tasks and set(tasks) <= {"C04", "C05"}
     cases = {}
     for case, task in tasks.items():
         run = here / task["output"]

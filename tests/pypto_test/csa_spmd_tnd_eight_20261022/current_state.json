@@ -50,16 +50,16 @@
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
   "pending_tasks": {
-    "task_20261023_130310_342573112322": {
-      "case": "C04",
-      "candidate": "hc_cooperative_v4",
-      "mode": "phase_clock",
-      "performance_eligible": false
+    "task_20261023_133922_3154216781": {
+      "case": "C05",
+      "candidate": "output_rectangle_v3",
+      "mode": "complete_L1_candidate",
+      "performance_eligible": true
     }
   },
   "next_steps": [
     "Preserve four retained mechanisms and the original eight-case denominator; 10% goal remains active",
-    "Collect C04 hc_cooperative_v4 phase diagnostic; verify preinstrumentation matches measured CPP and compare only payload-equivalent endpoints; INPUT scope changed",
+    "Collect task_20261023_133922_3154216781 and run analyze_priority_candidate.py output_rectangle_v3; no C04 timing repeat because all four CPP are identical",
     "Reduce measured full-chain service work or exploit demonstrated resource complementarity; no more simple DMA/Vector reorderings",
     "Do not implement whole-leaf-round Attention insertion on existing owners: optimistic serialized-resource model already increases C05 waiting",
     "Do not repeat negative head partitioning or direct HC tail-copy removal without a new mechanism",
@@ -99,9 +99,10 @@
     "capacity_state_observer": 3,
     "capacity_production_contracts": 164,
     "hc_cooperative_math_ownership": 11,
-    "hc_cooperative_packed_math_ownership": 11
+    "hc_cooperative_packed_math_ownership": 11,
+    "output_rectangle_v3": 29
   },
-  "updated_at": "2026-10-23T13:04:33+08:00",
+  "updated_at": "2026-10-23T13:41:47+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -490,11 +491,25 @@
         "hc_cooperative_v4_C04_codegen.json",
         "hc_cooperative_v4_C05_codegen.json"
       ],
-      "status": "rejected_complete_L1_phase_diagnostic_pending",
+      "status": "rejected_complete_L1_diagnostic_complete",
       "mechanism": "Pack unchanged RMS chunks into four writer packets and one consumer load; original ordered fold retained",
       "tasks": "hc_cooperative_v4_tasks.json",
       "measurement": "hc_cooperative_v4_results.json",
-      "diagnostic": "hc_cooperative_v4_C04_phase_task.json"
+      "diagnostic": "hc_cooperative_v4_C04_phase_task.json",
+      "phase_result": "hc_cooperative_v4_C04_phase.json",
+      "phase_comparison": "hc_cooperative_v4_C04_phase_comparison.json"
+    },
+    "output_rectangle_v3": {
+      "source": "output_rectangle_v3.json",
+      "cases": [
+        "C05"
+      ],
+      "source_checks": 29,
+      "codegen": "output_rectangle_v3_codegen.json",
+      "closed_C04_all_four_cpp_equal": true,
+      "tasks": "output_rectangle_v3_tasks.json",
+      "status": "complete_L1_pending",
+      "mechanism": "Single M160 with five N192 tiles plus static N64 tail, 48 O_A tasks; original O_B owners retained"
     }
   },
   "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
@@ -631,7 +646,10 @@
     "query_local_v5_C05": "query_local_v5_C05_phase_comparison.json",
     "attention_overlap_v1_C05": "attention_overlap_v1_C05_phase_comparison.json",
     "C01_retained_phase": "retained_C01_phase_sdk_v1.json",
-    "coarse_interleaving": "coarse_interleaving_resource_model.json"
+    "coarse_interleaving": "coarse_interleaving_resource_model.json",
+    "hc_cooperative_v4_C04": "hc_cooperative_v4_C04_phase.json",
+    "hc_endpoint_direction_mismatch": "hc_cooperative_v4_C04_phase_comparison.json",
+    "C05_OA_observed_service": "C05_output_observed_service.json"
   },
   "same_sdk_reused_other_references": "same_sdk_reused_other_references.json",
   "same_sdk_reference_coverage": {
@@ -652,7 +670,7 @@
   "current_sdk_C08_reference": "baseline_current_sdk_C08.json",
   "current_implementation": "physical_capacity_production_v1",
   "earlier_stage_commit": "3a0f423c6",
-  "latest_stage": "hc_cooperative_packed_rejected_C04_phase_diagnostic_submitted",
+  "latest_stage": "hc_diagnostic_not_causal_output_rectangle_C05_full_L1_submitted",
   "retained_results": "retained_physical_capacity.json",
   "production_source_manifest": "physical_capacity_production_v1.json",
   "prior_production_commit": "32a1426d9",
@@ -670,6 +688,17 @@
     "hc_cooperative_v3": {
       "result": "runs/compile_hc_cooperative_C04_v3/result.json",
       "reason": "Tile row_sum needs explicit scratch; v4 supplies it and explicit high-precision rsqrt scratch"
+    },
+    "output_rectangle_v1": {
+      "results": [
+        "runs/compile_output_rectangle_C04_v1/result.json",
+        "runs/compile_output_rectangle_C05_v1/result.json"
+      ],
+      "reason": "Weight-view branch valid-shape type mismatch; separated helper dispatch in v2"
+    },
+    "output_rectangle_v2": {
+      "result": "runs/compile_output_rectangle_C05_v2/result.json",
+      "reason": "NZ dynamic last-dimension unsupported; static N192/N64 calls in v3; C04 closed path passed"
     }
   }
 }

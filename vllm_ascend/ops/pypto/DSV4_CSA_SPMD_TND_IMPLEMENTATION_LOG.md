@@ -5438,3 +5438,52 @@ hc_cooperative_v4_C04_phase_task.json固定对应已测CPP、原始结果和基�
 
 生产、四项保留机制和八档0.985336943775587保持，10% goal继续active；
 本轮只签名本地提交，没有push。
+
+### 2026-10-23：HC诊断方向与正式计时不一致，转向输出任务粒度
+
+task_20261023_130310_342573112322已completed/exit0，三个诊断窗口及严格
+检查通过，插桩前CPP与已测hc_cooperative_v4完全匹配。新诊断中共同端点
+GATES/NORM/QA为35.18/51.72/66.04μs，旧保留版为41.18/57.32/73.86μs；
+OUT为756.56对787.28μs，方向却与正式L1 773.58对763.65相反。因此这些
+跨任务插桩差值不足以归因正式回退，不能声称已确认前段省6μs或后段吞掉收益。
+INPUT定义不同继续排除。原正式负例保留，证据
+hc_cooperative_v4_C04_phase_comparison.json；不继续扫描HC四路分工参数。
+
+只读复用当前C05阶段记录，取每核第二/第三个O_A组的区间，排除首项包含的
+Attention获取等待。三窗各20个满M128任务、20个尾M16任务，所选区间GM等待
+为零；满块中位27.43/27.51/27.36μs，尾块24.59/24.11/24.56μs。区间仍含
+本核搬运、流水、循环和发布，不是纯矩阵时间，但已足够否决按八倍行数比例
+估算两类任务成本。原始选中区间保存在C05_output_observed_service.json。
+
+新的output_rectangle_v3独立基于当前physical_capacity_production_v1，
+没有叠加失败的HC方案。仅已有Host token容量128<T<=160选OA_ROWS=160、
+OA_COLS=192，实际T/Q/L仍由device决定。每组五个N192块和一个N64尾块，共
+48个O_A逻辑任务，每个AIC两项；原M128+尾/N256为64项、每核最多三项。
+保持原K256累加、stage2、量化与O_B数学及O_B owner，区别于先前M192/N128
+加O_B互补分工的小幅候选。C05逻辑权重载入128→64MiB，激活重复载入
+36→54MiB；二者均不是HBM事务或设备收益，新增N尾和每项N增加的成本须实测。
+
+v1的完整CPU解析拒绝两分支wa_first/wa_k_chunk有效shape类型不一致；v2
+拆成返回同一root Tensor的独立helper后，C04关闭域通过，C05又在NZ lowering
+遇到动态末维不支持。冻结v3改为静态N192与N64两个tile调用，共用从原版提取
+的K256数学体，避免动态NZ末维。两版失败收据均保留，未改公共SDK。
+
+v3的29项CPU检查通过：执行真实几何/发布/获取表达式，覆盖实际T1..160
+的十二个边界，全部行及16列单位唯一覆盖，40个N192和8个N64任务、每AIC
+两项、64个O_B任务及owner不变，量化等待完整写者；另核对16个Host容量边界、
+三种query上界、四种history及原K调用链。最后一次测试收取因会话中断丢失
+进程句柄，修饰过callback绑定的测试仅补这一份CPU收据，29过/6.57秒，保存
+runs/output_rectangle_v3_ut_receipt.log。已通过的完整编译和设备基线未重做。
+
+C04/C05完整CPU编译均通过。C04关闭域的orchestration、PTO CPP及AIC/AIV
+两份CPP与当前保留版逐字一致（仅忽略整行pto位置注释），不重复C04设备计时。
+C05实际有M160×N192与M160×N64两种Acc store，后者只写64列，动态有效M
+仍取min(160,T-row)。ABI与编排保持；AIC Mat475136/Acc131072、Left/Right
+各65536，AIV Vec180224，均在原上限内。见output_rectangle_v3_codegen.json。
+
+中断恢复后再次以唯一公共manifest确认logical-codegen/validated，未修改
+SDK或排队源码。通过task-submit提交C05/device0完整十窗及六组严格检查：
+task_20261023_133922_3154216781。来源绑定output_rectangle_v3_tasks.json；
+收取器允许明确的非空重点档子集，仍核对全72角色原始窗口、原固定分母、
+同卡同SDK及全部四份执行CPP。候选尚未采用，四项正式机制、八档比值
+0.985336943775587及10%目标均不变。本轮签名本地提交，不push。
