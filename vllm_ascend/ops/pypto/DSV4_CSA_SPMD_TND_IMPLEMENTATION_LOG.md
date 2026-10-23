@@ -5654,3 +5654,49 @@ AIC已等待全部量化实际写者，若QUANT发布同时覆盖系数，可在
   参考检出位于工作区`.cache/csa-recipes-infer-20261023`，没有改公共SDK。
   后续逐项比较真实源码的buffer寿命、预取距离和交接协议；不能仅凭
   示例使用双缓冲就声称适合本例或已经提速。
+
+
+### 2026-10-23：B16 READY/ACK收取，参考指定源码建立连续Key供数原型
+
+- B16诊断任务23644089762 completed/exit0，7组完整bitwise/状态/保护
+  检查通过，三轮各24AIC+48AIV均为22次成对事件。插桩前CPP与现生产
+  C04完整CPU产物仅去pto位置注释后逐字相同，SDK相同。AIC ACK累计
+  中位14.52/15.81/15.08us；AIV READY为60.25/60.14/60.94us。
+  优先研究Cube生产链，不把这些Scalar区间当作可省时间。原始窗口和
+  证据见`score_fifo_C04_v1_results.json`；无正式性能重测。
+- `recipes_pipeline_reference_v1.json`固定指定仓库a0633636下六份源码。
+  AscendC GatherSelectionKvCache用绑定队列管理KV/KRope搬入、搬出和
+  最后消费者释放，tiling对metadata与两份payload的总UB预算做检查。
+  这些可借鉴的buffer合同已纳入候选；其块命中复用、旧BF16 Indexer归约
+  和TileLang串行示例不直接替换当前INT8/N64/严格bitwise数学。
+- 新`packed_score_keys`候选仅先在C04实验。两AIV各用二维DMA读取16个
+  Native页的4096B key前缀，跳过64B scale；逆序页按页恢复，页内字节
+  不变。prefill第0块，随后在消费Score(s)前准备Key(s+1)。AIC从连续GM
+  环一次读入128KiB L1，保留原N64、双M192 QK早FIX、WS和TopK次序。
+- 只在已采用leaf-layout策略内、live>3、叶的有效行数整除1024、全部页
+  证明连续时启用。部分叶/碎片页/小live沿原页DMA。两AIV仍各读原私有
+  scale，避免旧共享scale协议反例。新增KEY_READY事件6，原Score READY
+  证明先前Key已消费，原ACK和drain保留；有限交错模型15组全部通过。
+- 复用balanced G6闲置9MiB score_arena前6MiB，不增加workspace分配。
+  初版核内动态reinterpret受字节/Tile推导限制，入口表达也没有向深层
+  helper传出可推导metadata；当前以binding零拷贝INT8 view传递，增加
+  一个内部kernel别名参数，不新增业务输入。Cube只读，AIV按InOut规则
+  传递返回值。不得再称底层kernel ABI完全未变。
+- v5错误地在AIC调用含Vector归约的布局proof，自动拆分后出现游离
+  Scalar；这是原型的角色分配错误。v6改为AIC Scalar逐页整数检查，
+  保留与AIV相同的256页/2^24物理域和全页合法条件。它的额外成本也
+  必须接受完整L1验证，不删除检查或将末页无条件当连续。
+- v1～v5编译失败均封存于`packed_score_keys_compile_history.json`，
+  没有修改SDK、没有把这些调用限制或原型错误直接报告为上游bug。
+  v6的21项CPU检查通过：实际helper正反向字节、唯一半块写入、
+  原Cube数学/Vector顺序、零拷贝容量、完整协议模型及Scalar证明边界。
+  C04完整CPU编译正在进行，未上卡、未采用、未声称性能收益。
+
+- 补记：v6完整CPU编译通过且仍只有原AIC/AIV两个函数、一个MIX模块。
+  AIC Mat475136/Acc131072/Left65536/Right65536B，AIV Vec176128B，
+  均在限制内。AIC的历史Vec描述符未新增，也没有TROWMAX/TGATHERB等
+  Vector指令；业务root不变，新增内部别名参数已如实记录。
+  证据`packed_score_keys_v6_codegen.json`。
+- B16设备8唯一任务`task_20261023_171002_9596929355`已提交，沿用
+  `launch_sdk_measure_v2.sh`、历史同SDK同卡原基线和保留版，严格6组
+  eager/graph/post-L1检查及至少10个完整72角色L1窗口。尚待终态。
