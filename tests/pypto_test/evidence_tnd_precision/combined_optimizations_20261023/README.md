@@ -10,9 +10,9 @@
 - `FORMAL_SOURCE_PROOF.json`：正式checkout与实际import overlay的逐字节等价SHA。
 - `cpu-receipt-final.json`：最终29文件manifest下，64Tensor真实编译、artifact加载、schema/NZ layout/T1..256路由通过且无NPU初始化。
 - `LAUNCH_ARGUMENT_CHECK.json`：调度附加参数的纯shell header控制；不执行框架或设备代码。
-- `TASKS.json`、`TASK_STATUS.json`、CPU任务日志：实际任务和终态。早期启动失败单独保留，不算数值失败。
+- `TASKS.json`、`TASK_STATUS.json`、CPU任务日志、`startup_checks/`：实际任务和终态；最终状态中全部任务均已退出。保留两次启动exit2、诊断文件缺失exit127、模型加载exit1和一次未分配设备的取消，不算数值失败。
 - `executed_helpers.tar.gz`、`EXECUTED_FILES.json`：实际单层和整模型助手、formal package/alias/env overlay、manifest与复算脚本的原样归档和SHA；不含模型、bank cache payload、SDK二进制或编译缓存。
-- `whole8k_summary.json`、`whole8k_raw.tar.gz`及`WHOLE8K_RAW_FILES.json`：已通过8K整模型16rank的完整warm192/测192输出、事件、FULL轨迹、计时、配置和容量；128K仍待验收，尚无128K通过收据。
+- `whole8k_summary.json`、`whole128k_summary.json`、各raw.tar.gz及RAW_FILES索引：两档均已通过，分别封存53个原始文件，包括16rank完整warm192/测192输出、接受事件、实际FULL轨迹、计时、配置、容量及真实init。
 
 公开whole摘要仅将可重算的输出/事件SHA字段warm_tokens_events_sha256、measured_tokens_events_sha256重命名为warm_payload_sha256、measured_payload_sha256，避免密钥扫描误判。原样SUMMARY保留在raw归档；字段映射、反向还原等价和SHA见PUBLIC_SUMMARY_DERIVATION.json。
 
