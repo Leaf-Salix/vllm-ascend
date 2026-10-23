@@ -46,7 +46,7 @@
 - `workspace_pool_estimate.json`：CPU meta容量估算，不是模型设备峰值。
 - `redispatch_failures.json`：v05两种PTO在收尾阶段触发的Native query/Q前缀容量不一致。
 - `redispatch_validation.json`：修复后SWA/HCA/CSA的单卡Native容量图参考对照通过。
-- `jobs.json`：当前v09两种PTO B16整模型任务及其前置验证路径。B16三侧整模型及输出对照已完成，B24单卡正在验证。
+- `jobs.json`：当前v09两种PTO B16整模型任务及其前置验证路径。B16三侧整模型及输出对照已完成，B24单卡已通过，三侧整模型已启动或排队。
 
 有工作区修复的冻结包使用`prepare.py <实验名> --revision 99268437c --workspace-fix`；
 图回退修复再加`--redispatch-fix`。
@@ -59,7 +59,7 @@
 不分配 NPU 显存。默认 device scratch 声明容量为3.076 GiB；
 `heap_mb=[256,128,256,32]、task_window=4096`时为1.191 GiB。
 当前256参数的TaskPayload使默认任务窗口更大，不能沿用旧版1.343 GiB估算。
-此结果只用于选配置，尚不代表较小配置已经通过当前TND。
+此CPU结果只用于选配置；当前TND每ring16MiB的设备验证证据另见`b24_workspace_validation.json`。
 
 单卡入口支持`workspace_probe.sh <源码> <输出> --batch 24
 --ring-heap-mb 256 128 256 32 --ring-task-window 4096`。
@@ -69,5 +69,9 @@
 
 B16完整对照见`b16_comparison.json`及`b16_comparison.texts.md`。
 两种PTO全部输出token和接受事件一致；对Native简单问题全部一致，复杂问题仍有差异。
-B24的候选改为每ring16MiB、window4096，须先通过单卡；
-整模型计划三侧统一`--hccl-buffer-mb 512`、预算0.925，避免只增大KV预算压垮临时空间。
+B24已通过每ring16MiB、window4096的单卡验证；
+整模型三侧统一`--hccl-buffer-mb 512`、预算0.925，避免只增大KV预算压垮临时空间。
+
+B24任务：Native `task_20261023_214627_15185825199`，
+MPMD `task_20261023_215109_17296011908`，
+SPMD `task_20261023_215109_17296539735`。实际状态以队列及`jobs.json`更新为准。

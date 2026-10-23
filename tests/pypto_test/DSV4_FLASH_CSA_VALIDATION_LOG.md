@@ -23202,3 +23202,25 @@ B24启动器新增显式ring/window与HCCL缓冲参数，配置写入configurati
 PTO启用较小ring前须提供同batch、同ring配置的单卡PASS。B24预计三侧
 统一HCCL_BUFFSIZE=512、显存预算0.925，具体以实际启动配置和验证结果为准。
 这是功能验证的显存配置调整，不与B16跨配置计算性能收益。
+
+### 735.101 B24小容量运行时单卡通过，启动三侧整模型（2026-10-23）
+
+`task_20261023_214143_132841526488` exit=0。冻结v10，当前公共SDK，
+128K/B24、S1/S6与layer2/layer4连续调用，heap=[16,16,16,16]MiB、
+task_window=4096。两种TND的共享工作区与独占参考在eager及graph重放中，
+输出、Top-K、SWA/压缩cache、Compressor状态、Indexer cache/scale/state
+全部逐bit相同，保护区通过。证据`b24_workspace_validation.json`。
+这是当前TND的设备功能证据；CPU容量查询0.597GiB仍不是整模型显存峰值。
+
+B16三侧输出对照完成后，才启动B24。B24使用相同v11冻结算子、同一公共SDK，
+三侧统一显存预算0.925、HCCL_BUFFSIZE=512；PTO使用上述已验证ring配置。
+权重、Native HCA、CANN9.2、NZ2、确定性、图模式与无静态编译口径沿用。
+固定取既有KV的前24个不同问题（8个Python推演、8个状态转移、4个账本、
+4个简单重复）；每卡192token/请求。HCCL容量和KV预算写入配置、三侧对齐。
+
+- Native：`task_20261023_214627_15185825199`，`runs/v11_native_b24`。
+- MPMD：`task_20261023_215109_17296011908`，`runs/v11_mpmd_b24`。
+- SPMD：`task_20261023_215109_17296539735`，`runs/v11_spmd_b24`。
+
+此时Native正在执行，PTO排队。B24整模型及输出对照仍未完成，不能以单卡
+PASS替代真实24路decode验收；不跨B16/B24配置比较性能。
