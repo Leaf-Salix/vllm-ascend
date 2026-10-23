@@ -5166,3 +5166,41 @@ AST与设备验证版一致；2048和2080两个代表完整CPU编译的四份CPP
 其他七档维持原已保留值。新权威结果retained_physical_capacity.json：八档
 等权几何平均比值0.985336943775587，完整L1耗时降低1.46630562244%。
 原10%目标未达成，goal继续active；自有CPU/NPU任务全部终态，无push。
+
+### 2026-10-23：B1当前阶段诊断与跨核组head分工原型
+
+上一goal轮正式保留C02分档，属于实际进展。当前HEAD=fad8ccb64，权威留存
+physical_capacity_production_v1/retained_physical_capacity.json，原八档分母
+和0.90目标不变。公共SDK仍logical-codegen/validated。cannbot-knowledge
+索引仍缺失，不全库兜底或重建；复用已读Attention调度卡的所有权、最后消费者
+和排空约束，具体A3核组/事件语义以当前已验证源码和生成物为准。
+
+只读复核另一会话B1_CURRENT_PHASE_ANALYSIS：旧480μs级带探针端点显示
+输出链也值得关注，不能凭Attention只有六个活跃核组认定主瓶颈。旧记录
+不改标为当前版本；补缺的当前诊断task_20261023_104925_18657722738在卡8
+completed/exit0，三次图重放及完整逐bit/保护通过，插桩前CPP与C01同SDK
+已合格十窗实现完全一致。原基线未重测，诊断不计正式性能。
+
+三次诊断最晚端点的中位为QUERY185.86、SCORE_VECTOR225.62、ATTN_PLAN244.00、
+ATTN_VECTOR284.32、OA_GROUP_7 316.00、OB330.56、OUT345.30μs。报告单独标出
+Attention真正六个AIC/十二个AIV query owner，不把所有发布phase的角色当作
+有计算的角色。这些端点差和扣GM等待余数都不等于可删除耗时，也不与358.02μs
+正式L1相减。证据retained_C01_phase_sdk_v1.json，完整原始三窗保留。
+
+隔离候选head_partition2_v1仅改Attention stream、plan获取和O_A packed获取
+三个模块：物理core c处理query=c//2+k*12、head区间(c%2)*32..+31；两个
+AIV各处理16个head，外部64-head布局和每环槽64行间距不变。每个query的
+QK/PV K归约、五块softmax顺序、RoPE及cast不变；KV仍由同组双AIV各采64行，
+因此KV采集/中转逻辑量明确翻倍。C01活跃Attention组由6变12，无速度预测。
+消费者必须等待全部新packed写者，不能继续只等原六个核组。
+
+15项CPU检查通过：实际源码的1..6容量query/head/packed所有权、4608个
+物理组/五块mask组合的AIC+双AIV事件DAG、失活组、完整排空、数学表达式和
+原K链核对；负对照确认旧packed获取集合不能覆盖新写者。完整CPU编译通过，
+root/return ABI及orchestration不变，静态事件位点相同；真实qk_q为32×512
+BF16、运行状态为16×256 FP32。AIC Mat434176/Acc131072/Left与Right各65536，
+AIV Vec163872，均在既有边界内。证据head_partition2_v1_C01_codegen.json。
+
+这只是C01隔离pilot，未全局改变策略或生产代码。通过task-submit提交卡8
+task_20261023_110504_25167107437，按完整链路十窗和原严格检查验收；采用
+与否仍取决于其完整L1结果，不能由新增活跃核数推断收益。无push。
