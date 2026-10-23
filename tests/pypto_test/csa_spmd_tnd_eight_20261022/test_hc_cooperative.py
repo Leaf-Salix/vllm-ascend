@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 HERE = Path(__file__).resolve().parent
-SOURCE = HERE / "runs/hc_cooperative_v2"
+SOURCE = HERE / "runs/hc_cooperative_v4"
 PARENT = HERE / "runs/physical_capacity_production_v1"
 
 
@@ -56,6 +56,14 @@ def scalar_or_tensor(value):
 
 def cpu_language():
     return SimpleNamespace(
+        tile=SimpleNamespace(
+            create=lambda shape, **_kw: Tensor(np.full(shape, np.nan, np.float32)),
+            full=lambda shape, value, **_kw: Tensor(np.full(shape, value, np.float32)),
+            assemble=assemble,
+            reshape=lambda value, shape: Tensor(value.data.reshape(shape)),
+            extract=lambda value, row, col, shape, **kw: tile_slice(value, shape, [row, col], **kw),
+            rsqrt=lambda value, tmp: Tensor(np.float32(1) / np.sqrt(value.data)),
+        ),
         tensor=SimpleNamespace(dim=lambda value, axis: value.data.shape[axis]),
         range=range,
         pipeline=lambda *args, **_kw: range(*args),
@@ -68,7 +76,7 @@ def cpu_language():
         cast=lambda value, _dtype: Tensor(value.data.copy()),
         mul=lambda left, right: Tensor(scalar_or_tensor(left) * scalar_or_tensor(right)),
         add=lambda left, right: Tensor(scalar_or_tensor(left) + scalar_or_tensor(right)),
-        row_sum=lambda value: Tensor(np.sum(value.data, axis=1, keepdims=True, dtype=np.float32)),
+        row_sum=lambda value, **_kw: Tensor(np.sum(value.data, axis=1, keepdims=True, dtype=np.float32)),
         reshape=lambda value, shape: Tensor(value.data.reshape(shape)),
         set_validshape=lambda value, *shape: Tensor(value.data, shape),
         fillpad=fillpad,
@@ -209,7 +217,7 @@ def test_actual_schedule_dependency_coverage_and_slots():
 
 
 def test_unrelated_modules_and_original_math_unchanged():
-    manifest = json.loads((HERE / "hc_cooperative_v2.json").read_text())
+    manifest = json.loads((HERE / "hc_cooperative_v4.json").read_text())
     for path in PARENT.glob("*.py"):
         if path.name not in manifest["changed_modules"]:
             assert path.read_bytes() == (SOURCE / path.name).read_bytes()

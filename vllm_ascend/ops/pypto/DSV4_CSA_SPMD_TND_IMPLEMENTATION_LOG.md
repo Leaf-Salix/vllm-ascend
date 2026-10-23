@@ -5329,3 +5329,41 @@ add承接第一个结果并写回同一物理accumulator，+0及后续乘法/rsq
 的新目标/采用结果。cannbot知识索引仍缺失，复用已读所有权/排空约束；没有
 全库扫描或重建。正式四项保留机制及原八档比值0.985336943775587保持，
 hc_cooperative尚无设备收益结论，goal仍active，不push。
+
+### 2026-10-23：HC RMS部分和成包交接；原v2任务继续排队
+
+上一轮已完成v2源码、11项CPU检查、两档完整编译和任务提交，属于实际进展。
+本轮重新确认task_20261023_121507_140089517903与
+task_20261023_121508_14009351506均pending，尚无result；沿原句柄等待，
+没有因观察到期而重启、重复提交或更改冻结源码。
+
+新增analyze_priority_candidate.py和hc_cooperative_v2_tasks.json，正式结果
+将核对原始72角色十窗、六组逐bit/保护、同卡同SDK、全部四份执行CPP及当前
+保留版本的生成物。只读试运行reference部分确认C04为763.65、C05为1003.02μs，
+各10窗，分别与当前CPU保留档四份CPP匹配；原固定分母778.39/1014.46不变。
+该工具准备不等于候选设备验收，也没有补采基线。
+
+v2新增RMS交接在每个M8块产生32个1×8 FP32写回和32次小片读入。独立v3
+将每个K4096写者的八份和先保留在8×8 UB块中，再一次写1×64包；消费者
+用一次4×64跨行load读四包，局部reshape为32×8，随后按0..31逐项左折叠。
+不合并每包内部的浮点和；传输字节仍是每M8写1KiB、读1KiB，减少的是PTO
+搬运调用和小请求，不宣称删除这些字节或已经省下设备时间。512B槽、同代
+发布/获取、所有owner和Cube依赖均沿v2，排队中的v2包逐文件未修改。
+
+v3的11项CPU源执行检查通过，但完整编译指出Tile row_sum必须显式提供
+同形scratch，不能沿用Tensor层自动分配的调用方式。冻结v4补齐这个scratch，
+并按共享PyPTO源码的正式Tile接口为rsqrt显式提供scratch，从而保留原高精度
+模式；没有把high_precision=True静默降为普通模式。v3失败收据保留在
+compile_hc_cooperative_C04_v3/result.json，属于原型API修正而非SDK问题。
+
+v4的11项源码数值/尾部/依赖/槽检查全部通过，C04/C05完整CPU后端编译和
+生成物审计通过。实际IR为每个写者一次1×64 store、消费者一次4×64 load；
+四个stage4子视图均为1×8，生产packet与8×8块同址，消费者4×64与32×8
+视图同址。32次TEXTRACT/TADD保留单一顺序，accumulator与packet空间分离，
+TRSQRT带显式临时Tile。C++还可见packet store前V→MTE3等待，以及下个
+owner复用前MTE3→V等待。AIV仍180224B，AIC资源与v2同界，ABI及编排保持。
+证据hc_cooperative_v4_C04_codegen.json、hc_cooperative_v4_C05_codegen.json。
+
+此为有独立源码/生成物证据的交接成本改进，尚未提交v4设备任务，先收原v2
+的完整精度和性能结果再决定。生产、四项保留机制、八档正式比值与10%目标
+均未变；本轮继续签名本地提交，不push。

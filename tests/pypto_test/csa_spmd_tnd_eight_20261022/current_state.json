@@ -66,6 +66,7 @@
   "next_steps": [
     "Preserve four retained mechanisms and the original eight-case denominator; 10% goal remains active",
     "Collect the two hc_cooperative_v2 priority tasks; use existing retained full-L1 references and all strict checks; no baseline remeasurement",
+    "Use analyze_priority_candidate.py hc_cooperative_v2 after both original tasks finish; v4 has passed CPU gates but is not submitted",
     "Reduce measured full-chain service work or exploit demonstrated resource complementarity; no more simple DMA/Vector reorderings",
     "Do not implement whole-leaf-round Attention insertion on existing owners: optimistic serialized-resource model already increases C05 waiting",
     "Do not repeat negative head partitioning or direct HC tail-copy removal without a new mechanism",
@@ -104,9 +105,10 @@
     "capacity_tier_isolated_contracts": 165,
     "capacity_state_observer": 3,
     "capacity_production_contracts": 164,
-    "hc_cooperative_math_ownership": 11
+    "hc_cooperative_math_ownership": 11,
+    "hc_cooperative_packed_math_ownership": 11
   },
-  "updated_at": "2026-10-23T12:16:26+08:00",
+  "updated_at": "2026-10-23T12:30:55+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -464,6 +466,20 @@
       ],
       "status": "complete_L1_pending",
       "mechanism": "Four K4096 AIV owners per M8; original 32-step RMS left fold and split-specific Cube input acquire"
+    },
+    "hc_cooperative_v4": {
+      "source": "hc_cooperative_v4.json",
+      "cases": [
+        "C04",
+        "C05"
+      ],
+      "source_tests": 11,
+      "codegen": [
+        "hc_cooperative_v4_C04_codegen.json",
+        "hc_cooperative_v4_C05_codegen.json"
+      ],
+      "status": "CPU_gates_passed_not_submitted_wait_v2",
+      "mechanism": "Pack unchanged RMS chunks into four writer packets and one consumer load; original ordered fold retained"
     }
   },
   "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
@@ -616,7 +632,7 @@
   "current_sdk_C08_reference": "baseline_current_sdk_C08.json",
   "current_implementation": "physical_capacity_production_v1",
   "earlier_stage_commit": "3a0f423c6",
-  "latest_stage": "hc_cooperative_CPU_gates_passed_two_priority_L1_tasks_submitted",
+  "latest_stage": "hc_cooperative_v2_verified_queue_wait_v4_packed_handoff_CPU_gates_complete",
   "retained_results": "retained_physical_capacity.json",
   "production_source_manifest": "physical_capacity_production_v1.json",
   "prior_production_commit": "32a1426d9",
@@ -630,6 +646,10 @@
     "hc_cooperative_v1": {
       "result": "runs/compile_hc_cooperative_C04_v1/result.json",
       "reason": "Prototype full/tail Tensor type mismatch; corrected in v2, no shared SDK change"
+    },
+    "hc_cooperative_v3": {
+      "result": "runs/compile_hc_cooperative_C04_v3/result.json",
+      "reason": "Tile row_sum needs explicit scratch; v4 supplies it and explicit high-precision rsqrt scratch"
     }
   }
 }

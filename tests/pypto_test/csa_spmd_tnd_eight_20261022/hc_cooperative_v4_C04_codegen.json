@@ -1,0 +1,66 @@
+{
+  "candidate": "hc_cooperative_v4",
+  "case_id": "C04",
+  "full_codegen_passed": true,
+  "root_return_abi_orchestration_unchanged": true,
+  "resources": {
+    "cube_schedule": {
+      "mat": 475136,
+      "acc": 131072,
+      "vec": 16384,
+      "left": 65536,
+      "right": 65536
+    },
+    "vector_schedule": {
+      "vec": 180224
+    }
+  },
+  "limits": {
+    "vec": 188416,
+    "mat": 524288,
+    "acc": 131072,
+    "left": 65536,
+    "right": 65536
+  },
+  "emitted_stores": {
+    "x_fp32": [
+      {
+        "tile": "%value_inline20__ssa_v0",
+        "view": "pto.partition_view %x_fp32__ssa_v0_view, offsets = [%456, %457], sizes = [%429, %c512_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<?x512xf32>"
+      },
+      {
+        "tile": "%3",
+        "view": "pto.partition_view %x_fp32__ssa_v0_view, offsets = [%460, %461], sizes = [%429, %c512_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<?x512xf32>"
+      },
+      {
+        "tile": "%12",
+        "view": "pto.partition_view %x_fp32__ssa_v0_view, offsets = [%465, %466], sizes = [%429, %c512_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<?x512xf32>"
+      },
+      {
+        "tile": "%21",
+        "view": "pto.partition_view %x_fp32__ssa_v0_view, offsets = [%470, %471], sizes = [%429, %c512_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<?x512xf32>"
+      }
+    ],
+    "widen_tail": [
+      {
+        "tile": "%partial_packet_inline4__ssa_v0",
+        "view": "pto.partition_view %widen_tail__ssa_v0_view, offsets = [%473, %475], sizes = [%c1_index, %c64_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<1x64xf32>"
+      }
+    ],
+    "inv": [
+      {
+        "tile": "%inverse_inline31__ssa_v0",
+        "view": "pto.partition_view %inv__ssa_v0_view, offsets = [%509, %c0_index], sizes = [%c8_index, %c1_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<8x1xf32>"
+      }
+    ]
+  },
+  "producer_packet_address": 155648,
+  "consumer_packet_address": 81920,
+  "handoff_per_M8": "Four 1x64 FP32 stores and one 4x64 strided load; 32 original chunks retained",
+  "local_views_and_accumulator_carry_checked": true,
+  "high_precision_rsqrt_scratch": true,
+  "source_math_and_ownership_checks": 11,
+  "device_execution": false,
+  "performance_eligible": false,
+  "limitation": "Static/source checks do not prove A3 bit equality or runtime speed; original v2 tasks remain unchanged"
+}
