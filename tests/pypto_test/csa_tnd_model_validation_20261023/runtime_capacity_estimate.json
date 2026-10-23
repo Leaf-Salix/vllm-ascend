@@ -1,0 +1,144 @@
+{
+  "scope": "CPU查询已构建Simpler的build_kernel_pipeline_contract_impl；不分配NPU内存、不代表较小配置已通过当前TND运行验证",
+  "toolchain_release": "csa-shared-20261022-logical-codegen",
+  "simpler_commit": "57e499238fd4ee3548947ad860be456aaeeb16b5",
+  "source_function": "src/a2a3/runtime/tensormap_and_ringbuffer/host/runtime_maker.cpp::build_kernel_pipeline_contract_impl",
+  "capacity_reason": "当前CORE_MAX_TENSOR_ARGS=256；每个TaskPayload内嵌256个128字节Tensor描述符，默认四个ring各16384槽，不能沿用旧版本1.343GiB估计。",
+  "query_source": "runs/runtime_capacity/layout.cpp",
+  "compact_configuration": {
+    "heap_mb": [
+      256,
+      128,
+      256,
+      32
+    ],
+    "task_window": 4096
+  },
+  "rows": [
+    {
+      "variant": "default",
+      "pipeline_depth": 1,
+      "resources": [
+        {
+          "kind": 4,
+          "class": 0,
+          "bytes": 0
+        },
+        {
+          "kind": 1,
+          "class": 1,
+          "bytes": 1073741824
+        },
+        {
+          "kind": 2,
+          "class": 1,
+          "bytes": 2204631936
+        },
+        {
+          "kind": 3,
+          "class": 1,
+          "bytes": 24658944
+        },
+        {
+          "kind": 5,
+          "class": 2,
+          "bytes": 0
+        },
+        {
+          "kind": 6,
+          "class": 2,
+          "bytes": 0
+        }
+      ],
+      "device_scratch_bytes": 3303032704,
+      "device_scratch_GiB": 3.0761889219284058
+    },
+    {
+      "variant": "historical_compact",
+      "pipeline_depth": 1,
+      "resources": [
+        {
+          "kind": 4,
+          "class": 0,
+          "bytes": 0
+        },
+        {
+          "kind": 1,
+          "class": 1,
+          "bytes": 704643072
+        },
+        {
+          "kind": 2,
+          "class": 1,
+          "bytes": 551158656
+        },
+        {
+          "kind": 3,
+          "class": 1,
+          "bytes": 22692864
+        },
+        {
+          "kind": 5,
+          "class": 2,
+          "bytes": 0
+        },
+        {
+          "kind": 6,
+          "class": 2,
+          "bytes": 0
+        }
+      ],
+      "device_scratch_bytes": 1278494592,
+      "device_scratch_GiB": 1.1906908750534058
+    },
+    {
+      "variant": "tnd_external_workspace_candidate",
+      "pipeline_depth": 1,
+      "resources": [
+        {
+          "kind": 4,
+          "class": 0,
+          "bytes": 0
+        },
+        {
+          "kind": 1,
+          "class": 1,
+          "bytes": 67108864
+        },
+        {
+          "kind": 2,
+          "class": 1,
+          "bytes": 551158656
+        },
+        {
+          "kind": 3,
+          "class": 1,
+          "bytes": 22692864
+        },
+        {
+          "kind": 5,
+          "class": 2,
+          "bytes": 0
+        },
+        {
+          "kind": 6,
+          "class": 2,
+          "bytes": 0
+        }
+      ],
+      "device_scratch_bytes": 640960384,
+      "device_scratch_GiB": 0.5969408750534058
+    }
+  ],
+  "declared_saving_GiB": 1.885498046875,
+  "tnd_candidate_configuration": {
+    "heap_mb": [
+      16,
+      16,
+      16,
+      16
+    ],
+    "task_window": 4096
+  },
+  "tnd_candidate_reason": "TND工作区由外部分配；已生成MPMD编排无GM alloc。仍需单卡确认，不能据CPU容量推断运行通过。"
+}

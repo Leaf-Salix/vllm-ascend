@@ -23162,3 +23162,43 @@ RMSE约2.8e-5），该对照同时改变了Native运行容量，不能用来单�
 不区分+0/-0的表示，准确口径为零容差逐元素一致；没有放宽容差。
 修复版16卡MPMD `task_20261023_210324_365776931582`及SPMD
 `task_20261023_210324_36579134321`已排队。仍先完成B16三侧对照，再进入B24。
+
+### 735.100 B16三侧真实decode完成；MPMD与SPMD逐token及接受事件完全一致（2026-10-23）
+
+修复版MPMD任务`task_20261023_210324_365776931582`、SPMD任务
+`task_20261023_210324_36579134321`均exit=0，原Native B16基线继续复用。
+三侧同一99268437c算子基线、公共SDK、CANN9.2、NZ2、Native HCA、混合问题及KV；
+仅PTO增加已验证的工作区共享和图回退padding修复。无静态编译、无SuperKernel，
+显存预算0.92、HCCL_BUFFSIZE=1800。每侧16卡×16请求×192token=49,152token，
+每卡48次96行S6 forward，全部无抢占，21层CSA的实际PTO提交已确认。
+
+| 对照 | 完全一致请求/256 | 不同token/49,152 | 接受事件完全一致请求/256 |
+|---|---:|---:|---:|
+| Native vs TND-SPMD | 64 | 22,416 | 32 |
+| Native vs TND-MPMD | 64 | 22,416 | 32 |
+| TND-SPMD vs TND-MPMD | 256 | 0 | 256 |
+
+Native平均接受3.806501548，两个PTO均3.795665635，差约−0.010836个。
+三侧32个简单问题请求答案检查全部通过，彼此逐token一致；复杂问题仍有措辞、
+格式以及推演内容差异，不能称为“仅格式不同”，也不宣称与Native全量token一致。
+这与之前用户明确接受的“简单token一致、复杂问题可能分歧”的口径一致；
+本次MPMD与参考SPMD在全部请求的输出和接受事件上完全一致。
+
+证据：`csa_tnd_model_validation_20261023/{mpmd,spmd}_b16_summary.json`、
+`b16_comparison.json`、`b16_comparison.texts.md`。对照脚本已核对三侧配置，
+完整文本保留全部16个不同问题的三侧输出。各侧跨DP输出差异也单独记录。
+完整CSA图重放证据尚未成立：TND合同拒绝原捕获图后正常派发，功能通过依赖
+真实PTO提交证据，而不是仅看FULL标签；本轮不是图性能验收。
+
+B16结束后才提交B24单卡`task_20261023_214143_132841526488`，
+检查两种TND的S1/S6、两层交替、独占/共享和graph。当前SDK默认运行时
+device scratch声明3.076GiB，其中任务窗口约2.053GiB；TaskPayload内嵌
+256个128字节Tensor描述符，旧版1.343GiB估计不再适用。CPU合同查询
+`runtime_capacity_estimate.json`给出各项容量，查询不占卡、不修改SDK。
+TND工作区由外部提供，B24先验证heap每ring16MiB、window4096的候选，
+CPU声明总容量约0.597GiB；尚未将其记为设备通过。
+
+B24启动器新增显式ring/window与HCCL缓冲参数，配置写入configuration.json；
+PTO启用较小ring前须提供同batch、同ring配置的单卡PASS。B24预计三侧
+统一HCCL_BUFFSIZE=512、显存预算0.925，具体以实际启动配置和验证结果为准。
+这是功能验证的显存配置调整，不与B16跨配置计算性能收益。

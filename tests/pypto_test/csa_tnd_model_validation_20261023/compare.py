@@ -25,6 +25,8 @@ def main():
     configs = {mode: read(root / "configuration.json") for mode, root in roots.items()}
     reference = configs["native"]
     for config in configs.values():
+        assert config.get("pto_ring_config") == reference.get("pto_ring_config"), "运行时容量配置必须记录并对齐"
+        assert config.get("hccl_buffer_mb", 1800) == reference.get("hccl_buffer_mb", 1800)
         for key in (
             "source_commit",
             "toolchain",

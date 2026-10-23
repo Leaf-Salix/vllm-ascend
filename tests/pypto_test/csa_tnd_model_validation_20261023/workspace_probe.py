@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""单卡对照独占/复用工作区：B16 S1/S6、两层交替、图重放，保持原算术。"""
+"""单卡对照独占/复用工作区：S1/S6、两层交替、图重放，保持原算术。"""
 
+import argparse
 import importlib
 import json
-import sys
 from pathlib import Path
 
 import torch
@@ -28,9 +28,26 @@ def compare(actual, expected):
 
 
 def main():
-    output = Path(sys.argv[1])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("output", type=Path)
+    parser.add_argument("--batch", type=int, choices=(16, 24), default=16)
+    parser.add_argument("--ring-heap-mb", type=int, nargs=4)
+    parser.add_argument("--ring-task-window", type=int)
+    parser.add_argument("--device", type=int, help="队列物理卡号；进程内映射为npu:0")
+    args = parser.parse_args()
+    assert bool(args.ring_heap_mb) == bool(args.ring_task_window), "ring配置须完整提供"
+    ring_config = (
+        {"heap_mb": args.ring_heap_mb, "task_window": args.ring_task_window} if args.ring_heap_mb else None
+    )
+    output = args.output
     output.mkdir(parents=True, exist_ok=False)
-    report = {"status": "RUNNING", "scope": "单卡工作区生命周期，不替代16卡真实decode", "variants": {}}
+    report = {
+        "status": "RUNNING",
+        "scope": "单卡工作区生命周期，不替代16卡真实decode",
+        "batch": args.batch,
+        "ring_config": ring_config,
+        "variants": {},
+    }
 
     def save():
         (output / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
@@ -59,13 +76,18 @@ def main():
         tensor_parallel_size=1,
         hf_overrides={"sliding_window": 128},
         max_model_len=131584,
-        max_num_seqs=16,
+        max_num_seqs=args.batch,
         max_num_batched_tokens=256,
         block_size=32,
         enable_prefix_caching=False,
         enforce_eager=True,
         speculative_config={"method": "dspark", "num_speculative_tokens": 5, "enforce_eager": True},
-        additional_config={"weight_nz_mode": 2, "enable_kv_nz": False, "enable_dsa_cp": False},
+        additional_config={
+            "weight_nz_mode": 2,
+            "enable_kv_nz": False,
+            "enable_dsa_cp": False,
+            **({"pto_csa_ring_config": ring_config} if ring_config else {}),
+        },
     ).create_engine_config()
     device = torch.device("npu:0")
     with native_session(config, 0), torch.inference_mode():
@@ -74,7 +96,9 @@ def main():
         scenes = []
         for index, (layer_index, query_tokens) in enumerate(((2, 1), (2, 6), (4, 6))):
             layer = layers[layer_index]
-            fixture = make_fixture(config, layer.self_attn, 16, 131072, 1024 + index, device, query_tokens=query_tokens)
+            fixture = make_fixture(
+                config, layer.self_attn, args.batch, 131072, 1024 + index, device, query_tokens=query_tokens
+            )
             groups = {
                 name: (fixture["metadata"][group["prefix"]], group["views"])
                 for name, group in fixture["groups"].items()
