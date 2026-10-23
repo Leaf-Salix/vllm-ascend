@@ -1,0 +1,153 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/indexer_scale_layout_stages.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/indexer_scale_layout_stages.py
+@@ -8,6 +8,7 @@
+ 首尾用于筛选，随后加载全部有效页证明连续性。失败时返回方向0，由Score沿用
+ 原逐页gather。物理页号域限制为2^24，保证FP32比较不丢失有效页号的整数精度。
+ 每个叶的两条AIV各自校验，不复用上一请求、上一叶或上次图重放的结果。
++物理布局保持8×256，策略可只计算一个有效行；仍逐页完整检查，失败回退逐页读取。
+ """
+ 
+ import pypto.language as pl
+@@ -27,6 +28,7 @@
+     page_begin: pl.Scalar[pl.INDEX],
+     pages: pl.Scalar[pl.INDEX],
+     physical_pages: pl.Scalar[pl.INDEX],
++    VALID_PROOF_ROWS: pl.constexpr = LAYOUT_PROOF_ROWS,
+ ):
+     """返回本叶首物理页和方向；仅在实际Score AIV内调用，范围不合法则回退。"""
+     first_page = pl.cast(0, pl.INDEX)
+@@ -63,11 +65,11 @@
+                             difference = pl.abs(pl.sub(pl.cast(page_ids, pl.FP32), expected))
+                             ones = pl.set_validshape(
+                                 pl.tile.full([LAYOUT_PROOF_ROWS, LAYOUT_PROOF_PAGES], dtype=pl.FP32, value=1.0),
+-                                LAYOUT_PROOF_ROWS,
++                                VALID_PROOF_ROWS,
+                                 pages,
+                             )
+                             repeated = pl.set_validshape(
+-                                pl.col_expand_mul(ones, difference), LAYOUT_PROOF_ROWS, pages
++                                pl.col_expand_mul(ones, difference), VALID_PROOF_ROWS, pages
+                             )
+                             scratch = pl.create_tile([LAYOUT_PROOF_ROWS, LAYOUT_PROOF_PAGES], dtype=pl.FP32)
+                             max_difference = pl.row_max(repeated, scratch)
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/indexer_score_stages.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/indexer_score_stages.py
+@@ -2531,6 +2531,7 @@
+     key_prefetch_to_l0: pl.constexpr,
+     balance_leaves: pl.constexpr,
+     scale_page_coalescing: pl.constexpr,
++    SCALE_PROOF_ROWS: pl.constexpr,
+     SCORE_READY_EVENT: pl.constexpr,
+     SCORE_CONSUMED_EVENT: pl.constexpr,
+ ):
+@@ -2578,6 +2579,7 @@
+                         single_page_begin,
+                         single_page_count,
+                         pl.tensor.dim(idx_native_kv_cache, 0),
++                        SCALE_PROOF_ROWS,
+                     )
+                 single_roots = pl.tile.full([query_group_size // 2, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF)
+                 single_segments = pl.tile.full(
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/entry.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/entry.py
+@@ -231,6 +231,7 @@
+     TO_L0: pl.constexpr,
+     BALANCED: pl.constexpr,
+     SCALE_PAGE_COALESCING: pl.constexpr,
++    SCALE_PROOF_ROWS: pl.constexpr,
+ ):
+     pl.func_attr({"split_aiv": True})
+     pl.system.set_ffts(ffts)
+@@ -254,6 +255,7 @@
+         TO_L0,
+         BALANCED,
+         SCALE_PAGE_COALESCING,
++        SCALE_PROOF_ROWS,
+         0,
+         1,
+     )
+@@ -285,6 +287,7 @@
+     score_arena: pl.InOut[pl.Tensor[[SCORE_ROWS, 8192], pl.FP32]],
+     pair_arena: pl.InOut[pl.Tensor[[PAIR_ROWS, 1024], pl.FP32]],
+     SCALE_PAGE_COALESCING: pl.constexpr,
++    SCALE_PROOF_ROWS: pl.constexpr,
+ ):
+     with pl.cluster(name_hint="indexer_score"):
+         indexer_transfer = index_score_topk_cube(
+@@ -328,6 +331,7 @@
+             TO_L0,
+             BALANCED,
+             SCALE_PAGE_COALESCING,
++            SCALE_PROOF_ROWS,
+         )
+     return (indexer_transfer, score_arena, pair_arena)
+ 
+@@ -784,6 +788,7 @@
+     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
+     LOCAL_ATTENTION_STATS: pl.constexpr = False,
+     SCALE_PAGE_COALESCING: pl.constexpr = False,
++    SCALE_PROOF_ROWS: pl.constexpr = 8,
+     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+     PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
+     SPLIT_SCORE_ROWS: pl.constexpr = False,
+@@ -1246,6 +1251,7 @@
+             score_arena,
+             pair_arena,
+             SCALE_PAGE_COALESCING,
++            SCALE_PROOF_ROWS,
+         )
+     with pl.spmd(
+         pl.min(tokens, VECTORS),
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/policy.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/policy.py
+@@ -27,6 +27,8 @@
+ # 两个 M32 容量以内已验证删除空 worker 获益；更大容量保留原分工。
+ # 128K B28 的完整 L1 回退，不能因局部少派空任务而全域采用。
+ NONEMPTY_WORKER_MAX_TOKENS = 64
++# SPMD已验证的一有效行叶内证明域，最多六个原始8192候选叶。
++LEAF_LAYOUT_MAX_CACHE_ROWS = 6 * 8192
+ 
+ 
+ @dataclass(frozen=True)
+@@ -45,6 +47,7 @@
+     early_attention_geometry: bool = False
+     local_attention_stats: bool = False
+     scale_page_coalescing: bool = False
++    scale_proof_rows: int = 8
+     plan_physical_rows: bool = False
+     split_score_rows: bool = False
+     limit_empty_workers: bool = False
+@@ -68,6 +71,7 @@
+             "EARLY_ATTENTION_GEOMETRY": self.early_attention_geometry,
+             "LOCAL_ATTENTION_STATS": self.local_attention_stats,
+             "SCALE_PAGE_COALESCING": self.scale_page_coalescing,
++            "SCALE_PROOF_ROWS": self.scale_proof_rows,
+             "PLAN_PHYSICAL_ROWS": self.plan_physical_rows,
+             "PLAN_TABLE_COLUMNS": self.plan_table_columns,
+             "SPLIT_SCORE_ROWS": self.split_score_rows,
+@@ -118,6 +122,12 @@
+     single_request_leaves = requests == 1 and long_history and cache_rows <= 65536 and 5 <= max_query_tokens <= 6
+     ob_rows = 32 if tokens <= 32 else 96 if tokens <= 96 else 128
+     parallel_small_qa = group == 6 and 16 < tokens < 32
++    single_row_leaf_scale = (
++        long_history
++        and group == 6
++        and EARLY_GEOMETRY_MIN_TOKENS <= tokens <= LOCAL_STATS_MAX_TOKENS
++        and cache_rows <= LEAF_LAYOUT_MAX_CACHE_ROWS
++    )
+     return CSAMPMDPolicy(
+         limit_empty_workers=tokens <= NONEMPTY_WORKER_MAX_TOKENS,
+         bsh_projection_order=not long_history,
+@@ -144,7 +154,11 @@
+         # 沿已有小M16并行域和O_A N256的较大T域启用，中间域保留逐页读取。
+         # 不按B/history验收点枚举；每叶仍完整检查本轮实际读取的页，碎片则回退。
+         # 小M16与较大T边界已做完整同轮验证；其余验证边界见统一优化日志。
+-        scale_page_coalescing=(long_history and group == 6 and (parallel_small_qa or tokens > LOCAL_STATS_MAX_TOKENS)),
++        scale_page_coalescing=(
++            single_row_leaf_scale
++            or (long_history and group == 6 and (parallel_small_qa or tokens > LOCAL_STATS_MAX_TOKENS))
++        ),
++        scale_proof_rows=1 if single_row_leaf_scale else 8,
+         # 沿已有至少两个M32行块的前置几何区间，统一在plan验证选中页，
+         # 并把压缩逻辑索引转换成物理行；消费者不再重复Q/L扫描和页表查询。
+         # 小T的计划生产者更少，搬移地址工作未稳定获益，保留原逻辑表示。
