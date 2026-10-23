@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Native-order QA routes for measured T126/T168; retain other frozen routes."""
+"""Native-order QA routes for measured T95/T126/T168; retain other frozen routes."""
 
 import pypto.language as pl
 
@@ -32,7 +32,8 @@ from ..deepseek_v4_flash_csa_tnd_precision.qkv_proj_rope import (
 )
 from ..deepseek_v4_flash_csa_tnd_precision_spmd.qkv_proj_rope import kv_proj_rope
 
-# Measured against the actual FULL Native QA boundary at T126 and T168.
+# Measured against the actual FULL Native QA boundary at T95, T126 and T168.
+QA_NATIVE_PACKET_ROWS_TND = 95
 QA_NATIVE_PACKET_ROWS = 126
 QA_NATIVE_PACKET_ROWS_B28 = 168
 QR_NATIVE_PACKET_BLOCKS = 2
@@ -128,7 +129,9 @@ def q_proj_qr(
         with pl.scope():
             qr_t_matmul = ((tile_rows + QR_M_TILE - 1) // QR_M_TILE) * QR_M_TILE
             qr_fp32 = pl.create_tensor([qr_t_matmul, Q_LORA], dtype=pl.FP32)
-            if tile_rows == QA_NATIVE_PACKET_ROWS:  # noqa: SIM114 - scalar branches required by PyPTO codegen
+            if tile_rows == QA_NATIVE_PACKET_ROWS_TND:  # noqa: SIM114 - scalar branches required by PyPTO codegen
+                q_proj_qa_126(x, wq_a, qr_fp32, tile_base, tile_rows)
+            elif tile_rows == QA_NATIVE_PACKET_ROWS:  # noqa: SIM114 - scalar branches required by PyPTO codegen
                 q_proj_qa_126(x, wq_a, qr_fp32, tile_base, tile_rows)
             elif tile_rows == QA_NATIVE_PACKET_ROWS_B28:
                 q_proj_qa_126(x, wq_a, qr_fp32, tile_base, tile_rows)

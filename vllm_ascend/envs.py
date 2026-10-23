@@ -32,6 +32,7 @@ def _pto_csa_atomic_add() -> int:
         "tnd_precision",
         "tnd_full_precision",
         "tnd_precision_combined",
+        "tnd_precision_tuned",
     ) or variant.startswith("pkg:")
     default = "0" if fixed_reduction else "1"
     return int(os.getenv("VLLM_ASCEND_PTO_CSA_ATOMIC_ADD", default))

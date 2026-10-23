@@ -28,6 +28,7 @@ _PERFORMANCE = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa"
 _TND_PRECISION = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision"
 _TND_FULL_PRECISION = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_full_precision"
 _TND_PRECISION_COMBINED = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision_spmd_combined"
+_TND_PRECISION_TUNED = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision_spmd_tuned"
 _ENV = "PTO_CSA_VARIANT"
 _ALIASES = {
     "precision": "precision",
@@ -37,6 +38,7 @@ _ALIASES = {
     "tnd_precision": "tnd_precision",
     "tnd_full_precision": "tnd_full_precision",
     "tnd_precision_combined": "tnd_precision_combined",
+    "tnd_precision_tuned": "tnd_precision_tuned",
 }
 
 
@@ -82,6 +84,7 @@ def variant_package() -> str:
         "tnd_precision": _TND_PRECISION,
         "tnd_full_precision": _TND_FULL_PRECISION,
         "tnd_precision_combined": _TND_PRECISION_COMBINED,
+        "tnd_precision_tuned": _TND_PRECISION_TUNED,
     }[selected_variant()]
 
 
