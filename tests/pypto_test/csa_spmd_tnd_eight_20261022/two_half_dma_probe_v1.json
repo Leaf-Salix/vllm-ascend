@@ -1,0 +1,35 @@
+{
+  "device_execution": false,
+  "performance_eligible": false,
+  "source": "two_half_dma_then_vector.pto",
+  "sdk_release": "csa-shared-20261022-logical-codegen",
+  "flags": [
+    "--pto-arch=a3",
+    "--pto-level=level3",
+    "--enable-insert-sync"
+  ],
+  "observations": {
+    "independent": {
+      "cpp": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/two_half_dma_probe_v1/independent.cpp",
+      "cpp_sha256": "b4b0744c11ef2c46ba7646c5e935163b43733ca3563ac0399f29a7a225768282",
+      "gm_store_to_vector_completion_wait": false,
+      "vector_line": 202,
+      "excerpt": "  set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);\n  TLOAD(v20, v3);\n  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);\n  TLOAD(v16, v2);\n  set_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);\n  wait_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);\n  for (int64_t v22 = v10; v22 < v12; v22 += v11) {\n    wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);\n    for (int64_t v24 = v10; v24 < v13; v24 += v11) {\n      TLOAD(v42, v41);\n    set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);\n    wait_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);\n    TSTORE(v59, v18);\n    set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);\n  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);\n  TADDS(v20, v20, v15);\n  set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);\n  wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);\n  TSTORE(v4, v20);\n  wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);"
+    },
+    "same_address": {
+      "cpp": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/two_half_dma_probe_v1/same_address.cpp",
+      "cpp_sha256": "473d77d95393f5c1106a81f09a4882baeaf0b2ada7b3b9e8315245be2fa00fb1",
+      "gm_store_to_vector_completion_wait": true,
+      "vector_line": 203,
+      "excerpt": "  set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);\n  TLOAD(v19, v3);\n  set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);\n  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);\n  TLOAD(v15, v2);\n  set_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);\n  wait_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);\n  wait_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);\n  for (int64_t v21 = v9; v21 < v11; v21 += v10) {\n    wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);\n    for (int64_t v23 = v9; v23 < v12; v23 += v10) {\n      TLOAD(v41, v40);\n    set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID1);\n    wait_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID1);\n    TSTORE(v58, v17);\n    set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);\n  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);\n  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);\n  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);\n  TADDS(v19, v19, v14);\n  set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);\n  wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);\n  TSTORE(v4, v19);\n  wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);"
+    }
+  },
+  "meaning": "Pure two-half DMA/store loops preserve MTE3-to-MTE2 reuse protection without forcing independent later V work to wait for the last GM store; aliasing still adds the required MTE3-to-V wait",
+  "production_status": "No production candidate prepared from this probe",
+  "requirements": [
+    "A per-invocation proof for all selected physical rows, not the fixed-fixture observation alone",
+    "Original zero-fill and event semantics on failed proof, partial blocks, unsupported layout, first/drain ticks",
+    "Full PyPTO allocation and actual compiler synchronization audit",
+    "Strict numerical/state checks and complete L1 benefit; no speedup claimed from this probe"
+  ]
+}

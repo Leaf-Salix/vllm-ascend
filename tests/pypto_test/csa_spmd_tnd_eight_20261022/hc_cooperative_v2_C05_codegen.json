@@ -1,0 +1,96 @@
+{
+  "candidate": "hc_cooperative_v2",
+  "case_id": "C05",
+  "full_codegen_passed": true,
+  "root_return_abi_and_orchestration_unchanged": true,
+  "resources": {
+    "cube_schedule": {
+      "mat": 475136,
+      "acc": 131072,
+      "left": 65536,
+      "right": 65536
+    },
+    "vector_schedule": {
+      "vec": 180224
+    }
+  },
+  "limits": {
+    "vec": 188416,
+    "mat": 524288,
+    "acc": 131072,
+    "left": 65536,
+    "right": 65536
+  },
+  "emitted_stores": {
+    "x_fp32": [
+      {
+        "ir_line": 579,
+        "view": "pto.partition_view %x_fp32__ssa_v0_view, offsets = [%461, %462], sizes = [%434, %c512_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<?x512xf32>",
+        "tile": "%value_inline11__tile"
+      },
+      {
+        "ir_line": 602,
+        "view": "pto.partition_view %x_fp32__ssa_v0_view, offsets = [%469, %470], sizes = [%434, %c512_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<?x512xf32>",
+        "tile": "%3"
+      },
+      {
+        "ir_line": 626,
+        "view": "pto.partition_view %x_fp32__ssa_v0_view, offsets = [%479, %480], sizes = [%434, %c512_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<?x512xf32>",
+        "tile": "%11"
+      },
+      {
+        "ir_line": 650,
+        "view": "pto.partition_view %x_fp32__ssa_v0_view, offsets = [%491, %492], sizes = [%434, %c512_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<?x512xf32>",
+        "tile": "%19"
+      }
+    ],
+    "widen_tail": [
+      {
+        "ir_line": 586,
+        "view": "pto.partition_view %widen_tail__ssa_v0_view, offsets = [%463, %467], sizes = [%c1_index, %c8_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<1x8xf32>",
+        "tile": "%row_sum_inline4__tile"
+      },
+      {
+        "ir_line": 610,
+        "view": "pto.partition_view %widen_tail__ssa_v0_view, offsets = [%472, %477], sizes = [%c1_index, %c8_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<1x8xf32>",
+        "tile": "%9"
+      },
+      {
+        "ir_line": 634,
+        "view": "pto.partition_view %widen_tail__ssa_v0_view, offsets = [%483, %488], sizes = [%c1_index, %c8_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<1x8xf32>",
+        "tile": "%17"
+      },
+      {
+        "ir_line": 658,
+        "view": "pto.partition_view %widen_tail__ssa_v0_view, offsets = [%495, %500], sizes = [%c1_index, %c8_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<1x8xf32>",
+        "tile": "%25"
+      }
+    ],
+    "inv": [
+      {
+        "ir_line": 762,
+        "view": "pto.partition_view %inv__ssa_v0_view, offsets = [%556, %c0_index], sizes = [%c8_index, %c1_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<8x1xf32>",
+        "tile": "%inverse_inline29__tile"
+      }
+    ]
+  },
+  "rms_add_chain": [
+    [
+      "%total_inline33__tile",
+      "%part_inline30__tile",
+      "%28"
+    ],
+    [
+      "%28",
+      "%27",
+      "%29"
+    ]
+  ],
+  "rms_add_carry_same_physical_buffer": true,
+  "rms_32_chunks_two_per_loop_no_reassociation": true,
+  "input_notify_and_rms_acquire_cache_maintenance_present": true,
+  "source_tests": "11 passed: nine numerical source simulations, exhaustive T1..1024 waits/slots, unchanged modules",
+  "device_execution": false,
+  "performance_eligible": false,
+  "limitation": "CPU source simulation and codegen audit; device bit equality and full L1 are still required"
+}

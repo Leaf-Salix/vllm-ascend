@@ -188,11 +188,15 @@ class CSAServiceRuntime(AttentionServiceBase):
         descriptors.append(("hadamard", tensor_descriptor(indexer.hadamard)))
         kv_cache = _build_kv_cache(self.wrapper, context)
         descriptors.append(("kv_cache", tuple(tensor_descriptor(value) for value in kv_cache)))
+        compressed_table = metadata[self.prefixes["compressed"]].decode.block_table
+        if compressed_table is None or compressed_table.ndim != 2:
+            return None
         policy = self._select_policy(
             tokens=tokens,
             requests=indexer.decode.seq_lens.numel(),
             max_query_tokens=MAX_QUERY_TOKENS,
             max_seq_len=indexer.decode.max_seq_lens,
+            compressed_table_columns=compressed_table.shape[1],
         )
         return (tuple(descriptors), policy)
 
@@ -331,6 +335,7 @@ class CSAServiceRuntime(AttentionServiceBase):
             requests=requests,
             max_query_tokens=MAX_QUERY_TOKENS,
             max_seq_len=maximum,
+            compressed_table_columns=native["cmp_block_table"].shape[1],
         )
         key = (_descriptor_key(native), policy)
         if key not in self._bindings:

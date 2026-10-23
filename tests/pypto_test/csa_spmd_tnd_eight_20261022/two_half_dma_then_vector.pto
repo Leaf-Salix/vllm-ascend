@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: Apache-2.0
+// CPU-only valid-index probe: two 32-row chunks, a reused DMA tile, later V work.
+// A production path would require a per-invocation validity proof and fallback.
+!idx = !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!rows = !pto.tile_buf<loc=vec, dtype=bf16, rows=32, cols=512, v_row=32, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!row = !pto.tile_buf<loc=vec, dtype=bf16, rows=1, cols=512, v_row=1, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!work = !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!idx_gm = !pto.partition_tensor_view<1x64xi32>
+!table_view = !pto.tensor_view<256x512xbf16>
+!row_gm = !pto.partition_tensor_view<1x512xbf16>
+!rows_gm = !pto.partition_tensor_view<32x512xbf16>
+!out_view = !pto.tensor_view<64x512xbf16>
+!work_gm = !pto.partition_tensor_view<1x64xf32>
+
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @two_half_dma_then_vector(
+      %table: !table_view, %indices: !idx_gm, %input: !work_gm,
+      %out_work: !work_gm, %out_rows: !out_view)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %a0 = arith.constant 0 : i64
+    %a256 = arith.constant 256 : i64
+    %a33024 = arith.constant 33024 : i64
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %two = arith.constant 2 : index
+    %thirtytwo = arith.constant 32 : index
+    %width = arith.constant 512 : index
+    %addend = arith.constant 1.0 : f32
+    %idx = pto.alloc_tile addr = %a0 : !idx
+    %rows = pto.alloc_tile addr = %a256 : !rows
+    %work = pto.alloc_tile addr = %a33024 : !work
+    pto.tload ins(%input : !work_gm) outs(%work : !work)
+    pto.tload ins(%indices : !idx_gm) outs(%idx : !idx)
+    scf.for %half = %zero to %two step %one {
+      %first = arith.muli %half, %thirtytwo : index
+      scf.for %r = %zero to %thirtytwo step %one {
+        %column = arith.addi %first, %r : index
+        %physical_i32 = pto.tgetval ins(%idx, %column : !idx, index) outs : i32
+        %physical = arith.index_cast %physical_i32 : i32 to index
+        %src = pto.partition_view %table, offsets = [%physical, %zero], sizes = [%one, %width] : !table_view -> !row_gm
+        %dst = pto.subview %rows[%r, %zero] sizes [1, 512] valid [%one, %width] : !rows -> !row
+        pto.tload ins(%src : !row_gm) outs(%dst : !row)
+      }
+      %out_half = pto.partition_view %out_rows, offsets = [%first, %zero], sizes = [%thirtytwo, %width] : !out_view -> !rows_gm
+      pto.tstore ins(%rows : !rows) outs(%out_half : !rows_gm)
+    }
+    pto.tadds ins(%work, %addend : !work, f32) outs(%work : !work)
+    pto.tstore ins(%work : !work) outs(%out_work : !work_gm)
+    return
+  }
+}

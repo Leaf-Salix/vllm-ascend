@@ -1,0 +1,88 @@
+{
+  "measured": false,
+  "performance_eligible": false,
+  "source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/attention_stream_stages.py",
+  "source_sha256": "4db13c2ea969189d35554dc9b4500323ec2edb586805e33f474cc8c8cd20b42d",
+  "constants": {
+    "H": 64,
+    "HEAD_DIM": 512,
+    "ATTN_K_TILE": 128,
+    "SPARSE_BLOCKS": 5,
+    "QK_TRANSFER_SLOTS": 3
+  },
+  "assumptions": [
+    "All capacity queries active, all five sparse blocks valid and each contains 128 valid KV rows",
+    "Count semantic tensor payload at each named interface; ignore DMA padding and extra implementation copies",
+    "QK and PV reuse the existing L1 KV tile; do not count a second KV GM-to-L1 load"
+  ],
+  "limitations": [
+    "These are logical interface bytes, not measured HBM bytes or DRAM bandwidth",
+    "L2 can serve repeated ring accesses; adding interfaces counts repeated traversal of the same payload",
+    "Invalid masks/rows reduce actual traffic; mi/li, metadata, scalar reads and query preparation are excluded",
+    "No speedup is inferred by dividing these bytes by a nominal bandwidth"
+  ],
+  "cases": {
+    "C04": {
+      "tokens": 96,
+      "channels_bytes": {
+        "kv_cache_to_vector": 62914560,
+        "kv_vector_to_gm_ring": 62914560,
+        "kv_gm_ring_to_cube_l1": 62914560,
+        "score_cube_fix_to_gm": 15728640,
+        "score_gm_to_vector": 15728640,
+        "probability_vector_to_gm": 7864320,
+        "probability_gm_to_cube_l1": 7864320,
+        "pv_cube_fix_to_gm": 62914560,
+        "pv_gm_to_vector": 62914560,
+        "query_gm_to_cube_l1": 6291456,
+        "packed_output_to_gm": 6291456
+      },
+      "channels_mib": {
+        "kv_cache_to_vector": 60.0,
+        "kv_vector_to_gm_ring": 60.0,
+        "kv_gm_ring_to_cube_l1": 60.0,
+        "score_cube_fix_to_gm": 15.0,
+        "score_gm_to_vector": 15.0,
+        "probability_vector_to_gm": 7.5,
+        "probability_gm_to_cube_l1": 7.5,
+        "pv_cube_fix_to_gm": 60.0,
+        "pv_gm_to_vector": 60.0,
+        "query_gm_to_cube_l1": 6.0,
+        "packed_output_to_gm": 6.0
+      },
+      "total_interface_mib": 357.0,
+      "compressed_row_gather_count": 49152
+    },
+    "C05": {
+      "tokens": 144,
+      "channels_bytes": {
+        "kv_cache_to_vector": 94371840,
+        "kv_vector_to_gm_ring": 94371840,
+        "kv_gm_ring_to_cube_l1": 94371840,
+        "score_cube_fix_to_gm": 23592960,
+        "score_gm_to_vector": 23592960,
+        "probability_vector_to_gm": 11796480,
+        "probability_gm_to_cube_l1": 11796480,
+        "pv_cube_fix_to_gm": 94371840,
+        "pv_gm_to_vector": 94371840,
+        "query_gm_to_cube_l1": 9437184,
+        "packed_output_to_gm": 9437184
+      },
+      "channels_mib": {
+        "kv_cache_to_vector": 90.0,
+        "kv_vector_to_gm_ring": 90.0,
+        "kv_gm_ring_to_cube_l1": 90.0,
+        "score_cube_fix_to_gm": 22.5,
+        "score_gm_to_vector": 22.5,
+        "probability_vector_to_gm": 11.25,
+        "probability_gm_to_cube_l1": 11.25,
+        "pv_cube_fix_to_gm": 90.0,
+        "pv_gm_to_vector": 90.0,
+        "query_gm_to_cube_l1": 9.0,
+        "packed_output_to_gm": 9.0
+      },
+      "total_interface_mib": 535.5,
+      "compressed_row_gather_count": 73728
+    }
+  }
+}

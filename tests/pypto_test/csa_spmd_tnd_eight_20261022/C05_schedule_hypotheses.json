@@ -1,0 +1,72 @@
+{
+  "case": "C05",
+  "source": "baseline_C05_phase_sdk_v1.json",
+  "performance_eligible": false,
+  "observations": {
+    "kv_score_late_aic": [
+      [
+        4,
+        6,
+        7,
+        5
+      ],
+      [
+        6,
+        4,
+        5,
+        7
+      ],
+      [
+        4,
+        6,
+        5,
+        7
+      ]
+    ],
+    "output_late_aic": [
+      [
+        9,
+        3,
+        10,
+        2
+      ],
+      [
+        2,
+        9,
+        8,
+        10
+      ],
+      [
+        3,
+        11,
+        2,
+        9
+      ]
+    ],
+    "score_row_step_max_over_mean": 1.0
+  },
+  "hypotheses": [
+    {
+      "name": "defer_kv_v1",
+      "implemented": true,
+      "task_id": "task_20261022_211820_67056725661",
+      "purpose": "Move independent original-KV behind local Score drain; attempt overlap with Vector tail"
+    },
+    {
+      "name": "rotate_kv_owners",
+      "implemented": false,
+      "idea": "Assign existing KV logical ranks to earlier prefix AICs, preserving bijection and wait on all 24 physical producers",
+      "candidate_shift": 16,
+      "current_shift": 4,
+      "risk": "Other token tiers have different nonempty KV ranks; validate whole dynamic domain"
+    },
+    {
+      "name": "balance_output_tail",
+      "implemented": false,
+      "idea": "For one full M128 plus short tail, account for unequal O_A row costs when distributing independent O_B jobs",
+      "evidence": "Late OB cores 0..3 and 8..11 also own full-row O_A jobs; equal job counts do not imply equal work",
+      "candidate_transfer": "Consider moving 8 original O_B jobs from heavy full-row owners to 20..23; no mathematical or leaf-tree change",
+      "risk": "Must preserve complete job cover, per-group quant dependencies and final output visibility; not yet implemented or measured"
+    }
+  ]
+}

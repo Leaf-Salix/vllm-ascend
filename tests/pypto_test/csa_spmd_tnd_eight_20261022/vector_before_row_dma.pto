@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: Apache-2.0
+// CPU-only scheduling probe; valid indices are a caller precondition.
+// Distinct live allocations: indices [0,256), rows [256,65792), work [65792,66048).
+!idx = !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!rows = !pto.tile_buf<loc=vec, dtype=bf16, rows=64, cols=512, v_row=64, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!row = !pto.tile_buf<loc=vec, dtype=bf16, rows=1, cols=512, v_row=1, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!work = !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!idx_gm = !pto.partition_tensor_view<1x64xi32>
+!table_view = !pto.tensor_view<256x512xbf16>
+!row_gm = !pto.partition_tensor_view<1x512xbf16>
+!rows_gm = !pto.partition_tensor_view<64x512xbf16>
+!work_gm = !pto.partition_tensor_view<1x64xf32>
+
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @vector_before_explicit_row_dma(
+      %table: !table_view, %indices: !idx_gm, %input: !work_gm,
+      %out_work: !work_gm, %out_rows: !rows_gm)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %a0 = arith.constant 0 : i64
+    %a256 = arith.constant 256 : i64
+    %a65792 = arith.constant 65792 : i64
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %sixtyfour = arith.constant 64 : index
+    %width = arith.constant 512 : index
+    %addend = arith.constant 1.0 : f32
+    %idx = pto.alloc_tile addr = %a0 : !idx
+    %rows = pto.alloc_tile addr = %a256 : !rows
+    %work = pto.alloc_tile addr = %a65792 : !work
+    pto.tload ins(%input : !work_gm) outs(%work : !work)
+    pto.tload ins(%indices : !idx_gm) outs(%idx : !idx)
+    pto.tadds ins(%work, %addend : !work, f32) outs(%work : !work)
+    scf.for %r = %zero to %sixtyfour step %one {
+      %physical_i32 = pto.tgetval ins(%idx, %r : !idx, index) outs : i32
+      %physical = arith.index_cast %physical_i32 : i32 to index
+      %src = pto.partition_view %table, offsets = [%physical, %zero], sizes = [%one, %width] : !table_view -> !row_gm
+      %dst = pto.subview %rows[%r, %zero] sizes [1, 512] valid [%one, %width] : !rows -> !row
+      pto.tload ins(%src : !row_gm) outs(%dst : !row)
+    }
+    pto.tstore ins(%work : !work) outs(%out_work : !work_gm)
+    pto.tstore ins(%rows : !rows) outs(%out_rows : !rows_gm)
+    return
+  }
+}

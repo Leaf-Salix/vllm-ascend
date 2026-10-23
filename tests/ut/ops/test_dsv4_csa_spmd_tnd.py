@@ -33,9 +33,7 @@ from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.service_config import 
 )
 def test_output_balance_capacity_domains(tokens, requests, max_query, length, expected):
     """The adopted ownership change is confined to its validated resource domains."""
-    policy = select_policy(
-        tokens=tokens, requests=requests, max_query_tokens=max_query, max_seq_len=length
-    )
+    policy = select_policy(tokens=tokens, requests=requests, max_query_tokens=max_query, max_seq_len=length)
     assert policy.output_work_balance is expected
     assert policy.constexprs()["OUTPUT_WORK_BALANCE"] is expected
 
@@ -76,11 +74,11 @@ def test_borrowed_score_optimization_domains(tokens, requests, max_query, length
 @pytest.mark.parametrize(
     "tokens,requests,max_query,length,wide_n,branch_groups",
     [
-        (1, 1, 1, 131073, True, 2),
-        (6, 1, 6, 131078, True, 2),
-        (8, 2, 6, 131078, True, 2),
-        (9, 2, 6, 131078, True, 4),
-        (23, 4, 6, 131078, True, 4),
+        (1, 1, 1, 131073, False, 4),
+        (6, 1, 6, 131078, False, 4),
+        (8, 2, 6, 131078, False, 4),
+        (9, 2, 6, 131078, False, 4),
+        (23, 4, 6, 131078, False, 4),
         (24, 4, 6, 131078, False, 4),
         (31, 6, 6, 131078, False, 4),
         (32, 6, 6, 131078, True, 4),
@@ -96,12 +94,91 @@ def test_borrowed_score_optimization_domains(tokens, requests, max_query, length
     ],
 )
 def test_qb_width_and_prefix_resource_boundaries(tokens, requests, max_query, length, wide_n, branch_groups):
-    """Preserve the measured negative QA domain and the two-Hadamard work bound."""
+    """Preserve the frozen baseline's long-G6 wide-N tier and four prefix producers."""
     policy = select_policy(tokens=tokens, requests=requests, max_query_tokens=max_query, max_seq_len=length)
     assert policy.qb_wide_n is wide_n
     assert policy.prefix_branch_groups == branch_groups
     assert policy.constexprs()["QB_WIDE_N"] is wide_n
     assert policy.constexprs()["PREFIX_BRANCH_GROUPS"] == branch_groups
+
+
+@pytest.mark.parametrize(
+    "tokens,requests,max_query,length,leaf,coalescing",
+    [
+        (6, 1, 6, 131078, False, False),
+        (24, 4, 6, 131078, False, True),
+        (48, 8, 6, 131078, False, False),
+        (56, 17, 6, 131078, False, False),
+        (63, 16, 6, 131078, False, False),
+        (64, 16, 6, 131078, True, True),
+        (80, 16, 6, 131078, True, True),
+        (96, 16, 6, 131078, True, True),
+        (97, 17, 6, 131078, False, True),
+        (144, 24, 6, 131078, False, True),
+        (96, 16, 6, 196608, True, True),
+        (96, 16, 6, 196612, False, False),
+        (96, 16, 6, 262150, False, False),
+        (96, 20, 5, 131077, False, False),
+        (96, 16, 6, 8198, False, False),
+    ],
+)
+def test_leaf_scale_layout_resource_and_history_bounds(tokens, requests, max_query, length, leaf, coalescing):
+    policy = select_policy(tokens=tokens, requests=requests, max_query_tokens=max_query, max_seq_len=length)
+    assert policy.leaf_scale_layout is leaf
+    assert policy.constexprs()["LEAF_SCALE_LAYOUT"] is leaf
+    assert policy.scale_page_coalescing is coalescing
+
+
+@pytest.mark.parametrize(
+    "tokens,requests,max_query,length,enabled,rows",
+    [
+        (1, 1, 6, 131078, False, 128),
+        (64, 16, 6, 131078, False, 128),
+        (96, 16, 6, 131078, False, 128),
+        (128, 24, 6, 131078, False, 128),
+        (129, 24, 6, 131078, True, 192),
+        (144, 24, 6, 131078, True, 192),
+        (168, 28, 6, 131078, True, 192),
+        (192, 32, 6, 131078, True, 192),
+        (193, 33, 6, 131078, False, 128),
+        (256, 43, 6, 131078, False, 128),
+        (144, 29, 5, 131077, False, 192),
+        (144, 144, 1, 131073, False, 192),
+        (144, 24, 6, 32771, False, 192),
+        (144, 24, 6, 32772, True, 192),
+        (168, 28, 6, 8198, False, 192),
+        (192, 32, 6, 8198, False, 192),
+        (168, 28, 6, 262150, True, 192),
+    ],
+)
+def test_joint_prefix_uses_only_long_g6_single_m192_domain(tokens, requests, max_query, length, enabled, rows):
+    """Keep the measured B16/short-history regressions outside the joint prefix."""
+    policy = select_policy(tokens=tokens, requests=requests, max_query_tokens=max_query, max_seq_len=length)
+    assert policy.joint_bf16_prefix is enabled
+    assert policy.prefix_projection_rows == rows
+    assert policy.constexprs()["JOINT_BF16_PREFIX"] is enabled
+    assert policy.constexprs()["PREFIX_PROJECTION_ROWS"] == rows
+    assert not (policy.joint_bf16_prefix and policy.score_group_order)
+
+
+@pytest.mark.parametrize("tokens", [6, 56, 96])
+@pytest.mark.parametrize("columns", [None, 1, 2048, 2049, 2050, 2080, 2081, 4096])
+def test_physical_plan_capacity_uses_allocated_table_width(tokens, columns):
+    descriptors = dict(tokens=tokens, requests=16, max_query_tokens=6, max_seq_len=262150)
+    selected = select_policy(**descriptors, compressed_table_columns=columns)
+    default = select_policy(**descriptors)
+    expected = 2080 if tokens >= 64 and columns is not None and 2048 < columns <= 2080 else 2048
+    assert selected.plan_table_columns == expected
+    selected_values, default_values = selected.constexprs(), default.constexprs()
+    assert selected_values.pop("PLAN_TABLE_COLUMNS") == expected
+    assert default_values.pop("PLAN_TABLE_COLUMNS") == 2048
+    assert selected_values == default_values
+
+
+@pytest.mark.parametrize("columns", [True, 0, -1, 2050.0])
+def test_physical_plan_capacity_rejects_invalid_descriptors(columns):
+    with pytest.raises(ValueError, match="compressed_table_columns"):
+        select_policy(tokens=96, requests=16, max_query_tokens=6, max_seq_len=262150, compressed_table_columns=columns)
 
 
 def native_case():
@@ -555,3 +632,26 @@ def test_tnd_runner_preserves_framework_mixed_graph_choice(monkeypatch, history,
     else:
         assert mode == CUDAGraphMode.NONE and descriptor.num_tokens == 9
         dispatch.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "tokens,requests,max_query,length,compiled",
+    [
+        (31, 16, 6, 131078, False),
+        (32, 16, 6, 131078, True),
+        (48, 8, 6, 131078, False),
+        (48, 16, 6, 131078, True),
+        (56, 16, 6, 131078, True),
+        (63, 16, 6, 131078, True),
+        (64, 16, 6, 131078, False),
+        (96, 16, 6, 131078, False),
+        (56, 16, 5, 131077, False),
+        (56, 16, 6, 8198, False),
+        (6, 1, 6, 131078, False),
+    ],
+)
+def test_score_group_order_compile_domain(tokens, requests, max_query, length, compiled):
+    """Host selects code; actual group count, live rows and history remain device-side."""
+    policy = select_policy(tokens=tokens, requests=requests, max_query_tokens=max_query, max_seq_len=length)
+    assert policy.score_group_order is compiled
+    assert policy.constexprs()["SCORE_GROUP_ORDER"] is compiled

@@ -1,0 +1,33 @@
+{
+  "number": 3114,
+  "state": "OPEN",
+  "title": "[Pass Bug] Simplify folds unreachable integer division before pruning the false branch",
+  "url": "https://github.com/hw-native-sys/pypto/issues/3114",
+  "repo": "hw-native-sys/pypto",
+  "reported_commit": "26e94e05627eb47710dcc214bae1774b8829df8a",
+  "repro_source": "repro_unreachable_floor_div.py",
+  "raw_repro_log": "runs/repro_unreachable_floor_div_attribution.log",
+  "device_execution": false,
+  "reproduction": {
+    "device_execution": false,
+    "cases": {
+      "guarded_zero": {
+        "passed": false,
+        "stage": "Simplify",
+        "error": "Floor division by zero\nCheck failed: c.pb->value_ != 0 at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-shared-20261022/include/pypto/ir/arith/const_fold.h:218"
+      },
+      "safe_divisor": {
+        "passed": true,
+        "simplified": "# pypto.program: SafeDivisor\nimport pypto.language as pl\n\n\n@pl.program\nclass SafeDivisor:\n    @pl.function\n    def main(self, query: pl.Scalar[pl.INDEX]) -> pl.Scalar[pl.INDEX]:\n        owner_inline1: pl.Scalar[pl.INDEX] = -1\n        owner_inline1: pl.Scalar[pl.INDEX] = 0\n        owner: pl.Scalar[pl.INDEX] = owner_inline1\n        return owner"
+      }
+    }
+  },
+  "body_sha256": "46021db45d73e5fde4423b8f89cf6d8dbdadb3a99c80af481ade84a0ab61fe83",
+  "duplicate_search": [
+    "exact Floor division by zero",
+    "unreachable division",
+    "constant folding",
+    "zero Simplify"
+  ],
+  "submission_note": "Initial call rejected missing ir-pass label before issue creation; verified no matching issue, then submitted without labels"
+}

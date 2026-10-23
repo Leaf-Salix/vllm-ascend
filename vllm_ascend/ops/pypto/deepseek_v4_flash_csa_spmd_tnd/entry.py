@@ -43,7 +43,8 @@
     编排内部建立，避免作为独立外部参数触发部分重叠别名检查；不复制数据。业务
     写回发生后先发布、读方等待后才用别名，不能单凭Python对象别名假设可见。
     group_offsets至少pad16(pad16(B+1)+4*T)+48+4*T个INT32；
-    SCALE_PAGE_COALESCING启用时尾部另加2*B项，关闭时保留原容量。
+    SCALE_PAGE_COALESCING启用时尾部另加2*B项，关闭时保留原容量；
+    LEAF_SCALE_LAYOUT仍保留这块尾区容量，但不读写META证明。
     依次为前缀/组描述符/scale页writer链表头/合法关闭行地址/连续页布局；
     最后每请求两项(first_page,direction)由META唯一writer覆盖后发布，
     balanced Score复用证明；方向0保留原逐页读取，旧分区偏移均不变化。
@@ -68,6 +69,7 @@
 
 import pypto.language as pl
 
+from .attention_plan_stages import PHYSICAL_PLAN_COLUMNS
 from .cube_schedule import cube_schedule
 from .qkv_stages import BF16_WEIGHT_LAYOUT
 from .query_projection_stages import QUANT_WEIGHT_LAYOUT
@@ -277,6 +279,7 @@ def _csa_core_group(
     BALANCED: pl.constexpr,
     ROOTS: pl.constexpr,
     OA_COLS: pl.constexpr,
+    OA_ROWS: pl.constexpr,
     OB_ROWS: pl.constexpr,
     OUTPUT_GROUP_PIPELINE: pl.constexpr,
     HC_ROW_DEPENDENCIES: pl.constexpr,
@@ -287,6 +290,7 @@ def _csa_core_group(
     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
     SCALE_PAGE_COALESCING: pl.constexpr = False,
+    LEAF_SCALE_LAYOUT: pl.constexpr = False,
     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
     SPLIT_SCORE_ROWS: pl.constexpr = False,
     OUTPUT_WORK_BALANCE: pl.constexpr = False,
@@ -294,6 +298,10 @@ def _csa_core_group(
     SHORT_TOPK_PREFIX: pl.constexpr = False,
     QB_WIDE_N: pl.constexpr = False,
     PREFIX_BRANCH_GROUPS: pl.constexpr = 4,
+    JOINT_BF16_PREFIX: pl.constexpr = False,
+    PREFIX_PROJECTION_ROWS: pl.constexpr = 128,
+    SCORE_GROUP_ORDER: pl.constexpr = False,
+    PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
 ):
     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
     with pl.cluster(name_hint="dynamic_csa_full"):
@@ -381,6 +389,7 @@ def _csa_core_group(
             BALANCED,
             ROOTS,
             OA_COLS,
+            OA_ROWS,
             OB_ROWS,
             OUTPUT_GROUP_PIPELINE,
             HC_ROW_DEPENDENCIES,
@@ -390,6 +399,9 @@ def _csa_core_group(
             OUTPUT_WORK_BALANCE,
             QB_WIDE_N,
             PREFIX_BRANCH_GROUPS,
+            JOINT_BF16_PREFIX,
+            PREFIX_PROJECTION_ROWS,
+            SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
         )
         (
             x_fp32,
@@ -576,6 +588,7 @@ def _csa_core_group(
             BALANCED,
             ROOTS,
             OA_COLS,
+            OA_ROWS,
             OB_ROWS,
             OUTPUT_GROUP_PIPELINE,
             HC_ROW_DEPENDENCIES,
@@ -586,9 +599,12 @@ def _csa_core_group(
             EARLY_ATTENTION_GEOMETRY,
             LOCAL_ATTENTION_STATS,
             SCALE_PAGE_COALESCING,
+            LEAF_SCALE_LAYOUT,
             PLAN_PHYSICAL_ROWS,
             SHORT_HALF_SCORE_UB,
             SHORT_TOPK_PREFIX,
+            SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
+            PLAN_TABLE_COLUMNS=PLAN_TABLE_COLUMNS,
         )
     return (
         x_fp32,
@@ -811,6 +827,7 @@ def decode_csa_spmd(
     BALANCED: pl.constexpr,
     ROOTS: pl.constexpr,
     OA_COLS: pl.constexpr,
+    OA_ROWS: pl.constexpr,
     OB_ROWS: pl.constexpr,
     OUTPUT_GROUP_PIPELINE: pl.constexpr,
     HC_ROW_DEPENDENCIES: pl.constexpr,
@@ -821,6 +838,7 @@ def decode_csa_spmd(
     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
     SCALE_PAGE_COALESCING: pl.constexpr = False,
+    LEAF_SCALE_LAYOUT: pl.constexpr = False,
     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
     SPLIT_SCORE_ROWS: pl.constexpr = False,
     OUTPUT_WORK_BALANCE: pl.constexpr = False,
@@ -828,6 +846,10 @@ def decode_csa_spmd(
     SHORT_TOPK_PREFIX: pl.constexpr = False,
     QB_WIDE_N: pl.constexpr = False,
     PREFIX_BRANCH_GROUPS: pl.constexpr = 4,
+    JOINT_BF16_PREFIX: pl.constexpr = False,
+    PREFIX_PROJECTION_ROWS: pl.constexpr = 128,
+    SCORE_GROUP_ORDER: pl.constexpr = False,
+    PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
 ):
     # Native cache只作为一个根入参传入。两份Key是编排内的零拷贝描述符，
     # 避免把“可写cache+部分重叠只读视图”当作独立外部入参触发Torch别名拒绝。
@@ -1065,6 +1087,7 @@ def decode_csa_spmd(
             BALANCED,
             ROOTS,
             OA_COLS,
+            OA_ROWS,
             OB_ROWS,
             OUTPUT_GROUP_PIPELINE,
             HC_ROW_DEPENDENCIES,
@@ -1075,6 +1098,7 @@ def decode_csa_spmd(
             EARLY_ATTENTION_GEOMETRY,
             LOCAL_ATTENTION_STATS,
             SCALE_PAGE_COALESCING,
+            LEAF_SCALE_LAYOUT,
             PLAN_PHYSICAL_ROWS,
             SPLIT_SCORE_ROWS,
             OUTPUT_WORK_BALANCE,
@@ -1082,6 +1106,10 @@ def decode_csa_spmd(
             SHORT_TOPK_PREFIX,
             QB_WIDE_N,
             PREFIX_BRANCH_GROUPS,
+            JOINT_BF16_PREFIX,
+            PREFIX_PROJECTION_ROWS,
+            SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
+            PLAN_TABLE_COLUMNS=PLAN_TABLE_COLUMNS,
         )
     return (
         x_fp32,

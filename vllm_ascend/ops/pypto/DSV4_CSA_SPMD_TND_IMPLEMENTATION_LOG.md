@@ -13,10 +13,12 @@
 - [v122 之后的九档优化目标：原始计划与约束](#csa-tnd-next-10pct-goal-20261022)
 - [v122 之后的九档优化过程：截至暂停的全部记录](#csa-tnd-next-10pct-log-20261022)
 - [后续性能测试规范：八档、六列、至少十个有效窗口](CSA_PERFORMANCE_TEST_SPEC.md)
+- [新八档核内与核间优化目标及执行记录](#csa-tnd-eight-case-10pct-20261022)
 
-当前优化 Goal 仍为 **paused**，没有待收取设备/CPU 任务；九档 10% 目标尚未达成。
+旧九档优化 Goal 已结束追踪，九档 10% 目标没有达成。用户随后建立了新的八档
+核内与核间优化 Goal，目前为 **active**；其冻结基线与进度见上面的新八档入口。
 下文的 active、pending、未授权 push 等描述是各条记录形成时的状态，按时间顺序阅读。
-本次文档归并及用户授权的累积提交推送不恢复优化，也不将历史五窗口结果改标为
+此前文档归并及用户授权的累积提交推送未恢复当时的优化，也未将历史五窗口结果改标为
 新规范要求的十窗口结果。新八档测试规范与旧九档优化验收分别保留其口径。
 
 ## 本轮目标与边界
@@ -3441,3 +3443,2117 @@ v5设备任务，不用CPU等价冒充它完成了九档验收。所有本会话
 无CPU或设备pending。Goal保持paused，G<=0.90仍未达成；生产默认未变。
 按用户“本次尝试做完就停下”的指令结束本轮，不自动恢复或扩大优化。
 本地阶段提交后停止，没有push。
+
+<a id="csa-tnd-eight-case-10pct-20261022"></a>
+
+## 2026-10-22：新八档核内与核间优化，固定现有已验证基线
+
+用户清除了旧 Goal，建立新目标：参考 cannbot-knowledge 的 ops 做核内优化，
+分析各 task 均衡性做核间调度优化，性能测试按 CSA_PERFORMANCE_TEST_SPEC.md，
+在现有基础上提升 10%。随后明确继续优化 **TND-SPMD**，八档等权几何平均耗时
+降低至少 10%；这是本轮验收定义，不是每档必须分别降低 10%。
+
+```text
+r_i = candidate_TND_SPMD_L1_median_i / frozen_combined_v1_L1_median_i
+G = exp(sum(log(r_i), i=1..8) / 8)
+目标：G <= 0.90
+```
+
+正式性能展示保持规范规定的八行、六种计时和 Native 相对 TND-SPMD 的百分比，
+不增加几何平均行；G 作为优化目标的内部验收字段保存。各格至少 10 个有效窗口，
+保留全部样本，混长两列 BSH 为 N/A。原九档/v122 分母和已归档结果不改写。
+保持正式第 4 层 W8A8/NZ2、BF16、TP1、完整 HC_pre/RMSNorm/CSA/HC_post，
+动态 Q/L、Native 分页和 cache/state 合同继续有效，原 Native 差异单列。
+
+### 同步、来源和历史数据复用
+
+本 worktree 从已发布的 `2b670ca8d` 快进到 `67134f28b`，取得另外会话刚完成的
+`tests/pypto_test/csa_performance_20261022/` 八档六列数据，没有改写远端成果。
+新目标没有授权继续 push；后续按阶段本地提交。公共 SDK 仍为已验证的
+`csa-shared-20261021-upstream-fixes`，没有修改或重建它。
+
+本轮实验目录为 `tests/pypto_test/csa_spmd_tnd_eight_20261022/`。
+逐格审查现有结果后，选用已完成全部八档测量的 **combined_v1**，不使用更慢的
+v122 或仅 CPU 通过的 combined_v5 作性能分母。`freeze_baseline.py` 完成：
+
+- 核对全部六列已填格的样本数和中位数；只对明确不支持的混长 BSH 格接受 N/A。
+- 从八份完整结果和 80 份原始 L1 重新计算 TND-SPMD 跨度，逐窗确认 72 核、
+  一个 MIX task、incore 首尾和完整记录，并与全部保存样本逐项匹配。
+- 验证实际设备测量冻结包的 41 个模块与 combined_v1 清单一致。
+- 固定 `baseline.json`、完整 Git revision 和必要的六份 `.py.source` 覆盖文件；
+  `materialize_baseline.py` 已从这些永久材料重建出逐字相同的基线。
+
+八档已有 TND-SPMD 中位数依次为 355.01、971.61、617.39、773.83、1012.17、
+1158.70、924.00、750.79 μs。原始未舍入值、全部样本和来源保存在 baseline.json。
+本次未重测这些合格历史值；后续对照检查可以执行冻结基线获取正确性输出，
+但不能用另一次更慢的基线测量替换本轮固定性能分母。
+
+### 核间分析与核内候选的依据
+
+`analyze_balance.py` 只读现有原始 L1，复用另一会话按同次编排提交序号命名 task
+的解析器。`baseline_balance.json` 保留十个窗口的 MPMD 原始 L1 索引与核间统计，
+以及 SPMD 全核尾部统计；逐核区间仍保存在对应原始记录。B1 的中间链 AIC
+最大/平均耗时中位数约 1.89，混长约 1.08；
+多数等长大档接近 1.01。它们包含等待和空角色，不是计算利用率，不能据此断言
+已经算力均衡，也不能把 MPMD 的阶段耗时直接移植为 SPMD 内部阶段耗时。
+继续结合真实 owner 公式、每核工作量及必要的阶段端点定位可改善的尾部。
+
+知识查询 `discover` 确认 `artifacts/indexes/knowledge.sqlite3` 缺失，退出码 2。
+依 `knowledge-query/SKILL.md` 停止索引检索，不扫描全库兜底、不修改知识库或
+自行伪造 ready/outcome。只读已定位的 ops 卡片：
+
+- `guides/synchronization/resident_softmax_state_slot_recurrence_and_reuse_events.md`：
+  draft、未定位平台；作为保持最后消费者与复用顺序的工程提醒，不认证其示例。
+- `guides/synchronization/attention_schedule_slots_and_platform_handoffs.md`：
+  draft、未定位平台；保持参与者、事件数、空块和排空协议，不移植 950 专用路径。
+- `guides/operator_practice/simd_operator_optimization/memory_access/l2_cache_mode_config.md`：
+  draft，正文说明 A3 适用；区分带宽和缓存替换，不能无 PMU 证据认定缓存瓶颈。
+- `apis/simd_api/basic_api/memory_vector_compute/sort_and_merge_isasi/sort32.md`：
+  stable、明确 A3；保留局部同分顺序和既有归并树，不以近似 TopK 改写正确性边界。
+
+以上路径均相对 `cannbot-knowledge/knowledge/ops/ascendc/`。同时读取当前公共
+PyPTO 的 mgather、reinterpret_view、cmp/sels 接口实现，作为候选的实际接口依据。
+这些阅读不构成已取得设备收益的证据。
+
+首个独立候选针对 Score AIV 的 Native scale 页读取：原通用路径对每个 1024 候选
+块执行 32 次 Scalar 页址及边界处理；候选用 Tile 一次计算页号、显式屏蔽非法页，
+再读取相同的 64B scale 行。Native cache 仍是唯一外部根，在编排内建立只读别名，
+无 Host 数据搬运。连续页快速分支、Score/FIFO/ACK/排空、浮点运算及 TopK 树保持。
+非 64B page stride 或 INT32 索引范围外保留原逐页回退。
+
+21 组 CPU 检查执行真实 helper 的算子逻辑，对照原逐字节读取，覆盖正/逆序与碎片页、
+负页/越界/INT32 极大值、空表、31/32/33 页边界、重复尾页和三种 page stride，全部通过。
+这只证明地址与字节合同，不代替设备代码、缓存协议和性能验证。
+
+首版完整编译在 JIT 的 Tensor dtype/view 元数据推导处失败；第二版改为 INT8
+64B 行别名，进入主体解析后发现分支 Tile 的 pad 类型不一致。第三版保持完整有效区，
+显式携带 zero-pad 类型后重新编译。三个尝试均单独保存源码和结果，不改公共 SDK，
+当前尚无该候选的设备性能结论。结果和后续取舍在此入口继续追加。
+
+### 16:48：Scale 批量读取完成代码生成，首个十窗口任务已排队
+
+第三版已通过主体解析，但 PTOAS 指出 A2/A3 TSELS 的 tmp 必须与 src/dst 同 dtype，
+且至少容纳一整行。已读取公共 PTOAS `PTOScatterAndSelect.cpp` 的实际检查，
+第四版改用 INT32 的完整索引行 scratch，保持原候选地址逻辑。
+`compile_scale_gather_C04_v4/result.json` 确认 parse/full_codegen 均通过。
+
+`scale_gather_v4_codegen.json` 从实际分配后 IR 与 C++ 核对：页表使用
+`MGATHER<Coalesce::Elem, GatherOOB::Zero>`，scale 行使用
+`MGATHER<Coalesce::Row, GatherOOB::Zero>`，三个 TSELS 屏蔽非法地址；
+外部 kernel ABI 与原八档实测基线完全一致。UB 地址上界 180224B，Mat 475136B，
+Left/Right 各 65536B，Acc 131072B，均在既有空间容量内。只读别名没有增加外部
+cache 根或搬运任务。首次审计误按 `TMGATHER` 拼写查 C++ 而失败，修正为实际
+生成的 `MGATHER` 名称；没有放松指令变体、地址类型或空间边界检查。
+
+复用原八档 fixture/scale 构造和 L1 导出代码，生成独立测量器：
+冻结参考用于 eager、图重放精确比较及交替重放，但不重新采集其性能；候选采集
+10 个完整窗口，固定历史中位数仍是唯一性能分母。最终输出/TopK/score 和
+cache/state 对冻结参考逐字节比较，Native 原有差异保持原状。
+CPU 执行生成后的实际采样循环，确认十次 reference 重放不进入 DFX，候选有十次
+成对 begin/end，每次只测一次图重放，原始记录目录互不覆盖。与地址检查合计
+22 项通过，Ruff 与 shell 语法检查通过。
+
+首个任务 `task_20261022_164733_203463730090`，指定历史 C04 使用的同一张 8 号卡，
+单卡、最大运行时间 1500 秒，当前观察为 pending。候选源码为
+`runs/scale_gather_v4`，输出 `runs/h131072_b16_s6_scale_gather_v4`。
+本轮尚无已保留的新设备优化，未把编译、CPU 合同或局部工作量变化当成 10% 达标。
+
+### 16:57：修复启动环境缺项，保留失败任务后重提
+
+`task_20261022_164733_203463730090` 已 completed/exit1。日志停在 Native 模板
+OPP 检查，未导入候选、未执行算子。启动器误从本 worktree 定位未构建的 OPP，
+而原八档测量使用主检出的已构建 Native 模板依赖。修为 source 主检出的同一
+`csa_native_template_20260929/env.sh`，CPU shell 路径前检通过；没有重建或改动 OPP。
+
+同一冻结候选重新提交为 `task_20261022_165739_25359074832`，仍指定 8 号卡。
+输出使用新 attempt `runs/h131072_b16_s6_scale_gather_v4_env2`；旧任务及初始化
+失败保存在 jobs.json/current_state.json，不归因于候选算法，不计入性能样本。
+
+### 17:39：Scale 设备失败转微型定位；N128 已完成编译和关键依赖审查
+
+`task_20261022_165739_25359074832` 已 completed/exit1：冻结参考 eager 的输出、
+状态与保护检查通过，候选首次同步报 507015/VEC instruction parameter invalid，
+尚未产生性能窗口。原始 result.json、日志与本任务的 kernel dump 均保留在
+`runs/h131072_b16_s6_scale_gather_v4_env2/`，未把该候选列为保留优化。
+
+直接核对公共 Simpler 所绑定的 PTO-ISA `327cd5869f3a7c4d2c6a1b945b2aed06e7665c5d`
+发现 A2/A3 `TCmps.hpp` 的 INT32 分支实际调用相等比较，不能用于本候选的 GE/LT。
+这是明确的语义缺陷，但尚不能认定它就是 VEC 异常的唯一原因。`MGather.hpp`
+显式支持 INT8，Row/Zero 的非法行以 Scalar 写零；已排除“INT8 清零必然使用
+不支持的向量 duplicate”这一未经证实的假设，没有修改公共 SDK。
+
+helper 改用 FP32 做边界比较，同时保留 INT32 地址及选择。调用端限制容量小于
+2**24，并保留原索引乘法范围检查；新增六组边界证明，包含 INT32 极值及 FP32
+舍入边界，连同地址字节合同和测量循环共 28 项 CPU 检查通过。构造仅含原 helper
+的独立设备诊断，比较碎片/非法/尾页的原始字节，不声称 CSA 性能。
+首个诊断 `task_20261022_173315_40566603033` 在编译期发现 INDEX→FP32 Scalar
+转换不支持，未执行候选 kernel。修为先转 INT32 后转 FP32，CPU meta 全量编译通过，
+冻结到 `runs/scale_probe_v6_source` 后提交 `task_20261022_173811_16954222671`。
+
+第二个独立候选 N128 仅扩展原长历史 G6/SPLIT_SCORE_ROWS 区间：Score N64→N128，
+一个 QK Acc 依次接收两段 K128 点积，WS 的两段 K192 累加顺序及 FP16 舍入不变；
+WS Right 在自身消费前装载，减少共存空间。它与 scale 候选没有叠加。
+v1 超出 L0B（81920>65536B）；v2 改将 Key 下一块只预取至 L1，已完成全量编译。
+`score_n128_single_acc_v2_codegen.json` 检查 UB 180224B、Mat 475136B、
+Left/Right 65536B、Acc 131072B，外部 kernel ABI 与历史 C04 相同；实际 C++
+24 次 QK 写回与复用保留 M→FIX/FIX→M 依赖，8 处 WS Right 复用保留 M→MTE1。
+这只审查关键依赖，不替代设备正确性，也不保证减少 panel 必然胜过新增等待。
+
+v2 的 Host 策略构造错误（dataclass 没有 to_l0 参数）在排队阶段发现，取消尚未执行
+的 `task_20261022_173551_3898926889`。修为在 constexprs 中由已选 split/N128
+生成 TO_L0；冻结 v3。八档及 T30/T36 两边界真实 select_policy CPU 前检通过，
+40 个非 policy 模块与完整 C04 编译描述均与 v2 相同，因此复用其编译审查。
+新任务 `task_20261022_173834_1885489714` 使用历史同卡 8，仅测 C04 的候选十窗口。
+截至此记录仍无本轮已保留的新设备优化，完整八档 10% 目标尚未证明。
+
+17:48 补记：scale 微型 v6 的首个普通页案例逐字节通过；重复尾页案例首行
+64B 不一致，任务 completed/exit1。未扩大到完整 CSA。设备端 TSELS 的 scratch
+含 Scalar 写入，因此另测纯 Vector 的 TSEL 路径，不据此直接宣布根因。
+v7 两次 CPU 前检分别修复 full 参数顺序及显式 Tile 类型，v7r2 全量编译通过，
+提交 `task_20261022_174755_7079965369`。诊断器现在保留每例失败的 actual/
+expected 字节，并汇总五例结果；普通错误不提前丢弃后续案例。N128 v3 当前
+任务 running，沿用原句柄，不重复提交。上述候选均未改生产默认或 push。
+
+### 17:57：N128 性能负例归档；scale 指令链通过微型设备验证
+
+N128 v3 的 C04 任务 completed/exit0，eager、图重放及采样后输出/Top-K/score/
+cache/state 均与冻结参考逐字节相同，全部保护检查通过。十个有效窗口均为
+72 核、一个 MIX task；中位数 915.88 μs，对固定历史 773.83 μs 为
+1.18356745，即慢 18.36%。本版不保留，不扩测其他七档；原始十个样本和
+校验索引见 `score_n128_single_acc_v3_result.json`。减少 panel 未形成完整收益，
+不能仅凭生成代码断言回退完全由单 Acc 串行化导致。
+
+`task_20261022_174755_7079965369`（9 号卡）completed/exit0：纯 Vector TSEL
+版本五例 scale 字节检查全部通过，包含重复尾页、逆序、碎片、非法页和负逻辑页。
+这仅解除微型正确性阻碍，不是完整 CSA 已通过。冻结完整 `scale_gather_v7`，
+CPU 全量编译及 MGATHER/TSEL/ABI/空间审查通过，UB 等空间上界仍在原容量内。
+C04 完整十窗口任务为 `task_20261022_175230_90457915022`，指定历史同卡 8。
+
+为定位下一步核间优化，另从本轮冻结基线生成独立阶段诊断器。复用已验证的
+native150 插桩方式，只在当前进程编译钩子改写候选 C++，不编辑共享 SDK；
+每个阶段私有槽保留字 16..19 记录端点和累计等待。静态审查当前 C04 产物
+覆盖 45 个等待位点、48 个通知位点，不修改原等待/通知/FIFO 数量或数学。
+运行器保留未插桩参考逐字节对照及保护检查，每档取三个图重放的阶段记录，
+禁止产生 statistics_us/ratio_to_frozen 或任何性能验收窗口。插桩自身会干扰调度，
+只能作为阶段与尾部定位依据。C04/C08 两项诊断分别为
+`task_20261022_175638_115263920914`、`task_20261022_175639_11540146694`。
+没有重测合格的 Native/MPMD/BSH 性能，也没有更换本轮固定性能分母。
+
+### 18:20：Scale 完整负例与当前阶段证据；按真实有效行重排 Score 组
+
+`scale_gather_v7` C04 任务 completed/exit0，严格逐字节及保护/图检查全部通过，
+十窗口中位数 802.88 μs，对固定 773.83 μs 慢 3.754%。本版不保留、不扩档；
+`scale_gather_v7_result.json` 留下全部样本和结果索引。A3 的 MGATHER Row 实现
+仍逐行发 DMA；本候选减少源码层页址分支，并未等价减少 DMA 次数，额外向量
+寻址和等待是否占主要回退需另测，不能将该机制推断当作已证明的唯一原因。
+
+两个基线阶段诊断均 completed/exit0，插桩结果与未插桩冻结参考逐字节相同，
+各取三个图重放。插桩前 C++ 与对应历史产物仅 `// pto:` 位置注释不同；只去掉
+这些整行注释后，完整可执行 C++ 相同，比较规则与原 hash 均保留。
+`baseline_phase_analysis.json` 显示 Score AIC 完成时刻的最早/最晚差距中位数：
+C04 8.28 μs，C08 76.64 μs。C08 三次最晚两核均为 6/7，4/5 随后；这些核
+还承接不同前段工作。interval 含前一发布到当前发布之间的所有工作，记录的
+GM wait 不含 FFTS/FIFO 等待，不把剩余时间解释为纯算力，也不把插桩值用于 G。
+
+`score_owner_work_model.json` 按真实 Q 和当前 owner/叶公式统计 padded QK 行工作。
+C08 最大/均值约 1.3469，假设将重组与轻组配对后约 1.0102；这只是工作模型，
+不保证完成时序或全链收益。新候选 `score_group_order_v2` 针对原有 16-group
+平衡叶区间，仅在容量允许、叶数为 3 的倍数、有效历史相差最多一行、重组不超过
+一半且原来存在重/重配对时重排。原请求归属、叶边界、所有浮点计算及 TopK 归并
+树保持；AIC/双 AIV 使用同一正向表，TopK 根等待用逆向表寻找真实生产者。
+
+映射放在既有 4*T 描述符容量内的未用部分，显式检查边界，不侵入后续 scale-plan
+分区，不增加 Native 根、工作区大小、task、通知或屏障。每轮重新写启用标志，
+条件不满足恢复逻辑恒等，不能消费前轮的旧表。CPU 三项属性检查运行真实 helper，
+覆盖 40 组 group/leaf 组合、全部根写者与等待对应、同址启用→关闭及不等历史回退。
+C08 全量编译通过；Mat/Left/Right/Acc 上界保持，UB 163872B，packed ABI 与历史
+C08 相同；静态 GM notify/wait 位点仍为 48/45，但这不代替设备事件验证。
+任务 `task_20261022_181543_203120114774` 指定历史 C08 的 2 号卡，当前 pending。
+本轮已测两个性能候选均未保留；生产实现不变，八档 10% 目标继续 active。
+
+### 19:27：混长组重排初步有效，隔离分档并验证服务与状态
+
+组重排 v2 的 C08 任务 completed/exit0，完整精确/保护/eager/图及采样后检查通过，
+十个有效窗口中位数 728.33 μs，对固定 750.79 μs 降低 2.9915%。原始十窗和检查
+索引见 `score_group_order_v2_result.json`。这是单档初步收益，不是八档综合达标。
+
+v3 增加 `SCORE_GROUP_ORDER` constexpr。Host 仅以既有长 G6、T>=32 且容量
+T<requests*6 选择是否编译；实际组数、有效行与历史差异仍由 device 判定。
+八档真实 select_policy 前检确认只有 C08 开启，其余原有策略项全部相同。
+生成代码比较覆盖全部八档：七个关闭档在源码/两个 packed 封装/Host 编排及
+kernel ABI 上与历史产物一致；同类的 C02/C04、C05/C06 共用代表编译，不重复
+做完全相同的 CPU 编译。开启的 C08 与实际设备测过的 v2 产物一致。
+比较只移除整行 `// pto:` 位置注释，不改变量、指令、地址或事件；无 ELF 同一声明。
+证据 `score_group_order_v3_codegen.json` 支持复用七档历史窗口及 C08 的新十窗，
+没有重新采集已合格的其他五列性能。
+
+服务集成审查发现 frozen combined_v1 的两个 Host 文件早于仓库已有 Native
+`max_seqlen_q_actual` 修复。v4 保留当前仓库 `service.py/service_config.py`，
+防止把该修复覆盖回旧版；其余 40 个模块逐字等于 v3，核内和编译策略不变。
+这项 Host 同步不算新的核内优化或重新定义基线。完整服务门禁仍需真机确认。
+
+已冻结两个只做功能的工具，均禁止生成性能统计：
+
+- `task_20261022_190734_409850120824`：v3 同址状态矩阵，15 个 metadata 场景及
+  4 步连续 decode；新增重排开启、恒等映射、历史不等、重新开启/逆序物理 owner、
+  碎片页五例，核对实际 flag/正向表/逆向表及每个根的状态。CPU observer 前检
+  验证三种路径和篡改 flag 的拒绝，4 项通过。
+- `task_20261022_192200_5031203393`：v4 正式 `spmd_tnd` 模型准备、canonical
+  custom-op、ACLGraphWrapper、工作区复用、空输入和 Native 回退。保留现有
+  服务验证规则，明确要求实际服务选中本混长分档，不把直接 Prepared 调用
+  当作正式服务路径。当前两项都 running，沿用原句柄等待。
+
+### 另两个独立核内尝试的完整结果
+
+局部连续页证明 `local_scale_v1` 仅在当前 32 页全部合法连续时用二维带行间隔
+load，否则逐字保留原 Scalar 页循环和重复尾页；原全请求连续证明路径不变。
+25 项 CPU 字节/浮点整数界限检查及五例设备微型检查通过。实际生成一个
+32×64 INT8 TLOAD，归约保持物理 8 行、有效 1 行，packed ABI 与空间上界不变。
+C04 完整十窗为 769.31 μs，对固定 773.83 μs 仅降低 0.5841%；精确/图/保护全过。
+当前只视为小幅单档结果，未保留、未扩大为八档收益。记录 `local_scale_v1_result.json`；
+微型任务 `task_20261022_183054_268827429855`，完整任务
+`task_20261022_184933_341013719076` 均 completed/exit0。
+
+N128 双 Acc 变体把每个 192 行 QK 半块拆成 M128/M64，各用 64/32KiB Acc，
+FP16/ReLU 逐元素转换位置、完整 K128 点积及后续两段 K192 WS 顺序不变。
+九项 CPU 检查执行生成后的切片/插入，覆盖随机/极值/交替输入；归约与 FIFO
+调用保持。全量编译及 48 个 QK 插入/复用、8 个 WS Right 复用依赖审查通过。
+任务 `task_20261022_184613_33179372574` completed/exit0，完整精确检查通过，
+十窗中位 862.32 μs，比固定基线慢 11.4353%。虽然比单 Acc 版本更短，仍不采用，
+不扩档；全部样本见 `score_n128_two_acc_v1_result.json`。两种 N128 负例不再盲目重测。
+本轮生产代码尚未改变，没有 push，10% 总目标仍 active。
+
+### 20:40 更正工具链可比性；优先推进 128K/B16、B24
+
+公共 SDK 在 18:00 发布、18:14 验证为 `csa-shared-20261022-logical-codegen`，
+PyPTO 从 e891351e 升到 26e94e05；旧冻结基线仍是 20261021 版本。逐项读取
+原 task 启动日志后，确认组重排 v2、局部 scale v1、N128 双 Acc 都使用新 SDK。
+此前针对这三项计算的跨 SDK 比率全部撤回：C08 的 2.9915%、局部 scale 的
+0.5841%、N128 双 Acc 的 11.4353% 以及八档约 0.38% 均不作为验收结论。
+这是本会话版本检查遗漏。原始窗口和报告完整保留，不改标工具链或删慢样本；
+摘要增加不可比标记，证据见 `sdk_provenance_audit.json`。源码/ABI 一致只能证明
+代码等价，不能豁免 SDK 一致要求，19:27 节的七档历史性能复用声明同步撤回。
+N128 单 Acc v3 和 scale_gather_v7 的实际启动版本与旧基线一致，原负例仍有效。
+
+组重排的同址 15 场景/连续 4 步、canonical SPMD 服务验证均 completed/exit0；
+126 项生产 CPU 测试、C08 完整编译和代码等价审查通过。性能未确认前撤回本会话
+临时生产集成，冻结 v5 与 UT 快照保留；没有覆盖其他 session 修改，没有 push。
+compact Score pl.range 变体 CPU 代码生成因 Mat 同源同目的 TMOV 失败，未上设备。
+
+用户最新要求优先优化 128K/B16/S6（C04）、128K/B24/S6（C05），最终八档等权
+几何平均降低 10% 的口径不变。原 combined_v1 算法分母和旧 SDK 数据保持不变；
+另行补齐同一实现的新 SDK 基线。已有新 SDK C05 历史十窗来自更旧 SPMD 源码，
+完整代码不匹配；名为 h131072_b16 的记录实际是不同混长、容量和 seed，均不能
+代替 C04/C05。本轮先补这两个缺项，不重测 Native/BSH/MPMD 已有列。采样器将
+记录实际 SDK 并拒绝跨版本收益计算。C08 候选暂缓扩展。
+
+### 同 SDK 采样门禁与两重点档候选准备
+
+`measurement_provenance.py` 和独立冻结的 `sdk_measurement_harness_v1` 保留
+原 fixture、严格逐字节比较、复位、warmup 和完整 72-role 单 MIX L1 边界。
+启动时记录 bootstrap 实际 release、三个 SDK 根及 Git HEAD，核对已验证 manifest
+和实际 PyPTO 导入路径；不扫描 SDK 文件。校准必须逐文件等于原 combined_v1；
+候选只能对同 SDK、同 case、同源码且十个完整窗口一致的校准结果计算比率。
+16 项门禁/真实采样循环检查通过。历史 harness、baseline.json、原始报告不变。
+
+两项缺失校准已提交：C04 `task_20261022_204306_347423614603` 指定原候选卡8，
+C05 `task_20261022_204306_347428319389` 自动分配。当前均等待他人的16卡任务，
+不重复提交、不干预其他任务；每档只采十窗，参考重放仍只用于准确性和交错。
+
+只读复用另会话 d263bc3f2 的 `indexer_leaf_scale_layout`，候选 `leaf_scale_v1`
+在每叶实际 AIV 对至多256页完整证明正/逆连续，结果留在本核Scalar，删除单
+META写者的整请求布局证明。原连续读取和逐页回退、数学与FIFO保持；B16开启
+此读取，B24延续连续读取但改变证明位置。暂保留原可选2*B尾分区容量，无新跨核
+共享状态。两档完整CPU编译通过，UB地址上界180224B，其余各空间不超限；
+15项属性测试覆盖每个中间页破坏、正逆方向、尾叶和2^24整数边界。
+来源是可借鉴的功能机制，不复用MPMD性能收益。完整L1/状态门禁尚未采集。
+
+先前逐块分布式证明 `distributed_scale_v1` 的C05完整CPU也通过；它每32页重复
+校验，现优先更少重复的叶内证明，未提交其NPU任务。B16另尝试保持N64数学与
+双QK Acc，拆出首尾panel后将中间14块写为pl.range，解决先前条件Mat自拷贝
+失败；当前仍是CPU可行性实验。首次生成空if语法失败且编译器入口无源码，未
+执行设备；修正生成器后冻结并使用全新目录编译，所有失败记录保留。
+
+21:03补记：两校准已运行，B16卡8、B24卡0，参考eager通过，正在编译候选侧
+（同一个未修改基线）。另提交C05阶段诊断 `task_20261022_205927_375116654`，
+卡2运行，同公共SDK，三次插桩重放，只用于端点/等待定位，禁止进入性能统计。
+B16已有阶段记录不重复采集。Score工作模型显示C04/C05的24核组按padded行
+步数都为max/mean=1；不把块数相等称为实际时间相等。
+
+缩循环peeled v1在ConvertToSSA报buf_key_panel作用域错误；v2将已知prefetch
+constexpr在分支内展开后通过SSA，但最终Mat仍同址163840自拷贝，未上设备。
+停止此方向在当前公共SDK下的进一步试探，不修改共享SDK或删除生成指令绕过。
+本阶段已本地提交cd7a96149，没有push。
+
+### 21:06 两重点档同 SDK 基线完成，开始叶内证明完整对照
+
+C04/C05校准均completed/exit0，严格eager、graph、post-L1及所有保护检查通过，
+每档十个完整72-role单MIX窗口。原combined_v1源码逐文件相同，新SDK固定为
+20261022-logical-codegen。C04卡8中位778.39μs，C05卡0中位1014.46μs；全部
+样本、窗口路径、来源和SDK在 `baseline_current_sdk_C04_C05.json`，旧baseline.json
+保持原样，不将环境变化列为优化收益。
+
+复用已完成的同新SDK候选十窗，重算C04局部块证明769.31μs相对778.39μs降低
+约1.17%，暂不采用；N128双Acc862.32μs相对新分母仍慢约10.78%，停止扩展。
+旧跨版本比率仍保留为撤回记录，原报告不修改。C08没有同SDK基线，收益仍未确认。
+
+叶内证明对照已提交：C04 `task_20261022_210538_22017831360` 卡8，
+C05 `task_20261022_210539_22025123534` 卡0；同新SDK及同卡校准，完整十窗与
+严格回归。当前不能预判性能通过，不改生产默认、不push。
+
+### 21:20 叶内证明首版无收益；根据B24阶段记录调整后续方向
+
+`leaf_scale_v1`两档completed/exit0，完整精确、保护及图检查全部通过。C04
+788.33μs，比同SDK778.39慢1.277%；C05 1021.82μs，比1014.46慢0.726%。
+本版不采用、不扩档；全部十窗见 `leaf_scale_v1_results.json`。这也说明另一
+会话MPMD中消除AICPU扫描的收益不能套用到单SPMD。后续只隔离一个具体开销：
+物理8×256证明Tile保留，但有效行设1，删除七行相同向量工作；两档全CPU编译
+及最终valid_shape=[1,1]归约/ABI/空间审查通过。与八行版共30项页表属性测试
+全部通过。one_row的C04/C05任务分别211934_72225422027、211934_72236616480。
+
+B24三次阶段诊断完成且逐字节相同；插桩前完整可执行C++与同SDK校准相同。
+META端点中位66.64μs，Score AIC完成差33.38μs、AIV差39.18μs；这些含探针值
+只用于定位，不作为性能窗口或跨SDK比较。三次均是AIC4～7在KV_PROJECT及
+SCORE_CUBE最后，前置QB/KV负载叠加比Score块数更值得处理。详细全阶段端点
+见 `baseline_C05_phase_sdk_v1.json`，不把GM wait扣除后的余数叫纯计算。
+
+`defer_kv_v1`仅在既有COOPERATIVE_PREFIX、长G6 split、OA_COLS=256区间，
+把原KV投影从分支末尾移到本核Score全部FIFO排空之后、Attention之前；数学
+helper、logical owner循环置换、KV真实完成通知均保留。AIV仍在自己Score归还
+后才等待KV及消费，未加跨核同步或提前通知；可能与Vector收尾/部分TopK重叠，
+也可能推迟KV norm，必须用完整L1取舍。两改动文件之外全部等于基线，8种策略
+组合证明KV恰好执行/发布一次，另有数学/工作区合同检查，共9项通过。完整C05
+编译和ABI/资源审查通过，任务211820_67056725661卡0排队。
+
+### 21:37 B16单有效行取得单档正向，B24 KV后移为负例
+
+`leaf_scale_one_row_v1` C04 completed/exit0，十个完整窗口中位763.65μs，
+对同SDK同卡冻结基线778.39μs降低1.89365%；六组严格eager/graph/post检查
+及保护全过。这是单档候选，尚未宣称生产采用或八档达标。已提交真实T96/R16
+的同址/连续验证213452_137176811781，沿用原10项metadata矩阵并增加满容量S6
+及满容量反向物理owner两例，共12例、4步连续decode；没有DFX性能测量。
+C05同一证明候选仍在执行。
+
+KV后移C05 completed/exit0，严格正确性通过，十窗1026.00μs，对1014.46μs
+慢1.1376%；不采用，不将局部Score提前等同整链收益。后续独立候选
+`rotate_kv_v1`保持全部阶段原顺序，只把既有大T长G6资源域的KV循环owner偏移
+从4变为16：T144的8个非空逻辑worker由物理4～11移到16～23。24逻辑worker
+仍为双射，AIV原先就等待全部24个真实KV生产者，故消费者/通知合同不变。
+候选只改变两个调度文件，未改变任何数学、buffer或阶段位置；正在完整CPU编译，
+还没有设备性能证据。O_B尾部不均衡另外记录为后续假设，尚未实现，不并入本轮。
+本地阶段提交新增0fcdcbf16，仍未push。
+
+### 21:46 收窄页证明采用候选；B16动态状态完成
+
+C04的12项同址metadata和4步连续decode completed/exit0，实际T96/R16，
+完整输出/Top-K/score/cache/state、保护区、代际及几何全过。C05单有效行
+中位1015.58μs，对1014.46μs为+0.1104%，不将其说成收益。
+
+新增`leaf_scale_guard_v1`：只在既有长G6且64<=T容量<=96区间启用叶内证明，
+其他区间恢复原META证明及scale策略；八档仅C02/C04开启，C05/C06保持原策略，
+C03/C08也保持原路径。四项核内调用链显式传递constexpr，页表与实际可见范围
+仍由device校验；并保留生产中已有service.py/service_config.py的Native
+query-bound修复。正在编译C04开启与C05关闭的完整产物，核对同SDK实际代码。
+保留C02尚缺性能验证，不能据同T就预记更大历史收益或八档通过。
+
+KV核分工旋转的21项CPU覆盖检查通过：T1..1025及分段/尾块，24逻辑worker
+始终双射，输出tile/有效行集合相同，数学与Vector消费者未变。最终IR确认为
+`(worker+8)%24`，packed ABI不变；C05同卡任务213951_157406224063正在运行。
+其余O_B尾部调度仍只是记录中的后续假设。
+
+### 21:56 B16正式服务通过；B24转向按尾行成本分配O_B
+
+leaf_guard C04开启的完整C++、两个packed wrapper、Host编排与ABI与实际
+测过的单有效行版本完全一致（仅去pto位置注释）；C05关闭与同SDK两份基线
+产物均一致。48项策略/边界检查通过。正式`spmd_tnd`模型/custom-op、
+ACLGraphWrapper两次重放、工作区复用、空输入和Native回退completed/exit0，
+实际服务明确LEAF_SCALE_LAYOUT=true，逐bit及所有保护通过。C04无需重复计时，
+保留763.65μs及12+4状态证据。仍未验证C02性能和完整八档目标，不改生产默认。
+
+B24 rotate_kv_v1严格对照通过，十窗1010.04μs，对1014.46μs降低0.4357%；
+幅度小、样本交叠，不当成稳定可采用收益，不重复同源计时挑轮次。旧v78/v82
+大T输出分工也只有微小收益，本轮不重复其按16重核/8轻核简单分配的方案。
+
+新`output_tail_balance_v1`针对一个完整M128加不超过32行尾块的既有资源
+区间（长G6、128<T<=160），根据C05真实OB最晚0～3/8～11核，转移8项
+原O_B工作到只处理两份O_A尾行块的20～23核：仅group0/1的dc0～3改变owner，
+其余56项不变。完整64格输出恰好一次，每组仍等同一quant生产者，数学helper
+及Vector全24核最终等待不变。17项CPU覆盖/guard检查与完整C05编译通过；
+这是新的按完整/尾行成本分配方案，不能预估端点差就是收益。独立C05同卡
+完整十窗任务已提交，结果待收集。
+
+21:58任务补记：C05输出尾行分工任务为215626_232405323561，沿原卡0十窗。
+C04收益及动态/服务门禁已全部通过；由于64～96长G6策略同时覆盖256K/B16，
+为避免未验证历史扩展而误用，启动C02原实现的新SDK缺项校准
+215719_235949521745（卡8），之后仅测guarded候选；不重复已有C04窗口。
+仍不补跑Native/BSH/MPMD无关列，未把当前两重点档当完整八档验收。
+
+### 22:09 B24输出分工无收益；补查新归档避免重复C02基线
+
+output_tail_balance_v1 C05 completed/exit0，完整严格检查通过，十窗1018.45μs，
+对1014.46μs慢0.3933%。本轮C05叶证明、KV后移、KV置换及按尾行分配O_B均
+未形成可采用的净收益，保持原策略；所有窗口和负例保留。C04叶证明的服务、
+状态和代码等价证据已本地提交3a0f423c6，未push。
+
+补查之前遗漏的新增归档目录csa_performance_20261022_aicpu，发现20:07提交、
+已完成的C02同SDK十窗：task_20261022_200748_181884127036，卡9，中位969.17μs。
+该SPMD源码含另一候选的关闭分支，文件hash不同，但此case完整C++、两个
+packed封装、编排及ABI与本轮同SDK未改基线完全一致；原case、fixture、72核
+L1原始时间戳、SDK启动头和十窗统计均重新核验。证书C02_reused_reference.json
+明确保留实际源码hash差异，不把它伪装成相同源码。
+
+本会话C02重复校准215719_235949521745在compile_and_eager_candidate阶段
+被主动终止，0个L1窗口，exit130，不作为失败性能/无效慢样本。之前的查找范围
+漏了新目录，是本会话检索遗漏。C04/C05已经完成的同卡校准不删除、不择优重置；
+新目录另有不同卡的776.29/1007.72μs记录，保留为额外背景。B16方向一致，
+B24的微幅正向更不支持采用。
+
+C02只测新guarded候选，task_20261022_220713_27566122223固定同一原记录卡9。
+独立sdk_measurement_harness_v2只增加“候选采样、外部证书比较”模式：仍检查
+实际SDK、以原41模块基线做严格正确性参考，原warmup和十窗循环逐AST相同；
+原始结果不产生ratio或伪造基线hash，待结束后用证书计算比较。所有旧harness
+和报告保持原样。
+
+22:23补记：C01/C03/C07三个关闭资源类也完成CPU编译；结合C05代表C06、
+C03代表C08，六个关闭档的完整C++/packed/Host编排/ABI均与原基线一致，
+只删除pto位置注释做比较，见leaf_scale_guard_disabled_classes.json。
+这份证书只证明关闭路径代码不变，不允许把旧SDK计时改标成新SDK。
+
+C02外部复用还核对了scenarios.py及EngineArgs、make_layer、make_fixture、
+native_bind、prepare_weights调用AST，均相同；未使用的Native/BSH工具及
+L1之外outer profiler差异单列。没有伪造源码hash或替换任何原始报告。
+当前C02候选任务仍排队等待CI释放16卡，沿同一task句柄等待。
+
+等待期间只读研究后续信号布局：当前512B槽间距明确是沿用的验证值，并非
+硬件最小行声明；公共编译器文档/ISA说明单写者64B隔离及TNOTIFY的DCCI、
+DSB和末尾PIPE_ALL。潜在缩距只作signal_layout_research.json假设，未改源码
+或提交设备任务。尤其不能删除通知前PIPE_ALL：通知后的barrier不保证信号
+发布前业务写回完成；现有阶段插桩使用槽内16～19字，若缩到16字也必须重做。
+
+### 22:47 本轮重点优化收尾：仅保留128K/B16的新页证明
+
+C02 guarded v1在原记录同卡9 completed/exit0，严格逐bit、图及保护全过，
+十窗972.05μs对复用969.17μs为+0.2972%。保持原始采样报告ratio=null，由
+同SDK/同case/同卡及外部等价证书计算比较，不伪装新的基线测量。
+
+最终`leaf_scale_guard_v2`只进一步收紧Host历史资源范围：压缩长度上界
+`cache_rows<=6*8192`，即原8192候选叶不超过6个的区间；当前八档只有C04
+开启，C02恢复原策略，其余六个关闭档也不变。v2所有核内模块逐字等于v1，
+C04全部constexpr仍相同，原性能、12+4动态状态及服务验证可以复用；C02
+关闭完整CPU产物与同SDK历史基线的C++/packed/Host/ABI完全一致。104项
+Host分档/历史边界测试通过，未按B16单点枚举，也未宣称区间内每点同等收益。
+
+已将最终版本集成到本会话隔离worktree的正式TND-SPMD目录，共6个算子文件
+（含1个新增leaf helper）。同时承接原先已验证、已作为本轮分母的combined_v1
+三项逻辑，不把它们重复计成新收益；保留原service/query-bound修复。更新说明
+和格式时仅规范import/module文档及未使用变量名，完整非文档AST和导入集合
+一致；生产目录C04开启与C02关闭完整编译再次匹配冻结产物，见
+leaf_guard_production_style_audit.json / leaf_guard_production_codegen.json。
+
+正式CPU合同、variant及query-bound检查130项通过。原5项G2 QB预期同步到
+本轮冻结基线已经采用的窄N/4前缀核策略，新加15项叶证明分档边界；未改阈值
+以迁就性能或数值。针对源码的Ruff及git diff检查通过，没有重复NPU计时。
+本轮只保留1项新优化：C04完整L1 778.39→763.65μs（-1.89365%），其余
+7个业务档保留基线策略/生成代码。B24无可靠收益，未采用弱正向或负例。
+所有设备任务与CPU编译已收齐，无活动本会话任务。八档10%总目标仍active且
+未达成，正式G不靠跨SDK数据构造；不更新goal为complete，不push。采用证书
+为retained_leaf_scale.json，完整原始窗口及过程继续保留。
+
+
+### 等长TND独立分支：用户授权与首个候选
+
+用户明确允许多batch实际Seqlen一致、等效BSH时采用独立分支；128K/B16和
+B24仍优先，八档等权10%及原combined_v1分母不变。此前signal slot footprint
+只有只读研究，尚未改码或上卡，先转向这项新授权。
+
+`uniform_geometry_v1`以已采用的生产提交79fae6db0为父版本，保留C04单有效
+行叶证明，只改request_geometry、attention_plan和attention_stream三个模块。
+沿现有PLAN_PHYSICAL_ROWS资源域，每个实际工作AIV每次调用检查全部Q/L：
+B>1，Q从0开始、严格等间距S>0、B*S=T，全部KV length相同且>=S。通过后
+请求定位改为query//S；其它输入仍走原query_request扫描。早期Attention
+几何可复用一次证明处理八行，后续AIV在多个query之间复用自身的核内Scalar。
+不跨replay保存谓词，不回读device内容到Host，不新增GM工作区/任务/同步。
+原positions因果校验、页表保护及全部数学保持。此版保守地要求query和KV
+两种长度都相等，未把只有shape或query长度相等当成充分条件。
+
+同源helper对独立owner集合oracle的71项CPU测试通过：S1至S16、B1/2/8/16/
+24/28/32，逐个中间Q/L篡改、padding/重叠/短存储、同址真/假反复切换及随机
+非法边界均覆盖。CPU完整代码生成进行中，尚无设备正确性或新收益结论。
+新候选不是已采用版本，不覆盖原始冻结结果；manifest和生成脚本位于已有
+csa_spmd_tnd_eight_20261022目录。
+
+B16/B24完整CPU代码生成均通过；C04的AIC函数、两侧packed入口和orchestration
+与已采用生产版一致（仅忽略pto位置注释），变化在AIV内部几何分支。B24初次
+CPU启动描述符文件名写错，未进入解析/设备，改为经完整policy核对的已有描述符
+后成功。设备任务B16=`task_20261022_231311_146232724441`（卡8），
+B24=`task_20261022_231741_162492223535`（卡0），各10有效窗及全部样本；
+仍对原combined_v1的同SDK基线比较，另观察是否超过已采用C04的763.65μs。
+同址验证器已准备16组metadata和4步连续解码，增加等长→不同KV长→等长、
+等长→失活padding→等长转换，仅当候选值得继续时执行设备门禁。
+
+
+### 等长几何候选收齐：两档负例；PyPTO问题已上报
+
+两任务completed/exit0，各10个完整72角色L1窗口，reference/candidate的eager、
+graph和post-L1全部逐bit与guards检查通过。C04中位789.36μs，对同SDK原分母
+778.39μs为+1.4093%，对已采用763.65μs为+3.3667%；C05为1024.20μs，
+对1014.46μs为+0.9601%。完整样本、原始路径和任务信息见
+`uniform_geometry_v1_results.json`。两档均不采用，不再为此负例执行16+4状态
+矩阵或服务门禁。正式生产代码仍是79fae6db0已验证版本。本结果只否定这版
+几何寻址实现，不否定用户新授权的等长专用计算/调度路径；未将控制流或寄存器
+变化武断归为已证实瓶颈。
+
+补充关闭档编译发现宽度恒0时，虽然除法受if width>0保护，Simplify仍先折叠
+不可达的query//0。增加外层constexpr helper调用开关的v2，C04编译成功但
+C03关闭档仍失败，未进行额外NPU计时，未改已排队/运行的v1冻结源码。
+最小@pl.program复现只运行InlineFunctions→Simplify：前者成功，后者报
+const_fold.h:218；将受保护除法的分母写为pl.max(width,1)的对照可正常化简为0。
+此处是CPU编译问题，不归因于PTOAS/Simpler或硬件，不宣称与本次性能回退有关。
+
+用户明确授权发现PyPTO、Simpler、PTOAS的问题可直接提issue。已查重并提交
+[PyPTO #3114](https://github.com/hw-native-sys/pypto/issues/3114)，含精确commit、
+独立最小复现、预期IR、错误及已验证绕过；提交后再次读取核对正文和OPEN状态。
+记录为`upstream_issue_3114.json`，本地复现脚本为repro_unreachable_floor_div.py。
+仓库模板所写ir-pass标签实际不存在，首次未创建；核实无同名issue后不带标签
+成功提交，没有重复issue。公共SDK未编辑/重建。
+
+本会话本轮两项设备任务及所有CPU编译已结束，无待收结果。八档10%总目标
+仍active且未达成；未push。后续SDK问题沿用本次用户授权，确认与查重后直接
+上报相应上游，并在本统一记录中保留链接，不另外拆出过程MD。
+
+
+### 64B与512B核实：撤回缩槽候选，保持已验证协议
+
+用户指出Scalar DCache行与MTE/GM访问粒度不能混为一谈。查阅[A2/A3官方
+避免同地址访问说明](https://www.hiascend.com/doc_center/source/en/CANNCommunityEdition/900/programug/Ascendcopdevg/atlas_ascendc_best_practices_10_00013.html)确认：MTE2、MTE3和Scalar的GM请求均按512B
+粒度处理，落在同一对齐512B区域的并发访问可能串行。[架构说明](https://www.hiascend.com/doc_center/source/en/CANNCommunityEdition/850/opdevg/Ascendcopdevg/atlas_ascendc_10_0008.html)
+中的64B指Scalar DCache行；通用L2行大小随硬件变化，不能把该页的范围值
+写成已查实的本机A3 L2物理参数。[缓存路径说明](https://www.hiascend.com/document/detail/en/CANNCommunityEdition/910/API/ascendcopapi/docs/en/api/SIMD-API/basic_api/cache_control/system_cache_overview.md)也表明Scalar经DCache
+后仍访问L2/GM，512B关注点并非MTE独有。
+
+因此，64B私有槽避免多个写者共用Scalar DCache行，与512B分隔减少GM请求
+竞争是两个层次。缩槽把8个不同控制槽放进一个512B区间，不能仅靠分配字节
+减少推断同步提速。本轮撤回signal_slots16_v1设备测试，生产128个INT32/
+512B槽保持不变，尚未提交任何本会话NPU任务。C04完整CPU生成成功仅表示
+可编译；辅助72角色探针因自身INT32 errors + INDEX常量类型不匹配停在解析，
+不是SDK故障证据。预备源码与两份描述符归档在既有runs目录，未丢弃证据。
+
+用户提供的[A5 atomic使用手册](https://github.com/nalinaly/simpler/blob/3699b7ae4ff47abcfa1e2916881d4309cf39c00f/tests/atomic_probe/ATOMIC_USAGE_GUIDE.md)已按commit与blob固定参考。其64B规则
+着重所有权/一致性；DCCI脏行可能覆盖新值，DSB不能代替写回或跨核交权。
+A5特定atomic发布省DSB等实测不直接外推A3。CSA实际Set仍是DCCI→volatile
+GM store→DCCI→DSB_DDR，wait为DCCI与Scalar读取；原PIPE_ALL、阶段维护及
+等待均未删除。后续审查将分别核对控制字、业务payload与整行所有权，再决定
+是否有冗余操作；不把手册的保守工程规则当成当前A3已经复现故障。
+
+审计和链接见signal_layout_audit.json。本轮没有新增性能样本、没有共享SDK
+修改，也没有改变已采用算子。原八档10%目标继续active且未完成。
+
+
+### 2026-10-23 输出量化两项独立候选：B16分工，B24未读尾零
+
+本轮先查AIC纯Tile发布维护，发现10月21日已完整验证B1/B16且无收益，故不
+重复该候选。只读核对另两个session最新记录：BSH已有WS/B1/归属措施多已
+承接或有负例；AICPU-MPMD的sync_start收益属于多task启动，不能直接套单
+SPMD。MPMD v17增加量化并行度可缩短核内量化，但完整输出链变慢，因此只
+取它作为局部工作分配的线索，不迁移其性能数值或直接采用。
+
+分别从已采用生产79fae6db0冻结两个候选，保留C04叶证明和512B信号槽。
+`output_quant_task16_v1`只把量化逻辑任务32行改16行，实际8行数学tile及
+stage2流水、全部舍入/归约不变；Cube与Vector组等待同步使用同一常量。
+C04的量化有效AIV从24增至48，每核32行降至16行，但通知/等待增多，完整
+收益必须实测。先只测C04，不预判其它档或全域采用。
+
+`output_quant_no_unused_pad_v1`独立保持原32行量化分工，仅在NZ且OB_ROWS>96
+时把尾零范围终点改为真实T。既有大M O_B早已按active_rows读activation并
+只写真实T，其完整AIC C++与候选逐字相同（只忽略pto位置注释），因此没有
+将padding删掉却留给完整M读取。小/中NZ和全部ND仍清零；T内失活query行仍
+正常计算。C05少写8*112*1024=917504字节INT8尾零及对应生成指令，不把这
+个逻辑字节量当作实测带宽或收益。
+
+14项CPU测试对33个T边界运行实际分工循环，独立验证全部有效行/尾零唯一
+覆盖、最终尾owner，以及Cube/Vector等待集合确实包含全部实际writer。
+两档完整CPU生成成功；quant数学体与O_B消费者不变。新增测量harness只在
+非计时snapshot检查候选o_quant[T:]始终保留INT8哨兵37，覆盖eager、graph、
+全部L1后；原严格输出/Top-K/score/cache/state和外保护均保留，计时循环
+与完整72角色首尾边界不变。
+
+任务C04=`task_20261023_000814_330260230692`（卡8），C05=
+`task_20261023_000814_33026777254`（卡0），各10有效窗。原combined_v1同SDK
+分母仍778.39/1014.46μs，C04还须超过已采用763.65μs才值得继续。当前尚未
+收齐设备结果，生产未改，公共SDK未改，目标active，未push。
+
+
+### 两项输出量化候选终态：正确但没有完整L1收益
+
+两任务均completed/exit0，各侧eager/graph/post-L1的输出、Top-K/score、
+cache/state逐bit与保护区通过。C04 task16中位779.06μs，相对原同SDK
+778.39μs为+0.0861%，相对已采用763.65μs为+2.0179%，不采用。
+C05省未读尾零中位1017.81μs，对1014.46μs为+0.3302%，不采用。
+C05三次snapshot均证实整个o_quant[T:]保留非零哨兵37，说明结果没有依赖
+被省去的清零；正确性与性能分别判断，不能把省917504字节称为耗时改善。
+全部20窗口、72角色记录、任务/SDK/原路径见output_quant_priority_results.json。
+
+这两条负例不再扩大到状态/服务及剩余档，正式算子继续保持已有采用版本。
+旧PipeUtilization记录也已只读检查，但其来源是20261020较早Score实现，
+不是本次SDK/算子；不按那些Scalar/MTE累计值定量解释本次耗时或合成收益。
+
+后续等长专用路径仍获用户授权。已排除的uniform_geometry_v1在每个AIV
+各做一遍全Q/L证明；下一步研究由已有META单写者在本轮元数据扫描中证明
+一次，再由原依赖保护消费者读取。先核对工作区所有权和发布时机，不新增
+Host回读、静态测试点任务表或绕过causal/页保护，不把未实现方案当成收益。
+本轮无待收设备或CPU任务，八档10%目标active且未完成，没有push。
+
+
+### META统一证明的等长候选：单写者、常量除法与原通用回退
+
+上一轮已排除每AIV重复扫描Q/L的uniform_geometry_v1。本轮uniform_meta_v1
+仍从生产79fae6db0派生，但把证明融合进既有indexer_group_plan_stage请求
+扫描：仅PLAN_PHYSICAL_ROWS且G6域，B>1、T=6B、全部Q[r]=6r且正L一致时
+写INT32标记1，否则0。前B+1组前缀按16项对齐后的最后一字只有在确实属于
+padding时才用；B+1恰对齐的布局不写/不读证明，保持通用查找。全部8项plan、
+真实组描述符和scale计划不变，无额外Tensor根或Host回读。
+
+该字由原META唯一写者每轮覆盖，与其它元数据一起发布，之后直到kernel
+结束只读。它不是新增同步信号，512B阶段槽及现有DCCI/DSB/PIPE_ALL保持。
+早期几何只有实际有行的AIV先获取原META；晚期Attention在已有Indexer压缩
+helper无条件获取META之后读取。通过证明的查找用query//6常量算术；请求
+位置因果、页表、gather、数学和FIFO全部保留。混长、padding、不同KV长度、
+无预留字及关闭策略均走原query_request，不把形状相等当实际等长。
+
+63项同源CPU检查覆盖Q/L中间项改变、失活、B15/B31无padding字、S1～S6及
+同址真/假/真切换；完整plan与原组描述符逐项一致，仅允许专用预留字变化。
+C04/C05开启档、C03关闭档完整编译通过。C03的完整C++、两packed入口和
+orchestration与基线相同（只去pto位置注释）；C08使用同一constexpr集合与
+动态代码类。关闭域没有重复上一版恒零分母的问题，快路径除数始终是6。
+证据uniform_meta_v1_codegen.json，源码和hash见uniform_meta_v1.json。
+
+测量器仍保留原10窗、交替未计时reference、完整72角色首尾跨度。只在eager/
+graph/post-L1的非计时snapshot追加读取实际META标记并要求等于1，防止死分支
+或BOOL编码导致未启用却误记收益。C04卡8任务task_20261023_003650_1390799683，
+C05卡0任务task_20261023_003836_22329631593，当前队列状态按task-submit跟踪。
+CPU通过不代表设备/状态验收，原生产不变，目标仍active，未push。
+
+同址验证器已从既有uniform_state_harness_v1派生，仅新增逐轮真实META标记
+与CPU侧独立Q/L谓词比较，继续保留全部16组metadata、4步连续解码以及
+输出/Top-K/score/cache/state、地址/代际/保护检查。等长→不同L→等长与
+等长→padding→等长都读取实际槽值，未将Host预期代替device结果。准备证据
+uniform_meta_state_v1.json；当前尚未提交此功能任务，等待性能是否值得推进。
+
+最新task-submit确认C04/C05原任务均pending，16卡CI任务
+`task_20261023_000924_333970730698`仍running；没有取消、重复提交或换源。
+此为已核实的队列等待，不作为失败、无进展阻塞或性能结果。源码阶段提交
+91173e5cc，验证准备另行本地提交，均不push。
+
+
+### 2026-10-23：按用户要求转向完整数据流、成本与调度分析
+
+用户明确要求从更宏观的角度决定下一步性能方向。原八档等权几何平均降低
+10%的目标、combined_v1分母、TND-SPMD优化对象及C04/C05优先级均保持。
+后续候选先说明改变哪条完整依赖链、减少哪类实质工作，再考虑局部参数。
+不将“多做并行”“少几条Scalar指令”直接当作整层收益。
+
+#### 收齐当前等长META候选，保持已采用实现
+
+C04/C05两任务均completed/exit0，各10个有效完整72角色L1窗口，实际META
+证明在eager、graph、post-L1三次回读均为1。输出、Top-K/score、cache/state
+逐bit及全部保护检查通过。C04为783.41μs，对原同SDK778.39μs慢0.6449%，
+对已采用763.65μs慢2.5876%；C05为1024.24μs，对1014.46μs慢0.9641%。
+两档均不采用，不扩大这个负例的状态/服务测试。全部20个样本、原始72角色
+记录路径、SDK与检查结果见`csa_spmd_tnd_eight_20261022/uniform_meta_v1_results.json`。
+
+`uniform_meta_on_interface_audit.json`另确认C04/C05的AIC数学体、两个packed
+入口签名/调用包装和orchestration与对应父版本相同，只忽略整行pto位置注释；
+AIV主体有意改变。这不证明AIV无额外开销，也不能用接口一致推定性能。
+当前本会话无待收CPU/NPU任务；正式算子仍保留79fae6db0的一项叶证明优化。
+
+#### 收益预算与证据边界
+
+如果仅用“每个重点档自身降低10%”举例，C04相对原778.39μs需省77.839μs，
+已有14.74μs后还需约63.099μs；C05需省101.446μs。这只是量级预算，不把
+八档几何平均目标擅自改成逐档10%。若只有两个档各降低10%、其余六档不变，
+八档几何平均只降低约2.60%；若仅靠两个档共同达成总目标，二者都要降低
+34.39%。因此重点档是首轮筛选入口，后续必须找到能覆盖更多资源区间的措施。
+
+新增离线`analyze_macro_schedule.py`及`macro_schedule_analysis.json`，复用
+现有case、当前policy、Score算量模型和同SDK C05阶段诊断；本轮没有新设备
+采样。该分析区分有效算量、逻辑GM→L1请求量、设备插桩端点，禁止混为耗时。
+
+同SDK C05三次插桩的“最后完成位置”中位数：QUERY 297.28、SCORE_VECTOR
+584.26、TOPK 597.60、ATTN_PLAN 613.72、ATTN_VECTOR 829.42、OB 968.92、
+OUT 1000.70μs。对应Score AIC结束离散度33.38μs、Attention AIV16.02μs、
+OB49.00μs。阶段并发且各角色起点不同，这些端点不能相减冒充纯阶段计算，
+离散度不能相加作为可省时间；已有GM等待计数也不含全部FIFO/FFTS等待。
+本轮没有从旧SDK的PipeUtilization值推断当前瓶颈，更没有把同步等待全部
+算成同步指令本身的成本。需要区分“前驱还没完成”和“就绪后的交接开销”。
+
+#### 当前可确认的结构问题
+
+1. **任务数量均衡不等于成本均衡。** C04/C05的Score padded-row×step
+   最大/平均均为1.0，分别每核22/33步；继续只换Score owner不能减少这些
+   等长档的总算量。实际尾部差异还涉及前段到达时间、内存及流水等待。
+   C08该算量比为1.3469，混长需要另按实际live行、可见历史和叶数量安排。
+2. **B24输出的满块和尾块成本相差很大。** 当前O_A为M128/N256，T144拆成
+   M128+M16；同样3个任务可能是3个满块或3个尾块。按有效M×N统计，最忙核
+   是全24核平均的2倍；C06为1.7143、C07为1.5。两个M块各遍历同一组权重，
+   逻辑权重载入合计128MiB，唯一权重为64MiB；这不是实测HBM流量。
+3. **已有按owner等待，但发布粒度仍限制下游。** `wait_indexer_query_roots`
+   等真正root writer的整段SCORE_VECTOR完成；`wait_attention_plan_rows`
+   在Attention helper开始前等待本组全部query的plan owner；O_A开始前获取
+   全部活跃Attention writer。当前不是每阶段都全核barrier，不能靠机械
+   删除wait提速。要提前消费，必须同步改变任务完成单位、发布协议和数据寿命。
+4. **融合/交错有实际成本。** 旧wave_current_math严格通过但B16
+   807.88→850.52μs、B28 1167.66→1369.50μs；其版本与当前不同，只用作
+   设计负例。原Score每叶恢复一次Query/Coeff，交错后每step恢复，逻辑额外
+   Left操作25.3125/45.9375MiB；B28各wave最大步数之和56高于整段最大41。
+   不能重复该细粒度wave方案，也不能由此宣称所有跨阶段流水必然无效。
+
+#### 下一步执行顺序
+
+**第一，建立两档完整资源与依赖成本图，按整条链选择改动。** 复用现有C05
+证据；只为缺失的实际task到达/开始/结束、组内FIFO等待和载入量补针对性
+诊断，优先C04保留版本与C05。每个阶段同时记录唯一数据量、重复读写、有效/
+padding计算和最晚前驱。核间等待、GM等待及纯算术不能从阶段时长互相相减
+推导。先估计依赖最长链与Cube/Vector/搬运资源下界，再决定哪种重构有数十
+微秒的可验证空间；不直接将MPMD任务时长搬到SPMD模型中。
+
+**第二，优先联合优化O_A→量化→O_B整段，同时考虑分工与权重供给。**
+已有M48/M64只切小行块的版本增加权重载入且回退；只把8个O_B任务搬给轻核
+的版本也回退，这两种不重测。新的分析要联合决定M/N格子、每核O_A/O_B成本、
+量化依赖与组就绪顺序。离线反事实“单M块覆盖T、N128”在T144模型中可将
+O_A最大/平均从2.0变成1.125，逻辑权重载入128→64MiB；它尚无完整编译、
+片上资源和性能证明，不能预记收益。若M192/Left双缓冲不满足容量，应首先
+否决资源方案，不能为纸面均衡牺牲原K流水或放宽内存上限。C04已有的输出
+互补分工要保留；这个大T方向可覆盖C05/C06/C07，但单独不足以保证八档10%。
+
+**第三，前段→Score→Attention考虑粗粒度的联合分工，保留完整叶的局部性。**
+关注前段谁先释放Score输入、谁同时承担重Q_B/KV，及root就绪后的真实等待。
+先评估静态成本分配和就绪依赖，避免只轮换一个KV/Score角色的旧负例；如有
+足够收益空间，再研究单kernel内按完整Score叶/完整Attention query交接的
+执行策略。它必须保留Score叶内Query/Coeff驻留和完整范围负载均衡，不能再
+在每个N面板/step保存恢复两套状态，也不能仅把整段切成更多wave。
+
+单SPMD允许角色执行不同的控制分支，并不要求所有核同时处于同一业务阶段。
+但引入设备侧就绪队列会带来控制、所有权、缓冲复用与调度成本，应先用成本
+图确认上界，再决定是否值得实现；不能声称“留在单kernel里就没有调度成本”。
+如确实需要新的atomic队列，需先验证A3上所用发布/获取协议；用户提供的A5
+atomic手册用于约束设计，不能把A5专项实测当作本机A3已证明的内存模型。
+
+**第四，等长专用路径应选择整套执行策略，混长保留成本感知的通用路径。**
+本轮只缩短query_request查找已证明没有收益；后续等长证明只有在能支持
+具体的任务格子、生产消费归属或数据复用时才重新引入。等长不推出物理页
+连续，不免除causal/页保护，不用Host容量冒充本轮真实Q/L。混长的工作分配
+依据实际live与visible成本，不能为了静态均分扩大到B×S_max的假计算。
+此前已验证但缺同SDK原C08分母的group_order候选保持待定，不拼接跨SDK收益。
+
+以上是方向调整与可复算的结构分析，不是新性能采用。原10%目标仍active，
+完整72角色L1与严格逐bit/状态约束不变；没有修改公共SDK或生产算子，没有push。
+
+
+### 宏观分析后的首个联合候选：单M输出格子、权重复用及O_B互补分工
+
+本轮核对原goal仍active，上一轮已提交a4817147a的负例和结构分析属于进展。
+工作树起点干净，公共SDK仍csa-shared-20261022-logical-codegen/validated。
+直接重读已定位cannbot的L2 CacheMode卡片，继续区分逻辑载入与实际HBM流量；
+索引缺失未伪造检索结果，本轮也未修改任何缓存提示或公共工具链。
+
+从正式79fae6db0冻结`output_tall_v1`，只在已有Host token容量128<T<=192的
+资源域使用OA_ROWS=192、OA_COLS=128；实际有效行仍来自device Tensor维度，
+所有Q/L、页表与因果逻辑保持原样，不要求等长，不通过T/6猜请求归属。
+原M128+尾块/N256的64个O_A任务改为单M192/N128的64个任务。输出元素与
+原K256顺序不变，候选初衷是同时避免第二M块重复加载权重、改善满/尾块成本
+差异。它不同于旧M48/M64增加任务/权重次数，也不同于双M累加器共享权重版本。
+
+两侧O_A组任务与量化依赖统一使用OA_ROWS。量化数学、32行任务及8行stage2
+保留；O_B改用已存在的32个软件rank互补分工，物理仍24个AIC。当前单M/N128
+格子给0..15号核各3个O_A任务、其余各2个，对应O_B各2/4个任务。按源码
+语义计，每个O_A任务读1MiB BF16权重，每个O_B任务读0.5MiB INT8权重，
+各物理核合计均4MiB；这不是实际HBM事务或实测带宽。全部阶段发布/获取、
+512B控制槽、量化尾零和原最终归约顺序保持，没有新增跨核同步协议。
+
+34项CPU检查执行实际O_A几何与Cube/Vector输出调度循环，对16个实际T边界
+独立验证每个输出行列块唯一覆盖、全部64个O_B任务唯一覆盖、真实O_A写者
+全部被量化等待、O_B获取正确量化组；另验证17个容量边界及S1/S5/S6、四种
+history策略只改变预期三项常量。量化与O_B数学源保持相同。完整测试日志
+`runs/output_tall_v1_ut_final.log`，生成脚本和描述符均保存在既有实验目录。
+
+C05完整CPU编译通过。实际O_A确为M192×N128 FP32 Acc（96KiB），双Left
+各M192×K64（合计48KiB），Right使用K64×N128；K256外层stage2、内部递增
+K64链仍存在，未被编译器拆回两个M块。AIC总Mat475136B、Left/Right各65536B、
+Acc131072B，AIV Vec180224B，均未扩大原容量。packed ABI/根参数/返回合同
+与C05父版本相同。详见`output_tall_v1_codegen.json`及完整AllocateMemoryAddr
+IR；资源通过和源级覆盖均不代替设备逐bit正确性。
+
+先只提交C05完整十窗任务`task_20261023_013451_23777723578`，卡0，原同SDK
+分母1014.46μs，完整72角色首尾计时及eager/graph/post-L1回归不变。任务已
+核实running，源码冻结。并行进行C04关闭域完整编译，与已采用C04生成物比对；
+只有C05完整性能值得继续，才扩大状态/服务及C06/C07验证。生产未采用，未push。
+
+C04关闭域完整编译已完成，完整PTO C++、AIC/AIV两个packed文件及orchestration
+仅去整行pto位置注释后，与已采用生产版本逐字相同；见
+`output_tall_v1_C04_off_codegen.json`。没有为这份未改变的C04重复设备计时。
+
+
+### 联合输出候选终态与诊断：均衡改善，完整收益仍很小
+
+C05任务task_20261023_013451_23777723578 completed/exit0，完整十窗中位
+1010.88μs，对同SDK原分母1014.46μs仅少3.58μs（0.3529%）。所有eager/
+graph/post-L1输出、Top-K/score、cache/state逐bit及保护检查通过，实际
+OA_ROWS=192、OA_COLS=128、OUTPUT_WORK_BALANCE=True；设备生成CPP与完整
+CPU审阅版相同。全部窗口见`output_tall_v1_C05_result.json`。样本分布重叠，
+本轮暂存候选，不采用、不为这个小变化扩大到状态/服务及其它档位，不称它为
+稳定已兑现的优化。正式仍只有C04叶证明这一项新采用。
+
+为解释纸面成本与完整效果的差距，只追加一次C05候选阶段诊断：
+task_20261023_014251_264666425693，卡0，completed/exit0，严格检查及3个
+诊断窗口通过。`output_tall_v1_C05_phase.json`绑定未插桩CPP与该候选实际
+性能任务中的CPP；同SDK旧C05原版阶段数据直接复用，不重测。对照见
+`output_tall_v1_C05_phase_comparison.json`，不能用于性能验收或相减合成收益。
+
+- O_A第3/6/7组的角色区间中位数仍约25～26μs，没有出现算量模型暗示的
+  成比例下降；它们从本核上一发布点开始，不是无等待的纯矩阵指令计时。
+- O_A第7组完成离散度11.12→1.20μs，O_B为49.00→14.78μs，但O_B最后完成
+  位置只从968.92→965.50μs。O_B最早完成位置920.20→950.72μs，说明离散度
+  缩小也包含原先早完成的核承担更多工作，不能把34μs离散度缩小认领为净省。
+- 前段/Score端点亦有约十μs差异，目前没有证据将其归因于输出源改动；两轮
+  非配对插桩不能扣除这段差异，替代正式十窗的3.58μs结果。
+
+补全两侧操作数的逻辑搬运模型后，O_A权重128→64MiB的同时，N块数量增加
+使激活36→72MiB，合计164→136MiB，只少约17.07%。原模型明确只统计权重，
+不能将权重减半扩大为总搬运减半。新完整操作数模型与各核明细见
+`macro_schedule_operand_analysis.json`；仍不是实际HBM事务、缓存命中率或
+硬件带宽。该证据要求后续同时计算两侧重复读取和最慢核的实际服务成本，
+暂不因算量比漂亮继续扫描相邻M/N参数。
+
+诊断分析器新增显式候选引用模式。负向自检发现同一测量目录同时含reference
+和candidate两个build，仅“目录中任一CPP相同”不足以绑定候选。已修正为
+候选模式必须指定该测量目录中的确切CPP，并先与候选完整CPU生成物核对；
+默认原版calibration模式的3窗内容保持一致，错实现对照已确认被拒。首次
+自检产生的错误归属文件已标记invalidated并保留在runs；没有用它作结论，
+此为本轮分析器问题，不是SDK故障。验证见phase_analyzer_candidate_reference_checks.json。
+
+另提交C04当前保留版本的同SDK阶段诊断task_20261023_014328_266874830877，
+卡8。使用output_tall_v1的C04关闭路径，已与763.65μs已采用版本的实际CPP
+唯一匹配，因此不是测一个新的B16实现。仅补缺失的当前版本阶段证据，
+不采正式性能分母；当前仍pending，保留原handle，不重复提交或干预其它任务。
+
+#### 依赖粒度的结构模型：B16与B24不应套同一个重叠假设
+
+`analyze_score_readiness.py`复用真实组/叶/owner枚举，对两个S6 fixture做
+抽象Score-step模型。全部核同时起跑、一步成本为1，并忽略排序、plan、
+同步、前段到达与同核Score占用；所以只说明依赖限制，不代表可执行调度
+或任何微秒收益。此处q//6只是离线固定fixture身份，未进入生产代码。
+
+C04每核22步，每个query组的最后叶在22步才完成；将整段发布改成逐叶
+发布，在该模型中不提前任何组。C05每核33步，但部分组的全部叶在8/9/16/
+17等步已结束，现行整段发布把它们推迟到33步。即使只改逐叶发布，Top-K
+worker按q%48完成全部query后才发布、Attention又先等本组全部query的plan，
+模型里的Attention仍全部等到33步；再只细化Top-K发布也没有改变该结果。
+同时具备逐叶、逐query Top-K以及Attention按当前query获取时，模型的首个
+query门槛才可到8步。这仍未解决实际核占用、因果cache依赖或流水存活状态。
+
+因此若研究B24提前消费，应联合修改完成单位、下游依赖和粗粒度任务执行，
+并保留完整叶的Query/Coeff驻留，不能恢复已失败的逐step波次交错；B16先看
+真实前段到达与Score稳态供数。`score_readiness_model.json`保留完整数组与
+假设，不把33→8写成性能加速。原八档10%目标active，生产未改变，未push。
+
+
+### 2026-10-23：当前两档阶段/硬件证据收齐，选择前段联合投影方向
+
+上一轮完成了联合输出候选、阶段诊断和依赖粒度模型，属于实际进展。核对
+goal仍active、工作树起点干净、公共SDK仍logical-codegen/validated。
+C04阶段任务task_20261023_014328_266874830877 completed/exit0，三窗和完整
+精度/保护通过；未插桩CPP与已采用763.65μs版本的实际CPP唯一匹配，见
+`retained_C04_phase_sdk_v1.json`。其中Score AIC完成离散度6.94μs，Attention
+AIV为10.42μs；META最后位置18.50、QUERY271.42、SCORE_VECTOR457.82、
+ATTN_VECTOR647.78、OUT787.28μs。均是插桩定位，不能替代完整L1或相加认领收益。
+
+对照旧两wave模型也再次确认：均衡固定owner即便零交接成本，Score+Attention
+串行服务总量仍可能不变；完整叶切换还会增加流水启动/排空。故没有仅因
+“首个query可更早就绪”就实现设备队列。先补当前版本的真实流水占用，
+避免拿较早SDK的PMU给当前算子归因。
+
+新增PMU壳复用当前完整fixture、权重、源/SDK校验、图与逐bit检查，只将正式
+L1采样替换为三次candidate图重放。按[官方Profiler Level1接口说明](https://www.hiascend.com/doc_center/source/en/CANNCommunityEdition/910/devaids/Profiling/atlasprofiling_16_0033.html)
+采PipeUtilization，保留原始CSV/trace、实际编译配置路径及全72角色代际检查。
+没有调用begin_dfx，没有生成新的L1分母或候选性能窗口。
+
+首版C04/C05任务task_20261023_021935_38554996813和
+task_20261023_021935_385554318608均在CSV解析时exit1：当前kernel_details.csv
+没有旧版Step Id列，导致采样后数据检查未执行。两份已采原始记录及冻结v1壳
+保留，不把这次失败说成算子或SDK精度故障。v2按三个显式
+CSA_TND_CURRENT_PMU trace区间一一绑定MIX记录，并将解析放在采样后检查之后。
+缺marker、越界/重叠marker、缺核、重复step、NaN/无效计数等10项CPU检查通过；
+实际v1 CSV可离线解析，但缺失的采样后检查仍不能补记PASS。
+
+修正后的C04 task_20261023_023331_4141726772、C05
+task_20261023_023331_414564088均completed/exit0。各三次全24 AIC+48 AIV记录，
+eager/graph/post-PMU输出、Top-K/score、cache/state及保护逐bit通过；三次采样
+的全核代际恰增加3，512B槽padding保持。显式选择candidate编译目录，与同SDK
+已测C04保留实现/C05原版的完整CPP核对一致。结果为current_C04_pipe_sdk_v2.json、
+current_C05_pipe_sdk_v2.json，原始三样本均保留。
+
+| 当前实现 | AIC MAC μs | AIC Scalar μs | AIC MTE1 μs | AIC MTE2 μs | AIC FIX μs | AIV Vector μs | AIV Scalar μs |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| C04 / 128K B16 | 192.852 | 354.232 | 254.844 | 368.195 | 187.978 | 187.982 | 413.974 |
+| C05 / 128K B24 | 289.240 | 437.211 | 394.037 | 457.079 | 277.847 | 279.495 | 514.095 |
+
+这是工具对完整核的汇总，非72条逐核流水，也不定位到某个投影；各pipe可
+重叠，Scalar可能含忙等，不能相加或用外层Duration减去它们得到可省时间。
+当前AIC/AIV ICache miss原值分别为0.003/0.006、0.003/0.005，也不等于
+stall微秒。该数据支持下一步同时减少重复搬运和零散指令，而非只平均任务数。
+
+另核对组件路线以避免重做已知问题：[PyPTO #3038](https://github.com/hw-native-sys/pypto/issues/3038)
+仍OPEN，当前view仍只派生canonical stride，不能绕过保护把Native页尾scale
+当连续Key。L2 BYPASS当前PTOAS0.69只有在提供offset时才调整源地址；
+[PTOAS #1537](https://github.com/hw-native-sys/PTOAS/issues/1537)已记录旧runtime偏移未初始化的风险并关闭修复。
+未硬编码地址偏移或把策略标签当作有效指令。#1625的槽范围修正及后续两级
+预取已有完整正负设备记录，不能原样再测。公共SDK始终未修改/重建。
+
+下一候选聚焦Q_A之后的五路BF16投影：Indexer value/gate、主value/gate和
+原KV。它们都读取同一normed[T,4096]，输出总宽3072；Q_A和split-K head权重
+保留原路径。拟用每块128列、单M128/M192的24任务格子共同分配，沿用现有
+Native权重根与原输出缓冲，不新增权重拼接缓存或Host metadata回读。这样既
+减少跨M重复读权重，也把主投影/KV前移到同一准备阶段，避免它们继续串在
+Indexer query或Q_B之后。不是把旧单个KV轮换/后移负例重命名。
+
+源码层面的初步模型见joint_prefix_work_model.json：C04非QA完整K归约链
+172→24，权重逻辑读取68→24MiB、激活21→18MiB；C05为252→24、权重96→24、
+激活31.5→27MiB。原成对投影的X按源码共享计一次，实际生成DMA/指令仍须
+核对，不能直接折算收益。该方向会改变K512到K256的分段和写者分配，必须
+验证片上资源、所有消费者依赖及完整设备逐bit精度；当前尚无实现采用或
+性能结论。所有本轮任务已终态，原八档10%目标继续active，未push。
+
+#### 联合前缀投影：完成两档实测，逻辑搬运减少尚未转化为明显收益
+
+独立实验包joint_prefix_v1实现了上述24任务格子；CPU完整编译通过后发现通用
+width helper使compiled ABI中两处256维度变成动态维度，因此未上卡。保留v1，
+v2改成固定256/1024/512宽度的三个helper，C04/C05完整codegen的根参数与返回
+ABI恢复一致。全程序Mat475136B、Left/Right各65536B、Acc131072B、AIV Vec180224B
+均未增大；联合job实际累加器分别为128×128、192×128 FP32。C03关闭路径的
+四份CPP与原保留策略完整一致，仅忽略位置注释，见joint_prefix_v2_codegen.json。
+
+67项CPU检查覆盖真实网格AST的写覆盖、Native权重/输出方向、容量边界及旧
+消费者等待范围。QA仍先发布，联合阶段发布原有三类通知后再做Indexer query；
+主投影与KV的旧重复计算/通知被关闭。Native绑定、下游算法和512B通知槽不变；
+不假设设备Q/L等长，也没有新增Host回读或权重拼接缓存。
+
+| 档位 | 原版同SDK L1 μs | 当前保留 μs | 联合前缀 v2 μs | 对当前保留变化 |
+|---|---:|---:|---:|---:|
+| C04 / 128K B16 S6 | 778.39 | 763.65 | 779.33 | +2.05% |
+| C05 / 128K B24 S6 | 1014.46 | 1014.46 | 1007.51 | -0.69% |
+
+C04 task_20261023_032803_157168828876、C05 task_20261023_032956_16262894437
+均completed/exit0。每档10个完整72角色L1窗口；eager/graph/post-L1输出、Top-K、
+score、cache/state逐bit及保护全部通过。全部样本与原始路径保存在
+joint_prefix_v2_results.json，未把此次K分段变化的正确性推断到未测的其它形状。
+
+C04本版拒绝采用；C05仅弱变化，未进入state/service及全档扩测，生产仍保持
+79fae6db0中的leaf优化。这个结果说明减少源码归约链和逻辑读量本身不是宏观
+优化的充分证据，需要核对下游就绪是否真正提前及重排造成的等待。
+为此只补阶段诊断：C04 task_20261023_033752_18611141470（卡8），C05
+task_20261023_033752_186126911640（卡0），均沿用既有三窗诊断壳，尚待终态。
+诊断不能替代正式L1、不能把各pipe时间相加认领收益。目标继续active，未push。
+
+#### 宏观判断：优化关键链的供给顺序，同时核算完整服务成本
+
+上述两阶段任务均completed/exit0，三窗严格检查通过。分析器显式选取测量目录
+中的candidate CPP，先与完整CPU产物唯一匹配，再核对插桩前CPP；没有将同目录
+reference误当候选。证据见joint_prefix_v2_C04_phase.json、C05同名文件及
+joint_prefix_v2_phase_comparison.json。
+
+B24诊断中，MAIN_PROJECT最后端点183.96→131.12、KV_PROJECT298.88→131.64μs，
+但IDX_QUERY_PROJECT为152.72→164.66，QUERY297.28→296.38；将非关键分支提前
+不保证下游关键输入一起提前。SCORE_VECTOR584.26→571.02，而ATTN_VECTOR
+829.42→827.12、OUT1000.70→1000.78，阶段间也没有保留全部提前量。这些是
+不同三窗诊断的端点，起始部分亦有差异，不能作为配对因果微秒或正式收益。
+尤其C04探针OUT787.28→766.74与正式L1的回退方向相反，说明插桩会改变调度；
+正式采用仍只看未插桩完整L1，不能用诊断翻转779.33μs的拒绝结论。
+
+后续采用三个层次选择方向：
+
+1. **关键链和核角色一起设计。** Indexer链决定长历史Score可否启动；主压缩、
+   KV、主Q最终服务Attention。联合投影需要保留Indexer优先级，不能只平均五路
+   矩阵任务。先验证有明确依赖变化的分工，再判断是否值得增加设备调度器。
+2. **数清真正搬运和指令成本。** 权重逻辑读取、GM FIFO往返、Scalar控制和片上
+   状态恢复都计入。另一会话已有直接Native KV→AIC L1完整负例（20261017，
+   同轮892.66→1100.10μs）；两AIV并行搬运改成单AIC逐行ND2NZ，减少GM字节
+   仍可能更慢。该历史结果仅用于排除重复思路，不跨SDK作为本轮分母。
+3. **按工作特征选择调度。** B16 Score/Attention当前收尾较齐，单纯重排owner
+   难以覆盖十个百分点；B24/混长可研究粗粒度提前消费，但必须同时处理叶完成、
+   Top-K与Attention获取粒度，并核算同核占用。旧逐step wave和Query反量化穿插
+   Score均有负例，不能换名重复。只提前首个query也不能推导完整kernel更快。
+
+八档等权目标保持。若只让两个重点档各缩短10%，八档几何平均仅缩短约2.60%；
+重点档用于先验证机制，成功后必须覆盖适用资源域并回归全部八档。
+
+据此冻结critical_prefix_v1：QA→Indexer压缩→Indexer query的源级顺序恢复原版，
+再将主value/gate与KV的20个N128任务分到物理4..23核，留0..3核提前进入原
+Hadamard分支。继续复用已测M128/M192/K256 helper，未扫描相邻tile参数；下游
+Vector顺序、Native输入输出、512B通知和策略域不变。新增测试执行真实网格AST，
+验证20个任务完整覆盖且4个关键分支核在单M域不领主/KV工作；共67项通过。
+
+C04/C05完整CPU codegen、根/返回ABI、全部片上资源通过，地址上界与v2相同；
+C03关闭路径四份CPP及ABI完全一致。首个生成器调用误匹配WORKERS大小写，
+在创建候选目录前失败；修正后冻结一次，没有覆盖已编译包。首次资源读取器
+把MemRef根名当Mem枚举导致断言失败，按真实mem_*根分类后通过；均非SDK故障。
+生成器与测试Ruff通过。阶段commit 00ff61f8a保存前版结果，未push。
+
+新正式L1任务C04 task_20261023_035202_22899263683（卡8）、C05
+task_20261023_035202_22899807255（卡0）已提交，每档十个完整72-role窗口，仍
+对同SDK原combined_v1校准；C04采用时还须优于保留值763.65μs。尚未有新性能
+结论，不先做state/service扩测。生产保持原已采用版本，goal active。
+
+等待重点档期间，只读补齐同SDK历史分母证据：C01 358.02、C03 599.84、
+C06 1173.42、C07 917.71μs，来源同一csa_performance_20261022_aicpu归档。
+qualify_other_references.py核对各case、bootstrap实际SDK根/validated release、
+完整四份CPP/ABI对原冻结算法的已有等价证明、同一fixture构造，以及每档十窗
+原始72-role周期值重算和eager/graph/post-L1检查。保存所有样本和原始窗口路径，
+见same_sdk_reused_other_references.json；没有新增这四档NPU测量，也没有覆盖
+原baseline.json或挑选其它卡上的C04/C05更有利分母。C02沿用此前已合格记录。
+
+当前七档有合格同SDK原算法参考，C08仍缺：该归档C08实际只采MPMD L1，SPMD
+实现还启用了group-order候选，二者都不能补作原SPMD分母。后续若进入混长
+候选正式验收，需补这项缺失参考，不重跑其余七项。
+
+04:00补记：critical_prefix_v1的C05任务completed/exit0。完整L1十窗中位
+1003.02μs，相比原同SDK1014.46缩短11.44μs（1.1277%）；样本
+1006.32/1003.08/1004.40/1010.04/1000.64/992.62/1001.92/1002.96/999.48/1004.20。
+eager/graph/post-L1的全部输出、Top-K/score、cache/state逐bit和保护通过。
+这是小幅正向结果，尚未采用，不将前版或探针变化累加为收益。C04同候选任务
+task_20261023_035202_22899263683已由pending转running，保留原handle等待，
+结果在critical_prefix_v1_results.json继续归档；当前没有其它待收CPU会话。
+阶段commit337a287b4已保存关键链候选与前版两档诊断，未push。
+
+### 2026-10-23：关键前缀收窄到M192；完整八档同SDK参考补齐
+
+上一goal轮属于实际进展，本轮重新确认goal active、工作树干净和公共SDK
+仍logical-codegen/validated，再收取原B16任务，未因等待重启。C04
+critical_prefix_v1完整十窗中位776.74μs，全部逐bit/图/保护通过，但相对
+保留值763.65回退13.09μs，不能因略优于原778.39就采用。全样本和两档结果
+更新到critical_prefix_v1_results.json，B16继续保留原leaf优化。
+
+critical_prefix_v2仅将容量谓词收窄为128<Tcap<=192，沿用单M192和0..3核
+Indexer、4..23核主投影/KV分工；八档只影响C05/C06/C07，不凭B号单点选择，
+也不假设设备Q/L等长。2313组容量/历史/query上界检查确认只增加两个预定
+constexpr。C04关闭路径四份CPP及ABI与保留生产版本完全一致；C05全部源体、
+constexpr和描述符与已测v1相同；C06constexpr与C05相同。C07完整CPU编译、
+ABI和资源检查通过：Mat475136、Left/Right各65536、Acc131072、Vec163872B。
+证据见critical_prefix_v2_codegen.json。首次生成器缺少C02代表描述符，在设备
+提交前失败；不完整目录保留，修正为读取各档原报告后冻结全新v2，没有覆盖
+任何已编译/运行的包。
+
+C05状态任务task_20261023_040249_263110822494 completed/exit0，16种metadata
+变更和4次连续状态推进全部通过，包含S1..6、不同历史、inactive/padding、
+所有者逆序及碎片页。同图同地址、代际、几何、保护和输出/Top-K/score/cache/state
+逐bit通过；实际candidate完整CPP与v1 C05 CPU产物唯一匹配。v2 C05输入到
+编译器保持一致，因此复用该状态证据，不重复16+4；见critical_prefix_C05_state.json。
+canonical service任务task_20261023_041733_306508826683（卡0）继续使用v2。
+
+补齐的C08原版任务task_20261023_040249_263115323657（卡3）completed/exit0，
+原combined_v1源码未变、十个完整72-role窗口、严格检查通过，中位742.86μs。
+全部样本742.20/745.06/743.68/743.52/747.02/740.94/737.46/737.46/749.06/742.14，
+见baseline_current_sdk_C08.json。现在八档都有同公共SDK的原算法参考；这是
+补齐环境可比性，没有更换优化分母。旧混长group-order性能可以重新核验，
+仍须匹配原始执行版本/代码和已完成的状态证据，不能沿用旧跨SDK比率。
+
+C06/C07扩档分别为task_20261023_041929_31218698749（卡2）和
+task_20261023_041929_312190823750（卡11），使用现有sdk_measurement_harness_v2
+的uncompared模式：原冻结算法继续作精度参考，采十窗后再与已核验历史分母
+1173.42/917.71μs结合；原始报告不伪造calibration标记或源码hash。曾准备额外
+reference读取器，但发现已有等价采样壳后撤下草稿、归档到runs，没有覆盖
+既有v2壳或重复扩建测试框架。三个新任务待收，生产未采用关键前缀候选。
+
+#### 权重缓存策略的贯通证据与上游反馈
+
+纯CPU小矩阵DEFAULT/BYPASS对照，经实际公共PyPTO和PTOAS0.69完整降到C++：
+BYPASS在MLIR中带一个l2_bypass属性，却没有offset操作数；两份完整C++逐字
+相同，均不调用get_l2_cache_offset。测试同时记录实际SDK根/HEAD，未改共享
+源码或构建，未上NPU。首次探针漏--pto-level=level3而在默认版本编译被拒，
+修正后的新目录1项通过，失败日志保留。l2_bypass_lowering_evidence.json保留
+属性行、完整文件路径和指纹；没有测得缓存性能差异或新的正确性故障。
+
+PTOAS当前有offset才调整地址，无offset安全回退普通TLOAD；其旧#1537问题
+已经修复关闭。PyPTO当前文档/UT仍描述旧hint形式，UT停在MLIR，尚未接上新
+runtime-offset接口。查重后按用户授权提交[PyPTO #3116](https://github.com/hw-native-sys/pypto/issues/3116)，
+请求接通受支持的runtime契约、否则明确回退诊断，并补贯通PTOAS的测试。
+没有硬编码地址别名，也没有把安全回退称为新精度bug。该问题说明不能仅凭
+CSA源码的BYPASS声明声称权重绕L2已生效；是否能带来净收益仍需后续实测。
+
+### 2026-10-23：保留长历史M192分工与混长重排，八档综合尚未达到10%
+
+critical_prefix_v2扩档任务均completed/exit0，完整十窗、eager/graph/post-L1
+逐bit及保护通过，实际candidate CPP与预审CPU产物唯一匹配。两个参考均为
+此前核验的同SDK、同卡历史记录，原始候选uncompared报告不修改；结果单独
+结合证书，见critical_prefix_v2_expansion_results.json。
+
+| 档位 | 原算法同SDK μs | 候选 μs | 耗时变化 |
+|---|---:|---:|---:|
+| C06 / 128K B28 S6 | 1173.42 | 1138.41 | -2.9836% |
+| C07 / 8K B32 S6 | 917.71 | 930.19 | +1.3599% |
+
+因此最终联合前缀谓词为long_history、G6、128<Tcap<=192，短历史C07恢复
+原实现，C04继续已保留leaf版。这个边界来自不同资源域的正负结果，不把
+B28收益外推给短历史。C05 canonical service任务306508826683已通过，实际
+CPP与已测C05候选一致；见critical_prefix_C05_service.json。
+
+C06首次状态任务339468723710被旧测试壳的C04/C05白名单拒绝，未执行算子。
+保留失败记录后冻结m192_state_harness_v1，只扩入口白名单；原16 metadata+
+4连续步骤检查不改，执行真实schedule AST核验B28容量。新任务
+task_20261023_043423_353647121264 completed/exit0，全部逐bit、几何、地址、
+代际、保护及连续状态通过；实际CPP亦与合并候选相同。不是重跑已成功的B24
+验证。对应证据critical_prefix_C06_state.json。
+
+混长旧候选在logical-codegen SDK下的十窗728.33μs，现在可对新同SDK原版
+742.86计算，缩短1.9560%，旧跨SDK比率仍撤回。重查完整原始72-role周期值、
+逐bit/保护、权重、fixture检查及原版描述符一致；候选卡2、原版卡3，属于
+规范允许的历史复用，不能描述为同卡配对因果测量。原v3的15 metadata+4连续
+状态、v4 canonical service同样核对实际bootstrap release和完整CPP，均与
+当前合并候选C08代码一致，故不重复这些验证。见score_group_order_same_sdk_result.json
+与score_group_order_reuse_validation.json。
+
+合并包merged_schedule_v1以原冻结算法作三方基底，合并当前leaf/关键前缀与
+已验证group-order。9处冲突仅为新增constexpr/调用参数列表或格式；明确同时
+保留各特性，未整目录覆盖而丢失leaf。冻结包完整CPU编译7个代码类覆盖八档：
+C01/C02/C03/C07对原版、C04对已保留leaf、C05/C06对已测联合前缀、C08对已测
+group-order，四份CPP仅忽略位置注释及ABI均一致。C06还直接绑定实际NPU
+candidate目录，非只用相同policy推断。完整记录见merged_schedule_v1_codegen.json。
+
+合并包104项服务合同测试通过，测试进程将该包路径单独绑定并在结束检查所有
+已导入子模块来自此冻结包；生产文件在此阶段没有先行替换。合并包C06进一步
+执行真实canonical service任务task_20261023_044346_37857603166，completed/exit0，
+模型钩子/custom-op、图、workspace复用、空调用/回退和逐bit/保护通过，实际
+CPP与合并C05/C06类一致。对应merged_schedule_C06_service.json。
+
+上述门禁完成后正式集成两项新增策略，原C04 leaf优化保留，总计本goal新增
+保留三项机制。补齐group-order及长G6 M192容量/历史/query上界边界测试，实际
+生产136项CPU合同通过。生产与冻结包各模块执行AST一致，仅文档和独立import
+排序不同；最终生产C05完整CPU CPP再核对逐字一致。同步更正BYPASS注释，
+不再暗示声明已经产生L2绕缓存指令。未重复相同设备数学/性能测试。
+
+retained_merged_schedule.json保存八档原分母、当前采用值、每档比率及全部
+证据入口。按原八档等权计算，当前几何平均比率0.9899876499，即约缩短1.0012%，
+仍明显高于0.90验收线；没有重置分母或把局部百分比相加。生产集成清单为
+merged_schedule_integration.json。所有本轮NPU任务已终态，共享SDK未修改，
+未push；原10% goal继续active，下一轮继续从整链服务成本和数据供给分析机会。
+
+### 2026-10-23：按真实消费者检查依赖，尝试将主Query准备移入Attention
+
+继续使用merged_schedule_v1三个已保留机制，原八档分母及0.90目标不变。
+按当前比率0.9899876499反算：假设其余档位不变、受益档位相对降幅相同，
+只改善两档还需各降31.6952%，覆盖四档需各降17.3533%，覆盖八档需各降9.0898%。
+因此B16/B24是验证优先级，不能把仅在两档出现的微小收益当作完整目标的解决办法。
+
+补采保留版C05的三窗阶段诊断，任务task_20261023_053902_91322522932
+completed/exit0。插桩前CPP与已测critical_prefix_v1 C05完整代码一致，同SDK，
+前后逐bit和保护通过；retained_C05_phase_sdk_v1.json保存绑定与全部原始窗口。
+原C04诊断仍对应当前代码，未重测。以下仅为插桩后的里程碑跨度，不是独占
+计算时间，也不能用于收益计算：
+
+| 保留版诊断 | C04 B16 μs | C05 B24 μs |
+|---|---:|---:|
+| Query完成→Score Vector完成 | 186.40 | 269.66 |
+| Score Vector完成→Attention计划完成 | 36.98 | 38.88 |
+| Attention计划完成→Attention Vector完成 | 152.98 | 217.02 |
+| Attention Vector完成→最终输出完成 | 139.50 | 171.30 |
+
+两档QUERY发布间隔中位数约31μs，其中仍包括等待和控制。此候选的直接机会
+有限，不能预告为整链10%收益。Score和Attention的数据供给、实际服务成本
+及输出投影仍是后续需要覆盖的主体。analyze_retained_dependencies.py与
+retained_dependency_opportunities.json保存计算及限制。
+
+进一步排除几个重复或虚假的机会：QI的完整K1024×N256权重已在M64循环外
+驻留；Q_B全K预载与首M流式保留后续复用在此前BSH记录中均有无净收益实测；
+wait_row_owners已经等齐多个生产者后只做一次payload刷新，邻接阶段进一步
+合并acquire也已有负例。C05的OB核间完成跨度约48μs，但每个N512输出列块
+依赖(group*8+column)%24的三个真实owner；按列取最大就绪时间后机会明显
+收窄，不能把全核跨度当作可直接回收的时间。完整逐窗列就绪时间保留于上述JSON。
+
+新隔离候选query_local_v5将主Query的反量化/RMS/RoPE从Score前移到实际消费
+它的Attention核组。Score只消费Indexer Query，不依赖主q_flat。每组处理
+t=group+k*24，两AIV各处理32个head，均完成本query写回后通过FFTS事件6
+通知同组AIC；包含dummy容量行，AIC原本在检查有效mask前就会读取Query。
+AIV在Attention入口仍获取原QB依赖，不删除数据就绪约束；AIC删除全48个
+PHASE_QUERY等待，改为本query的通知。事件0/1及2..5、三槽顺序和排空不改。
+PHASE_QUERY记录移到AIV Attention末尾，不能再把它解释为原前缀阶段端点。
+
+tile从八token/单head改为单token/八head，保持每行512列规约、先激活scale
+再权重scale、RMS分支选择、RoPE顺序和BF16边界。读取权重scale的次数增加，
+同时q_proj读取更连续；它是调度与数据访问共同改变的候选，不能仅归因于
+少一道全局等待。GM q_flat仍存在，没有宣称片上零拷贝。现有q_heads外层别名
+现在被AIV写入，因此入口方向显式从In改为InOut；130个参数的槽序、shape、
+dtype、工作区以及return_aliases不变。此声明变化必须由实际服务路径再验证。
+
+候选仅在长历史G6、64<=Tcap<=192的资源域启用，当前八档覆盖C02/C04/C05/C06。
+首轮CPU作者预检v1的float调用、v2的非Mat异形TMOV、v3的只读别名方向、v4的
+incore reshape降成Tile均保留失败记录；没有改SDK、没有将这些未运行版本
+提交设备。v5使用原有外层二维别名并正确声明写方向。完整C04/C05编译通过，
+Cube Mat475136/Acc131072/Left65536/Right65536，AIV Vec180224字节；与保留版
+相同的关键峰值，没有扩大工作区。PTO代码中只新增事件6的一处MTE3 set与
+一处MTE2 wait，其余FFTS发出点逐项一致；详见query_local_v5_C04_codegen.json
+和query_local_v5_C05_codegen.json。
+
+27项CPU检查执行真实helper AST，对15个T（含1/7/8/9及容量边界）验证
+每个token/head唯一写者、完整覆盖、保护边界、原尾块分支和逐元素运算顺序，
+并检查原三项策略未丢失。CPU模型不能证明设备rsqrt舍入或事件活性。
+已提交C05任务task_20261023_055621_141049523995和C04任务
+task_20261023_055838_147095425686，按原规范执行逐bit/保护与十个完整L1窗口。
+当前尚未采用此候选，生产代码保持32a1426d9；结果待下文收口。
+
+#### 本轮结果：两档拒绝，后续转向单位工作成本
+
+两项性能任务均completed/exit0，eager/graph/post-L1的output、TopK、scores、
+所有cache/state及保护检查全部通过。复核20个原始L1窗口，均是完整72角色、
+一个MIX task的incore首尾差；实际候选CPP与对应CPU门禁代码匹配。结果见
+query_local_v5_results.json，保留全部样本：
+
+| 档位 | 原算法同SDK μs | 当前已保留 μs | Query局部准备 μs | 对已保留版回退 |
+|---|---:|---:|---:|---:|
+| C04 / 128K B16 S6 | 778.39 | 763.65 | 796.79 | +4.3397% |
+| C05 / 128K B24 S6 | 1014.46 | 1003.02 | 1043.43 | +4.0288% |
+
+两档均拒绝，不扩到C02/C06，也不做仅为采用而需要的额外服务/状态档位验证。
+生产仍保留三项机制，八档几何平均比率仍为0.9899876499，目标仍未达到。
+
+追加三窗候选C05诊断任务task_20261023_060513_164967611051，completed/exit0，
+前后严格检查通过，插桩前CPP与上述候选实测绑定。相对于同代码类保留版的
+诊断，Score Vector完成点提前约6.20μs、Attention计划提前5.10μs，但Attention
+Vector完成点推迟35.00μs，最终输出推迟40.08μs。它支持“前段少量提前、后段
+成本增加”的方向解释，不是独立收益样本；Query重切、scale额外读取、局部
+事件和流水交织同时改变，不能从该诊断进一步给每项成本分账。
+PHASE_QUERY已移到Attention末尾，其端点和ATTN_VECTOR的前置发布间隔不能
+与旧语义直接比较。query_local_v5_C05_phase_comparison.json保留这些限制。
+
+为后续数据路径评估补充attention_interface_traffic.json及生成脚本：在所有
+容量query活动、五个128候选块均有效的假设下，按每个接口分别统计逻辑payload，
+C04合计357 MiB，C05合计535.5 MiB。C05中KV cache→UB、UB→GM ring、GM→L1
+各90 MiB；PV写GM与Vector读回各90 MiB。K已经在L1供QK/PV复用，不重复计
+第二次GM→L1。另有score、probability、Query和packed写回。压缩候选行采集
+逻辑次数分别49152/73728，不将其直接等同硬件DMA指令数量。
+
+这些数值是接口payload账目，不是实测HBM流量：L2可以服务重复ring访问，
+同一数据跨多个接口会被重复计数，DMA填充、mi/li和Scalar metadata也未计入。
+不能拿535.5 MiB除以标称带宽来宣称硬件带宽瓶颈或预测提速。此前“KV直接
+送AIC L1”已因单Cube行搬运串行而回退，也不重复该方案。
+
+下一步优先获取实际TopK/物理行的连续run、页分布及跨query重叠率，再判断
+哪些数据复用值得改变核组分工；同时把Score/Attention的每单位工作成本与
+整段输出投影的数据往返作为主线。需要同时计算真实依赖、最忙核工作量、
+全部operand流量及新增指令，不能仅以少一道等待、少一次权重load或短路径
+判定优化。固定阶段的完成跨度也不直接等于动态调度可回收的空闲时间。
+
+本轮未修改共享SDK或生产算子，所有自有任务终态，未push。过程仍集中在本
+文档，失败预检与未测描述符归档在runs；原10% goal保持active。
+
+### 2026-10-23：实测KV访问局部性，拒绝逐行检查省略，反馈采集流水能力
+
+本轮开始复核HEAD=cbbcb41ff、工作区干净、所有旧任务终态；公共SDK仍为
+csa-shared-20261022-logical-codegen。知识库SQLite索引仍缺失，未重建或改做
+全库扫描；本轮接口依据为共享PyPTO、PTOAS和实际固定版本PTO-ISA源码。
+
+此前结果没有保存真实TopK/物理计划数组，因此冻结kv_access_harness_v1，
+仅执行一次已验证的merged_schedule_v1 C05，导出运行后的索引、位置、Q/L、
+页表与块mask，不改算子、不插桩、不采L1。任务task_20261023_062321_209509211525
+completed/exit0。该探针明确不重新声称数学验证；实际唯一CPP与已测C05候选
+一致，SDK、权重、固定case一致，复用原逐bit/图/状态证据。CPU独立核验所有
+物理索引等于本轮逻辑TopK经过causal范围、当前页表和物理容量约束后的映射，
+块mask与合法行一致。原始NPZ及其hash保存在runs，摘要retained_C05_kv_access.json。
+四项分析器测试覆盖连续访问、集合相同但顺序相反、页空洞和错误物理计划拒绝。
+
+| C05实际访问指标 | 观察值 |
+|---|---:|
+| 有效压缩KV行访问 | 73728 |
+| 按原64行lane切片及原顺序的连续run | 73724 |
+| 理想合并可减少的行请求比例上界 | 0.00543% |
+| 每64行片段的不同物理页中位数 | 62 |
+| 每片段改整页读取的payload放大倍数 | 31.12× |
+| 同请求相邻query的行集合重叠均值／中位数 | 5.37%／4.88% |
+| 同位置行重合比例均值 | 0.0163% |
+| 可直接复用的完整64行片段／128行块 | 0／0 |
+| 整个请求内去重后可少读的行比例均值 | 11.53% |
+| 全合法128行块／活动128行块 | 576／576 |
+
+这些是固定seed/fixture观察，不能外推所有线上请求。集合去重比例也不等于
+按原顺序可复用的L1 tile。当前连续24-query逻辑波次的不同物理行约10500～11120；
+假设改成一请求一cluster，同一query步24请求则为12288。该模型只描述逻辑
+working set，不是实际L2 miss或调度时序，但已不足以支持盲目重排请求以求缓存收益。
+因此本轮没有试整页读、按物理索引排序或跨query整块KV驻留。
+
+实际ISA pin为327cd5869f3a7c4d2c6a1b945b2aed06e7665c5d。A2/A3 ND Row/Zero
+对合法行执行范围判断和DMA，对非法行进入逐元素零填充分支；合法行没有额外
+清零。候选plan_gather_valid_v1复用plan已有的完整合法性mask，每128行做一次
+row_min，写私有attention_mask列7..10。0..4仍是原事件谓词，5/6仍是query几何；
+一个plan owner独占每行64B，当前代所有真实容量行（含inactive）均覆盖证明。
+消费者只有在同代证明为1时使用MGATHER Row/Undefined，否则保留原Zero读法。
+原query顺序、softmax/PV数学、FFTS事件、工作区及ABI均不变。
+
+27项CPU检查执行真实新增证明/消费分支，覆盖完整块、两lane中的坏行、负索引、
+容量外索引、full→partial→empty→full、尾行和poison保护；移除新增两处逻辑后，
+原plan及两Attention helper数学AST一致。完整C04/C05 CPU编译和资源门禁通过，
+主要Mat475136/Acc131072/Left65536/Right65536、AIV Vec180224字节，原FFTS
+发出点一致；关闭域C03四份CPP与原版仅忽略位置注释后相同。
+
+两档新性能任务均completed/exit0，eager/graph/post-L1逐bit及保护全部通过，
+原始20个完整72-role单MIX窗口和实际CPU/NPU CPP均已绑定。结果如下：
+
+| 档位 | 已保留版本 μs | 合法块采集候选 μs | 对已保留版变化 |
+|---|---:|---:|---:|
+| C04 / 128K B16 S6 | 763.65 | 781.01 | +2.2733% |
+| C05 / 128K B24 S6 | 1003.02 | 1006.30 | +0.3270% |
+
+任务分别为task_20261023_064346_258855815134、task_20261023_064228_255495026812。
+plan_gather_valid_v1_results.json保留全部样本。C05差值很小，只报告所见中位数，
+不声称统计显著；两档都没有净收益，因此不采用、不扩档，也不做采用所需的
+额外同址坏页/服务测试。生产仍是32a1426d9的三个保留机制，八档比率仍为
+0.9899876499，原0.90目标未达到。
+
+#### 编译侧后续方向：独立Vector工作被MGATHER宏完成等待约束
+
+进一步核对了PTOAS SyncMacroModel与ISA内部事件。没有把已关闭的#861
+Scalar index-read race当作新bug；当前编译器确实在索引DMA后插入MTE2→S。
+也区分了#1587的动态subview别名问题。本轮最小复现仅用三个静态不相交UB
+分配，先加载独立Vector输入和gather索引，再MGATHER、TADDS和两个输出store。
+共享PTOAS0.69编译通过，正确地在gather前发出独立输入的ready；同址负对照
+也编译通过，并保留gather后真实的数据依赖。
+
+不过ISA的MGatherRowImpl尾部仍有MTE2→V set/wait，后续独立TADDS位于
+同一V队列中，受到该宏完成点约束。不能仅凭头文件就断定它生效：本轮还用
+当前CCEC、A3 target和标准-O3/-DMEMORY_BASE等编译参数做预处理，确认
+__PTO_AUTO__未定义，PtoSetWaitFlag确实展开set_flag/wait_flag调用。
+未删除任何同步，未改共享SDK，也没有将CPU证据称为设备收益。
+
+查重后按用户既有授权提交[PTOAS #1674](https://github.com/hw-native-sys/PTOAS/issues/1674)，
+请求从ND Row/Undefined窄域提供由编译器管理依赖的异步采集路径。必须保留
+索引就绪、真实V/MTE3消费者完成、同址和循环复用依赖；Zero路径若扩展还须
+正确建模Scalar补零写入，不能全局开宏删除其它算子的同步。完整输入为
+mgather_independent_vector.pto，预处理和两对照证据为
+mgather_overlap_codegen_evidence.json，issue登记upstream_issue_1674.json。
+
+下一步先核对Attention每tick的Score输入准备、softmax与KV采集的真实重叠条件，
+并排重旧逐行／双遍gather负例；不能仅删几个范围判断或以字节量预测收益。
+本轮所有自有任务已终态，未push，goal继续active。
+
+后续排重补记：主BSH记录的E44双遍显式DMA已在长B16回退2.330%；E45的
+64KiB持久KV区曾需202240B而超188416B；E46改32KiB后，B24/B28仍分别
+回退0.577%/0.658%，均未采用。旧stage=2行加载还增加了1KiB UB复制，原逐行
+TLOAD循环本来就没有逐行显式wait。上述方案不能改名重测。当前TND的PV已
+左右各256列读取，不能再把“半列读取”当新发现。后续只有Score输入前取位置、
+独立KV缓冲生存期及实际V/MTE2重叠共同发生有依据的改变，才构成新候选；
+按更少head更新PV以减少同时live临时量仅是待完整编译审查的资源方案，尚未实现。
+
+### 2026-10-23：按完整执行策略重排优先级；预取候选在编译门禁否决
+
+用户再次要求从宏观角度看后续性能。本轮沿用原active goal、八档等权、
+combined_v1分母、TND-SPMD和C04/C05重点，没有重新设定基线。生产仍是
+merged_schedule_v1的三项已保留机制，正式几何平均比0.9899876498714436，
+耗时降低1.001235%，目标未达成。没有新增NPU执行或修改公共SDK。
+
+#### 先收取既有候选，按实际并发条件决定是否上卡
+
+attention_prefetch_v1从已采用merged_schedule_v1生成，仅改Attention AIV
+helper及其调用：上一块Score/bias提前加载、独立32KiB KV DMA区、两次32行
+采集/写出，保留原逐行边界判断、数学顺序、三槽及大小档的KV/Prob通知相对次序。
+它与旧E44/E46的区别是Score输入位置前移；不从已否决的plan-valid版本继承。
+
+C05完整CPU编译成功，实际Vec186112/188416B，Mat475136/524288B，
+Acc131072B、Left/Right各65536B。根参数、返回及packed ABI与已采用C05一致。
+KV持久区[86272,119040)与Score[32768,49152)、bias[120064,120576)分离。
+但实际C++存在以下顺序，见`attention_prefetch_v1_codegen.json`和复核脚本
+`audit_attention_prefetch.py`：
+
+- Score/bias的TLOAD确实先于当前KV行DMA，物理路径已无MGATHER宏。
+- 每32行DMA之后，在判断是否需要补零之前，无条件set/wait MTE2→V。
+- 两个半块循环退出时，又等待MTE3→V完成；随后才发出softmax的首条TMULS。
+
+因此本候选没有形成所要求的KV DMA/Vector重叠，**在编译机制门禁否决，不上卡**。
+没有宣称它设备精度通过、性能回退或所有异步实现均不可行。不能直接删除这些
+事件：重写必须证明真实别名、补零分支、跨半块及跨tick复用均受保护。
+未写仅为这个已否决候选服务的完整数值解释器，也不补C04/关闭档编译。
+
+#### 宏观结论：同时约束关键路径、资源服务能力和适用范围
+
+整体时间同时受依赖最长链和各硬件资源的总工作量约束。让某个query先就绪，
+只有在有资源执行它、且不等量推迟另一条关键链时，才可能产生净收益。
+单SPMD保留了设备内分工的空间，也保留了内部传输、等待和状态切换成本。
+MPMD的单task耗时不能直接代入当前SPMD，更不能把L1解释成已扣净所有调度空隙。
+
+`analyze_structural_priorities.py`复算已有证据，输出`structural_priorities.json`，
+没有新增性能样本。主要约束如下：
+
+| 决策维度 | 当前证据 | 对下一步的约束 |
+|---|---|---|
+| 收益覆盖 | 从已采用实现继续，仅两档改善需各31.70%；四档需各17.35%；五档需各14.14%；八档需各9.09%，才达到原八档10%目标 | C04/C05用于筛选，最终需要可扩展机制及互补分档；这些数值是假设其它档不变的预算，非预测 |
+| 均匀长历史 | C04/C05 Score padded-row×step最大/平均为1.0；当前阶段诊断的Score AIC尾差6.94/12.00μs、Attention AIV尾差10.42/9.48μs | 单独平衡尾部缺少支撑大收益的证据，优先降低整段服务成本；尾差也不是可直接删除的时间 |
+| 就绪粒度 | 原抽象模型C04逐叶最早/整段均22步；C05可从整段33步改到最早8步，但必须联合细化叶、TopK及当前query获取 | B24可研究粗粒度就绪执行；B16不能直接复用这个“8/33”的论据，且模型未计共享资源占用 |
+| 数据供给 | C05实际73728次压缩行访问仅4个相邻合并机会；按整页读会过取31.12倍；同请求相邻query集合平均只重合5.37% | 排除把随机稀疏采集简单变成连续整页读取/整块复用的路线 |
+| 硬件接口 | C05 Attention全有效块模型的各接口累计535.5MiB；其中KV三段各90MiB，PV写/读各90MiB | 研究必要接口的供给与重叠，不能把该数值当HBM字节或按峰值带宽预测收益 |
+| 编译落地 | 新候选有独立UB、提前加载，但控制流汇合处的完成等待仍阻止预期重叠 | 源码变形先经真实同步/缓冲审查，避免为未实现的机制做整层测试 |
+
+从最新已采用版本的插桩端点看，C04是Query271.42→ScoreVector457.82→
+Plan494.80→AttentionVector647.78→Out787.28μs；C05是287.94→557.60→
+596.48→813.50→984.80μs。它们用于定位完整链，不是独占阶段耗时，不能
+简单相减并相加认领收益。较早的同SDK C05 PMU对应原版而非当前critical-prefix，
+也不改标为当前已采用实现的逐阶段证据。
+
+#### 后续三条主线及进入设备实验的条件
+
+1. **优先降低Attention的完整供给/消费成本，先让流水在生成物中成立。**
+   关注稀疏行DMA与独立softmax/PV归并的重叠、缓冲生命周期及必要传输，保留
+   双AIV现有32-head分工。先用窄域、独立地址及复用/别名对照确认编译器能
+   表达正确异步边界；再在真实稀疏plan上验证服务成本，最后用完整L1确认。
+   PTOAS #1674仍是已提交的宏完成等待问题；显式DMA原型又暴露控制流完成
+   边界，不能把“改成TLOAD”当作问题已解决。共享SDK只能按统一发布流程升级。
+   如需预先准备KV做诊断，其准备时间外移只用于定位上限，不计优化收益。
+2. **长历史路径研究以完整叶/完整query为单位的联合执行策略。**
+   保留叶内Query/Coeff驻留和精确TopK合并树，核算Score、TopK、Plan与Attention
+   的真实资源竞争。B24先验证提前就绪能否填入可利用的资源空隙，再决定静态
+   粗粒度交错或设备侧就绪任务队列。禁止退回旧逐N面板切换，它曾增加大量
+   Left恢复及wave尾部。若引入队列，单SPMD形态可以保留，但队列控制、代际、
+   唯一写者、配对AIC/AIV及槽复用成本都必须计入；原子API存在不等于免费调度。
+3. **按不同瓶颈组织分档，扩大能保留收益的范围。**
+   当前Attention的query分配为q%24：C01只有6个活跃核组，C02/C04每组4个、
+   C03每组2个、C05每组6个、C06每组7个、C07每组8个；C08为2或3个。
+   这是源码工作几何，不是硬件利用率。B1可独立评估跨核组拆独立head的并行，
+   必须核算重复KV供给；均匀大B优先服务成本；混长按有效工作和就绪条件调度；
+   短历史档优先检查投影/输出链，不能以长历史Score措施覆盖所有场景。
+   等长分支只有在改变完整分工或数据供给时才有价值，不再单独优化几次元数据查找。
+
+排重补充：主BSH过程已有AIV0全量KV采集、AIV1全部64-head数学的完整实验，
+宽head改进版仍未优于当时现选；不能把“搬运核/计算核分工”作为未经尝试的
+主线。当前A2/A3 pinned `TPush.hpp`的数据路径为GM FIFO；官方TPUSH文档把
+直接L0C→UB/UB→L1相关规则列在A5分支。因此不把换成aic_gather/aiv_shard
+表述为本机已获得直接片上交换能力，也不把A5能力直接计入A3性能预算。
+资料：[TPUSH官方说明](https://github.com/hw-native-sys/pto-isa/blob/main/docs/isa/TPUSH.md)。
+
+下一步投入顺序为“可实现的Attention供数重叠→有资源预算的粗粒度调度→互补
+分档”，每个候选都说明预期减少的工作、为何可覆盖目标档、如何证明完整收益。
+若原数学逐bit约束下某条路径需要改变归约顺序，保留为不同算法议题，不悄悄
+放宽本轮约束。没有新保留优化，本轮阶段材料本地提交，未push，goal继续active。
+
+### 2026-10-23：独立Vector先发射的Attention候选通过CPU门禁，开始两档完整验证
+
+上一轮完成实际生成物审计并改变后续行动，属于进展。新轮核对goal仍active，
+生产merged_schedule_v1与公共logical-codegen/validated SDK未变。知识索引仍缺失，
+未重建或扫描全库；复读已定位的Attention流水slot卡，沿用slot最后消费者、
+数值状态版本、两AIV参与集合及三拍排空约束。该卡为draft、未定位平台，
+具体A3行为仍按当前源码、生成物及设备验证判定。
+
+`vector_before_row_dma.pto`先在独立UB地址发Vector，再做显式逐行DMA；正对照
+无V→MTE2/S等待阻断首行DMA，同址负对照保留V→MTE2等待，后置Vector对照也
+单独保留。均是CPU编译，不是硬件加速证据。记录为`vector_dma_probe_v1.json`。
+首个命令误用了build/tools的Python包装入口，缺package root退出；改用公共
+build/bin/ptoas成功。这是调用路径错误，没有当作SDK故障上报。
+
+`attention_overlap_v1`从已采用版本冻结：当当前压缩块和上一Score块都有效、
+且物理plan可用时，在同一个控制分支中先load索引/Score/bias并发出原softmax，
+再做两次32行KV DMA，最后按原大小档顺序通知KV/Prob。与前轮只前取输入不同，
+这次Vector数学本身位于DMA前。概率及mi/li存储仍在采集之后；PV在线归并、
+最终发布和所有数学次序保持。SWA、失效块、首拍、排空及能力外情况保留原体。
+
+两档完整CPU编译及`audit_attention_overlap.py`通过：AIV Vec均180224B，
+AIC Mat475136B、Acc131072B、Left/Right各65536B；C04原有Cube Vec16384B保留。
+根参数/返回ABI与各自已采用版本一致。真实生成物从softmax首条TMULS、
+TROWMAX/TEXP/TROWSUM/TCVT到首行KV TLOAD之间没有PIPE_ALL或V→MTE2/S完成等待；
+索引的MTE2→S保护仍在。独立DMA持久区不与Score/概率/索引区重叠。
+FP32归约走TRowReduceOps，头文件中的Scalar末块归约等待属于整数分支；
+所用Vector底层实现另核对，不能只以外层C++没有wait判断宏内部行为。
+
+这是**第一组32行DMA与先发出的Vector工作具备重叠路径**，不是全64行都已
+证明重叠：第二半块仍等第一半块GM写完才能复用缓冲；实际时长尚需设备证据。
+
+20项CPU检查通过：从实际AIC/AIV源码反向切出事件控制，对两种通知策略各
+枚举1024种双query有效块mask，序列与原版逐项一致，三角色DAG无环；缺少
+一个AIV通知的负对照被拒绝。另核对原AIC/原AIV体、fallback和softmax数学AST，
+并实际执行双32行采集源码，覆盖两lane、半块边界、负哨兵/容量外地址及
+full→partial→empty→full缓冲复用，逐bit搬运及外部哨兵通过。
+这些不代替硬件事件容量、cache可见性或完整算子设备正确性。
+
+两任务均经task-submit，沿用完整链路、各10个有效72角色L1窗口及原同SDK分母：
+
+- C05/device0：`task_20261023_082544_83204314999`。
+- C04/device8：`task_20261023_082745_88724516982`。
+
+任务source和harness保持冻结，实际进展一度分别到candidate/reference编译，
+CCEC进程仍活跃，并非等待超时或kernel失败。任务清单为
+`attention_overlap_v1_tasks.json`，结果审查脚本为`analyze_attention_overlap.py`。
+本条为CPU阶段交接，尚无性能采用结论；生产、原基线和三项保留机制不变，未push。
+
+#### 两种Attention顺序的完整结果与阶段归因
+
+early-Vector两任务均completed/exit0。C04十窗中位789.24μs，相对已采用
+763.65μs慢3.351%；C05为1029.72μs，相对1003.02μs慢2.662%。六次检查
+覆盖reference/candidate的eager、graph和post-L1，输出、TopK/score、cache/state
+逐bit与保护区均通过；20窗重新从全72角色原始L1首尾计算，实测CPP与CPU
+审计产物一致。完整证据`attention_overlap_v1_results.json`，不采用、不扩档。
+
+C05诊断task_20261023_083537_109702310267 completed/exit0，三窗及正确性
+检查通过，插桩前CPP与该实测候选一致。相对已采用实现的诊断，ScoreVector
+结束点557.60→552.24μs，Plan596.48→590.80，AttentionVector813.50→838.68，
+OUT984.80→1009.82。较晚的完成位置主要在Attention段出现并传到输出。
+这些是插桩前沿比较，不是纯算术时间或正式回退的精确分摊；尚不能区分
+Scalar发射成本、DMA吞吐及Cube供数延迟各占多少。见
+`attention_overlap_v1_C05_phase.json`与`attention_overlap_v1_C05_phase_comparison.json`。
+
+随后用`two_half_dma_then_vector.pto`验证反向发射顺序：两个32行纯DMA/store
+循环后再发独立Vector，仍保留MTE3→MTE2复用保护，独立区无需等待最后GM
+写完；同址负对照保留MTE3→V等待。该CPU证据不含任何硬件耗时。
+
+`attention_valid_overlap_v1`组合原已验证的整128行有效性证明与上述纯DMA路径，
+从merged_schedule_v1出发，不继承early-Vector数学发射顺序。当前proof、当前块
+及上一Score块都有效时才省掉行内判断/补零分支；先前取Score/bias、发DMA，
+大T仍先通知KV再做softmax，失败证明保留原完整fallback。证明生产者与旧
+plan_gather_valid_v1的文件逐字相同，旧候选单独无收益不被改记为正向。
+两档完整CPU/ABI/资源及实际同步门禁通过，AIV Vec仍180224B；30项CPU检查
+包括旧20项和新10项，新增实际proof入口、4096组带证明开关的事件模型、原
+数学/fallback与有效行双半块复用。未把小型PTO探针直接当作完整算子证明。
+
+第二版两任务同样completed/exit0：C05 task_20261023_085022_152372822517，
+C04 task_20261023_085318_164981112344。C04十窗中位791.03μs，较已采用慢
+3.585%；C05为1022.15μs，慢1.907%。完整严格检查及20个原始72角色窗口均
+通过，实际CPP匹配，见`attention_valid_overlap_v1_results.json`。整体候选不采用；
+不继续扩性能档或做仅用于采用的服务验证。
+
+正式性能壳没有导出private proof列，因此另准备不改kernel的单次读回壳
+`kv_proof_harness_v1`，读取mask7..10及物理indices，逐块比较证明，并记录当前/
+上一块有效条件下的快速分支资格。这是补足运行路径证据，不重采L1、不新增
+数学正确性声明，也不是直接指令计数。C05 task_20261023_091308_221552610679、
+C04 task_20261023_091309_221636318785已提交；本条写入时尚未收取读回。
+
+#### 重新核对八档的真实能力覆盖
+
+`physical_plan_capacity_coverage.json`按冻结描述符与当前实际谓词复算：
+只有C04/C05/C06/C07启用且满足物理plan条件。C02虽然PLAN_PHYSICAL_ROWS为真，
+但compressed_table为[16,2050]，超过PHYSICAL_PLAN_COLUMNS=2048，整档会回退
+到原逻辑indices/逐行查页路径；不是2080/4096已经受支持。C01/C03/C08的policy
+本来关闭。这是能力边界证据，没有把它换算成性能收益。
+
+下一步优先隔离评估足以覆盖C02的页表容量档，并保持现有2048列档的生成物。
+如果使用2080列，只是覆盖实际2050列并满足对齐的候选设计；完整UB分配、
+物理地址精确性、无效页/因果保护、动态状态与完整L1仍需实际验证。不能将
+Native页表截断到2048列，也不能为提速忽略尾部新token所在页。
+
+同步排重：当前Score源码已包含QK(current)/WS(previous)错拍、拆分QK早FIX与
+下一Key预取；这些不能再当新优化。旧静态容量v28已经测过B16/B28约0.4%/1.0%
+小幅变化，缺少新机制不原样重测。后续核间调度仍先核算共享资源、驻留和
+启动/排空成本，不能用最早query就绪时间代替完整链路收益。原八档10%目标
+继续active，生产三项保留机制及1.001235%综合降低保持，未push。
+
+运行路径补证已收齐：两读回任务均completed/exit0，C04 proof均为1、384/384个
+压缩块满足完整快速分支条件；C05为576/576。proof逐块等于实际物理indices的
+全有效判断，物理模式容量条件成立。源码/SDK/case及完整生成CPP与各自严格
+十窗口测量一致，见`attention_valid_overlap_v1_proof_readback.json`。这是设备
+产生的条件见证，不是指令计数；没有增加性能样本或重报数学验收。两种顺序
+的整体验证均不支持采用，当前自有CPU/NPU任务全部终态。C02容量扩展仍是
+下一步待实现/验证项，未将它预记为优化收益。
+
+### 2026-10-23：C02物理plan容量试测取得3.70%正向，进入分档与状态验证
+
+从merged_schedule_v1冻结physical_capacity_2080_v1，仅将共享的
+PHYSICAL_PLAN_COLUMNS由2048改为2080。前置几何、最终plan和Attention消费
+仍共用原容量谓词；没有裁剪2050列页表、删除causal/非法页检查或改变数学。
+这只是C02隔离原型，未将默认容量改入生产。
+
+52项CPU检查通过：执行实际物理地址推导体，对2048/2049/2050/2080列、
+尾部causal位置、负页/越界页以及FP32精确页号上界做独立整数oracle比较；
+其它源码逐字不变。完整CPU编译/ABI/事件位点审计通过，真实p_table为
+INT32[1,2080]、8320B，AIV总Vec峰值仍180224B，AIC资源保持原上限以内。
+
+task_20261023_093314_284037929851/device9 completed/exit0。沿用原完整链路、
+六次reference/candidate eager/graph/post-L1逐bit和保护检查；十个全72角色
+L1窗口中位933.34μs，对同设备、同SDK已合格历史969.17μs降低3.69698%。
+基线没有重测或换算法，实测CPP与CPU候选一致。正式结果保存
+`physical_capacity_2080_v1_C02_result.json`及全部样本/原始窗口路径。
+
+在全部窗口与原检查结束后，新增只读观察，不影响计时：实际物理indices与
+独立Host映射一致、区别于原逻辑indices表示，49152条压缩行有效；其中4条
+确实访问第2048列。证据为原任务的physical_capacity_observation.npz/json，
+不是仅凭源码存在分支认定已启用。现阶段仍是pilot，不更新正式八档收益。
+
+后续将容量按实际compressed block-table描述符选成2048/2080两档，统一
+传给生产者和消费者，并核对旧档生成物、真实服务图签名及状态/非法页保护。
+保留原三项机制和固定分母；共享SDK未变、未push，goal继续active。
+
+### 2026-10-23：容量分档完成八档代码等价，进入C02状态与服务检查
+
+冻结physical_capacity_tier_v1，policy新增PLAN_TABLE_COLUMNS constexpr，
+从实际已分配cmp_block_table.shape[1]选择2048/2080，不读回Q/L数据。
+binding与service graph signature使用同一描述符；前置geometry、最终plan
+和Attention消费统一接收容量。八档仅C02选择2080，其他七档仍为2048。
+现有136项合同测试在隔离候选运行，加29项容量/传递检查，共165项通过。
+新状态观察器的3项CPU检查也通过，覆盖历史页选择、非法页恢复和dummy。
+
+八档完整CPU编译通过。C02全部四份CPP和kernel ABI与已实测2080原型一致，
+其他七档与已保留实现一致；仅剔除`// pto:`源位置注释，无表达式归一化。
+C06使用已实测C06产物作为比较对象。证据physical_capacity_tier_v1_codegen.json。
+构建检查脚本初版误假定C06有独立merged CPU目录，修正为已归档的真实产物；
+隔离UT首次收集缺少测试source_loader路径，修正本地导入后165项通过。
+这两项均为测试工具路径问题，未修改共享SDK或冻结候选。
+
+通过task-submit在device9提交state任务task_20261023_101533_4702752956，
+service任务task_20261023_101534_47081128521。状态检查保留原16场景/4连续步，
+新增负压缩页、恢复、越界压缩页、恢复。只修改第一query已选中的历史压缩页，
+不破坏本轮写slot；独立整数oracle校验physical indices和压缩块mask。
+服务检查保留真实custom-op、ACLGraphWrapper、空调用和Native回退合同，
+将原C04专用leaf策略断言改为C02实际2080容量断言。两项均不采性能。
+当前生产仍是merged_schedule_v1，未预记新收益、未push。
+
+#### 容量试测后的宏观投入排序与边界
+
+C02证明值得优先寻找“描述符越界导致整段回退”的结构性损失：本轮改变的是
+整档地址准备/消费路径，而不是缩短某条指令。若状态和服务门禁全部通过，
+原八档分母下的几何平均比值将为0.985336943775587，即耗时降低1.46631%；
+当前正式值仍0.9899876498714436。此前三项收益和本次pilot不能提前混记。
+假定其他档位不变，再只改善两档须各降低30.3965%，四档须各16.5713%，
+八档须各8.66069%，才达到原10%目标。这是覆盖预算，不是性能预测。
+
+后续按完整工作量、关键依赖、资源利用三个问题安排：
+
+1. 先完成C02容量分档落地，继续检查其他快速路径的实际命中与回退原因。
+   不直接全开小T的physical plan：已查另一会话10月19日七档复试，B4回退
+   3.115%，B8仅0.156%弱正向，因此其T>=64选择有实测依据。旧测不同SDK
+   不能作为当前收益分母；它足以否决“只改开启阈值就是新机制”的说法。
+2. 小batch首先确认是否由可并行阶段占据关键路径，再研究query/head二维
+   分工。C01现有Attention只分配6个核组；把独立head分给更多核组可增加
+   并行，但会重复KV采集和GM中转，不能由6→24直接推断四倍加速。除QK/PV
+   计算与环槽外，还要同步改变plan获取、sink/head偏移、packed写者和O_A
+   获取集合。数学不跨head归约，仍须生成物资源审查及完整逐bit/L1验证。
+3. 大batch继续以完整leaf/query为单位评估Score→TopK→Attention交错，先
+   核算能提前执行的具体query与它占用AIC、AIV、DMA后对剩余Score的延迟。
+   C05理想化8/33步就绪只表明依赖机会；C04对应22/22，不能套同一预算。
+   只有存在可用资源空隙或减少总搬运，才值得实施；不重做旧逐面板切换。
+4. Attention继续寻找能减少总传输/地址成本的机制。新两种流水候选虽保持
+   精度却使完整L1回退，故暂不继续仅交换DMA/Vector顺序。当前设备随机KV
+   低连续性、低相邻query重用证据保持有效；A3没有已验证的A5式直接交换
+   捷径，不能把改写API名当作删除GM流量。混长与短历史分别按其实际工作
+   和投影/输出链选策略，不把长历史Score方案当作全八档通用优化。
+
+设备验证暂因CI占用全16卡而排队；沿原task句柄等候，没有重复提交或干预
+他人任务。CPU阶段签名提交430035ebc，生产及正式收益暂不变。新增
+audit_capacity_validation.py将逐项检查完成后的20+4状态、非法页恢复、
+真实服务、源码/SDK和执行CPP证据；脚本存在不表示这些设备门禁已通过。
+
+### 2026-10-23：正式保留C02容量分档，八档综合耗时降低1.46631%
+
+两项device9任务均completed/exit0。状态任务101533_4702752956完成20种
+metadata和4步连续状态：reference/candidate共48组逐bit数值、全部缓存写
+保护、同址重放、代际递增、geometry合同通过。每次candidate重放还独立校验
+物理索引和压缩块mask；表宽2051，负页和越界页场景各16条首query的四个
+压缩块失效而SWA保留，随后的恢复场景正常。不存在把invalid block跳过后
+漏掉对应通知或沿用上轮indices的现象。
+
+服务任务101534_47081128521完成真实模型准备、custom-op、ACLGraphWrapper
+捕获和两次同址重放，实际选择PLAN_TABLE_COLUMNS=2080；输出、Top-K、
+score/cache逐bit，工作区复用、无Python重复提交、空调用及Native回退均通过。
+执行四份CPP与已测容量档一致。继承的service harness只记录冻结源码路径、
+policy和实际生成物，没有启动时source_hashes；审计明确记为false，并核对
+未修改的冻结包和全部CPP，不补写虚构的同时点hash，也不为此重跑设备。
+完整门禁证书：physical_capacity_tier_v1_validation.json。
+
+正式工作树接入七个SPMD模块并整理文档/导入/格式，冻结
+physical_capacity_production_v1。44模块除module文档与导入排序/分组之外，
+AST与设备验证版一致；2048和2080两个代表完整CPU编译的四份CPP及ABI也
+逐字等价，证据physical_capacity_production_v1_codegen.json。此前八档编译
+证书继续有效；七个不变档不重复采时。
+
+正式CPU测试初次为163过、1失败：MPMD的CSAServiceRuntime继承SPMD基类，
+新compressed_table_columns参数被传到其旧select_policy。修复MPMD服务
+适配层，仅显式接收并忽略SPMD专用容量参数，MPMD策略、数学、核参数均不变。
+随后164项正式合同测试全过，包含真实custom-op的SPMD/MPMD两条CPU路由。
+这是本轮接入兼容修复，不作为PyPTO/PTOAS/Simpler问题提交。Ruff和diff检查通过。
+
+正式留存第四项机制：按实际已分配页表宽度选容量，仅本八档的C02改变核路径。
+复用同卡/同SDK的十窗实测933.34μs，对原969.17μs降低3.69698%；所有原始
+窗口和样本在pilot结果中保留，未把状态/服务时间计入性能，也未换基线分母。
+其他七档维持原已保留值。新权威结果retained_physical_capacity.json：八档
+等权几何平均比值0.985336943775587，完整L1耗时降低1.46630562244%。
+原10%目标未达成，goal继续active；自有CPU/NPU任务全部终态，无push。
+
+### 2026-10-23：B1当前阶段诊断与跨核组head分工原型
+
+上一goal轮正式保留C02分档，属于实际进展。当前HEAD=fad8ccb64，权威留存
+physical_capacity_production_v1/retained_physical_capacity.json，原八档分母
+和0.90目标不变。公共SDK仍logical-codegen/validated。cannbot-knowledge
+索引仍缺失，不全库兜底或重建；复用已读Attention调度卡的所有权、最后消费者
+和排空约束，具体A3核组/事件语义以当前已验证源码和生成物为准。
+
+只读复核另一会话B1_CURRENT_PHASE_ANALYSIS：旧480μs级带探针端点显示
+输出链也值得关注，不能凭Attention只有六个活跃核组认定主瓶颈。旧记录
+不改标为当前版本；补缺的当前诊断task_20261023_104925_18657722738在卡8
+completed/exit0，三次图重放及完整逐bit/保护通过，插桩前CPP与C01同SDK
+已合格十窗实现完全一致。原基线未重测，诊断不计正式性能。
+
+三次诊断最晚端点的中位为QUERY185.86、SCORE_VECTOR225.62、ATTN_PLAN244.00、
+ATTN_VECTOR284.32、OA_GROUP_7 316.00、OB330.56、OUT345.30μs。报告单独标出
+Attention真正六个AIC/十二个AIV query owner，不把所有发布phase的角色当作
+有计算的角色。这些端点差和扣GM等待余数都不等于可删除耗时，也不与358.02μs
+正式L1相减。证据retained_C01_phase_sdk_v1.json，完整原始三窗保留。
+
+隔离候选head_partition2_v1仅改Attention stream、plan获取和O_A packed获取
+三个模块：物理core c处理query=c//2+k*12、head区间(c%2)*32..+31；两个
+AIV各处理16个head，外部64-head布局和每环槽64行间距不变。每个query的
+QK/PV K归约、五块softmax顺序、RoPE及cast不变；KV仍由同组双AIV各采64行，
+因此KV采集/中转逻辑量明确翻倍。C01活跃Attention组由6变12，无速度预测。
+消费者必须等待全部新packed写者，不能继续只等原六个核组。
+
+15项CPU检查通过：实际源码的1..6容量query/head/packed所有权、4608个
+物理组/五块mask组合的AIC+双AIV事件DAG、失活组、完整排空、数学表达式和
+原K链核对；负对照确认旧packed获取集合不能覆盖新写者。完整CPU编译通过，
+root/return ABI及orchestration不变，静态事件位点相同；真实qk_q为32×512
+BF16、运行状态为16×256 FP32。AIC Mat434176/Acc131072/Left与Right各65536，
+AIV Vec163872，均在既有边界内。证据head_partition2_v1_C01_codegen.json。
+
+这只是C01隔离pilot，未全局改变策略或生产代码。通过task-submit提交卡8
+task_20261023_110504_25167107437，按完整链路十窗和原严格检查验收；采用
+与否仍取决于其完整L1结果，不能由新增活跃核数推断收益。无push。
+
+### 2026-10-23：B1双核组分头完整L1负向，转向HC尾行冗余GM搬运
+
+head_partition2_v1的卡8任务task_20261023_110504_25167107437最终
+completed/exit0；排队期间沿原句柄等待，没有因等待改卡或重复提交。
+reference/candidate的eager、graph、post-L1六组逐bit输出/TopK/score/
+cache-state及保护全部通过，实际执行四份CPP与CPU门禁匹配。十个全72角色
+窗口为379.08、368.14、368.48、365.92、369.26、365.50、366.46、372.94、
+370.70、367.90μs，中位368.31μs，对原同卡同SDK合格358.02μs回退2.87414%。
+结果head_partition2_v1_C01_result.json保留全部原始窗口。该候选拒绝，不做
+采用所需的额外服务/状态矩阵，不继续仅提高head分区数。复制KV是明确新增
+工作，但本测量没有单独隔离其占比，不能把整个回退唯一归因于它。
+
+当前B1阶段还显示INPUT35.30、NORM66.88、COMB83.58、QR92.02μs等早期
+端点；这些带探针值只定位前段链路，不当作独占耗时。定向核对HC源码发现
+widen尾行和norm尾行均存在“GM暂存→UB重读→正式输出”的往返。该位置
+不需要跨核共享临时结果，因此新候选只消除复制，不改变行分工或浮点归约。
+它独立基于当前已保留实现，未叠加失败的head拆分。
+
+hc_direct_tail_v1的3项AST数学检查通过，但完整CPU解析拒绝pl.store的
+TensorType输入；这是原型API用法错误，未上卡、不报SDK issue。保留失败
+runs/compile_hc_direct_tail_C01_v1/result.json。冻结v2改用Tensor assemble，
+返回更新后的x_hc32_flat别名；RMS K512/K256顺序、fillpad、BF16舍入、完整
+8行路径及所有发布依赖保持。v1/v2共6项源码检查通过，v2完整CPU编译通过。
+
+实际生成物已确认widen_tail与norm_tail视图只剩定义，没有消费者；四个
+展开的widen store和两个norm store都直达正式根，并保留动态有效行的
+set_validshape及min(8,T-row)目标窗口。root/return ABI和orchestration不变，
+完整cube_schedule C++函数也逐字不变。每个per-core CPP文件实际包含两侧
+静态函数，所以不把含已改变Vector函数的整个aic文件误称不变。AIC Mat
+475136/Acc131072，AIV Vec163872，均通过资源门禁。证据
+hc_direct_tail_v2_C01_codegen.json；这仍不是设备精度或性能证据。
+
+task_20261023_114005_400243722917已通过task-submit提交卡8，按原完整
+链路十窗与六组严格检查验收。正式四项保留机制、1.46631%八档结果和固定
+分母未变，10% goal继续active；未push。
+
+### 2026-10-23：HC尾行直接写回无净收益；补全粗粒度交错资源模型
+
+task_20261023_114005_400243722917已completed/exit0。hc_direct_tail_v2
+的reference/candidate eager、graph及post-L1六组逐bit输出、Top-K、score、
+cache/state和保护全部通过；执行四份CPP与CPU门禁匹配。十个完整72角色
+L1窗口为366.30、362.74、372.00、360.82、361.84、362.58、357.84、358.02、
+359.00、355.44μs，中位361.33μs，对同卡同SDK合格历史358.02μs回退
+0.924529%。不采用，不继续为这个负例扩大状态/服务验证。记录
+hc_direct_tail_v2_C01_result.json保留全部样本和原始窗口，没有重测基线。
+
+宏观分析继续核算先前提出的“完整Score叶之后插入已就绪Attention query”。
+新增analyze_coarse_interleaving.py复用当前策略及八档fixture，核对当前
+indexer_long_leaf_plan/work_item/leaf_range的AST与冻结基线一致，并确认
+C04/C05的完整Score owner模型未改变。不是把旧阶段端点差换算为服务时间。
+
+模型把每个核组视为一个串行资源，Score step成本为1，Attention query成本
+扫描0、0.25、0.5、1、2、4、8个抽象单位。保留各核原叶顺序和query%24归属，
+每轮先做本核完整叶，再执行该轮根已齐全的query；逐query等待真实全部根，
+不额外添加全核屏障。所有Score叶/query恰好一次、根依赖、核内资源互斥及
+容量下界均检查；原始离线调度区间保存在coarse_interleaving_resource_model.json。
+
+C04全部query的最后一叶都在第4轮，不能靠这次插入提前。C05在保持原分工
+时，第1轮仅group0～3完整，后续出现每核短尾叶所在轮不同及query依赖传播。
+即使令Attention成本为0，强制插入时的等待仍使模型跨度33→40单位；其它
+抽象成本下相对原阶段顺序多19.30%～21.01%。这只是该具体调度的离线筛选，
+不是NPU性能预测，也不证明所有异步调度必然退步。在此串行资源模型中，
+两档原分工已达到总工作量/24下界；只重排相同工作无法突破该下界。
+
+模型还乐观地忽略Top-K/plan、发布/获取和切换开销。实际Attention沿所有
+query连续运行三槽流水，不能假定拆成单query调用没有额外启动和排空。
+因此不直接实现这个强制插入方案；后续若再做交错，需先明确可重叠的实际
+AIC/AIV/搬运资源，或减少总工作、修正真实服务成本不均衡。不能把8/33的
+理想就绪比例直接宣称为可省耗时。此结论补充此前细粒度wave负例与依赖模型。
+
+当前无自有待收设备任务，生产仍为physical_capacity_production_v1，正式
+保留四项优化，原八档几何平均比值0.985336943775587，10%目标保持active。
+没有改变共享SDK，没有push。
+
+### 2026-10-23：HC输入四路列分工，保持原RMS累加顺序
+
+上一goal轮完成HC直接尾写的设备负例和粗粒度交错资源模型，属于实质进展。
+本轮从整链输入供给重新检查：现有widen/RMS以M8分给一个AIV，该核串行
+处理全部16384列，四个AIC K4096投影片都要等这份输入完整完成。新的隔离
+候选按(row_tile,K4096 split)将同样的工作分给四个AIV；AIC只等对应split的
+两个M8写者，保留原四份投影及其K256归约，不复制输入计算或扩张query/head。
+
+每个AIV仍对八个K512片做原FP32平方及row_sum，不先合成一个split部分和。
+原widen_tail仅在此候选中改作RMS partial区：split独占一条16384列物理行，
+每个M8块占128个FP32即512B槽，八个1×8和使用前256B。原行owner在获取
+四个实际写者后，从+0按K512的0..31顺序逐次相加，再做原比例、epsilon和
+高精度rsqrt。没有重排归约树；inv仍由原M8 owner写并在本核供gates/comb。
+INPUT含义在此隔离包中改为FP32列片及RMS片完成；全体先发布再获取，没有
+互相等待未发布的生产者。完整scratch支持T<=1024，本轮pilot只覆盖规范
+T<=192，不作为无保护的生产通用策略。
+
+这个改变有成本：每token增加32个FP32部分和的GM写/读，以及每M8四写者
+获取；原metadata planner还可能先承担一个K4096片而晚到。源码widen最忙
+AIV的K512片数由C04的32降到8、C05的32降到16，不把片数比例当成耗时比例。
+后续仍以完整72角色L1判断，不能只采这段或把前段端点差相加。
+
+冻结hc_cooperative_v1首次CPU解析因完整/尾块的`squared`变量Tensor有效
+shape类型不一致失败，保留compile_hc_cooperative_C04_v1/result.json。
+v2统一在row_sum前设置有效行并fillpad零；完整M8无padding，所有有效值及
+归约顺序相同。这是原型类型表达修正，没有修改共享SDK或提交上游问题。
+CPU模拟器首次3个尾行用例因load的offset/shape参数顺序写反失败，修正测试
+适配后11项全部通过：九种T的随机BF16可表示输入及跨度指数、所有有效输出/
+原inv容量尾的位级比较、scratch未写区哨兵、T1..1024全部真实wait表达式的
+写者覆盖及独占512B槽、无关模块不变。该NumPy执行不是A3浮点精度证据。
+
+C04/C05完整CPU后端编译均通过。实际PTO IR审计确认四个stage4展开FP32
+store保留动态有效行，RMS片只以1×8读写；32项combine以step2展开，第二个
+add承接第一个结果并写回同一物理accumulator，+0及后续乘法/rsqrt链保持。
+输入发布、消费获取及业务cache维护都存在。root/return ABI与orchestration
+同当前版本，AIC Mat475136/Acc131072/Left和Right各65536，AIV Vec180224，
+均通过资源边界。审计脚本最初对stage4展开位点数和零常量文本格式的假设
+不正确，按实际IR修正后通过，没有为通过审计修改内核。
+
+证据为hc_cooperative_v2_C04_codegen.json、hc_cooperative_v2_C05_codegen.json。
+通过task-submit提交同卡/同SDK完整十窗及严格检查：
+
+- C04/device8：task_20261023_121507_140089517903。
+- C05/device0：task_20261023_121508_14009351506。
+
+本轮只读检查主检出最新46c8d9cec的MPMD分块记录：局部Score/Attention缩短
+而完整L1回退的证据继续约束设计，不将其它会话的暂停指令或候选当作本会话
+的新目标/采用结果。cannbot知识索引仍缺失，复用已读所有权/排空约束；没有
+全库扫描或重建。正式四项保留机制及原八档比值0.985336943775587保持，
+hc_cooperative尚无设备收益结论，goal仍active，不push。
+
+### 2026-10-23：HC RMS部分和成包交接；原v2任务继续排队
+
+上一轮已完成v2源码、11项CPU检查、两档完整编译和任务提交，属于实际进展。
+本轮重新确认task_20261023_121507_140089517903与
+task_20261023_121508_14009351506均pending，尚无result；沿原句柄等待，
+没有因观察到期而重启、重复提交或更改冻结源码。
+
+新增analyze_priority_candidate.py和hc_cooperative_v2_tasks.json，正式结果
+将核对原始72角色十窗、六组逐bit/保护、同卡同SDK、全部四份执行CPP及当前
+保留版本的生成物。只读试运行reference部分确认C04为763.65、C05为1003.02μs，
+各10窗，分别与当前CPU保留档四份CPP匹配；原固定分母778.39/1014.46不变。
+该工具准备不等于候选设备验收，也没有补采基线。
+
+v2新增RMS交接在每个M8块产生32个1×8 FP32写回和32次小片读入。独立v3
+将每个K4096写者的八份和先保留在8×8 UB块中，再一次写1×64包；消费者
+用一次4×64跨行load读四包，局部reshape为32×8，随后按0..31逐项左折叠。
+不合并每包内部的浮点和；传输字节仍是每M8写1KiB、读1KiB，减少的是PTO
+搬运调用和小请求，不宣称删除这些字节或已经省下设备时间。512B槽、同代
+发布/获取、所有owner和Cube依赖均沿v2，排队中的v2包逐文件未修改。
+
+v3的11项CPU源执行检查通过，但完整编译指出Tile row_sum必须显式提供
+同形scratch，不能沿用Tensor层自动分配的调用方式。冻结v4补齐这个scratch，
+并按共享PyPTO源码的正式Tile接口为rsqrt显式提供scratch，从而保留原高精度
+模式；没有把high_precision=True静默降为普通模式。v3失败收据保留在
+compile_hc_cooperative_C04_v3/result.json，属于原型API修正而非SDK问题。
+
+v4的11项源码数值/尾部/依赖/槽检查全部通过，C04/C05完整CPU后端编译和
+生成物审计通过。实际IR为每个写者一次1×64 store、消费者一次4×64 load；
+四个stage4子视图均为1×8，生产packet与8×8块同址，消费者4×64与32×8
+视图同址。32次TEXTRACT/TADD保留单一顺序，accumulator与packet空间分离，
+TRSQRT带显式临时Tile。C++还可见packet store前V→MTE3等待，以及下个
+owner复用前MTE3→V等待。AIV仍180224B，AIC资源与v2同界，ABI及编排保持。
+证据hc_cooperative_v4_C04_codegen.json、hc_cooperative_v4_C05_codegen.json。
+
+此为有独立源码/生成物证据的交接成本改进，尚未提交v4设备任务，先收原v2
+的完整精度和性能结果再决定。生产、四项保留机制、八档正式比值与10%目标
+均未变；本轮继续签名本地提交，不push。
+
+### 2026-10-23：HC四路输入原型完整L1负向，提交已审查的成包版
+
+前几轮为经任务句柄反复确认的有效等待：CI占满16卡，维护关闭、无设备
+白名单限制，两项原任务位于pending前列。没有把队列等待改称失败或终止。
+随后两项task均转running并最终completed/exit0；所有设备执行仍经task-submit。
+
+hc_cooperative_v2在C04/C05两档的reference/candidate eager、graph及post-L1
+六组输出、Top-K/score、cache/state逐bit与保护全部通过，实际四份CPP和
+对应CPU门禁一致。十窗中位数：C04 770.89μs，对当前763.65慢0.948078%；
+C05 1018.98μs，对当前1003.02慢1.591195%。不能由widen片数减少推断完整
+收益，因此原型不采用，也不为它扩大状态/服务矩阵。全部20窗及保留/原始
+基线样本、同卡同SDK/源码证据在hc_cooperative_v2_results.json。
+
+收取器首次在浮点严格相等断言处停止：C04十窗中位在Python为
+778.3900000000001，冻结JSON显示778.39，相差约1.1e-13μs。改为只允许
+绝对1e-9μs的表示误差，并保留原始样本及重算中位；目标ratio仍显式使用
+原冻结分母778.39/1014.46，没有换基线、改样本或重测。完整收取随后通过。
+
+v4不是重复原任务：上一轮已经独立完成的打包改动，将每M8的32次小片
+store/32次小片load改成四个1×64写包和一次4×64读包，保持总字节与原32项
+顺序。这明确针对新增交接请求成本；没有设备阶段分解证明，所以不把v2的
+全部回退唯一归因于小请求，也不预记v4收益。两档CPU门禁和11项源检查继续
+有效，不重复已通过的编译/CPU测试。公共SDK再次确认logical-codegen/validated。
+
+通过task-submit提交v4同卡、完整72角色十窗及六组严格检查：
+
+- C04/device8：task_20261023_124733_265710723223。
+- C05/device0：task_20261023_124733_265715716319。
+
+任务与原始/保留参考绑定在hc_cooperative_v4_tasks.json，终态后使用
+analyze_priority_candidate.py hc_cooperative_v4收取。v2冻结源码和全部负例
+保留，生产仍为physical_capacity_production_v1，四项正式机制、八档比值
+0.985336943775587及10%目标不变；无push。
+
+### 2026-10-23：成包HC交接仍无完整收益，补一次阶段定位
+
+上一goal轮完成v2设备负例及v4提交，属于实际进展。本轮按原句柄收取v4，
+C04/device8任务124733_265710723223、C05/device0任务124733_265715716319
+均completed/exit0。两档六组eager/graph/post-L1逐bit输出、Top-K/score、
+cache/state与保护全过，四份实际CPP匹配CPU门禁。C04十窗中位773.58μs，
+对763.65回退1.300334%；C05为1021.05μs，对1003.02回退1.797571%。
+hc_cooperative_v4_results.json保留所有原始样本、72角色窗口及新旧生成物证据。
+不采用，不为负例扩状态/服务矩阵；不把减少PTO搬运调用当作完整性能收益。
+
+等待期间按完整历史排重：key_page_proof早已把AIC逐页读取改为既有首地址/
+方向推导，B28 1161.00→1164.34μs负向；多ND Key试验也已有完整负例
+1163.64→1310.50μs，且倒序页与Right槽生命周期不能忽略。两者是历史设计
+约束，不是当前SDK的收益分母，本轮没有重新实现或上卡重复。旧静态容量
+v28只特化描述符，不代表所有device证明的专用路径均已排除，但当前没有
+足够新机制支持重做相同容量变换。
+
+另考察过Score结束后改用硬件全核屏障以聚合Top-K根获取。现有C04三窗
+Top-K GM等待中位1.38/1.40/1.43μs，C05为2.96/1.57/2.93μs；这些包含
+真实前驱等待，不能当作可删的同步开销，更不能由中位排除少数尾核代价。
+全核会合还可能推迟本来已就绪的query，现有证据不足以支持大收益，因此
+没有添加硬屏障，也没有把API支持当作性能理由。
+
+为避免接着扫描HC分核参数，提交一次C04当前失败版本的阶段诊断：
+task_20261023_130310_342573112322，source仍为未改动的hc_cooperative_v4，
+使用既有phase harness、三个诊断窗口和严格检查，不采正式性能。
+hc_cooperative_v4_C04_phase_task.json固定对应已测CPP、原始结果和基线诊断。
+
+比较边界特别注明：v4的INPUT发布的是FP32列片和RMS部分和，inverse RMS
+在其后组合；原INPUT已含inverse。因此两个INPUT interval不能当作同一段
+服务来比较。后续只以共同的PARTIAL/GATES/NORM/QA/META等payload端点定位，
+并核对插桩前CPP与已测版本相同；端点差也不直接归为某引擎独占或可删耗时。
+诊断结束前不宣称回退已被归因。
+
+生产、四项保留机制和八档0.985336943775587保持，10% goal继续active；
+本轮只签名本地提交，没有push。
+
+### 2026-10-23：HC诊断方向与正式计时不一致，转向输出任务粒度
+
+task_20261023_130310_342573112322已completed/exit0，三个诊断窗口及严格
+检查通过，插桩前CPP与已测hc_cooperative_v4完全匹配。新诊断中共同端点
+GATES/NORM/QA为35.18/51.72/66.04μs，旧保留版为41.18/57.32/73.86μs；
+OUT为756.56对787.28μs，方向却与正式L1 773.58对763.65相反。因此这些
+跨任务插桩差值不足以归因正式回退，不能声称已确认前段省6μs或后段吞掉收益。
+INPUT定义不同继续排除。原正式负例保留，证据
+hc_cooperative_v4_C04_phase_comparison.json；不继续扫描HC四路分工参数。
+
+只读复用当前C05阶段记录，取每核第二/第三个O_A组的区间，排除首项包含的
+Attention获取等待。三窗各20个满M128任务、20个尾M16任务，所选区间GM等待
+为零；满块中位27.43/27.51/27.36μs，尾块24.59/24.11/24.56μs。区间仍含
+本核搬运、流水、循环和发布，不是纯矩阵时间，但已足够否决按八倍行数比例
+估算两类任务成本。原始选中区间保存在C05_output_observed_service.json。
+
+新的output_rectangle_v3独立基于当前physical_capacity_production_v1，
+没有叠加失败的HC方案。仅已有Host token容量128<T<=160选OA_ROWS=160、
+OA_COLS=192，实际T/Q/L仍由device决定。每组五个N192块和一个N64尾块，共
+48个O_A逻辑任务，每个AIC两项；原M128+尾/N256为64项、每核最多三项。
+保持原K256累加、stage2、量化与O_B数学及O_B owner，区别于先前M192/N128
+加O_B互补分工的小幅候选。C05逻辑权重载入128→64MiB，激活重复载入
+36→54MiB；二者均不是HBM事务或设备收益，新增N尾和每项N增加的成本须实测。
+
+v1的完整CPU解析拒绝两分支wa_first/wa_k_chunk有效shape类型不一致；v2
+拆成返回同一root Tensor的独立helper后，C04关闭域通过，C05又在NZ lowering
+遇到动态末维不支持。冻结v3改为静态N192与N64两个tile调用，共用从原版提取
+的K256数学体，避免动态NZ末维。两版失败收据均保留，未改公共SDK。
+
+v3的29项CPU检查通过：执行真实几何/发布/获取表达式，覆盖实际T1..160
+的十二个边界，全部行及16列单位唯一覆盖，40个N192和8个N64任务、每AIC
+两项、64个O_B任务及owner不变，量化等待完整写者；另核对16个Host容量边界、
+三种query上界、四种history及原K调用链。最后一次测试收取因会话中断丢失
+进程句柄，修饰过callback绑定的测试仅补这一份CPU收据，29过/6.57秒，保存
+runs/output_rectangle_v3_ut_receipt.log。已通过的完整编译和设备基线未重做。
+
+C04/C05完整CPU编译均通过。C04关闭域的orchestration、PTO CPP及AIC/AIV
+两份CPP与当前保留版逐字一致（仅忽略整行pto位置注释），不重复C04设备计时。
+C05实际有M160×N192与M160×N64两种Acc store，后者只写64列，动态有效M
+仍取min(160,T-row)。ABI与编排保持；AIC Mat475136/Acc131072、Left/Right
+各65536，AIV Vec180224，均在原上限内。见output_rectangle_v3_codegen.json。
+
+中断恢复后再次以唯一公共manifest确认logical-codegen/validated，未修改
+SDK或排队源码。通过task-submit提交C05/device0完整十窗及六组严格检查：
+task_20261023_133922_3154216781。来源绑定output_rectangle_v3_tasks.json；
+收取器允许明确的非空重点档子集，仍核对全72角色原始窗口、原固定分母、
+同卡同SDK及全部四份执行CPP。候选尚未采用，四项正式机制、八档比值
+0.985336943775587及10%目标均不变。本轮签名本地提交，不push。
+
+### 2026-10-23：输出矩形试验有小幅全链收益，进入采用门禁
+
+task_20261023_133922_3154216781已completed/exit0。C05完整72角色十窗中位
+995.01μs，对当前保留1003.02μs降低0.798588%；六组逐bit/保护检查、
+同卡同SDK、源冻结清单及实际四份CPP核验通过。output_rectangle_v3_results.json
+保留全部样本和原1014.46μs分母；这是待采用候选，正式八档比值暂不更新。
+
+已提交C05的16种同地址metadata及4步连续状态：
+task_20261023_135137_7079796761；正式service/custom-op、ACLGraphWrapper、
+空调用与回退：task_20261023_135138_70859816005。均使用既有验证壳与公共SDK，
+不采性能。另补其余六档关闭域的CPU四CPP/ABI等价验证；C04已通过，不重编，
+C05已测且CPU通过，不重复计时。任务绑定output_rectangle_v3_validation_tasks.json。
+
+输出矩形的八档CPU核验已完成：C05改变O_A，其他七档各四CPP逐字一致
+（仅忽略pto位置注释），八档root ABI及编排均保持。两项设备门禁均exit0：
+16 metadata + 4连续状态共40组逐bit、同地址、geometry、代际与保护通过；
+正式service及两次ACLGraphWrapper重放、workspace复用、空调用和Native回退
+通过。两次执行的四CPP均匹配已测候选，SDK与源码绑定一致。见
+output_rectangle_v3_codegen_validation.json及output_rectangle_v3_runtime_validation.json。
+正式版本整理仍待完成，暂不改八档保留汇总。
+
+### 2026-10-23：采用输出矩形，C05降至995.01μs
+
+生产整合仅改policy/entry/双调度/O_A五个模块：把OA_ROWS传入AIC及AIV，
+两侧按相同ceil行列块推导发布/获取；仅NZ路径增加M160/N192及静态N64尾。
+ND helper保持整合前的原接口及AST，没有将未测ND试验纳入生产。38项生产
+检查通过，覆盖实际列/行唯一写者、全部等待写者、资源分界、原ND及全部
+可达数学AST、八档策略。整理后的八档各四CPP和root ABI逐字匹配已验证版本
+（只忽略pto位置注释），故复用已通过的设备状态与服务证据，不重复上卡。
+
+正式冻结output_rectangle_production_v1；retained_output_rectangle.json
+继承原八档分母及前四项机制，只将C05 1003.02更新为995.01μs，原始十窗
+及全部源/SDK绑定保留。相对原C05 1014.46μs的比值为0.980827238
+（精确数值见JSON）；八档几何比值0.9843498918572288，耗时降低1.5650108143%。
+10%目标未达到，继续active。正式保留机制共五项；本地签名提交，不push。
+
+下一步先研究C04输出组的核归属及非等宽列分工。任务数量一致不代表工作量
+一致；应同时检查每核总列数、激活重复载入、组内发布扇入及O_B就绪时序，
+不能把几何上的负载降低当作全链收益。
+
+### 2026-10-23：B16输出组改三核，先处理完整编译的资源限制
+
+新候选独立基于output_rectangle_production_v1，仅长G6/Host容量64<T<=96
+改变O_A及O_B owner。每组固定三AIC，各算一块N256及一块尾列；量化只等
+本组三个真实写者。总数学块64→48，每核最大列数384→352，逻辑激活载入
+48→36MiB，权重仍64MiB。O_B经24个逻辑rank置换，全部64项仍唯一写；
+最终仍24物理AIC发布PHASE_OB。没有改变K256累计、量化数学或O_B helper。
+这些是源级工作量，不能当成HBM数据或性能。更早的组可能因两次tile调用
+推迟就绪，O_B尾部成本须纳入完整L1。
+
+v1用80/80/96尾列，29项覆盖/依赖/策略检查通过，但C04完整编译拒绝
+Right 106496B超过65536B；C05关闭域编译通过。MemoryReuse dump中N80
+保留额外40960B Right分配，此外还有共享65536B；Left亦有额外49152B。
+原始失败与声明存output_group_owners_v1_memory_failure.json，未提交设备任务。
+此证据尚不能认定SDK缺陷，未改共享SDK。v2改静态64/96/96尾列，仍48项、
+同一数学/协议与O_B映射，最大列数仍352；正在检查实际分配，不能按tile面积
+直接声称资源已满足。正式五项机制及八档0.9843498918572288保持。
+
+v2的29项实际所有权/完整行列覆盖/量化依赖/边界检查通过。三种每核工作为
+(320列,3项O_B)、(352列,3项O_B)、(352列,2项O_B)，各8核。完整C04/C05
+编译通过，C04实际静态Acc store为M96×N256/N64/N96，仍使用原K256体。
+AIC Mat475136/Acc131072/Left65536/Right65536，AIV Vec180224；容量和ABI
+检查通过。C05关闭域四CPP与正式output_rectangle_production_v1一致，不重测。
+共享SDK未修改，采用代码仍为c086ecd67。
+
+仅提交C04/device8完整十窗及严格检查：task_20261023_144806_271128030529。
+绑定output_group_owners_v2_tasks.json；分析时显式使用retained_output_rectangle.json
+保留版清单，原八档分母不变。当前尚无新候选设备收益；五项正式机制及
+1.5650108143%累计耗时下降保持。

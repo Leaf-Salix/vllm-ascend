@@ -45,6 +45,7 @@ from .indexer_query_stages import (
     indexer_weights_project_stage,
 )
 from .indexer_score_stages import indexer_score_cube_stage
+from .joint_prefix_stages import joint_bf16_prefix_stage
 from .kv_stages import kv_project_stage
 from .output_projection_a_stages import o_projection_a_groups_stage_nz, o_projection_a_stage_nz
 from .output_projection_b_stages import o_b_groups_stage, o_b_stage
@@ -193,6 +194,7 @@ def cube_schedule(
     BALANCED: pl.constexpr,
     ROOTS: pl.constexpr,
     OA_COLS: pl.constexpr,
+    OA_ROWS: pl.constexpr,
     OB_ROWS: pl.constexpr,
     OUTPUT_GROUP_PIPELINE: pl.constexpr,
     HC_ROW_DEPENDENCIES: pl.constexpr,
@@ -202,11 +204,16 @@ def cube_schedule(
     OUTPUT_WORK_BALANCE: pl.constexpr = False,
     QB_WIDE_N: pl.constexpr = False,
     PREFIX_BRANCH_GROUPS: pl.constexpr = 4,
+    JOINT_BF16_PREFIX: pl.constexpr = False,
+    PREFIX_PROJECTION_ROWS: pl.constexpr = 128,
+    SCORE_GROUP_ORDER: pl.constexpr = False,
 ):
-    # 恢复原分task五份流式权重的BYPASS；预定义incore使用函数属性表达。
+    # 保留五份流式权重的BYPASS声明；预定义incore使用函数属性表达。
     # 当前PyPTO此属性只接受(参数序号,策略整数)，1表示CachePolicy.BYPASS。
     # 1=wq_a、8=wq_b、10=wkv、50=wo_a、53=wo_b；ABI审计必须检查对应关系，
-    # 修改签名时同步更新。该属性只影响GM读的L2提示，不改变发布/等待协议。
+    # 修改签名时同步更新。当前公共PTOAS0.69在缺少runtime offset时仍发普通
+    # TLOAD，不能仅凭此声明认为绕L2已生效；接入缺口见PyPTO#3116。
+    # 该声明不改变发布/等待协议，不使用硬编码地址别名绕过runtime契约。
     pl.func_attr({"cache_policy": [(1, 1), (8, 1), (10, 1), (50, 1), (53, 1)]})
     partials_gm = partials
     qa_gm = qa
@@ -240,8 +247,7 @@ def cube_schedule(
         for hc_wave in pl.range(pl.min(hc_waves, VECTORS // (2 * (GROUPS // 4)))):
             hc_first = ((worker + hc_wave * GROUPS) // 4) * 16
             signal = wait_row_owners(
-                signal, PHASE_INPUT, CORES, generation,
-                hc_first, pl.min(16, tokens - hc_first), 8, VECTORS, GROUPS, 1
+                signal, PHASE_INPUT, CORES, generation, hc_first, pl.min(16, tokens - hc_first), 8, VECTORS, GROUPS, 1
             )
     else:
         signal = wait_row_owners(
@@ -303,18 +309,61 @@ def cube_schedule(
     # 不能在写出这些结果之前等待Indexer归一化或量化，否则会形成等待环。
     idx_query_acc = indexer_query_project_stage(qr, idx_wq_b, idx_query_acc, worker, GROUPS)
     signal = publish_phase(signal, PHASE_IDX_QUERY_PROJECT, worker, CORES, generation)
+    if JOINT_BF16_PREFIX and COOPERATIVE_PREFIX:
+        # Leave the existing four Hadamard cores free to advance the Indexer chain.
+        # Twenty independent main/KV column blocks run on the Q_B core group.
+        main_value, main_score, kv_fp32 = joint_bf16_prefix_stage(
+            normed,
+            main_wkv,
+            main_wgate,
+            main_value,
+            main_score,
+            wkv,
+            kv_fp32,
+            worker,
+            GROUPS,
+            PREFIX_PROJECTION_ROWS,
+        )
+        signal = publish_phase(signal, PHASE_MAIN_PROJECT, worker, CORES, generation)
+        signal = publish_phase(signal, PHASE_KV_PROJECT, worker, CORES, generation)
     if COOPERATIVE_PREFIX:
         # 主压缩先生产；4核Hadamard/20核Q_B并行，KV仍由24个逻辑worker
         # 分摊。AIV同时调整消费者顺序，不能单独启用这一侧。
         (
-            main_value, main_score, weights_partial, idx_query_had,
-            q_proj, idx_had, kv_fp32, signal,
+            main_value,
+            main_score,
+            weights_partial,
+            idx_query_had,
+            q_proj,
+            idx_had,
+            kv_fp32,
+            signal,
         ) = projection_overlap_stage(
-            normed, main_wkv, main_wgate, main_value, main_score,
-            weights_proj, weights_partial, idx_query_rope_heads, hadamard,
-            idx_query_had, qr_matmul, wq_b, q_proj, idx_lengths, idx_count,
-            idx_normed, idx_had, wkv, kv_fp32, signal, worker, generation, PREFIX_BRANCH_GROUPS,
+            normed,
+            main_wkv,
+            main_wgate,
+            main_value,
+            main_score,
+            weights_proj,
+            weights_partial,
+            idx_query_rope_heads,
+            hadamard,
+            idx_query_had,
+            qr_matmul,
+            wq_b,
+            q_proj,
+            idx_lengths,
+            idx_count,
+            idx_normed,
+            idx_had,
+            wkv,
+            kv_fp32,
+            signal,
+            worker,
+            generation,
+            PREFIX_BRANCH_GROUPS,
             QB_WIDE_N,
+            JOINT_BF16_PREFIX,
         )
     else:
         weights_partial = indexer_weights_project_stage(normed, weights_proj, weights_partial, worker, GROUPS)
@@ -374,7 +423,6 @@ def cube_schedule(
         )
         signal = publish_phase(signal, PHASE_MAIN_PROJECT, worker, CORES, generation)
 
-
     # Score消费query INT8、系数和Native key/scale。Key写回与scale RMW不是一件事：
     # 后者按物理页分配唯一AIV写者；全部48个writer发布后，cache才可整体消费。
     signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)
@@ -404,6 +452,7 @@ def cube_schedule(
         0,
         1,
         SPLIT_SCORE_ROWS,
+        SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
     )
     signal = publish_phase(signal, PHASE_SCORE_CUBE, worker, CORES, generation)
 
@@ -431,7 +480,7 @@ def cube_schedule(
     packed_workers = pl.min(tokens, GROUPS) * 2
     signal = wait_row_owners(signal, PHASE_ATTN_VECTOR, CORES, generation, 0, packed_workers, 1, VECTORS, GROUPS, 1)
     if OUTPUT_GROUP_PIPELINE:
-        oa_per_group = ((tokens + 127) // 128) * (1024 // OA_COLS)
+        oa_per_group = ((tokens + OA_ROWS - 1) // OA_ROWS) * ((1024 + OA_COLS - 1) // OA_COLS)
         # 固定8是模型的输出组数，不是B/S档位。每组内部任务数由本次T决定；
         # 首项公式保留全局logical%24分核及原每核组序，不把所有核绑到同一组。
         # 本核完成某组即可通知AIV；该AIC继续其它组的O_A，与已就绪组量化重叠。
@@ -440,7 +489,7 @@ def cube_schedule(
             oa_owned = worker + ((oa_first + GROUPS - 1 - worker) // GROUPS) * GROUPS
             if oa_owned < oa_first + oa_per_group:
                 o_r = o_projection_a_groups_stage_nz(
-                    packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS, oa_group, oa_group + 1
+                    packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS, OA_ROWS, oa_group, oa_group + 1
                 )
                 signal = publish_phase(signal, PHASE_OA_GROUP_BASE + oa_group, worker, CORES, generation)
         quant_per_group = (tokens + 31) // 32
@@ -458,17 +507,34 @@ def cube_schedule(
                 if worker >= OUTPUT_BALANCE_HEAVY_CORES:
                     ob_worker = worker - OUTPUT_BALANCE_HEAVY_CORES + (ob_group % 2) * OUTPUT_BALANCE_COLUMNS_PER_GROUP
                 ob_first = ob_group * OUTPUT_BALANCE_COLUMNS_PER_GROUP
-                ob_owned = ob_worker + (
-                    (ob_first + OUTPUT_BALANCE_LAST_RANK - ob_worker) // OUTPUT_BALANCE_VIRTUAL_WORKERS
-                ) * OUTPUT_BALANCE_VIRTUAL_WORKERS
+                ob_owned = (
+                    ob_worker
+                    + ((ob_first + OUTPUT_BALANCE_LAST_RANK - ob_worker) // OUTPUT_BALANCE_VIRTUAL_WORKERS)
+                    * OUTPUT_BALANCE_VIRTUAL_WORKERS
+                )
                 if ob_owned < ob_first + OUTPUT_BALANCE_COLUMNS_PER_GROUP:
                     signal = wait_row_owners(
-                        signal, PHASE_O_QUANT_GROUP_BASE + ob_group, CORES, generation,
-                        ob_group * quant_per_group, quant_per_group, 1, VECTORS, GROUPS, 1
+                        signal,
+                        PHASE_O_QUANT_GROUP_BASE + ob_group,
+                        CORES,
+                        generation,
+                        ob_group * quant_per_group,
+                        quant_per_group,
+                        1,
+                        VECTORS,
+                        GROUPS,
+                        1,
                     )
                     o_partials = o_b_groups_stage(
-                        o_quant, wo_b, o_partials, tokens, ob_worker, OUTPUT_BALANCE_VIRTUAL_WORKERS,
-                        OB_ROWS, ob_group, ob_group + 1
+                        o_quant,
+                        wo_b,
+                        o_partials,
+                        tokens,
+                        ob_worker,
+                        OUTPUT_BALANCE_VIRTUAL_WORKERS,
+                        OB_ROWS,
+                        ob_group,
+                        ob_group + 1,
                     )
         else:
             for ob_group in pl.range(8):
@@ -476,15 +542,23 @@ def cube_schedule(
                 ob_owned = worker + ((ob_first + GROUPS - 1 - worker) // GROUPS) * GROUPS
                 if ob_owned < ob_first + 8:
                     signal = wait_row_owners(
-                        signal, PHASE_O_QUANT_GROUP_BASE + ob_group, CORES, generation,
-                        ob_group * quant_per_group, quant_per_group, 1, VECTORS, GROUPS, 1
+                        signal,
+                        PHASE_O_QUANT_GROUP_BASE + ob_group,
+                        CORES,
+                        generation,
+                        ob_group * quant_per_group,
+                        quant_per_group,
+                        1,
+                        VECTORS,
+                        GROUPS,
+                        1,
                     )
                     o_partials = o_b_groups_stage(
                         o_quant, wo_b, o_partials, tokens, worker, GROUPS, OB_ROWS, ob_group, ob_group + 1
                     )
     else:
         # 保留整阶段路径供区间策略与同轮对照；两分支复用全部数学helper。
-        o_r = o_projection_a_stage_nz(packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS)
+        o_r = o_projection_a_stage_nz(packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS, OA_ROWS)
         signal = publish_phase(signal, PHASE_OA, worker, CORES, generation)
         quant_tasks = 8 * ((tokens + 31) // 32)
         signal = wait_row_owners(signal, PHASE_O_QUANT, CORES, generation, 0, quant_tasks, 1, VECTORS, GROUPS, 1)

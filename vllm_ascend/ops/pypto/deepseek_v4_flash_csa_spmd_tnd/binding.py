@@ -51,8 +51,14 @@ class PreparedDynamicCSA:
         self.requests = b = native["kv_seq_lens"].numel()
         if hidden.shape != (t, 4, 4096) or hidden.dtype != torch.bfloat16 or not hidden.is_contiguous():
             raise ValueError("要求Native BF16连续hidden[T,4,4096]")
+        if native["cmp_block_table"].ndim != 2:
+            raise ValueError("cmp_block_table must be two-dimensional")
         self.policy = policy or select_policy(
-            tokens=t, requests=b, max_query_tokens=max_query_tokens, max_seq_len=max_seq_len
+            tokens=t,
+            requests=b,
+            max_query_tokens=max_query_tokens,
+            max_seq_len=max_seq_len,
+            compressed_table_columns=native["cmp_block_table"].shape[1],
         )
         device = hidden.device
         self.buffers: dict[str, torch.Tensor] = {}
@@ -201,8 +207,7 @@ class PreparedDynamicCSA:
             # 前缀+4*T组描述符，16项对齐后接48个scale链表头和4*T项地址描述符；
             # 启用连续页策略时尾部2*B项为(first_page,direction)，关闭时维持原容量。
             "group_offsets": (
-                (_pad(_pad(b + 1, 16) + 4 * t, 16) + 48 + 4 * t
-                 + (2 * b if self.policy.scale_page_coalescing else 0),),
+                (_pad(_pad(b + 1, 16) + 4 * t, 16) + 48 + 4 * t + (2 * b if self.policy.scale_page_coalescing else 0),),
                 torch.int32,
             ),
             "group_plan": ((8,), torch.int32),

@@ -162,6 +162,7 @@ def indexer_pair_publish_stage(
     generation: pl.Scalar[pl.INT32],
     QUERY_GROUP: pl.constexpr,
     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
+    SCORE_GROUP_ORDER: pl.constexpr = False,
 ):
     """AIV发布pair根；保持非balanced根0原位归并及原多路平局优先顺序。"""
     tokens = pl.tensor.dim(positions, 0)
@@ -195,12 +196,16 @@ def indexer_pair_publish_stage(
             signals = wait_indexer_query_roots(
                 signals,
                 plan,
+                offsets,
+                pl.tensor.dim(lengths, 0),
+                tokens,
                 group,
                 local_query % QUERY_GROUP,
                 root_count,
                 generation,
                 QUERY_GROUP,
                 BALANCED,
+                SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
             )
             if BALANCED and QUERY_GROUP != 2:
                 # G2独立半叶仍走下方原顺序左折叠，保持同分规则。

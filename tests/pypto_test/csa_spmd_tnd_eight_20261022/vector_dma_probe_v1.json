@@ -1,0 +1,46 @@
+{
+  "device_execution": false,
+  "performance_eligible": false,
+  "sdk_release": "csa-shared-20261022-logical-codegen",
+  "compiler": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/ptoas-csa-mpmd-upstream-20261021/build/bin/ptoas",
+  "flags": [
+    "--pto-arch=a3",
+    "--pto-level=level3",
+    "--enable-insert-sync"
+  ],
+  "source": "vector_before_row_dma.pto",
+  "observations": {
+    "before": {
+      "cpp": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/vector_dma_probe_v1/before.cpp",
+      "cpp_sha256": "dcbf45c81e1b2c88e963e2d2116becb732076d3bfaa5ed8f47e618f6841e730b",
+      "vector_line": 78,
+      "dma_line": 140,
+      "vector_before_dma": true,
+      "wait_for_vector_before_dma": false,
+      "excerpt": "  TLOAD(v19, v3);\n  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);\n  TLOAD(v15, v2);\n  set_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);\n  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);\n  TADDS(v19, v19, v14);\n  set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);\n  wait_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);\n  for (int64_t v21 = v10; v21 < v12; v21 += v11) {\n    TLOAD(v39, v38);\n  set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);\n  wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);\n  TSTORE(v4, v19);\n  wait_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);\n  TSTORE(v5, v17);"
+    },
+    "same_address": {
+      "cpp": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/vector_dma_probe_v1/same_address.cpp",
+      "cpp_sha256": "116c2e33807d08bb5e9d5b4b6df739df3f9b1f01e21e3c3c5e5a09b79b612e6f",
+      "vector_line": 75,
+      "dma_line": 139,
+      "vector_before_dma": true,
+      "wait_for_vector_before_dma": true,
+      "excerpt": "  TLOAD(v18, v3);\n  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);\n  TLOAD(v14, v2);\n  set_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);\n  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);\n  TADDS(v18, v18, v13);\n  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);\n  set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);\n  wait_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);\n  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);\n  for (int64_t v20 = v9; v20 < v11; v20 += v10) {\n    TLOAD(v38, v37);\n  set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);\n  wait_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);\n  wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);\n  TSTORE(v4, v18);\n  TSTORE(v5, v16);"
+    },
+    "after": {
+      "cpp": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/vector_dma_probe_v1/after.cpp",
+      "cpp_sha256": "d8f8ea1d09022f272ed60b30510cc219b64728527d6247509711d7fe100fcf33",
+      "vector_line": 141,
+      "dma_line": 137,
+      "vector_before_dma": false,
+      "wait_for_vector_before_dma": null,
+      "excerpt": "  TLOAD(v19, v3);\n  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);\n  TLOAD(v15, v2);\n  set_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);\n  wait_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);\n  for (int64_t v21 = v10; v21 < v12; v21 += v11) {\n    TLOAD(v39, v38);\n  set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);\n  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);\n  TADDS(v19, v19, v14);\n  set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);\n  wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);\n  TSTORE(v4, v19);\n  wait_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);\n  TSTORE(v5, v17);"
+    }
+  },
+  "limitations": [
+    "Valid-index-only CPU control-flow probe; no DMA timing or hardware correctness evidence",
+    "Different allocation and control flow in a full kernel require a separate audit"
+  ],
+  "invocation_correction": "Initial tools/ptoas/ptoas Python wrapper lacked its package root; actual shared build/bin/ptoas succeeded. This was a tool path mistake, not an SDK bug."
+}

@@ -1,0 +1,62 @@
+{
+  "performance_eligible": false,
+  "device_execution": false,
+  "source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/attention_plan_stages.py",
+  "limits": {
+    "PHYSICAL_PLAN_COLUMNS": 2048,
+    "EXACT_FP32_INT": 16777216
+  },
+  "cases": {
+    "C01": {
+      "plan_policy_enabled": false,
+      "table_columns": 1026,
+      "physical_cache_pages": 1027,
+      "physical_plan_supported_by_current_predicate": false
+    },
+    "C02": {
+      "plan_policy_enabled": true,
+      "table_columns": 2050,
+      "physical_cache_pages": 32801,
+      "physical_plan_supported_by_current_predicate": false
+    },
+    "C03": {
+      "plan_policy_enabled": false,
+      "table_columns": 1026,
+      "physical_cache_pages": 8209,
+      "physical_plan_supported_by_current_predicate": false
+    },
+    "C04": {
+      "plan_policy_enabled": true,
+      "table_columns": 1026,
+      "physical_cache_pages": 16417,
+      "physical_plan_supported_by_current_predicate": true
+    },
+    "C05": {
+      "plan_policy_enabled": true,
+      "table_columns": 1026,
+      "physical_cache_pages": 24625,
+      "physical_plan_supported_by_current_predicate": true
+    },
+    "C06": {
+      "plan_policy_enabled": true,
+      "table_columns": 1026,
+      "physical_cache_pages": 28729,
+      "physical_plan_supported_by_current_predicate": true
+    },
+    "C07": {
+      "plan_policy_enabled": true,
+      "table_columns": 66,
+      "physical_cache_pages": 2113,
+      "physical_plan_supported_by_current_predicate": true
+    },
+    "C08": {
+      "plan_policy_enabled": false,
+      "table_columns": 1026,
+      "physical_cache_pages": 16417,
+      "physical_plan_supported_by_current_predicate": false
+    }
+  },
+  "finding": "C02 has 2050 table columns, exceeds the current 2048-column bound, and therefore selects the logical-index fallback even with PLAN_PHYSICAL_ROWS enabled",
+  "next_gate": "Evaluate a resource tier large enough for C02 without changing 2048-column-tier code; full allocation, physical index/guard correctness and L1 measurement are required",
+  "limitation": "This is an exact descriptor/predicate evaluation, not observed latency or a speedup estimate"
+}

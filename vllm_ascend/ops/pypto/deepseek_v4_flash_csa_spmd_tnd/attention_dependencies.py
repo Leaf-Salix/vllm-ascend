@@ -37,9 +37,10 @@
 
 import pypto.language as pl
 
-from .indexer_group_stages import PLAN_WORDS
+from .indexer_group_stages import OFFSET_ROWS_DYN, PLAN_WORDS
 from .phase_sync import SIGNAL_SLOT_WORDS, SIGNAL_WORDS
 from .runtime_abi import CORES, GROUPS, PHASE_ATTN_PLAN, PHASE_SCORE_VECTOR, VECTORS
+from .score_group_order_stages import active_score_order_base
 from .signals import csa_signal_wait
 
 
@@ -47,16 +48,25 @@ from .signals import csa_signal_wait
 def wait_indexer_query_roots(
     signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
     plan: pl.Tensor[[PLAN_WORDS], pl.INT32],
+    offsets: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
+    requests: pl.Scalar[pl.INDEX],
+    tokens: pl.Scalar[pl.INDEX],
     group: pl.Scalar[pl.INDEX],
     local_query: pl.Scalar[pl.INDEX],
     root_count: pl.Scalar[pl.INDEX],
     generation: pl.Scalar[pl.INT32],
     QUERY_GROUP: pl.constexpr,
     BALANCED: pl.constexpr,
+    SCORE_GROUP_ORDER: pl.constexpr = False,
 ):
     """只获取本次归并读取的根；先读完同代计划，再选择真实写者。"""
     groups = pl.cast(pl.read(plan, [0]), pl.INDEX)
     leaves = pl.cast(pl.read(plan, [2]), pl.INDEX)
+    schedule_group = group
+    if BALANCED and QUERY_GROUP == 6 and SCORE_GROUP_ORDER:
+        order_base = active_score_order_base(offsets, groups, requests, tokens)
+        if order_base >= 0:
+            schedule_group = pl.cast(pl.read(offsets, [order_base + 1 + groups + group]), pl.INDEX)
     for root in pl.range(root_count):
         if BALANCED:
             leaf = root
@@ -65,7 +75,7 @@ def wait_indexer_query_roots(
             leaf = root // 2
             lane = root % 2
         if groups < GROUPS:
-            item = leaf * groups + group
+            item = leaf * groups + schedule_group
         else:
             item = group * leaves + leaf
         producer = GROUPS + 2 * (item % GROUPS) + lane
