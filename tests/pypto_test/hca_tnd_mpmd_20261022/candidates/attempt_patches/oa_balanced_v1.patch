@@ -1,0 +1,97 @@
+--- candidates/output_oa_balanced.py
++++ oa_balanced_v1/output.py
+@@ -34,47 +34,6 @@
+ OB_L1_K = 512
+ VECTORS = 48
+ SCALE_ROW = 16
+-
+-
+-@pl.jit.inline(auto_scope=False)
+-def _oa_column_tile(
+-    packed: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
+-    weight: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, WO_A_WEIGHT_LAYOUT],
+-    projected: pl.Tensor[[T_PAD, O_WIDTH], pl.FP32],
+-    group: pl.Scalar[pl.INDEX],
+-    row0: pl.Scalar[pl.INDEX],
+-    col0: pl.Scalar[pl.INDEX],
+-    active: pl.Scalar[pl.INDEX],
+-    source_row: pl.Scalar[pl.INDEX],
+-    COLUMNS: pl.constexpr,
+-):
+-    seed_storage = pl.create_tile([96, COLUMNS], dtype=pl.FP32,
+-                                  target_memory=pl.MemorySpace.Acc, compact=True)
+-    seed = pl.tile.set_validshape(seed_storage, active, COLUMNS)
+-    # A和B的L1窗口分开推进；A一份512列供两份256列B使用。
+-    for ka, (a_acc,) in pl.pipeline(O_GROUP_IN // 512, stage=2, init_values=(seed,)):
+-        a_k0 = ka * 512
+-        a_l1 = pl.load(packed, [source_row, a_k0], [96, 512],
+-                       valid_shape=[active, 512], target_memory=pl.MemorySpace.Mat)
+-        for kb, (b_acc,) in pl.pipeline(2, stage=2, init_values=(a_acc,)):
+-            b_k0 = a_k0 + kb * 256
+-            b_group = pl.load(weight, [group, b_k0, col0], [1, 256, COLUMNS], valid_shape=[1, 256, COLUMNS],
+-                              target_memory=pl.MemorySpace.Mat)
+-            b_l1 = pl.reshape(b_group, [256, COLUMNS])
+-            # L0B两份24KiB、L0A两份12KiB；72KiB Acc保持完整K累加链。
+-            # 末份只计算/写回64列，不能让物理COLUMNS列盒覆盖下一组。
+-            for ki, (c_acc,) in pl.pipeline(4, stage=2, init_values=(b_acc,)):
+-                a_l0 = pl.tile.extract(a_l1, 0, kb * 256 + ki * 64, [96, 64],
+-                                      target_memory=pl.MemorySpace.Left)
+-                b_l0 = pl.tile.extract(b_l1, ki * 64, 0, [64, COLUMNS],
+-                                      target_memory=pl.MemorySpace.Right)
+-                updated = pl.tile.matmul_acc(c_acc, a_l0, b_l0,
+-                                             init_cond=(ka == 0 and kb == 0 and ki == 0))
+-                c_done = pl.yield_(updated)
+-            b_done = pl.yield_(c_done)
+-        a_done = pl.yield_(b_done)
+-    pl.store(a_done, [row0, group * O_LORA + col0], projected)
+-    return projected
+ 
+ 
+ @pl.jit.inline(auto_scope=False)
+@@ -92,18 +51,40 @@
+     row_blocks = (tokens + 95) // 96
+     with pl.spmd(O_GROUPS * row_blocks * 6, name_hint="hca_oa_balanced_columns",
+                  deps=[heads_dep], allow_early_resolve=True) as ready:
+-        pl.set_cache_policy(weight, pl.CachePolicy.BYPASS)
+         unit = pl.tile.get_block_idx()
+         group = pl.max(0, unit // (row_blocks * 6))
+         row0 = (unit // 6 % row_blocks) * 96
+         col0 = pl.max(0, unit % 6) * 192
+         active = pl.min(96, tokens - row0)
++        active_columns = pl.min(192, O_LORA - col0)
+         source_row = group * T_PAD + row0
+-        # NZ张量的物理N维保持静态。前五份192列，末份64列；均严格在原权重内。
+-        if unit % 6 == 5:
+-            projected = _oa_column_tile(packed, weight, projected, group, row0, col0, active, source_row, 64)
+-        else:
+-            projected = _oa_column_tile(packed, weight, projected, group, row0, col0, active, source_row, 192)
++        pl.set_cache_policy(weight, pl.CachePolicy.BYPASS)
++        seed_storage = pl.create_tile([96, 192], dtype=pl.FP32,
++                                      target_memory=pl.MemorySpace.Acc, compact=True)
++        seed = pl.tile.set_validshape(seed_storage, active, active_columns)
++        # A和B的L1窗口分开推进；A一份512列供两份256列B使用。
++        for ka, (a_acc,) in pl.pipeline(O_GROUP_IN // 512, stage=2, init_values=(seed,)):
++            a_k0 = ka * 512
++            a_l1 = pl.load(packed, [source_row, a_k0], [96, 512],
++                           valid_shape=[active, 512], target_memory=pl.MemorySpace.Mat)
++            for kb, (b_acc,) in pl.pipeline(2, stage=2, init_values=(a_acc,)):
++                b_k0 = a_k0 + kb * 256
++                b_group = pl.load(weight, [group, b_k0, col0], [1, 256, 192], valid_shape=[1, 256, active_columns],
++                                  target_memory=pl.MemorySpace.Mat)
++                b_l1 = pl.reshape(b_group, [256, 192])
++                # L0B两份24KiB、L0A两份12KiB；72KiB Acc保持完整K累加链。
++                # 末份只计算/写回64列，不能让物理192列盒覆盖下一组。
++                for ki, (c_acc,) in pl.pipeline(4, stage=2, init_values=(b_acc,)):
++                    a_l0 = pl.tile.extract(a_l1, 0, kb * 256 + ki * 64, [96, 64],
++                                          target_memory=pl.MemorySpace.Left)
++                    b_l0 = pl.tile.extract(b_l1, ki * 64, 0, [64, 192],
++                                          target_memory=pl.MemorySpace.Right)
++                    updated = pl.tile.matmul_acc(c_acc, a_l0, b_l0,
++                                                 init_cond=(ka == 0 and kb == 0 and ki == 0))
++                    c_done = pl.yield_(updated)
++                b_done = pl.yield_(c_done)
++            a_done = pl.yield_(b_done)
++        pl.store(a_done, [row0, group * O_LORA + col0], projected)
+     return projected, ready
+ 
+ 

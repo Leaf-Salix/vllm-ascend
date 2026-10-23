@@ -35,15 +35,35 @@ def main():
     parser.add_argument("--windows", type=int, default=0)
     parser.add_argument("--native-only", action="store_true", help="只采 Native 直接调用外部 profiling，不使用图")
     parser.add_argument("--profile", action="store_true", help="通过功能检查后采两侧直接调用外部 profiling")
+    parser.add_argument("--profile-service", action="store_true",
+                        help="外部PTO计时使用真实custom op，每次新forward context，包含metadata生产和描述符绑定")
+    parser.add_argument("--host-profile", action="store_true", help="独立测真实服务/预绑定/Native的Host函数耗时，不采PyTorch profiling")
+    parser.add_argument("--prepared-host-probe", action="store_true", help="仅诊断SDK已预热registration的提交下界，不改正式入口或SDK")
     parser.add_argument("--diagnostic-perf", action="store_true",
                         help="仅在与冻结控制组全部逐bit一致时，保留 Native 误差并诊断性能；不改 passed")
+    parser.add_argument("--native-output-math", action="store_true",
+                        help="已做同输入诊断的Native输出量化语义修正；性能门禁仍要求cache/state精确及Native输出通过")
     parser.add_argument("--compare-legacy", action="store_true", help="S6 上核实 TND 迁移是否改变旧 HCA 数学")
     parser.add_argument("--compressor-probe-only", action="store_true", help="固定 Native RMS 输出验证 C128；不测性能")
     parser.add_argument("--metadata-sequence", action="store_true", help="固定设备地址，直接调用 S1/S5/混长 A→B→A；不测性能")
+    parser.add_argument("--precision-probe", action="store_true", help="同一生产数学的中间值及Native尾链诊断；不测性能")
+    parser.add_argument("--service-probe", action="store_true", help="真实custom op服务接管与KV钩子验证；不测性能")
     parser.add_argument("--device", type=int)
     args = parser.parse_args()
     if args.control_source and args.compare_legacy:
         raise ValueError("控制组只能选冻结 TND 或旧 HCA 中的一种")
+    if args.profile_service and (not (args.profile or args.host_profile) or args.native_only):
+        raise ValueError("服务性能采集必须与双侧--profile同时使用")
+    if args.host_profile and (not args.profile_service or args.windows or args.profile):
+        raise ValueError("Host归因使用--profile-service，且不与L1/PyTorch profiling混用")
+    if args.prepared_host_probe and not args.host_profile:
+        raise ValueError("预绑定SDK对照只用于独立Host诊断")
+    if args.native_output_math and (not args.diagnostic_perf or not args.control_source):
+        raise ValueError("Native输出数学迁移必须有冻结控制组和显式诊断性能标记")
+    if args.precision_probe and (args.windows or args.profile or args.native_only):
+        raise ValueError("中间值诊断不与性能采集混用")
+    if args.service_probe and (args.windows or args.profile or args.native_only or args.precision_probe):
+        raise ValueError("服务接管验证独立执行，不混入计时或中间值诊断")
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=False)
     os.environ["PYPTO_PROG_BUILD_DIR"] = str(args.output / "build")
@@ -84,11 +104,55 @@ def main():
         options = CompileOptions(platform="a2a3", memory_planner=passes.MemoryPlanner.PYPTO)
         if args.cpu:
             entry.decode_hca_tp1_layer_test.compile(config=options)
+            if hasattr(entry, "decode_hca_tp1_layer_tall_test"):
+                entry.decode_hca_tp1_layer_tall_test.compile(config=options)
+            if args.precision_probe:
+                probes = importlib.import_module(PACKAGE + ".trace_entry")
+                probes.trace_hca.compile(config=options)
+                if hasattr(probes, "trace_hca_tall"):
+                    probes.trace_hca_tall.compile(config=options)
+                probes.trace_output.compile(config=options)
+                if hasattr(probes, "trace_output_tall"):
+                    probes.trace_output_tall.compile(config=options)
             if args.compare_legacy:
                 legacy_entry = importlib.import_module("vllm_ascend.ops.pypto.deepseek_v4_flash_hca.decode_hca")
                 legacy_entry.decode_hca_tp1_layer_test.compile(config=options)
             if control_package:
-                importlib.import_module(control_package + ".entry").decode_hca_tp1_layer_test.compile(config=options)
+                control_entry = importlib.import_module(control_package + ".entry")
+                control_entry.decode_hca_tp1_layer_test.compile(config=options)
+                if hasattr(control_entry, "decode_hca_tp1_layer_tall_test"):
+                    control_entry.decode_hca_tp1_layer_tall_test.compile(config=options)
+            # .compile完成IR/PTOAS设备代码，但编排C++原先到首次执行才编译。
+            # 在CPU阶段也完成它，避免把明显的编排codegen错误留到占卡之后。
+            from pypto.runtime.kernel_compiler import KernelCompiler
+            from pypto.runtime.pto_isa import ensure_pto_isa_root
+            from concurrent.futures import ThreadPoolExecutor
+
+            compiler = KernelCompiler(platform="a2a3")
+            sources = sorted((args.output / "build").glob("*/orchestration/*.cpp"))
+            if not sources:
+                raise RuntimeError("CPU编译未生成编排源码，不能声称完整后端编译通过")
+            report["orchestration_compiles"] = []
+            for source in sources:
+                binary = compiler.compile_orchestration("tensormap_and_ringbuffer", str(source))
+                source.with_suffix(".so").write_bytes(binary)
+                report["orchestration_compiles"].append({"source": str(source), "bytes": len(binary)})
+            isa_root = str(ensure_pto_isa_root())
+            kernels = sorted((args.output / "build").glob("*/kernels/*/*.cpp"))
+            if not kernels:
+                raise RuntimeError("没有生成incore源码")
+
+            def compile_kernel(source):
+                binary = compiler.compile_incore(
+                    str(source), core_type=source.parent.name, pto_isa_root=isa_root,
+                    runtime_name="tensormap_and_ringbuffer",
+                )
+                source.with_suffix(".o").write_bytes(binary)
+                return {"source": str(source), "bytes": len(binary)}
+
+            # 每个源文件使用独立编译目录；纯CPU完成AscendC编译/链接，不初始化Worker。
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                report["incore_binary_compiles"] = list(pool.map(compile_kernel, kernels))
             report["passed"] = True
             save("cpu_backend_compiled")
             return
@@ -124,8 +188,18 @@ def main():
         report.update(device=device_id, query_lengths=queries, history_lengths=histories,
                       token_capacity=args.token_capacity or sum(queries))
         torch.npu.set_device(device_id)
+        # 直接调用仍使用CANN现成编译算子；显式记录实际开关，避免依赖进程默认值。
+        torch.npu.set_compile_mode(jit_compile=False)
         torch.npu.config.allow_internal_format = True
         torch_npu.npu.set_deterministic_level(0)
+        report["execution_config"] = {
+            "jit_compile": False,
+            "is_jit_compile_false": bool(torch_npu.npu.is_jit_compile_false()),
+            "aclgraph_capture": False, "aclgraph_replay": False,
+            "superkernel": False,
+            "superkernel_note": "遵循用户后续直接调用口径，没有图编译/SuperKernel图优化",
+            "weight_nz_mode": 2,
+        }
         current_platform.pre_register_and_update()
         if not enable_custom_op():
             raise RuntimeError("Native 自定义算子不可用")
@@ -153,6 +227,11 @@ def main():
             output = torch.empty_like(fixture["hidden"])
             native_intermediates = {}
             norm_hook = None
+            release_native_capture = None
+            if args.precision_probe:
+                from precision_probe import capture_native
+
+                native_intermediates, release_native_capture = capture_native(layer)
             if args.compressor_probe_only:
                 def capture_norm(module, inputs, value):
                     native_intermediates["normalized"] = value.detach().clone()
@@ -174,6 +253,8 @@ def main():
 
             native_call()
             torch.npu.synchronize()
+            if release_native_capture is not None:
+                release_native_capture()
             if norm_hook is not None:
                 norm_hook.remove()
             native = collect()
@@ -261,8 +342,15 @@ def main():
                 legacy_op = pypto.torch.register(
                     decode_hca_tp1_layer_test, "dsv4_hca_legacy_diagnostic::attention", config=options,
                 )
+                legacy_operators = legacy_adapter.HCAOperators(legacy_op)
+                if hasattr(reference_module, "decode_hca_tp1_layer_tall_test"):
+                    legacy_tall = pypto.torch.register(
+                        reference_module.decode_hca_tp1_layer_tall_test,
+                        "dsv4_hca_legacy_diagnostic::attention_tall", config=options,
+                    )
+                    legacy_operators = legacy_adapter.HCAOperators(legacy_op, legacy_tall)
                 legacy_call = legacy_adapter.NativeHCACall(
-                    legacy_adapter.HCAOperators(legacy_op), legacy_adapter.prepare_weights(layer.self_attn, layer),
+                    legacy_operators, legacy_adapter.prepare_weights(layer.self_attn, layer),
                     fixture["hidden"], fixture["positions"], groups,
                     layer_name=layer.self_attn.dsa_attn.dsa_attn.layer_name,
                     compact_metadata=fixture["compact"]["compressed"], output=output,
@@ -276,6 +364,7 @@ def main():
                     raise RuntimeError("控制组需要唯一 kernel_config")
                 reference_config = reference_configs.pop()
                 reference_call = legacy_call
+                report["reference_policy"] = getattr(legacy_call, "policy", "default")
                 legacy = collect()
                 report["reference_guards"] = guard_checks(fixture)
                 save("numerical_reference_ready")
@@ -285,6 +374,7 @@ def main():
                 layer_name=layer.self_attn.dsa_attn.dsa_attn.layer_name,
                 compact_metadata=fixture["compact"]["compressed"], output=output,
             )
+            report["selected_policy"] = getattr(call, "policy", "default")
             if args.metadata_sequence:
                 from metadata_sequence import validate
 
@@ -350,6 +440,37 @@ def main():
                                 and all_passed(report["native_guards"])
                                 and all_passed(report["pto_guards"])
                                 and all_passed(report["repeat_guards"]))
+            if args.precision_probe:
+                if not all_passed(report["pto_guards"]) or report["nonfinite_output"]:
+                    raise AssertionError("原入口存在越界或非有限值，不继续拼接诊断")
+                from precision_probe import run_probe
+
+                report["precision_probe"] = run_probe(
+                    package=PACKAGE, options=options, call=call, fixture=fixture, layer=layer, config=config,
+                    output=output, baseline=eager, native=native, native_tensors=native_intermediates,
+                    restore=restore, collect=collect, output_dir=args.output,
+                )
+                report["post_probe_guards"] = guard_checks(fixture)
+                save("precision_diagnosed")
+                if (not report["precision_probe"]["passed_capture_equivalence"]
+                        or not all_passed(report["post_probe_guards"])):
+                    raise AssertionError("诊断采集改变生产结果或破坏保护区")
+                return
+            if args.service_probe:
+                if not all_passed(report["pto_guards"]) or report["nonfinite_output"]:
+                    raise AssertionError("原入口存在越界或非有限值，不继续服务验证")
+                from service_probe import validate
+
+                report["service_validation"] = validate(
+                    package=PACKAGE, layer=layer, call=call, config=config, fixture=fixture,
+                    output=output, baseline=eager, restore=restore, collect=collect,
+                )
+                report["post_service_guards"] = guard_checks(fixture)
+                save("service_validated")
+                if (not report["service_validation"]["passed"]
+                        or not all_passed(report["post_service_guards"])):
+                    raise AssertionError("服务接管、KV钩子或状态比较失败")
+                return
             diagnostic_allowed = (
                 args.diagnostic_perf and legacy is not None
                 and all_passed(report["pto_reference"]) and all_passed(report["reference_guards"])
@@ -357,6 +478,23 @@ def main():
                 and all_passed(report["repeat_eager"]) and all_passed(report["pto_guards"])
                 and all_passed(report["repeat_guards"]) and not report["nonfinite_output"]
             )
+            if args.native_output_math:
+                state_exact = all(all_passed(checks) for name, checks in report["pto_reference"].items()
+                                  if name != "output")
+                report["output_math_transition"] = {
+                    "from": "八组各自量化、FP32部分和反量化",
+                    "to": "Native O_A BF16边界、整token量化、完整K8192 INT32点积",
+                    "same_input_evidence": "native_output_h8192_b32_v4/precision_probe.json",
+                    "cache_state_exact_to_control": state_exact,
+                    "output_bitwise_equal_to_control": all_passed(report["pto_reference"]["output"]),
+                    "native_output_with_existing_tolerance": all_passed(report["pto_native"]["output"]),
+                }
+                diagnostic_allowed = (
+                    state_exact and all_passed(report["pto_native"]["output"])
+                    and all_passed(report["reference_guards"]) and all_passed(report["pto_guards"])
+                    and all_passed(report["repeat_eager"]) and all_passed(report["repeat_guards"])
+                    and not report["nonfinite_output"]
+                )
             report["preserves_reference"] = all_passed(report["pto_reference"]) if legacy is not None else None
             report["diagnostic_performance_only"] = bool(diagnostic_allowed and not report["passed"])
             if not report["passed"] and not diagnostic_allowed:
@@ -421,19 +559,123 @@ def main():
                 if not all_passed(post_checks) or not all_passed(report["post_l1_guards"]):
                     report["passed"] = False
                     raise AssertionError("L1 采样后状态或保护区检查失败")
-            if args.profile:
+            if args.profile or args.host_profile:
                 from profile_eager import profile_call
 
                 def reset_profile():
                     restore(fixture)
                     output.fill_(float("nan"))
 
+                pto_profile_call = call
+                if args.profile_service:
+                    from service_probe import validate
+                    service = importlib.import_module(PACKAGE + ".service")
+
+                    # 先证明确实进入PTO和保持KV生命周期；计时阶段不保留计数包装。
+                    report["profile_service_validation"] = validate(
+                        package=PACKAGE, layer=layer, call=call, config=config, fixture=fixture,
+                        output=output, baseline=eager, restore=restore, collect=collect,
+                    )
+                    if not report["profile_service_validation"]["passed"]:
+                        raise AssertionError("真实服务验证未通过，不继续计时")
+                    service.bind_layer(layer, call.operators, max_num_seqs=64, max_num_batched_tokens=384)
+
+                    def pto_profile_call():
+                        # 每次都是一个新step，不能把compact metadata跨step缓存掉。
+                        with set_ascend_forward_context(
+                            fixture["metadata"], config, num_tokens=fixture["tokens"],
+                            num_actual_tokens=fixture["actual_tokens"],
+                        ):
+                            torch.ops.vllm.dsv4_hca_forward(
+                                fixture["hidden"], fixture["positions"], output,
+                                layer.self_attn.dsa_attn.prefix,
+                            )
+
+                report["outer_profile_scope"] = (
+                    "两侧每次新forward context；PTO真实custom op含eligibility、KV钩子、compact producer和描述符绑定"
+                    if args.profile_service else "Native完整直接调用；PTO预绑定算子，不含每步服务绑定"
+                )
+                if args.host_profile:
+                    from host_probe import profile_host
+
+                    host_calls = {"native": native_call, "pto_prebound": call, "pto_service": pto_profile_call}
+                    if args.prepared_host_probe:
+                        from host_probe import prepared_operator
+
+                        entry = importlib.import_module(PACKAGE + ".entry")
+                        prepared_root = (entry.decode_hca_tp1_layer_tall_test
+                                         if getattr(call, "policy", "default") != "default"
+                                         else entry.decode_hca_tp1_layer_test)
+                        selected_operator = getattr(call, "kernel", call.operators.attention)
+                        prepared = prepared_operator(prepared_root, selected_operator._schema)
+                        prepared_runtime = service.HCATNDServiceRuntime(
+                            layer.self_attn, adapter.HCAOperators(prepared), 64, layer, 384,
+                        )
+
+                        def prepared_call():
+                            prepared(*call.core_args)
+
+                        def prepared_service_call():
+                            wrapper = layer.self_attn.dsa_attn
+                            previous = wrapper._pto_hca_runtime
+                            wrapper._pto_hca_runtime = prepared_runtime
+                            try:
+                                pto_profile_call()
+                            finally:
+                                wrapper._pto_hca_runtime = previous
+
+                        host_calls.update(prepared=prepared_call, prepared_service=prepared_service_call)
+                        prepared_checks = {}
+                        for name, run in (("prepared", prepared_call), ("prepared_service", prepared_service_call)):
+                            reset_profile()
+                            run()
+                            torch.npu.synchronize()
+                            actual = collect()
+                            checks = {"output": compare_tensor(actual["output"], eager["output"], 0, 0),
+                                      "guards": guard_checks(fixture)}
+                            for group in fixture["groups"]:
+                                checks[group] = [compare_tensor(a, b, 0, 0) for a, b in zip(actual[group], eager[group])]
+                            prepared_checks[name] = checks
+                            if not all_passed(checks):
+                                raise AssertionError("预绑定SDK调用改变了输出或状态")
+                        report["prepared_probe_checks"] = prepared_checks
+                        report["prepared_probe_scope"] = "测试期间源码/constexpr/config冻结；仅跳过JIT分析，SDK参数/别名/设备/生命周期校验均保留"
+                        try:
+                            prepared(*call.core_args[:-1])
+                        except (ValueError, TypeError) as exc:
+                            report["prepared_rejected_missing_argument"] = str(exc)
+                        else:
+                            raise AssertionError("预绑定SDK入口未拒绝缺失参数")
+                    report["host_profile"] = profile_host(
+                        host_calls,
+                        reset_profile, output_dir=args.output,
+                    )
+                    after = collect()
+                    checks = {"output": compare_tensor(after["output"], eager["output"], 0, 0),
+                              "guards": guard_checks(fixture)}
+                    for name in fixture["groups"]:
+                        checks[name] = [compare_tensor(a, b, 0, 0) for a, b in zip(after[name], eager[name])]
+                    report["post_host_profile_checks"] = checks
+                    save("host_profiled")
+                    if not all_passed(checks):
+                        raise AssertionError("Host诊断后结果或保护区改变")
+                    return
                 report["outer_profiles"] = {}
-                for side, run in (("native", native_call), ("pto", call)):
+                report["post_profile_checks"] = {}
+                for side, run in (("native", native_call), ("pto", pto_profile_call)):
                     report["outer_profiles"][side] = profile_call(
                         run, reset_profile, output_dir=args.output / f"profile_{side}",
                         side=side, samples=args.windows or 10,
                     )
+                    after = collect()
+                    expected = native if side == "native" else eager
+                    checks = {"output": compare_tensor(after["output"], expected["output"], 0, 0),
+                              "guards": guard_checks(fixture)}
+                    for name in fixture["groups"]:
+                        checks[name] = [compare_tensor(a, b, 0, 0) for a, b in zip(after[name], expected[name])]
+                    report["post_profile_checks"][side] = checks
+                    if not all_passed(checks):
+                        raise AssertionError(f"{side}外部采样后的结果或保护区改变")
             save("completed")
     except Exception:
         report["traceback"] = traceback.format_exc()

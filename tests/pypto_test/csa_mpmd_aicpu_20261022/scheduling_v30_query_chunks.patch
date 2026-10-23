@@ -1,0 +1,1499 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/attention_plan_stages.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/attention_plan_stages.py
+@@ -243,6 +243,8 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def attention_slot_plan_stage(
++    query_begin: pl.Scalar[pl.INDEX],
++    query_end: pl.Scalar[pl.INDEX],
+     topk: pl.Tensor[[T_DYN, TOPK], pl.INT32],
+     positions: pl.Tensor[[T_DYN], pl.INT64],
+     bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+@@ -265,8 +267,8 @@
+     # 三个阶段共用容量谓词；表示不靠Host猜测或逐query私自切换。
+     physical_mode = physical_plan_supported(pl.tensor.dim(compressed_table, 1), compressed_pages, PLAN_PHYSICAL_ROWS)
+     # 固定8是向量tile，不是请求长度。一个tile可跨请求，逐行用Q/L判断owner。
+-    for first in pl.range(worker_id * ROWS, tokens, WORKERS * ROWS):
+-        rows = pl.min(ROWS, tokens - first)
++    for first in pl.range(query_begin + worker_id * ROWS, query_end, WORKERS * ROWS):
++        rows = pl.min(ROWS, query_end - first)
+         # Top-K按query%48写，plan按八行tile%48写。只等这个tile真正读取的
+         # 最多八个owner；尾部仅rows行。wait内仍保留业务缓存的获取语义。
+         # Producer completion and GM visibility are enforced by the MPMD DAG.
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/attention_stream_stages.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/attention_stream_stages.py
+@@ -128,6 +128,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def attention_qk_pv_cube_stage(
++    query_begin: pl.Scalar[pl.INDEX],
++    query_end: pl.Scalar[pl.INDEX],
++    attention_buffer_base: pl.Scalar[pl.INDEX],
+     q_flat: pl.Tensor[[Q_ROWS_DYN, HEAD_DIM], pl.BF16],
+     valid_block_mask: pl.Tensor[[PLAN_CAP_DYN, 16], pl.INT32],
+     kv_transfer: pl.Tensor[[KV_RING_ROWS_DYN, HEAD_DIM], pl.BF16],
+@@ -141,11 +144,11 @@
+     EVENT_BASE: pl.constexpr = 0,
+ ):
+     """AIC侧：QK领先PV两拍；必须与本组两个AIV helper并发。"""
+-    t_dim = token_count
+     qk_core = core_id
++    ring_worker = attention_buffer_base + qk_core
+     # 固定硬件控制区声明，不搬运业务Tensor；最终Simpler包装使用运行时FFTS基址。
+     pl.system.set_ffts(ffts_workspace)
+-    qk_query_count = (t_dim + CORE_GROUPS - 1 - qk_core) // CORE_GROUPS
++    qk_query_count = (query_end - query_begin + CORE_GROUPS - 1 - qk_core) // CORE_GROUPS
+     qk_block_count = qk_query_count * SPARSE_BLOCKS
+     qk_q = pl.create_tile([H, HEAD_DIM], dtype=pl.BF16, target_memory=pl.MemorySpace.Mat)
+     # KV 只进一次 L1：QK 用它的转置视图，PV 用同一份的行切片。
+@@ -155,11 +158,11 @@
+     for qk_tick in pl.range(qk_block_count + QK_PRE_LAUNCH):
+         if qk_tick < qk_block_count:
+             qk_sb = qk_tick % SPARSE_BLOCKS
+-            qk_t = qk_core + (qk_tick // SPARSE_BLOCKS) * CORE_GROUPS
++            qk_t = query_begin + qk_core + (qk_tick // SPARSE_BLOCKS) * CORE_GROUPS
+             if qk_sb == 0:
+                 qk_q = pl.gather_row(qk_q, q_flat, [0, 0], [qk_t * H, 0], [H, HEAD_DIM])
+             if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
+-                qk_slot = qk_core * QK_TRANSFER_SLOTS + qk_tick % QK_TRANSFER_SLOTS
++                qk_slot = ring_worker * QK_TRANSFER_SLOTS + qk_tick % QK_TRANSFER_SLOTS
+                 qk_kv_row = qk_slot * ATTN_K_TILE
+                 qk_transfer_row = qk_slot * H
+                 pl.system.sync_wait(EVENT_BASE + QK_KV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+@@ -175,9 +178,9 @@
+         if qk_tick >= QK_PRE_LAUNCH:
+             pv_work = qk_tick - QK_PRE_LAUNCH
+             pv_sb = pv_work % SPARSE_BLOCKS
+-            pv_t = qk_core + (pv_work // SPARSE_BLOCKS) * CORE_GROUPS
++            pv_t = query_begin + qk_core + (pv_work // SPARSE_BLOCKS) * CORE_GROUPS
+             if pl.read(valid_block_mask, [pv_t, pv_sb]) > 0:
+-                pv_slot = qk_core * QK_TRANSFER_SLOTS + pv_work % QK_TRANSFER_SLOTS
++                pv_slot = ring_worker * QK_TRANSFER_SLOTS + pv_work % QK_TRANSFER_SLOTS
+                 pv_transfer_row = pv_slot * H
+                 pl.system.sync_wait(
+                     EVENT_BASE + QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC
+@@ -217,6 +220,9 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def attention_qk_pv_vector_lane_stage(
++    query_begin: pl.Scalar[pl.INDEX],
++    query_end: pl.Scalar[pl.INDEX],
++    attention_buffer_base: pl.Scalar[pl.INDEX],
+     ori_kv_flat: pl.Tensor[[ORIGINAL_ROWS_DYN, HEAD_DIM], pl.BF16],
+     cmp_kv_flat: pl.Tensor[[COMPRESSED_ROWS_DYN, HEAD_DIM], pl.BF16],
+     ori_block_table: pl.Tensor[[REQUESTS_DYN, ORIGINAL_COLUMNS_DYN], pl.INT32],
+@@ -249,12 +255,14 @@
+     """双AIV各32头/64候选；同一mask和事件次序保证与AIC配对。"""
+     t_dim = pl.tensor.dim(position_ids, 0)
+     physical_mode = physical_plan_supported(
+-        pl.tensor.dim(cmp_block_table, 1), pl.tensor.dim(cmp_kv_flat, 0) // BLOCK_SIZE,
++        pl.tensor.dim(cmp_block_table, 1),
++        pl.tensor.dim(cmp_kv_flat, 0) // BLOCK_SIZE,
+         PLAN_PHYSICAL_ROWS,
+     )
+     qk_core = core_id
++    ring_worker = attention_buffer_base + qk_core
+     qk_aiv = lane_id
+-    qk_query_count = (t_dim + CORE_GROUPS - 1 - qk_core) // CORE_GROUPS
++    qk_query_count = (query_end - query_begin + CORE_GROUPS - 1 - qk_core) // CORE_GROUPS
+     qk_block_count = qk_query_count * SPARSE_BLOCKS
+     # 固定硬件控制区声明，不搬运业务Tensor；最终Simpler包装使用运行时FFTS基址。
+     pl.system.set_ffts(ffts_workspace)
+@@ -290,11 +298,11 @@
+         qk_block_count + QK_PRE_LAUNCH + 1,
+         init_values=(running_m, running_l, running_left, running_right, local_stats_ring),
+     ):
+-        qk_t = qk_core + (qk_tick // SPARSE_BLOCKS) * CORE_GROUPS
++        qk_t = query_begin + qk_core + (qk_tick // SPARSE_BLOCKS) * CORE_GROUPS
+         qk_sb = qk_tick % SPARSE_BLOCKS
+         if qk_tick < qk_block_count:
+             if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
+-                qk_slot = qk_core * QK_TRANSFER_SLOTS + qk_tick % QK_TRANSFER_SLOTS
++                qk_slot = ring_worker * QK_TRANSFER_SLOTS + qk_tick % QK_TRANSFER_SLOTS
+                 qk_kv_row = qk_slot * ATTN_K_TILE
+                 # mask是两角色共同事件谓词；额外地址guard只限制gather，不改变
+                 # 事件对数。合法调用必须使用与plan同一批Q/L/positions/页表。
+@@ -310,12 +318,12 @@
+                     # 并行采64行；zero模式保留负哨兵/容量外地址的零填充。
+                     physical_column = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv
+                     physical_rows = pl.load(
+-                        cmp_sparse_indices, [qk_t, physical_column], [1, ATTN_K_TILE // 2],
++                        cmp_sparse_indices,
++                        [qk_t, physical_column],
++                        [1, ATTN_K_TILE // 2],
+                         target_memory=pl.MemorySpace.Vec,
+                     )
+-                    qk_kv_half = pl.tile.mgather(
+-                        cmp_kv_flat, physical_rows, coalesce="row", gather_oob="zero"
+-                    )
++                    qk_kv_half = pl.tile.mgather(cmp_kv_flat, physical_rows, coalesce="row", gather_oob="zero")
+                 else:
+                     # 只有原SWA/逻辑回退需要先清零；物理分支由MGATHER完整写出，
+                     # 不让旧零Tile与新64KiB结果跨分支同时存活。
+@@ -377,7 +385,7 @@
+                     pl.read(
+                         valid_block_mask,
+                         [
+-                            qk_core + ((qk_tick - 1) // SPARSE_BLOCKS) * CORE_GROUPS,
++                            query_begin + qk_core + ((qk_tick - 1) // SPARSE_BLOCKS) * CORE_GROUPS,
+                             (qk_tick - 1) % SPARSE_BLOCKS,
+                         ],
+                     )
+@@ -394,9 +402,9 @@
+         if qk_tick > 0 and qk_tick <= qk_block_count:
+             softmax_work = qk_tick - 1
+             softmax_sb = softmax_work % SPARSE_BLOCKS
+-            softmax_t = qk_core + (softmax_work // SPARSE_BLOCKS) * CORE_GROUPS
++            softmax_t = query_begin + qk_core + (softmax_work // SPARSE_BLOCKS) * CORE_GROUPS
+             if pl.read(valid_block_mask, [softmax_t, softmax_sb]) > 0:
+-                qk_slot = qk_core * QK_TRANSFER_SLOTS + softmax_work % QK_TRANSFER_SLOTS
++                qk_slot = ring_worker * QK_TRANSFER_SLOTS + softmax_work % QK_TRANSFER_SLOTS
+                 qk_transfer_row = qk_slot * H
+                 qk_s0 = softmax_sb * ATTN_K_TILE
+                 if t_dim < EARLY_KV_MIN_TOKENS:
+@@ -454,9 +462,9 @@
+         if qk_tick >= QK_PRE_LAUNCH + 1:
+             pv_work = qk_tick - QK_PRE_LAUNCH - 1
+             pv_sb = pv_work % SPARSE_BLOCKS
+-            pv_t = qk_core + (pv_work // SPARSE_BLOCKS) * CORE_GROUPS
++            pv_t = query_begin + qk_core + (pv_work // SPARSE_BLOCKS) * CORE_GROUPS
+             if pl.read(valid_block_mask, [pv_t, pv_sb]) > 0:
+-                pv_slot = qk_core * QK_TRANSFER_SLOTS + pv_work % QK_TRANSFER_SLOTS
++                pv_slot = ring_worker * QK_TRANSFER_SLOTS + pv_work % QK_TRANSFER_SLOTS
+                 pv_transfer_row = pv_slot * H
+                 pl.system.sync_wait(EVENT_BASE + QK_PV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
+                 # 同一 work 的 mi/li 已在两拍前产生；使用本 tick 更新后的环，
+@@ -468,15 +476,21 @@
+                     # 编译器依赖。不放开内存规划的安全门槛，也不经GM绕行。
+                     pv_m = pl.reshape(
+                         pl.tile.extract(
+-                            stats_cache_ready, (pv_work % QK_TRANSFER_SLOTS) * 2, 0,
+-                            [1, H // 2], target_memory=pl.MemorySpace.Vec,
++                            stats_cache_ready,
++                            (pv_work % QK_TRANSFER_SLOTS) * 2,
++                            0,
++                            [1, H // 2],
++                            target_memory=pl.MemorySpace.Vec,
+                         ),
+                         [H // 2, 1],
+                     )
+                     pv_l = pl.reshape(
+                         pl.tile.extract(
+-                            stats_cache_ready, (pv_work % QK_TRANSFER_SLOTS) * 2 + 1, 0,
+-                            [1, H // 2], target_memory=pl.MemorySpace.Vec,
++                            stats_cache_ready,
++                            (pv_work % QK_TRANSFER_SLOTS) * 2 + 1,
++                            0,
++                            [1, H // 2],
++                            target_memory=pl.MemorySpace.Vec,
+                         ),
+                         [H // 2, 1],
+                     )
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/entry.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/entry.py
+@@ -160,6 +160,11 @@
+ 
+ @pl.jit.incore
+ def index_score_topk_cube(
++    score_group_begin: pl.Scalar[pl.INDEX],
++    score_group_count: pl.Scalar[pl.INDEX],
++    score_buffer_base: pl.Scalar[pl.INDEX],
++    SCORE_WORKERS_PER_CHUNK: pl.constexpr,
++    uniform_six: pl.Scalar[pl.INT32],
+     positions: pl.Tensor[[T], pl.INT64],
+     idx_bounds: pl.Tensor[[IQ], pl.INT32],
+     idx_lengths: pl.Tensor[[B], pl.INT32],
+@@ -181,9 +186,14 @@
+     BALANCED: pl.constexpr,
+     SPLIT_SCORE_ROWS: pl.constexpr,
+ ):
+-    worker = pl.tile.get_block_idx()
++    worker = score_buffer_base + pl.tile.get_block_idx()
+     pl.system.set_ffts(ffts)
+     indexer_transfer = indexer_score_cube_stage(
++        score_group_begin,
++        score_group_count,
++        score_buffer_base,
++        SCORE_WORKERS_PER_CHUNK,
++        uniform_six,
+         idx_query_i8,
+         coefficients,
+         idx_key0,
+@@ -212,6 +222,11 @@
+ 
+ @pl.jit.incore
+ def index_score_topk_vector(
++    score_group_begin: pl.Scalar[pl.INDEX],
++    score_group_count: pl.Scalar[pl.INDEX],
++    score_buffer_base: pl.Scalar[pl.INDEX],
++    SCORE_WORKERS_PER_CHUNK: pl.constexpr,
++    uniform_six: pl.Scalar[pl.INT32],
+     positions: pl.Tensor[[T], pl.INT64],
+     idx_bounds: pl.Tensor[[IQ], pl.INT32],
+     idx_lengths: pl.Tensor[[B], pl.INT32],
+@@ -234,6 +249,11 @@
+     pl.func_attr({"split_aiv": True})
+     pl.system.set_ffts(ffts)
+     (score_arena, pair_arena) = indexer_score_vector_lane_stage(
++        score_group_begin,
++        score_group_count,
++        score_buffer_base,
++        SCORE_WORKERS_PER_CHUNK,
++        uniform_six,
+         idx_cache,
+         indexer_table,
+         positions,
+@@ -245,7 +265,7 @@
+         score_arena,
+         pair_arena,
+         pl.tile.get_subblock_idx(),
+-        pl.tile.get_block_idx(),
++        score_buffer_base + pl.tile.get_block_idx(),
+         QUERY_GROUP,
+         QK_PANEL,
+         SCORE_TILE,
+@@ -261,6 +281,11 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def index_score_topk_group(
++    score_group_begin: pl.Scalar[pl.INDEX],
++    score_group_count: pl.Scalar[pl.INDEX],
++    score_buffer_base: pl.Scalar[pl.INDEX],
++    SCORE_WORKERS_PER_CHUNK: pl.constexpr,
++    uniform_six: pl.Scalar[pl.INT32],
+     positions: pl.Tensor[[T], pl.INT64],
+     idx_bounds: pl.Tensor[[IQ], pl.INT32],
+     idx_lengths: pl.Tensor[[B], pl.INT32],
+@@ -287,6 +312,11 @@
+ ):
+     with pl.cluster(name_hint="indexer_score"):
+         indexer_transfer = index_score_topk_cube(
++            score_group_begin,
++            score_group_count,
++            score_buffer_base,
++            SCORE_WORKERS_PER_CHUNK,
++            uniform_six,
+             positions,
+             idx_bounds,
+             idx_lengths,
+@@ -309,6 +339,11 @@
+             SPLIT_SCORE_ROWS,
+         )
+         (score_arena, pair_arena) = index_score_topk_vector(
++            score_group_begin,
++            score_group_count,
++            score_buffer_base,
++            SCORE_WORKERS_PER_CHUNK,
++            uniform_six,
+             positions,
+             idx_bounds,
+             idx_lengths,
+@@ -333,6 +368,10 @@
+ 
+ @pl.jit.incore
+ def sparse_attn_cube(
++    query_begin: pl.Scalar[pl.INDEX],
++    query_end: pl.Scalar[pl.INDEX],
++    attention_buffer_base: pl.Scalar[pl.INDEX],
++    ATTENTION_WORKERS_PER_CHUNK: pl.constexpr,
+     q_heads: pl.Tensor[[QUERY_HEAD_ROWS, 512], pl.BF16],
+     positions: pl.Tensor[[T], pl.INT64],
+     attention_mask: pl.Tensor[[ATTN_PLAN_ROWS, 16], pl.INT32],
+@@ -345,6 +384,9 @@
+     worker = pl.tile.get_block_idx()
+     pl.system.set_ffts(ffts)
+     (score_ring, pv_ring) = attention_qk_pv_cube_stage(
++        query_begin,
++        query_end,
++        attention_buffer_base,
+         q_heads,
+         attention_mask,
+         kv_ring,
+@@ -354,7 +396,7 @@
+         ffts,
+         worker,
+         pl.tensor.dim(positions, 0),
+-        GROUPS,
++        ATTENTION_WORKERS_PER_CHUNK,
+         2,
+     )
+     return (score_ring, pv_ring)
+@@ -362,6 +404,10 @@
+ 
+ @pl.jit.incore
+ def sparse_attn_vector(
++    query_begin: pl.Scalar[pl.INDEX],
++    query_end: pl.Scalar[pl.INDEX],
++    attention_buffer_base: pl.Scalar[pl.INDEX],
++    ATTENTION_WORKERS_PER_CHUNK: pl.constexpr,
+     rope_cos: pl.Tensor[[T, 64], pl.FP32],
+     cache_rows: pl.InOut[pl.Tensor[[CACHE_ROWS, 512], pl.BF16]],
+     positions: pl.Tensor[[T], pl.INT64],
+@@ -390,6 +436,9 @@
+     pl.func_attr({"split_aiv": True})
+     pl.system.set_ffts(ffts)
+     (kv_ring, probability_ring, mi_ring, li_ring, packed) = attention_qk_pv_vector_lane_stage(
++        query_begin,
++        query_end,
++        attention_buffer_base,
+         cache_rows,
+         main_cache,
+         original_table,
+@@ -413,7 +462,7 @@
+         ffts,
+         pl.tile.get_block_idx(),
+         pl.tile.get_subblock_idx(),
+-        GROUPS,
++        ATTENTION_WORKERS_PER_CHUNK,
+         2,
+         ATTENTION_QUERY_METADATA,
+         LOCAL_ATTENTION_STATS,
+@@ -424,6 +473,10 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def sparse_attn_group(
++    query_begin: pl.Scalar[pl.INDEX],
++    query_end: pl.Scalar[pl.INDEX],
++    attention_buffer_base: pl.Scalar[pl.INDEX],
++    ATTENTION_WORKERS_PER_CHUNK: pl.constexpr,
+     q_heads: pl.Tensor[[QUERY_HEAD_ROWS, 512], pl.BF16],
+     attention_mask: pl.Tensor[[ATTN_PLAN_ROWS, 16], pl.INT32],
+     kv_ring: pl.Tensor[[KV_RING_ROWS, 512], pl.BF16],
+@@ -452,9 +505,24 @@
+ ):
+     with pl.cluster(name_hint="sparse_attn"):
+         (score_ring, pv_ring) = sparse_attn_cube(
+-            q_heads, positions, attention_mask, kv_ring, score_ring, probability_ring, pv_ring, ffts
++            query_begin,
++            query_end,
++            attention_buffer_base,
++            ATTENTION_WORKERS_PER_CHUNK,
++            q_heads,
++            positions,
++            attention_mask,
++            kv_ring,
++            score_ring,
++            probability_ring,
++            pv_ring,
++            ffts,
+         )
+         (kv_ring, probability_ring, mi_ring, li_ring, packed) = sparse_attn_vector(
++            query_begin,
++            query_end,
++            attention_buffer_base,
++            ATTENTION_WORKERS_PER_CHUNK,
+             rope_cos,
+             cache_rows,
+             positions,
+@@ -506,7 +574,9 @@
+ ):
+     with pl.spmd(GROUPS, name_hint="qproj_b", allow_early_resolve=True, sync_start=False):
+         q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, pl.tile.get_block_idx(), GROUPS)
+-    with pl.spmd(VECTORS, name_hint="qproj_dequant_rms_nope_rope", allow_early_resolve=True, sync_start=False):
++    with pl.spmd(
++        VECTORS, name_hint="qproj_dequant_rms_nope_rope", allow_early_resolve=True, sync_start=False
++    ) as query_ready_tid:
+         q_flat = q_dequant_rope_stage(
+             wq_b_scale,
+             rope_cos,
+@@ -531,14 +601,14 @@
+         name_hint="csa_cache_writeback",
+         allow_early_resolve=True,
+         sync_start=False,
+-    ):
++    ) as native_cache_ready_tid:
+         cache_rows = original_kv_writeback_stage(kv, native_slots, cache_rows, pl.tile.get_block_idx(), VECTORS)
+-    return q_proj, q_flat, kv_fp32, kv, cache_rows
++    return q_proj, q_flat, kv_fp32, kv, cache_rows, query_ready_tid, native_cache_ready_tid
+ 
+ 
+ @pl.jit.inline(auto_scope=False)
+ def main_compressor_tasks(
+-    normed: pl.InOut[pl.Tensor[[T, 4096], pl.BF16]],
++    normed: pl.Tensor[[T, 4096], pl.BF16],
+     main_wkv: pl.Tensor[[1024, 4096], pl.BF16],
+     main_wgate: pl.Tensor[[1024, 4096], pl.BF16],
+     main_value: pl.InOut[pl.Tensor[[MPROJ, 1024], pl.FP32]],
+@@ -554,7 +624,7 @@
+     main_gamma: pl.Tensor[[512], pl.BF16],
+     main_cos: pl.Tensor[[MC, 64], pl.FP32],
+     main_sin: pl.Tensor[[MC, 64], pl.FP32],
+-    main_offsets: pl.InOut[pl.Tensor[[B], pl.INT32]],
++    main_offsets: pl.Tensor[[B], pl.INT32],
+     main_slots: pl.Tensor[[MSLOTS, 2], pl.INT32],
+     main_normed: pl.InOut[pl.Tensor[[MNORM, 512], pl.FP32]],
+     main_debug: pl.InOut[pl.Tensor[[T, 512], pl.FP32]],
+@@ -613,7 +683,7 @@
+         name_hint="compressor_norm_rope_cache",
+         allow_early_resolve=True,
+         sync_start=False,
+-    ):
++    ) as main_cache_ready_tid:
+         (main_normed, main_debug, main_cache) = compressor_norm_rope_cache_stage(
+             main_pooled,
+             main_gamma,
+@@ -630,7 +700,17 @@
+             pl.tile.get_block_idx(),
+             VECTORS,
+         )
+-    return main_value, main_score, main_pooled, main_state, main_normed, main_debug, main_cache, main_project_tid
++    return (
++        main_value,
++        main_score,
++        main_pooled,
++        main_state,
++        main_normed,
++        main_debug,
++        main_cache,
++        main_project_tid,
++        main_cache_ready_tid,
++    )
+ 
+ 
+ @pl.jit
+@@ -894,15 +974,17 @@
+         )
+     with pl.spmd(
+         pl.min((tokens + 7) // 8, VECTORS), name_hint="csa_inverse_rope", allow_early_resolve=True, sync_start=False
+-    ):
++    ) as inverse_rope_tid:
+         inverse_sin = attention_inverse_rope_sign_stage(rope_sin, inverse_sin, pl.tile.get_block_idx(), VECTORS)
++    geometry_dependencies = pl.array.create(1, pl.TASK_ID)
++    geometry_dependencies[0] = inverse_rope_tid
+     if EARLY_ATTENTION_GEOMETRY:
+         with pl.spmd(
+             pl.min((tokens + 7) // 8, VECTORS),
+             name_hint="csa_query_geometry",
+             allow_early_resolve=True,
+             sync_start=False,
+-        ):
++        ) as geometry_tid:
+             attention_indices = attention_geometry_prepare_stage(
+                 positions,
+                 idx_bounds,
+@@ -914,9 +996,11 @@
+                 VECTORS,
+                 PLAN_PHYSICAL_ROWS,
+             )
++        geometry_dependencies[0] = geometry_tid
+     with pl.spmd(qa_workers, name_hint="qproj_a", allow_early_resolve=True, sync_start=False) as qa_tid:
+         qa = q_a_stage(normed, wq_a, qa, pl.tile.get_block_idx(), GROUPS, QA_M16_PARALLEL)
+     projection_dependencies = pl.array.create(1, pl.TASK_ID)
++    attention_input_dependencies = pl.array.create(3, pl.TASK_ID)
+     if not BSH_PROJECTION_ORDER:
+         with pl.spmd(
+             idx_project_workers, name_hint="indexer_compressor_kv_score", allow_early_resolve=True, sync_start=False
+@@ -931,7 +1015,7 @@
+             qa, gamma_cq, qr, qr_scale, qr_matmul, qr_scale_pad, pl.tile.get_block_idx(), VECTORS
+         )
+     if BSH_PROJECTION_ORDER:
+-        (q_proj, q_flat, kv_fp32, kv, cache_rows) = qkv_tail_tasks(
++        (q_proj, q_flat, kv_fp32, kv, cache_rows, query_ready_tid, native_cache_ready_tid) = qkv_tail_tasks(
+             normed,
+             qr_matmul,
+             qr_scale_pad,
+@@ -951,34 +1035,45 @@
+             tokens,
+             kv_workers,
+         )
+-        (main_value, main_score, main_pooled, main_state, main_normed, main_debug, main_cache, main_project_tid) = (
+-            main_compressor_tasks(
+-                normed,
+-                main_wkv,
+-                main_wgate,
+-                main_value,
+-                main_score,
+-                main_state,
+-                main_state_table,
+-                main_ape,
+-                positions,
+-                main_bounds,
+-                main_lengths,
+-                main_state_slots,
+-                main_pooled,
+-                main_gamma,
+-                main_cos,
+-                main_sin,
+-                main_offsets,
+-                main_slots,
+-                main_normed,
+-                main_debug,
+-                main_cache,
+-                main_requests,
+-                main_project_workers,
+-                qa_tid,
+-            )
+-        )
++        attention_input_dependencies[0] = query_ready_tid
++        attention_input_dependencies[1] = native_cache_ready_tid
++        (
++            main_value,
++            main_score,
++            main_pooled,
++            main_state,
++            main_normed,
++            main_debug,
++            main_cache,
++            main_project_tid,
++            main_cache_ready_tid,
++        ) = main_compressor_tasks(
++            normed,
++            main_wkv,
++            main_wgate,
++            main_value,
++            main_score,
++            main_state,
++            main_state_table,
++            main_ape,
++            positions,
++            main_bounds,
++            main_lengths,
++            main_state_slots,
++            main_pooled,
++            main_gamma,
++            main_cos,
++            main_sin,
++            main_offsets,
++            main_slots,
++            main_normed,
++            main_debug,
++            main_cache,
++            main_requests,
++            main_project_workers,
++            qa_tid,
++        )
++        attention_input_dependencies[2] = main_cache_ready_tid
+         projection_dependencies[0] = main_project_tid
+         with pl.spmd(
+             idx_project_workers, name_hint="indexer_compressor_kv_score", allow_early_resolve=True, sync_start=False
+@@ -1102,7 +1197,7 @@
+         head_weights = indexer_weights_reduce_stage(
+             weights_partial, head_weights, tokens, pl.tile.get_block_idx(), VECTORS
+         )
+-    (group_offsets, group_plan) = indexer_group_plan_stage(
++    (group_offsets, group_plan, uniform_six) = indexer_group_plan_stage(
+         idx_bounds, idx_lengths, positions, group_offsets, group_plan, tokens, 0, QUERY_GROUP, BALANCED, ROOTS
+     )
+     group_offsets = indexer_scale_page_plan_stage(
+@@ -1125,7 +1220,7 @@
+         name_hint="indexer_head_coefficients",
+         allow_early_resolve=True,
+         sync_start=False,
+-    ):
++    ) as coefficient_tid:
+         coefficients = indexer_head_coefficients_stage(
+             idx_query_scale_heads,
+             head_weights,
+@@ -1137,6 +1232,7 @@
+             pl.tile.get_block_idx(),
+             VECTORS,
+             QUERY_GROUP,
++            uniform_six,
+         )
+     with pl.spmd(
+         pl.min(requests, VECTORS),
+@@ -1164,35 +1260,44 @@
+             idx_scales, group_offsets, idx_cache, tokens, requests, pl.tile.get_block_idx(), VECTORS
+         )
+     if not BSH_PROJECTION_ORDER:
+-        (main_value, main_score, main_pooled, main_state, main_normed, main_debug, main_cache, main_project_tid) = (
+-            main_compressor_tasks(
+-                normed,
+-                main_wkv,
+-                main_wgate,
+-                main_value,
+-                main_score,
+-                main_state,
+-                main_state_table,
+-                main_ape,
+-                positions,
+-                main_bounds,
+-                main_lengths,
+-                main_state_slots,
+-                main_pooled,
+-                main_gamma,
+-                main_cos,
+-                main_sin,
+-                main_offsets,
+-                main_slots,
+-                main_normed,
+-                main_debug,
+-                main_cache,
+-                main_requests,
+-                main_project_workers,
+-                qa_tid,
+-            )
+-        )
+-        (q_proj, q_flat, kv_fp32, kv, cache_rows) = qkv_tail_tasks(
++        (
++            main_value,
++            main_score,
++            main_pooled,
++            main_state,
++            main_normed,
++            main_debug,
++            main_cache,
++            main_project_tid,
++            main_cache_ready_tid,
++        ) = main_compressor_tasks(
++            normed,
++            main_wkv,
++            main_wgate,
++            main_value,
++            main_score,
++            main_state,
++            main_state_table,
++            main_ape,
++            positions,
++            main_bounds,
++            main_lengths,
++            main_state_slots,
++            main_pooled,
++            main_gamma,
++            main_cos,
++            main_sin,
++            main_offsets,
++            main_slots,
++            main_normed,
++            main_debug,
++            main_cache,
++            main_requests,
++            main_project_workers,
++            qa_tid,
++        )
++        attention_input_dependencies[2] = main_cache_ready_tid
++        (q_proj, q_flat, kv_fp32, kv, cache_rows, query_ready_tid, native_cache_ready_tid) = qkv_tail_tasks(
+             normed,
+             qr_matmul,
+             qr_scale_pad,
+@@ -1212,128 +1317,317 @@
+             tokens,
+             kv_workers,
+         )
+-    with pl.spmd(
+-        GROUPS, name_hint="indexer_score", allow_early_resolve=True, sync_start=True, deps=[idx_cache_tid]
+-    ) as score_tid:
+-        (indexer_transfer, score_arena, pair_arena) = index_score_topk_group(
+-            positions,
+-            idx_bounds,
+-            idx_lengths,
+-            idx_cache,
+-            indexer_table,
+-            idx_query_i8,
+-            group_offsets,
+-            group_plan,
+-            coefficients,
+-            idx_key0,
+-            idx_key64,
+-            indexer_transfer,
+-            ffts,
+-            QUERY_GROUP,
+-            QK_PANEL,
+-            SCORE_TILE,
+-            PREFETCH,
+-            TO_L0,
+-            BALANCED,
+-            SPLIT_SCORE_ROWS,
+-            score_arena,
+-            pair_arena,
+-            SCALE_PAGE_COALESCING,
+-        )
+-    with pl.spmd(
+-        pl.min(tokens, VECTORS),
+-        name_hint="indexer_topk",
+-        allow_early_resolve=True,
+-        sync_start=True,
+-        deps=[score_tid],
+-    ) as topk_tid:
+-        (topk_scores, topk_indices) = indexer_pair_publish_stage(
+-            idx_bounds,
+-            idx_lengths,
+-            positions,
+-            group_plan,
+-            group_offsets,
+-            attention_indices,
+-            pair_arena,
+-            topk_scores,
+-            topk_indices,
+-            pl.tile.get_block_idx(),
+-            VECTORS,
+-            ROOTS,
+-            BALANCED,
+-            QUERY_GROUP,
+-            EARLY_ATTENTION_GEOMETRY,
+-        )
+-    with pl.spmd(
+-        pl.min((tokens + 7) // 8, VECTORS),
+-        name_hint="csa_attention_plan",
+-        allow_early_resolve=True,
+-        sync_start=True,
+-        deps=[topk_tid],
+-    ):
+-        (attention_indices, attention_bias, attention_mask) = attention_slot_plan_stage(
+-            topk_indices,
+-            positions,
+-            idx_bounds,
+-            idx_lengths,
+-            original_table,
+-            compressed_table,
+-            attention_indices,
+-            attention_bias,
+-            attention_mask,
+-            pl.tensor.dim(cache_rows, 0) // 32,
+-            pl.tensor.dim(main_cache, 0) // 32,
+-            pl.tile.get_block_idx(),
+-            VECTORS,
+-            ATTENTION_QUERY_METADATA,
+-            EARLY_ATTENTION_GEOMETRY,
+-            PLAN_PHYSICAL_ROWS,
+-        )
+-    with pl.spmd(GROUPS, name_hint="sparse_attention", allow_early_resolve=True, sync_start=True) as attn_tid:
+-        (score_ring, pv_ring, kv_ring, probability_ring, mi_ring, li_ring, packed) = sparse_attn_group(
+-            q_heads,
+-            attention_mask,
+-            kv_ring,
+-            score_ring,
+-            probability_ring,
+-            pv_ring,
+-            ffts,
+-            rope_cos,
+-            cache_rows,
+-            positions,
+-            main_cache,
+-            idx_bounds,
+-            idx_lengths,
+-            original_table,
+-            compressed_table,
+-            attention_indices,
+-            attention_bias,
+-            inverse_sin,
+-            attn_sink,
+-            mi_ring,
+-            li_ring,
++        attention_input_dependencies[0] = query_ready_tid
++        attention_input_dependencies[1] = native_cache_ready_tid
++    score_total_groups = pl.cast(pl.read(group_plan, [0]), pl.INDEX)
++    attention_tids = pl.array.create(2, pl.TASK_ID)
++    # 每块边界为4个S6请求=24行，保证plan的8行/64B写入所有权。
++    split_groups = ((score_total_groups + 1) // 2 + 3) // 4 * 4
++    if QUERY_GROUP == 6 and uniform_six != 0 and split_groups > 0 and split_groups < score_total_groups:
++        # 原位写入的Tensor不在parallel循环中重绑定，避免虚假的loop-carried别名。
++        with pl.manual_scope():
++            for chunk in pl.parallel(2):
++                chunk_group_begin = pl.cast(0, pl.INDEX)
++                chunk_group_count = split_groups
++                query_begin = pl.cast(0, pl.INDEX)
++                query_end = split_groups * 6
++                if chunk == 1:
++                    chunk_group_begin = split_groups
++                    chunk_group_count = score_total_groups - split_groups
++                    query_begin = split_groups * 6
++                    # 末块清理全部dummy输出，不能留下上轮的padding数据。
++                    query_end = tokens
++                with pl.spmd(
++                    12,
++                    name_hint="indexer_score_query_chunk",
++                    allow_early_resolve=True,
++                    sync_start=True,
++                    deps=[coefficient_tid, idx_cache_tid],
++                ) as score_tid:
++                    index_score_topk_group(
++                        chunk_group_begin,
++                        chunk_group_count,
++                        chunk * 12,
++                        12,
++                        uniform_six,
++                        positions,
++                        idx_bounds,
++                        idx_lengths,
++                        idx_cache,
++                        indexer_table,
++                        idx_query_i8,
++                        group_offsets,
++                        group_plan,
++                        coefficients,
++                        idx_key0,
++                        idx_key64,
++                        indexer_transfer,
++                        ffts,
++                        QUERY_GROUP,
++                        QK_PANEL,
++                        SCORE_TILE,
++                        PREFETCH,
++                        TO_L0,
++                        BALANCED,
++                        SPLIT_SCORE_ROWS,
++                        score_arena,
++                        pair_arena,
++                        SCALE_PAGE_COALESCING,
++                    )
++                with pl.spmd(
++                    pl.min(query_end - query_begin, 24),
++                    name_hint="indexer_topk_query_chunk",
++                    allow_early_resolve=True,
++                    sync_start=True,
++                    deps=[score_tid, geometry_dependencies[0]],
++                ) as topk_tid:
++                    indexer_pair_publish_stage(
++                        query_begin,
++                        query_end,
++                        idx_bounds,
++                        idx_lengths,
++                        positions,
++                        group_plan,
++                        group_offsets,
++                        attention_indices,
++                        pair_arena,
++                        topk_scores,
++                        topk_indices,
++                        pl.tile.get_block_idx(),
++                        24,
++                        ROOTS,
++                        BALANCED,
++                        QUERY_GROUP,
++                        EARLY_ATTENTION_GEOMETRY,
++                    )
++                with pl.spmd(
++                    pl.min((query_end - query_begin + 7) // 8, 24),
++                    name_hint="csa_attention_plan_query_chunk",
++                    allow_early_resolve=True,
++                    sync_start=True,
++                    deps=[topk_tid],
++                ) as plan_tid:
++                    attention_slot_plan_stage(
++                        query_begin,
++                        query_end,
++                        topk_indices,
++                        positions,
++                        idx_bounds,
++                        idx_lengths,
++                        original_table,
++                        compressed_table,
++                        attention_indices,
++                        attention_bias,
++                        attention_mask,
++                        pl.tensor.dim(cache_rows, 0) // 32,
++                        pl.tensor.dim(main_cache, 0) // 32,
++                        pl.tile.get_block_idx(),
++                        24,
++                        ATTENTION_QUERY_METADATA,
++                        EARLY_ATTENTION_GEOMETRY,
++                        PLAN_PHYSICAL_ROWS,
++                    )
++                with pl.spmd(
++                    12,
++                    name_hint="sparse_attention_query_chunk",
++                    allow_early_resolve=True,
++                    sync_start=True,
++                    deps=[
++                        plan_tid,
++                        attention_input_dependencies[0],
++                        attention_input_dependencies[1],
++                        attention_input_dependencies[2],
++                        inverse_rope_tid,
++                    ],
++                ) as attn_tid:
++                    sparse_attn_group(
++                        query_begin,
++                        query_end,
++                        chunk * 12,
++                        12,
++                        q_heads,
++                        attention_mask,
++                        kv_ring,
++                        score_ring,
++                        probability_ring,
++                        pv_ring,
++                        ffts,
++                        rope_cos,
++                        cache_rows,
++                        positions,
++                        main_cache,
++                        idx_bounds,
++                        idx_lengths,
++                        original_table,
++                        compressed_table,
++                        attention_indices,
++                        attention_bias,
++                        inverse_sin,
++                        attn_sink,
++                        mi_ring,
++                        li_ring,
++                        packed,
++                        ATTENTION_QUERY_METADATA,
++                        LOCAL_ATTENTION_STATS,
++                        PLAN_PHYSICAL_ROWS,
++                    )
++                attention_tids[chunk] = attn_tid
++        (o_r, o_quant, o_scales, o_partials, output) = output_tasks(
+             packed,
+-            ATTENTION_QUERY_METADATA,
+-            LOCAL_ATTENTION_STATS,
+-            PLAN_PHYSICAL_ROWS,
+-        )
+-    (o_r, o_quant, o_scales, o_partials, output) = output_tasks(
+-        packed,
+-        wo_a,
+-        wo_b,
+-        wo_b_scale,
+-        x,
+-        post,
+-        comb,
+-        o_r,
+-        o_quant,
+-        o_scales,
+-        o_partials,
+-        output,
+-        attn_tid,
+-        OA_COLS,
+-        OB_ROWS,
+-    )
++            wo_a,
++            wo_b,
++            wo_b_scale,
++            x,
++            post,
++            comb,
++            o_r,
++            o_quant,
++            o_scales,
++            o_partials,
++            output,
++            attention_tids,
++            OA_COLS,
++            OB_ROWS,
++            2,
++        )
++    else:
++        with pl.spmd(
++            GROUPS, name_hint="indexer_score", allow_early_resolve=True, sync_start=True, deps=[idx_cache_tid]
++        ) as score_tid:
++            (indexer_transfer, score_arena, pair_arena) = index_score_topk_group(
++                0,
++                score_total_groups,
++                0,
++                24,
++                uniform_six,
++                positions,
++                idx_bounds,
++                idx_lengths,
++                idx_cache,
++                indexer_table,
++                idx_query_i8,
++                group_offsets,
++                group_plan,
++                coefficients,
++                idx_key0,
++                idx_key64,
++                indexer_transfer,
++                ffts,
++                QUERY_GROUP,
++                QK_PANEL,
++                SCORE_TILE,
++                PREFETCH,
++                TO_L0,
++                BALANCED,
++                SPLIT_SCORE_ROWS,
++                score_arena,
++                pair_arena,
++                SCALE_PAGE_COALESCING,
++            )
++        with pl.spmd(
++            pl.min(tokens, VECTORS),
++            name_hint="indexer_topk",
++            allow_early_resolve=True,
++            sync_start=True,
++            deps=[score_tid],
++        ) as topk_tid:
++            (topk_scores, topk_indices) = indexer_pair_publish_stage(
++                0,
++                tokens,
++                idx_bounds,
++                idx_lengths,
++                positions,
++                group_plan,
++                group_offsets,
++                attention_indices,
++                pair_arena,
++                topk_scores,
++                topk_indices,
++                pl.tile.get_block_idx(),
++                VECTORS,
++                ROOTS,
++                BALANCED,
++                QUERY_GROUP,
++                EARLY_ATTENTION_GEOMETRY,
++            )
++        with pl.spmd(
++            pl.min((tokens + 7) // 8, VECTORS),
++            name_hint="csa_attention_plan",
++            allow_early_resolve=True,
++            sync_start=True,
++            deps=[topk_tid],
++        ):
++            (attention_indices, attention_bias, attention_mask) = attention_slot_plan_stage(
++                0,
++                tokens,
++                topk_indices,
++                positions,
++                idx_bounds,
++                idx_lengths,
++                original_table,
++                compressed_table,
++                attention_indices,
++                attention_bias,
++                attention_mask,
++                pl.tensor.dim(cache_rows, 0) // 32,
++                pl.tensor.dim(main_cache, 0) // 32,
++                pl.tile.get_block_idx(),
++                VECTORS,
++                ATTENTION_QUERY_METADATA,
++                EARLY_ATTENTION_GEOMETRY,
++                PLAN_PHYSICAL_ROWS,
++            )
++        with pl.spmd(GROUPS, name_hint="sparse_attention", allow_early_resolve=True, sync_start=True) as attn_tid:
++            (score_ring, pv_ring, kv_ring, probability_ring, mi_ring, li_ring, packed) = sparse_attn_group(
++                0,
++                tokens,
++                0,
++                24,
++                q_heads,
++                attention_mask,
++                kv_ring,
++                score_ring,
++                probability_ring,
++                pv_ring,
++                ffts,
++                rope_cos,
++                cache_rows,
++                positions,
++                main_cache,
++                idx_bounds,
++                idx_lengths,
++                original_table,
++                compressed_table,
++                attention_indices,
++                attention_bias,
++                inverse_sin,
++                attn_sink,
++                mi_ring,
++                li_ring,
++                packed,
++                ATTENTION_QUERY_METADATA,
++                LOCAL_ATTENTION_STATS,
++                PLAN_PHYSICAL_ROWS,
++            )
++        attention_tids[0] = attn_tid
++        (o_r, o_quant, o_scales, o_partials, output) = output_tasks(
++            packed,
++            wo_a,
++            wo_b,
++            wo_b_scale,
++            x,
++            post,
++            comb,
++            o_r,
++            o_quant,
++            o_scales,
++            o_partials,
++            output,
++            attention_tids,
++            OA_COLS,
++            OB_ROWS,
++            1,
++        )
+     return (
+         x_fp32,
+         inv,
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/indexer_group_stages.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/indexer_group_stages.py
+@@ -124,19 +124,26 @@
+     ROOTS_PER_LEAF: pl.constexpr,
+ ):
+     """worker0写组前缀、描述符和叶计划；容量pad16(B+1)+4*T由入口保证。"""
++    uniform_six = pl.cast(0, pl.INT32)
+     if worker == 0:
++        uniform_six = pl.cast(1, pl.INT32)
++        inactive_seen = pl.cast(0, pl.INT32)
++        active_requests = pl.cast(0, pl.INDEX)
+         groups = pl.cast(0, pl.INDEX)
+         max_history = pl.cast(0, pl.INDEX)
+         requests = pl.cast(pl.tensor.dim(lengths, 0), pl.INDEX)
+         descriptor_base = (
+             (requests + 1 + GROUP_DESCRIPTOR_ALIGNMENT - 1) // GROUP_DESCRIPTOR_ALIGNMENT * GROUP_DESCRIPTOR_ALIGNMENT
+         )
+-        # 前缀有跨请求依赖，只扫描一次。描述符也在这名早期AIV上生成，
++        # 前缀有跨请求依赖，只扫描一次。描述符也在AICPU编排中生成，
+         # 消费者按组号读四个Scalar，避免AIC/双AIV对每个叶重复O(B)定位。
+         for request in pl.range(requests):
+             pl.write(offsets, [request], pl.cast(groups, pl.INT32))
+             begin, end, active = request_bounds(bounds, lengths, request, tokens)
+             if active != 0:
++                active_requests = active_requests + 1
++                if end - begin != 6 or begin != request * 6 or inactive_seen != 0:
++                    uniform_six = pl.cast(0, pl.INT32)
+                 length = pl.cast(pl.tensor.read(lengths, [request]), pl.INDEX)
+                 max_history = pl.max(max_history, pl.min(length // COMPRESS_RATIO, MAX_CANDIDATES))
+                 group_count = (end - begin + GROUP_SIZE - 1) // GROUP_SIZE
+@@ -158,12 +165,16 @@
+                                 0,
+                             )
+                             visible = pl.max(visible, lane_visible)
++                        else:
++                            uniform_six = pl.cast(0, pl.INT32)
+                     row = descriptor_base + (groups + local_group) * GROUP_DESCRIPTOR_WORDS
+                     pl.write(offsets, [row], pl.cast(request, pl.INT32))
+                     pl.write(offsets, [row + 1], pl.cast(first, pl.INT32))
+                     pl.write(offsets, [row + 2], pl.cast(live, pl.INT32))
+                     pl.write(offsets, [row + 3], pl.cast(visible, pl.INT32))
+                 groups = groups + group_count
++            else:
++                inactive_seen = pl.cast(1, pl.INT32)
+         # 末端索引显式转成INDEX；保持descriptor动态维度，避免后端把裸dim
+         # 当成缺失SSA的Scalar store下标，不读取任何Host数据。
+         pl.write(offsets, [requests], pl.cast(groups, pl.INT32))
+@@ -191,7 +202,9 @@
+             balanced_tag = pl.cast(1, pl.INT32)
+         pl.write(plan, [6], balanced_tag)
+         pl.write(plan, [7], pl.cast(ROOTS_PER_LEAF, pl.INT32))
+-    return offsets, plan
++        if active_requests == 0:
++            uniform_six = pl.cast(0, pl.INT32)
++    return offsets, plan, uniform_six
+ 
+ 
+ @pl.jit.inline(auto_scope=False)
+@@ -303,19 +316,29 @@
+     worker: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+     GROUP_SIZE: pl.constexpr,
++    uniform_six: pl.Scalar[pl.INT32],
+ ):
+     """AIV单写者生成每组完整对角系数块；输入scale/weight须已发布且覆盖T。"""
+     requests = pl.cast(pl.tensor.dim(lengths, 0), pl.INDEX)
+     groups = pl.cast(pl.read(offsets, [requests]), pl.INDEX)
+     # 前缀与描述符已由唯一planner发布；组号条带本身保证唯一writer。
+     for group in pl.range(worker, groups, WORKERS):
+-        request, first, live, _visible = indexer_decode_group(bounds, lengths, positions, offsets, group, GROUP_SIZE)
++        if uniform_six != 0:
++            request = group // (6 // GROUP_SIZE)
++            first = group * GROUP_SIZE
++            live = pl.cast(GROUP_SIZE, pl.INDEX)
++        else:
++            request, first, live, _visible = indexer_decode_group(
++                bounds, lengths, positions, offsets, group, GROUP_SIZE
++            )
+         coefficient_rows = pl.tile.full([COEFFICIENT_ROWS * GROUP_SIZE, HEADS], dtype=pl.FP16, value=0.0)
+         # 固定G只决定矩阵tile；尾lane分支先于任何输入load，非法
+         # metadata也不把旧scale/weights误放到对角线上。
+         for lane in pl.unroll(GROUP_SIZE):
+             if lane < live:
+-                _visible, causal = indexer_query_visibility(bounds, lengths, positions, request, first + lane)
++                causal = pl.cast(1, pl.INT32)
++                if uniform_six == 0:
++                    _visible, causal = indexer_query_visibility(bounds, lengths, positions, request, first + lane)
+                 if causal != 0:
+                     query_scales = pl.load(scales, [first + lane, 0], [1, HEADS])
+                     query_weights = pl.load(weights, [first + lane, 0], [1, HEADS])
+@@ -329,3 +352,47 @@
+         coefficient_matrix = pl.tile.reshape(coefficient_rows, [COEFFICIENT_ROWS, GROUP_SIZE * HEADS])
+         coefficients = pl.store(coefficient_matrix, [group * COEFFICIENT_ROWS, 0], coefficients)
+     return coefficients
++
++
++@pl.jit.inline(auto_scope=False)
++def indexer_decode_score_group(
++    uniform_six: pl.Scalar[pl.INT32],
++    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
++    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
++    positions: pl.Tensor[[TOKENS_DYN], pl.INT64],
++    offsets: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
++    group: pl.Scalar[pl.INDEX],
++    GROUP_SIZE: pl.constexpr,
++):
++    """AICPU本轮证明S6连续前缀后简化Score几何，历史长度仍逐请求读取。"""
++    if uniform_six != 0:
++        owner = group // (6 // GROUP_SIZE)
++        first = group * GROUP_SIZE
++        live = pl.cast(GROUP_SIZE, pl.INDEX)
++        length = pl.cast(pl.read(lengths, [owner]), pl.INDEX)
++        # 位置证明覆盖全部lane，最后一个lane给出组内最大可见数。
++        last_end = length - 6 + first - owner * 6 + GROUP_SIZE
++        visible = pl.max(pl.min(pl.min(length // COMPRESS_RATIO, last_end // COMPRESS_RATIO), MAX_CANDIDATES), 0)
++    else:
++        owner, first, live, visible = indexer_decode_group(bounds, lengths, positions, offsets, group, GROUP_SIZE)
++    return owner, first, live, visible
++
++
++@pl.jit.inline(auto_scope=False)
++def indexer_score_query_visibility(
++    uniform_six: pl.Scalar[pl.INT32],
++    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
++    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
++    positions: pl.Tensor[[TOKENS_DYN], pl.INT64],
++    request: pl.Scalar[pl.INDEX],
++    query: pl.Scalar[pl.INDEX],
++):
++    """等长分支只省掉已证明的Q/position检查；每条query的causal上界不合并。"""
++    if uniform_six != 0:
++        length = pl.cast(pl.read(lengths, [request]), pl.INDEX)
++        query_end = length - 6 + query - request * 6 + 1
++        visible = pl.max(pl.min(pl.min(length // COMPRESS_RATIO, query_end // COMPRESS_RATIO), MAX_CANDIDATES), 0)
++        causal = pl.cast(1, pl.INT32)
++    else:
++        visible, causal = indexer_query_visibility(bounds, lengths, positions, request, query)
++    return visible, causal
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/indexer_publish_stages.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/indexer_publish_stages.py
+@@ -102,6 +102,8 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_pair_publish_stage(
++    query_begin: pl.Scalar[pl.INDEX],
++    query_end: pl.Scalar[pl.INDEX],
+     bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+     lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+     positions: pl.Tensor[[TOKENS_DYN], pl.INT64],
+@@ -120,7 +122,7 @@
+ ):
+     """AIV发布pair根；保持非balanced根0原位归并及原多路平局优先顺序。"""
+     tokens = pl.tensor.dim(positions, 0)
+-    for query in pl.range(worker, tokens, WORKERS):
++    for query in pl.range(query_begin + worker, query_end, WORKERS):
+         # 两条调度路径共用根数、等待与归并数学。前置路径读取原ROPE阶段
+         # 已发布的本轮几何；后置路径只读Native Q/L/positions，不碰前缀。
+         # 先声明跨constexpr分支的Scalar，保证SSA合并后的类型和定义域明确。
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/indexer_score_stages.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/indexer_score_stages.py
+@@ -86,9 +86,9 @@
+     OFFSET_ROWS_DYN,
+     PLAN_WORDS,
+     TOKENS_DYN,
+-    indexer_decode_group,
++    indexer_decode_score_group,
+     indexer_leaf_range,
+-    indexer_query_visibility,
++    indexer_score_query_visibility,
+     indexer_work_item,
+ )
+ from .indexer_scale_layout_stages import indexer_leaf_scale_layout
+@@ -125,6 +125,11 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def _indexer_score_cube_original(
++    score_group_begin: pl.Scalar[pl.INDEX],
++    score_group_count: pl.Scalar[pl.INDEX],
++    score_buffer_base: pl.Scalar[pl.INDEX],
++    SCORE_WORKERS_PER_CHUNK: pl.constexpr,
++    uniform_six: pl.Scalar[pl.INT32],
+     qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+     coefficients: pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16],
+     idx_kv_cache: pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+@@ -149,15 +154,16 @@
+ ):
+     """AIC生产FP32 score双槽；须与两个vector_lane同MIX并发，外层/运行时已设置同一FFTS域。"""
+     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
+-    groups = pl.cast(pl.read(plan, [0]), pl.INDEX)
++    groups = score_group_count
+     buf_max_leaves = pl.cast(pl.read(plan, [2]), pl.INDEX)
+     buf_leaf_tiles = pl.cast(pl.read(plan, [3]), pl.INDEX)
+     buf_extra_leaves = pl.cast(pl.read(plan, [4]), pl.INDEX)
+     # 每个core独立读取同一device计划；空core不触发任何FFTS事件。
+-    for buf_item in pl.range(buf_worker, groups * buf_max_leaves, TOPK_SCORE_WORKERS):
+-        buf_group, buf_leaf = indexer_work_item(buf_item, groups, buf_max_leaves)
+-        buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_group(
+-            bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
++    for buf_item in pl.range(buf_worker - score_buffer_base, groups * buf_max_leaves, SCORE_WORKERS_PER_CHUNK):
++        buf_local_group, buf_leaf = indexer_work_item(buf_item, groups, buf_max_leaves)
++        buf_group = score_group_begin + buf_local_group
++        buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_score_group(
++            uniform_six, bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
+         )
+         buf_logical_begin, buf_leaf_capacity, work_valid = indexer_leaf_range(
+             buf_leaf,
+@@ -414,6 +420,11 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def _indexer_score_cube_split_store(
++    score_group_begin: pl.Scalar[pl.INDEX],
++    score_group_count: pl.Scalar[pl.INDEX],
++    score_buffer_base: pl.Scalar[pl.INDEX],
++    SCORE_WORKERS_PER_CHUNK: pl.constexpr,
++    uniform_six: pl.Scalar[pl.INT32],
+     qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+     coefficients: pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16],
+     idx_kv_cache: pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+@@ -444,15 +455,16 @@
+     是否减少等待、保持舍入和产生完整收益，分别由代码审计与真机检查决定。
+     """
+     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
+-    groups = pl.cast(pl.read(plan, [0]), pl.INDEX)
++    groups = score_group_count
+     buf_max_leaves = pl.cast(pl.read(plan, [2]), pl.INDEX)
+     buf_leaf_tiles = pl.cast(pl.read(plan, [3]), pl.INDEX)
+     buf_extra_leaves = pl.cast(pl.read(plan, [4]), pl.INDEX)
+     # 每个core独立读取同一device计划；空core不触发任何FFTS事件。
+-    for buf_item in pl.range(buf_worker, groups * buf_max_leaves, TOPK_SCORE_WORKERS):
+-        buf_group, buf_leaf = indexer_work_item(buf_item, groups, buf_max_leaves)
+-        buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_group(
+-            bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
++    for buf_item in pl.range(buf_worker - score_buffer_base, groups * buf_max_leaves, SCORE_WORKERS_PER_CHUNK):
++        buf_local_group, buf_leaf = indexer_work_item(buf_item, groups, buf_max_leaves)
++        buf_group = score_group_begin + buf_local_group
++        buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_score_group(
++            uniform_six, bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
+         )
+         buf_logical_begin, buf_leaf_capacity, work_valid = indexer_leaf_range(
+             buf_leaf,
+@@ -2435,6 +2447,11 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_score_cube_stage(
++    score_group_begin: pl.Scalar[pl.INDEX],
++    score_group_count: pl.Scalar[pl.INDEX],
++    score_buffer_base: pl.Scalar[pl.INDEX],
++    SCORE_WORKERS_PER_CHUNK: pl.constexpr,
++    uniform_six: pl.Scalar[pl.INT32],
+     qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+     coefficients: pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16],
+     idx_kv_cache: pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+@@ -2461,6 +2478,11 @@
+     """按已选长G6资源区间执行双QK早FIX；小域及其它组合保留原helper。"""
+     if SPLIT_SCORE_ROWS and balance_leaves and query_group_size == 6 and qk_panel_cols == 64 and score_tile == 1024:
+         result = _indexer_score_cube_split_store(
++            score_group_begin,
++            score_group_count,
++            score_buffer_base,
++            SCORE_WORKERS_PER_CHUNK,
++            uniform_six,
+             qr_hadamard_i8,
+             coefficients,
+             idx_kv_cache,
+@@ -2485,6 +2507,11 @@
+         )
+     else:
+         result = _indexer_score_cube_original(
++            score_group_begin,
++            score_group_count,
++            score_buffer_base,
++            SCORE_WORKERS_PER_CHUNK,
++            uniform_six,
+             qr_hadamard_i8,
+             coefficients,
+             idx_kv_cache,
+@@ -2512,6 +2539,11 @@
+ 
+ @pl.jit.inline(auto_scope=False)
+ def indexer_score_vector_lane_stage(
++    score_group_begin: pl.Scalar[pl.INDEX],
++    score_group_count: pl.Scalar[pl.INDEX],
++    score_buffer_base: pl.Scalar[pl.INDEX],
++    SCORE_WORKERS_PER_CHUNK: pl.constexpr,
++    uniform_six: pl.Scalar[pl.INT32],
+     idx_native_kv_cache: pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8],
+     idx_block_table: pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32],
+     position_ids: pl.Tensor[[TOKENS_DYN], pl.INT64],
+@@ -2535,15 +2567,16 @@
+     SCORE_CONSUMED_EVENT: pl.constexpr,
+ ):
+     """AIV lane0/1都完整消费同一core事件；只有真实query可写根，空尾lane仍ACK。"""
+-    groups = pl.cast(pl.read(plan, [0]), pl.INDEX)
++    groups = score_group_count
+     buf_max_leaves = pl.cast(pl.read(plan, [2]), pl.INDEX)
+     buf_leaf_tiles = pl.cast(pl.read(plan, [3]), pl.INDEX)
+     buf_extra_leaves = pl.cast(pl.read(plan, [4]), pl.INDEX)
+     # 每个core独立读取同一device计划；空core不触发任何FFTS事件。
+-    for buf_item in pl.range(buf_worker, groups * buf_max_leaves, TOPK_SCORE_WORKERS):
+-        buf_group, buf_leaf = indexer_work_item(buf_item, groups, buf_max_leaves)
+-        buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_group(
+-            bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
++    for buf_item in pl.range(buf_worker - score_buffer_base, groups * buf_max_leaves, SCORE_WORKERS_PER_CHUNK):
++        buf_local_group, buf_leaf = indexer_work_item(buf_item, groups, buf_max_leaves)
++        buf_group = score_group_begin + buf_local_group
++        buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_score_group(
++            uniform_six, bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
+         )
+         buf_logical_begin, buf_leaf_capacity, work_valid = indexer_leaf_range(
+             buf_leaf,
+@@ -2706,8 +2739,13 @@
+                         for single_local in pl.unroll(query_group_size // 2):
+                             single_query_lane = buf_score_lane * (query_group_size // 2) + single_local
+                             if single_query_lane < buf_live:
+-                                (single_query_visible, _causal) = indexer_query_visibility(
+-                                    bounds, kv_seq_lens, position_ids, single_batch, single_query + single_query_lane
++                                (single_query_visible, _causal) = indexer_score_query_visibility(
++                                    uniform_six,
++                                    bounds,
++                                    kv_seq_lens,
++                                    position_ids,
++                                    single_batch,
++                                    single_query + single_query_lane,
+                                 )
+                                 single_segment_valid = pl.max(
+                                     pl.min(single_query_visible - single_segment_begin, single_segment_span), 0
+@@ -2809,8 +2847,13 @@
+                     single_query_lane = buf_score_lane * (query_group_size // 2) + single_local
+                     if single_query_lane < buf_live:
+                         if query_group_size == 2:
+-                            legacy_visible, _legacy_causal = indexer_query_visibility(
+-                                bounds, kv_seq_lens, position_ids, single_batch, single_query + single_query_lane
++                            legacy_visible, _legacy_causal = indexer_score_query_visibility(
++                                uniform_six,
++                                bounds,
++                                kv_seq_lens,
++                                position_ids,
++                                single_batch,
++                                single_query + single_query_lane,
+                             )
+                             legacy_valid = pl.max(pl.min(legacy_visible - single_begin, single_capacity), 0)
+                             legacy_slot = (single_query + single_query_lane) * TOPK_ROWS_PER_QUERY + single_leaf
+@@ -2890,8 +2933,13 @@
+                     # 每query单独causal/visible；不能把组内最大历史当成所有query的有效候选数。
+                     for buf_query_lane in pl.unroll(query_group_size):
+                         if buf_query_lane < buf_live:
+-                            (buf_query_visible, _causal) = indexer_query_visibility(
+-                                bounds, kv_seq_lens, position_ids, buf_batch_idx, buf_query + buf_query_lane
++                            (buf_query_visible, _causal) = indexer_score_query_visibility(
++                                uniform_six,
++                                bounds,
++                                kv_seq_lens,
++                                position_ids,
++                                buf_batch_idx,
++                                buf_query + buf_query_lane,
+                             )
+                             buf_lane_valid_rows = pl.max(
+                                 pl.min(
+@@ -2914,8 +2962,8 @@
+                 # 每query单独causal/visible；不能把组内最大历史当成所有query的有效候选数。
+                 for buf_query_lane in pl.unroll(query_group_size):
+                     if buf_query_lane < buf_live:
+-                        (buf_query_visible, _causal) = indexer_query_visibility(
+-                            bounds, kv_seq_lens, position_ids, buf_batch_idx, buf_query + buf_query_lane
++                        (buf_query_visible, _causal) = indexer_score_query_visibility(
++                            uniform_six, bounds, kv_seq_lens, position_ids, buf_batch_idx, buf_query + buf_query_lane
+                         )
+                         buf_half_begin = buf_logical_begin + buf_lane_begin
+                         buf_half_valid = pl.max(pl.min(buf_query_visible - buf_half_begin, buf_lane_span), 0)
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/output_tasks.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/output_tasks.py
+@@ -34,9 +34,10 @@
+     o_scales: pl.InOut[pl.Tensor[[8, O_SCALE_ROWS], pl.FP32]],
+     o_partials: pl.InOut[pl.Tensor[[O_MM_ROWS, 32768], pl.INT32]],
+     output: pl.InOut[pl.Tensor[[T, 16384], pl.BF16]],
+-    attention_tid: pl.Scalar[pl.TASK_ID],
++    attention_tids: pl.Array[2, pl.TASK_ID],
+     OA_COLS: pl.constexpr,
+     OB_ROWS: pl.constexpr,
++    ATTENTION_PARTS: pl.constexpr,
+ ):
+     tokens = pl.tensor.dim(residual, 0)
+     oa_units = (tokens + 127) // 128 * (1024 // OA_COLS)
+@@ -48,7 +49,7 @@
+             with pl.spmd(
+                 pl.min(OA_WORKERS_PER_GROUP, oa_units),
+                 name_hint="o_proj_a",
+-                deps=[attention_tid],
++                deps=[attention_tids[i] for i in range(ATTENTION_PARTS)],
+                 allow_early_resolve=True,
+                 sync_start=False,
+             ) as oa_tid:

@@ -1,0 +1,72 @@
+{
+  "generated_at": "2026-10-23T14:40:17.234045+08:00",
+  "report_source_commit": "46c8d9cecef67bea3f342e92a21028b8cee6886c",
+  "spec": "SPEC.md",
+  "shared_toolchain": {
+    "release": "csa-shared-20261022-logical-codegen",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-shared-20261022",
+      "commit": "26e94e05627eb47710dcc214bae1774b8829df8a"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_mpmd_aicpu_20261022/upstream_logical_refresh/manifest.json",
+    "published_for_validation_at": "2026-10-22T18:00:10+08:00",
+    "validated_at": "2026-10-22T18:14:28+08:00"
+  },
+  "device_execution": false,
+  "new_device_tasks": 0,
+  "selected_versions": {
+    "native": {
+      "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_performance_20261022/PERFORMANCE.json",
+      "reused_cases": 8,
+      "cann": "9.2.0-beta.2",
+      "sdk_dependency": "不依赖 PyPTO/PTOAS/Simpler"
+    },
+    "bsh_mpmd": {
+      "snapshot": "61af469e87ab11ef728ebb977e7cecb47dcf4c8f",
+      "entry_selector": "csa_compile_constants(tokens)；仅C01为SINGLE_M16_QA=True，其余S6档False"
+    },
+    "bsh_spmd": {
+      "snapshot": "61af469e87ab11ef728ebb977e7cecb47dcf4c8f",
+      "last_kernel_commit": "df8d43a81",
+      "backoff_ticks": 150,
+      "compatibility": "已验证native_wait_signal_v1.patch，替代原150tick生成代码适配",
+      "short_typefix": {
+        "source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_20261020/runs/cohort_shared_h8192_b32_s6_v122_source/original_spmd/indexer_score_stages.py",
+        "device_evidence_task": "task_20261021_204807_386597714",
+        "device_passed": true,
+        "scope": "修正未激活长档临时Tile的静态声明；长档score_tile=1024两种表达式相同，复用长档已采记录",
+        "difference": "仅两处临时shape改用BUFFERED_LONG_SCORE_TILE=1024"
+      }
+    },
+    "tnd_mpmd": {
+      "commit": "d86c95f69",
+      "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/experiments/aicpu_v22b_bsh_order_live_workers/operator"
+    },
+    "tnd_spmd": {
+      "snapshot": "output_rectangle_v3",
+      "source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/output_rectangle_v3",
+      "evidence_commit": "bb37e1cce",
+      "default_service_adopted": false,
+      "selection": "已完成完整链路十窗、16+4状态及service门禁的冻结候选；非未验证HEAD"
+    }
+  },
+  "timing": "完整HC_pre→input RMSNorm→CSA→HC_post；按规范保留不同计时边界",
+  "history_rule": "同v22来源的已发现合格L1窗口全部纳入，包含后续控制组；SPMD按单一快照和现有逐档代码等价证据复用",
+  "large_files": "原始trace/CSV使用逐格可访问路径；本次不复制或重生成大型trace",
+  "optimization_goal": "保持paused；本次仅按用户指令汇总数据，不恢复优化、不push"
+}

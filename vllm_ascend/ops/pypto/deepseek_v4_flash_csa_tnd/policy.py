@@ -45,6 +45,7 @@ class CSAMPMDPolicy:
     plan_physical_rows: bool = False
     split_score_rows: bool = False
     limit_empty_workers: bool = False
+    bsh_projection_order: bool = False
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -66,6 +67,7 @@ class CSAMPMDPolicy:
             "PLAN_PHYSICAL_ROWS": self.plan_physical_rows,
             "SPLIT_SCORE_ROWS": self.split_score_rows,
             "LIMIT_EMPTY_WORKERS": self.limit_empty_workers,
+            "BSH_PROJECTION_ORDER": self.bsh_projection_order,
         }
 
 
@@ -107,6 +109,7 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
     parallel_small_qa = group == 6 and 16 < tokens < 32
     return CSAMPMDPolicy(
         limit_empty_workers=tokens <= NONEMPTY_WORKER_MAX_TOKENS,
+        bsh_projection_order=not long_history,
         query_group=group,
         qk_panel=64 if group == 6 else 128,
         score_tile=1024 if long_history else SHORT_SCORE_TILE,

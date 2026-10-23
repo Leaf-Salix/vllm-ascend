@@ -1,0 +1,37 @@
+--- candidates/output_native.py
++++ native_output_v2/output.py
+@@ -68,24 +68,22 @@
+         for token in pl.range(pl.tile.get_block_idx(), tokens, VECTORS):
+             raw = pl.load(projected, [token, 0], [1, O_WIDTH])
+             native_bf16 = pl.cast(raw, pl.BF16, mode="rint")
+-            rounded = pl.reshape(pl.cast(native_bf16, pl.FP32), [O_GROUPS, O_LORA])
+-            # A3列向量需要32B对齐：先算8段的max，8x1恰为32B。再将每段
+-            # 复制到8列并沿行归约，得到8份相同的全行amax；全过程留在Vector。
+-            reduce_tmp = pl.create_tile([O_GROUPS, O_LORA], dtype=pl.FP32)
+-            segment_max = pl.row_max(pl.abs(rounded), reduce_tmp)
+-            replicated = pl.row_expand_mul(pl.tile.full([O_GROUPS, 8], dtype=pl.FP32, value=1.0), segment_max)
+-            all_max = pl.col_max(replicated)
+-            amax = pl.maximum(all_max, pl.tile.full([1, 8], dtype=pl.FP32, value=INT8_AMAX_EPS))
+-            numerator = pl.tile.full([1, 8], dtype=pl.FP32, value=INT8_SCALE_MAX)
++            rounded = pl.cast(native_bf16, pl.FP32)
++            reduce_tmp = pl.create_tile([1, O_WIDTH], dtype=pl.FP32)
++            maximum = pl.row_max(pl.abs(rounded), reduce_tmp)
++            floor = pl.tile.full([1, 1], dtype=pl.FP32, value=INT8_AMAX_EPS)
++            amax = pl.maximum(maximum, floor)
++            numerator = pl.tile.full([1, 1], dtype=pl.FP32, value=INT8_SCALE_MAX)
+             # 与Native一致分别计算量化乘数和反量化scale，不倒数回推另一个。
+             multiplier = pl.div(numerator, amax)
+             dequant_scale = pl.mul(amax, 1.0 / INT8_SCALE_MAX)
+-            scaled = pl.row_expand_mul(rounded, pl.reshape(multiplier, [O_GROUPS, 1]))
++            scaled = pl.row_expand_mul(rounded, multiplier)
+             integer = pl.cast(scaled, pl.INT32, mode="rint")
+             half = pl.cast(integer, pl.FP16, mode="round")
+             byte = pl.cast(half, pl.INT8, mode="trunc")
+-            pl.store(pl.reshape(byte, [1, O_WIDTH]), [token, 0], quantized)
+-            scale_row = pl.concat(dequant_scale, dequant_scale)
++            pl.store(byte, [token, 0], quantized)
++            scale_row = pl.row_expand_mul(pl.tile.full([1, SCALE_ROW], dtype=pl.FP32, value=1.0),
++                                          dequant_scale)
+             pl.store(scale_row, [token, 0], token_scales)
+ 
+     rows = (tokens + MM_ROWS - 1) // MM_ROWS

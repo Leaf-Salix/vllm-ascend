@@ -1,0 +1,18 @@
+--- candidates/output_oa_balanced.py
++++ oa_balanced_v2/output.py
+@@ -48,6 +48,7 @@
+     source_row: pl.Scalar[pl.INDEX],
+     COLUMNS: pl.constexpr,
+ ):
++    pl.set_cache_policy(weight, pl.CachePolicy.BYPASS)
+     seed_storage = pl.create_tile([96, COLUMNS], dtype=pl.FP32,
+                                   target_memory=pl.MemorySpace.Acc, compact=True)
+     seed = pl.tile.set_validshape(seed_storage, active, COLUMNS)
+@@ -92,7 +93,6 @@
+     row_blocks = (tokens + 95) // 96
+     with pl.spmd(O_GROUPS * row_blocks * 6, name_hint="hca_oa_balanced_columns",
+                  deps=[heads_dep], allow_early_resolve=True) as ready:
+-        pl.set_cache_policy(weight, pl.CachePolicy.BYPASS)
+         unit = pl.tile.get_block_idx()
+         group = pl.max(0, unit // (row_blocks * 6))
+         row0 = (unit // 6 % row_blocks) * 96

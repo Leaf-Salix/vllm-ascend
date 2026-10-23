@@ -15,14 +15,22 @@ def read(path):
     return json.loads(Path(path).read_text())
 
 
-def task_map(raw_path):
-    """限定已验收 v9 的实际生成编排；遇到其他结构拒绝猜测名称。"""
+def task_map(raw_path, *, generated_cpp=None):
+    """从实际编排还原单层任务与八个输出组；不接受未知嵌套提交结构。
+
+    同进程A/B会产生两份编排，调用方须明确选择与该窗口对应的一份。
+    原八档导出不传此参数，仍限定唯一v9编排，不改变已有下载文件。
+    """
     names = read(raw_path.with_name("names.json"))["callable_id_to_name"]
     candidates = list((raw_path.parents[1] / "build_output").glob("decode_csa_tnd_*/orchestration/*.cpp"))
     # C05 来自 v11 对照任务：v9 控制组仍有 group_plan，v11 候选已删除。
     candidates = [path for path in candidates if "ext_group_plan" in path.read_text()]
-    assert len(candidates) == 1, candidates
-    cpp = candidates[0]
+    if generated_cpp is None:
+        assert len(candidates) == 1, candidates
+        cpp = candidates[0]
+    else:
+        cpp = Path(generated_cpp)
+        assert cpp in candidates, "指定编排必须来自同一原始运行的构建目录"
     text = cpp.read_text()
     assert text.count("SIMPLER_SCOPE(ScopeMode::MANUAL)") == 1
     manual_start = text.index("SIMPLER_SCOPE(ScopeMode::MANUAL)")

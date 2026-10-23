@@ -1,0 +1,1569 @@
+{
+  "shared_release": "csa-shared-20261022-logical-codegen",
+  "production_version": "v22 / d86c95f69",
+  "uniform_candidates_adopted": false,
+  "variants": [
+    {
+      "candidate": "aicpu_v25_uniform_six_scalar",
+      "control": "aicpu_v16_bsh_start_policy",
+      "manifest": "tests/pypto_test/csa_mpmd_aicpu_20261022/experiments/aicpu_v25_uniform_six_scalar/manifest.json",
+      "source_diff": {
+        "indexer_group_stages.py": "--- a/indexer_group_stages.py\n+++ b/indexer_group_stages.py\n@@ -124,19 +124,26 @@\n     ROOTS_PER_LEAF: pl.constexpr,\n ):\n     \"\"\"worker0写组前缀、描述符和叶计划；容量pad16(B+1)+4*T由入口保证。\"\"\"\n+    uniform_six = pl.cast(0, pl.INT32)\n     if worker == 0:\n+        uniform_six = pl.cast(1, pl.INT32)\n+        inactive_seen = pl.cast(0, pl.INT32)\n+        active_requests = pl.cast(0, pl.INDEX)\n         groups = pl.cast(0, pl.INDEX)\n         max_history = pl.cast(0, pl.INDEX)\n         requests = pl.cast(pl.tensor.dim(lengths, 0), pl.INDEX)\n         descriptor_base = (\n             (requests + 1 + GROUP_DESCRIPTOR_ALIGNMENT - 1) // GROUP_DESCRIPTOR_ALIGNMENT * GROUP_DESCRIPTOR_ALIGNMENT\n         )\n-        # 前缀有跨请求依赖，只扫描一次。描述符也在这名早期AIV上生成，\n+        # 前缀有跨请求依赖，只扫描一次。描述符也在AICPU编排中生成，\n         # 消费者按组号读四个Scalar，避免AIC/双AIV对每个叶重复O(B)定位。\n         for request in pl.range(requests):\n             pl.write(offsets, [request], pl.cast(groups, pl.INT32))\n             begin, end, active = request_bounds(bounds, lengths, request, tokens)\n             if active != 0:\n+                active_requests = active_requests + 1\n+                if end - begin != 6 or begin != request * 6 or inactive_seen != 0:\n+                    uniform_six = pl.cast(0, pl.INT32)\n                 length = pl.cast(pl.tensor.read(lengths, [request]), pl.INDEX)\n                 max_history = pl.max(max_history, pl.min(length // COMPRESS_RATIO, MAX_CANDIDATES))\n                 group_count = (end - begin + GROUP_SIZE - 1) // GROUP_SIZE\n@@ -158,12 +165,16 @@\n                                 0,\n                             )\n                             visible = pl.max(visible, lane_visible)\n+                        else:\n+                            uniform_six = pl.cast(0, pl.INT32)\n                     row = descriptor_base + (groups + local_group) * GROUP_DESCRIPTOR_WORDS\n                     pl.write(offsets, [row], pl.cast(request, pl.INT32))\n                     pl.write(offsets, [row + 1], pl.cast(first, pl.INT32))\n                     pl.write(offsets, [row + 2], pl.cast(live, pl.INT32))\n                     pl.write(offsets, [row + 3], pl.cast(visible, pl.INT32))\n                 groups = groups + group_count\n+            else:\n+                inactive_seen = pl.cast(1, pl.INT32)\n         # 末端索引显式转成INDEX；保持descriptor动态维度，避免后端把裸dim\n         # 当成缺失SSA的Scalar store下标，不读取任何Host数据。\n         pl.write(offsets, [requests], pl.cast(groups, pl.INT32))\n@@ -191,7 +202,9 @@\n             balanced_tag = pl.cast(1, pl.INT32)\n         pl.write(plan, [6], balanced_tag)\n         pl.write(plan, [7], pl.cast(ROOTS_PER_LEAF, pl.INT32))\n-    return offsets, plan\n+        if active_requests == 0:\n+            uniform_six = pl.cast(0, pl.INT32)\n+    return offsets, plan, uniform_six\n \n \n @pl.jit.inline(auto_scope=False)\n@@ -303,19 +316,29 @@\n     worker: pl.Scalar[pl.INDEX],\n     WORKERS: pl.constexpr,\n     GROUP_SIZE: pl.constexpr,\n+    uniform_six: pl.Scalar[pl.INT32],\n ):\n     \"\"\"AIV单写者生成每组完整对角系数块；输入scale/weight须已发布且覆盖T。\"\"\"\n     requests = pl.cast(pl.tensor.dim(lengths, 0), pl.INDEX)\n     groups = pl.cast(pl.read(offsets, [requests]), pl.INDEX)\n     # 前缀与描述符已由唯一planner发布；组号条带本身保证唯一writer。\n     for group in pl.range(worker, groups, WORKERS):\n-        request, first, live, _visible = indexer_decode_group(bounds, lengths, positions, offsets, group, GROUP_SIZE)\n+        if uniform_six != 0:\n+            request = group // (6 // GROUP_SIZE)\n+            first = group * GROUP_SIZE\n+            live = pl.cast(GROUP_SIZE, pl.INDEX)\n+        else:\n+            request, first, live, _visible = indexer_decode_group(\n+                bounds, lengths, positions, offsets, group, GROUP_SIZE\n+            )\n         coefficient_rows = pl.tile.full([COEFFICIENT_ROWS * GROUP_SIZE, HEADS], dtype=pl.FP16, value=0.0)\n         # 固定G只决定矩阵tile；尾lane分支先于任何输入load，非法\n         # metadata也不把旧scale/weights误放到对角线上。\n         for lane in pl.unroll(GROUP_SIZE):\n             if lane < live:\n-                _visible, causal = indexer_query_visibility(bounds, lengths, positions, request, first + lane)\n+                causal = pl.cast(1, pl.INT32)\n+                if uniform_six == 0:\n+                    _visible, causal = indexer_query_visibility(bounds, lengths, positions, request, first + lane)\n                 if causal != 0:\n                     query_scales = pl.load(scales, [first + lane, 0], [1, HEADS])\n                     query_weights = pl.load(weights, [first + lane, 0], [1, HEADS])\n",
+        "output_tasks.py": "--- a/output_tasks.py\n+++ b/output_tasks.py\n@@ -42,6 +42,7 @@\n     oa_units = (tokens + 127) // 128 * (1024 // OA_COLS)\n     quant_units = (tokens + 31) // 32\n     ob_tids = pl.array.create(OUTPUT_GROUPS, pl.TASK_ID)\n+    # 对齐BSH：各组按就绪核启动，O_A→quant→O_B仍严格依赖；不为小组额外等待整组准入。\n     with pl.manual_scope():\n         for group in pl.parallel(OUTPUT_GROUPS):\n             with pl.spmd(\n",
+        "entry.py": "--- a/entry.py\n+++ b/entry.py\n@@ -734,6 +734,7 @@\n     (idx_offsets, idx_count) = compact_offsets_and_count_stage(\n         idx_bounds, idx_lengths, idx_offsets, idx_count, tokens, 0\n     )\n+    # 与BSH前段一致：独立分块按就绪核启动，依赖仍由TMR保证；Score/Attention保持整组起跑。\n     with pl.spmd(\n         pl.min((tokens + 3) // 4, VECTORS), name_hint=\"csa_rope_sign\", allow_early_resolve=True, sync_start=False\n     ):\n@@ -850,7 +851,9 @@\n             pl.tile.get_block_idx(),\n             VECTORS,\n         )\n-    with pl.spmd(query_hadamard_workers, name_hint=\"indexer_query_hadamard\", allow_early_resolve=True, sync_start=False):\n+    with pl.spmd(\n+        query_hadamard_workers, name_hint=\"indexer_query_hadamard\", allow_early_resolve=True, sync_start=False\n+    ):\n         idx_query_had = indexer_query_hadamard_four_tokens_stage(\n             idx_query_rope_heads, hadamard, idx_query_had, tokens, pl.tile.get_block_idx(), GROUPS\n         )\n@@ -874,7 +877,7 @@\n     # 请求/叶/scale所有权规划仍在AICPU执行，但先提交不依赖该规划的投影。\n     # 第一位group_offsets消费者是下方head_coefficients；此处完成计划后\n     # 才提交它及cache/Score消费者，避免HC完成后AICore空等标量扫描。\n-    (group_offsets, group_plan) = indexer_group_plan_stage(\n+    (group_offsets, group_plan, uniform_six) = indexer_group_plan_stage(\n         idx_bounds, idx_lengths, positions, group_offsets, group_plan, tokens, 0, QUERY_GROUP, BALANCED, ROOTS\n     )\n     group_offsets = indexer_scale_page_plan_stage(\n@@ -905,6 +908,7 @@\n             pl.tile.get_block_idx(),\n             VECTORS,\n             QUERY_GROUP,\n+            uniform_six,\n         )\n     with pl.spmd(\n         pl.min(requests, VECTORS),\n",
+        "policy.py": "--- a/policy.py\n+++ b/policy.py\n@@ -70,7 +70,7 @@\n \n \n def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_len: int) -> CSAMPMDPolicy:\n-    \"\"\"仅依据已有Host信息选策略；有效分组数、叶数及全部访问地址由AIV/AIC计算。\"\"\"\n+    \"\"\"仅依据已有Host描述符选策略；实际分组/叶数由AICPU规划，寻址在设备消费端完成。\"\"\"\n     values = (tokens, requests, max_query_tokens, max_seq_len)\n     if any(type(v) is not int or v <= 0 for v in values):\n         raise ValueError(\"tokens/requests/max_query_tokens/max_seq_len须为已有的正整数描述符\")\n"
+      },
+      "paired_performance": [
+        {
+          "case": "h131072_b24_s6",
+          "source": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/result.json",
+          "statistics_us": {
+            "mpmd_control": {
+              "min": 1094.66,
+              "mean": 1129.944,
+              "max": 1149.3,
+              "samples": [
+                1146.02,
+                1149.3,
+                1117.02,
+                1146.28,
+                1118.16,
+                1135.24,
+                1143.94,
+                1121.3,
+                1127.52,
+                1094.66
+              ],
+              "median": 1131.38
+            },
+            "mpmd": {
+              "min": 1111.44,
+              "mean": 1131.2440000000001,
+              "max": 1154.88,
+              "samples": [
+                1111.44,
+                1122.04,
+                1140.7,
+                1151.38,
+                1154.88,
+                1125.62,
+                1127.22,
+                1132.68,
+                1123.92,
+                1122.56
+              ],
+              "median": 1126.42
+            }
+          },
+          "checks": {
+            "mpmd_control_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            }
+          },
+          "stage_medians_us": {
+            "mpmd_control": {
+              "indexer_head_coefficients/span_us": 9.41,
+              "indexer_head_coefficients/incore_max_us": 9.1,
+              "indexer_head_coefficients/start_us": 395.12,
+              "indexer_score/span_us": 285.48,
+              "indexer_score/incore_max_us": 285.11,
+              "indexer_score/start_us": 415.43,
+              "sparse_attention/span_us": 211.39,
+              "sparse_attention/incore_max_us": 211.01,
+              "sparse_attention/start_us": 745.1700000000001
+            },
+            "mpmd": {
+              "indexer_head_coefficients/span_us": 9.21,
+              "indexer_head_coefficients/incore_max_us": 8.969999999999999,
+              "indexer_head_coefficients/start_us": 388.5,
+              "indexer_score/span_us": 291.71000000000004,
+              "indexer_score/incore_max_us": 291.05,
+              "indexer_score/start_us": 408.32,
+              "sparse_attention/span_us": 215.59,
+              "sparse_attention/incore_max_us": 215.14,
+              "sparse_attention/start_us": 742.69
+            }
+          },
+          "l1_raw": [
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_00_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_00_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_01_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_01_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_02_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_02_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_03_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_03_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_04_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_04_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_05_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_05_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_06_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_06_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_07_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_07_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_08_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_08_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_09_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b24_s6/l1_09_mpmd_control/chip_swimlane_records.json"
+            }
+          ]
+        },
+        {
+          "case": "h8192_b32_s6",
+          "source": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/result.json",
+          "statistics_us": {
+            "mpmd_control": {
+              "min": 1030.22,
+              "mean": 1073.69,
+              "max": 1103.3,
+              "samples": [
+                1078.16,
+                1088.96,
+                1061.54,
+                1102.08,
+                1030.22,
+                1103.3,
+                1066.36,
+                1065.54,
+                1083.72,
+                1057.02
+              ],
+              "median": 1072.26
+            },
+            "mpmd": {
+              "min": 1038.58,
+              "mean": 1061.626,
+              "max": 1079.14,
+              "samples": [
+                1077.84,
+                1038.58,
+                1041.04,
+                1069.4,
+                1042.1,
+                1076.14,
+                1055.86,
+                1073.88,
+                1079.14,
+                1062.28
+              ],
+              "median": 1065.8400000000001
+            }
+          },
+          "checks": {
+            "mpmd_control_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            }
+          },
+          "stage_medians_us": {
+            "mpmd_control": {
+              "indexer_head_coefficients/span_us": 12.620000000000001,
+              "indexer_head_coefficients/incore_max_us": 12.48,
+              "indexer_head_coefficients/start_us": 448.65,
+              "indexer_score/span_us": 87.7,
+              "indexer_score/incore_max_us": 87.25,
+              "indexer_score/start_us": 472.46000000000004,
+              "sparse_attention/span_us": 253.88,
+              "sparse_attention/incore_max_us": 253.37,
+              "sparse_attention/start_us": 603.8900000000001
+            },
+            "mpmd": {
+              "indexer_head_coefficients/span_us": 10.29,
+              "indexer_head_coefficients/incore_max_us": 10.100000000000001,
+              "indexer_head_coefficients/start_us": 453.83000000000004,
+              "indexer_score/span_us": 84.32,
+              "indexer_score/incore_max_us": 83.76,
+              "indexer_score/start_us": 474.3,
+              "sparse_attention/span_us": 251.56,
+              "sparse_attention/incore_max_us": 250.98000000000002,
+              "sparse_attention/start_us": 602.5699999999999
+            }
+          },
+          "l1_raw": [
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_00_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_00_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_01_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_01_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_02_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_02_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_03_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_03_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_04_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_04_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_05_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_05_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_06_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_06_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_07_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_07_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_08_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_08_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_09_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h8192_b32_s6/l1_09_mpmd_control/chip_swimlane_records.json"
+            }
+          ]
+        },
+        {
+          "case": "h131072_b16_mixed",
+          "source": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/result.json",
+          "statistics_us": {
+            "mpmd_control": {
+              "min": 780.1,
+              "mean": 790.886,
+              "max": 806.52,
+              "samples": [
+                784.4,
+                806.52,
+                793.0,
+                784.12,
+                800.86,
+                785.68,
+                799.98,
+                780.1,
+                782.42,
+                791.78
+              ],
+              "median": 788.73
+            },
+            "mpmd": {
+              "min": 774.0,
+              "mean": 783.098,
+              "max": 796.48,
+              "samples": [
+                789.68,
+                796.48,
+                790.18,
+                774.72,
+                774.0,
+                778.6,
+                788.86,
+                780.84,
+                777.46,
+                780.16
+              ],
+              "median": 780.5
+            }
+          },
+          "checks": {
+            "mpmd_control_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            }
+          },
+          "stage_medians_us": {
+            "mpmd_control": {
+              "indexer_head_coefficients/span_us": 10.64,
+              "indexer_head_coefficients/incore_max_us": 8.66,
+              "indexer_head_coefficients/start_us": 263.75,
+              "indexer_score/span_us": 184.47,
+              "indexer_score/incore_max_us": 183.56,
+              "indexer_score/start_us": 286.78,
+              "sparse_attention/span_us": 132.79000000000002,
+              "sparse_attention/incore_max_us": 132.39,
+              "sparse_attention/start_us": 513.1800000000001
+            },
+            "mpmd": {
+              "indexer_head_coefficients/span_us": 10.82,
+              "indexer_head_coefficients/incore_max_us": 10.129999999999999,
+              "indexer_head_coefficients/start_us": 267.49,
+              "indexer_score/span_us": 182.76,
+              "indexer_score/incore_max_us": 181.86,
+              "indexer_score/start_us": 290.5,
+              "sparse_attention/span_us": 126.43,
+              "sparse_attention/incore_max_us": 125.89000000000001,
+              "sparse_attention/start_us": 514.51
+            }
+          },
+          "l1_raw": [
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_00_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_00_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_01_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_01_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_02_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_02_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_03_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_03_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_04_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_04_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_05_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_05_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_06_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_06_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_07_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_07_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_08_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_08_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_09_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_pair_h131072_b16_mixed/l1_09_mpmd_control/chip_swimlane_records.json"
+            }
+          ]
+        }
+      ],
+      "state_validation": {
+        "source": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v25_state_h131072_b28/result.json",
+        "passed": true,
+        "metadata_cases": [
+          {
+            "name": "uniform_s1",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "uniform_s6",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "uniform_s2",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "uniform_s3",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "uniform_s4",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "uniform_s5",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "no_compact_output",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "mixed_reverse_owners",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "uniform_s1_again",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "fragmented_pages",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          }
+        ],
+        "continuous_steps": [
+          {
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "candidate": "aicpu_v26_uniform_score_geometry",
+      "control": "aicpu_v22b_bsh_order_live_workers",
+      "manifest": "tests/pypto_test/csa_mpmd_aicpu_20261022/experiments/aicpu_v26_uniform_score_geometry/manifest.json",
+      "source_diff": {
+        "indexer_score_stages.py": "--- a/indexer_score_stages.py\n+++ b/indexer_score_stages.py\n@@ -86,9 +86,9 @@\n     OFFSET_ROWS_DYN,\n     PLAN_WORDS,\n     TOKENS_DYN,\n-    indexer_decode_group,\n+    indexer_decode_score_group,\n     indexer_leaf_range,\n-    indexer_query_visibility,\n+    indexer_score_query_visibility,\n     indexer_work_item,\n )\n from .indexer_scale_layout_stages import indexer_leaf_scale_layout\n@@ -125,6 +125,7 @@\n \n @pl.jit.inline(auto_scope=False)\n def _indexer_score_cube_original(\n+    uniform_six: pl.Scalar[pl.INT32],\n     qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],\n     coefficients: pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16],\n     idx_kv_cache: pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],\n@@ -156,8 +157,8 @@\n     # 每个core独立读取同一device计划；空core不触发任何FFTS事件。\n     for buf_item in pl.range(buf_worker, groups * buf_max_leaves, TOPK_SCORE_WORKERS):\n         buf_group, buf_leaf = indexer_work_item(buf_item, groups, buf_max_leaves)\n-        buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_group(\n-            bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size\n+        buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_score_group(\n+            uniform_six, bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size\n         )\n         buf_logical_begin, buf_leaf_capacity, work_valid = indexer_leaf_range(\n             buf_leaf,\n@@ -414,6 +415,7 @@\n \n @pl.jit.inline(auto_scope=False)\n def _indexer_score_cube_split_store(\n+    uniform_six: pl.Scalar[pl.INT32],\n     qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],\n     coefficients: pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16],\n     idx_kv_cache: pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],\n@@ -451,8 +453,8 @@\n     # 每个core独立读取同一device计划；空core不触发任何FFTS事件。\n     for buf_item in pl.range(buf_worker, groups * buf_max_leaves, TOPK_SCORE_WORKERS):\n         buf_group, buf_leaf = indexer_work_item(buf_item, groups, buf_max_leaves)\n-        buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_group(\n-            bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size\n+        buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_score_group(\n+            uniform_six, bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size\n         )\n         buf_logical_begin, buf_leaf_capacity, work_valid = indexer_leaf_range(\n             buf_leaf,\n@@ -2435,6 +2437,7 @@\n \n @pl.jit.inline(auto_scope=False)\n def indexer_score_cube_stage(\n+    uniform_six: pl.Scalar[pl.INT32],\n     qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],\n     coefficients: pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16],\n     idx_kv_cache: pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],\n@@ -2461,6 +2464,7 @@\n     \"\"\"按已选长G6资源区间执行双QK早FIX；小域及其它组合保留原helper。\"\"\"\n     if SPLIT_SCORE_ROWS and balance_leaves and query_group_size == 6 and qk_panel_cols == 64 and score_tile == 1024:\n         result = _indexer_score_cube_split_store(\n+            uniform_six,\n             qr_hadamard_i8,\n             coefficients,\n             idx_kv_cache,\n@@ -2485,6 +2489,7 @@\n         )\n     else:\n         result = _indexer_score_cube_original(\n+            uniform_six,\n             qr_hadamard_i8,\n             coefficients,\n             idx_kv_cache,\n@@ -2512,6 +2517,7 @@\n \n @pl.jit.inline(auto_scope=False)\n def indexer_score_vector_lane_stage(\n+    uniform_six: pl.Scalar[pl.INT32],\n     idx_native_kv_cache: pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8],\n     idx_block_table: pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32],\n     position_ids: pl.Tensor[[TOKENS_DYN], pl.INT64],\n@@ -2542,8 +2548,8 @@\n     # 每个core独立读取同一device计划；空core不触发任何FFTS事件。\n     for buf_item in pl.range(buf_worker, groups * buf_max_leaves, TOPK_SCORE_WORKERS):\n         buf_group, buf_leaf = indexer_work_item(buf_item, groups, buf_max_leaves)\n-        buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_group(\n-            bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size\n+        buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_score_group(\n+            uniform_six, bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size\n         )\n         buf_logical_begin, buf_leaf_capacity, work_valid = indexer_leaf_range(\n             buf_leaf,\n@@ -2706,8 +2712,13 @@\n                         for single_local in pl.unroll(query_group_size // 2):\n                             single_query_lane = buf_score_lane * (query_group_size // 2) + single_local\n                             if single_query_lane < buf_live:\n-                                (single_query_visible, _causal) = indexer_query_visibility(\n-                                    bounds, kv_seq_lens, position_ids, single_batch, single_query + single_query_lane\n+                                (single_query_visible, _causal) = indexer_score_query_visibility(\n+                                    uniform_six,\n+                                    bounds,\n+                                    kv_seq_lens,\n+                                    position_ids,\n+                                    single_batch,\n+                                    single_query + single_query_lane,\n                                 )\n                                 single_segment_valid = pl.max(\n                                     pl.min(single_query_visible - single_segment_begin, single_segment_span), 0\n@@ -2809,8 +2820,13 @@\n                     single_query_lane = buf_score_lane * (query_group_size // 2) + single_local\n                     if single_query_lane < buf_live:\n                         if query_group_size == 2:\n-                            legacy_visible, _legacy_causal = indexer_query_visibility(\n-                                bounds, kv_seq_lens, position_ids, single_batch, single_query + single_query_lane\n+                            legacy_visible, _legacy_causal = indexer_score_query_visibility(\n+                                uniform_six,\n+                                bounds,\n+                                kv_seq_lens,\n+                                position_ids,\n+                                single_batch,\n+                                single_query + single_query_lane,\n                             )\n                             legacy_valid = pl.max(pl.min(legacy_visible - single_begin, single_capacity), 0)\n                             legacy_slot = (single_query + single_query_lane) * TOPK_ROWS_PER_QUERY + single_leaf\n@@ -2890,8 +2906,13 @@\n                     # 每query单独causal/visible；不能把组内最大历史当成所有query的有效候选数。\n                     for buf_query_lane in pl.unroll(query_group_size):\n                         if buf_query_lane < buf_live:\n-                            (buf_query_visible, _causal) = indexer_query_visibility(\n-                                bounds, kv_seq_lens, position_ids, buf_batch_idx, buf_query + buf_query_lane\n+                            (buf_query_visible, _causal) = indexer_score_query_visibility(\n+                                uniform_six,\n+                                bounds,\n+                                kv_seq_lens,\n+                                position_ids,\n+                                buf_batch_idx,\n+                                buf_query + buf_query_lane,\n                             )\n                             buf_lane_valid_rows = pl.max(\n                                 pl.min(\n@@ -2914,8 +2935,8 @@\n                 # 每query单独causal/visible；不能把组内最大历史当成所有query的有效候选数。\n                 for buf_query_lane in pl.unroll(query_group_size):\n                     if buf_query_lane < buf_live:\n-                        (buf_query_visible, _causal) = indexer_query_visibility(\n-                            bounds, kv_seq_lens, position_ids, buf_batch_idx, buf_query + buf_query_lane\n+                        (buf_query_visible, _causal) = indexer_score_query_visibility(\n+                            uniform_six, bounds, kv_seq_lens, position_ids, buf_batch_idx, buf_query + buf_query_lane\n                         )\n                         buf_half_begin = buf_logical_begin + buf_lane_begin\n                         buf_half_valid = pl.max(pl.min(buf_query_visible - buf_half_begin, buf_lane_span), 0)\n",
+        "indexer_group_stages.py": "--- a/indexer_group_stages.py\n+++ b/indexer_group_stages.py\n@@ -124,19 +124,26 @@\n     ROOTS_PER_LEAF: pl.constexpr,\n ):\n     \"\"\"worker0写组前缀、描述符和叶计划；容量pad16(B+1)+4*T由入口保证。\"\"\"\n+    uniform_six = pl.cast(0, pl.INT32)\n     if worker == 0:\n+        uniform_six = pl.cast(1, pl.INT32)\n+        inactive_seen = pl.cast(0, pl.INT32)\n+        active_requests = pl.cast(0, pl.INDEX)\n         groups = pl.cast(0, pl.INDEX)\n         max_history = pl.cast(0, pl.INDEX)\n         requests = pl.cast(pl.tensor.dim(lengths, 0), pl.INDEX)\n         descriptor_base = (\n             (requests + 1 + GROUP_DESCRIPTOR_ALIGNMENT - 1) // GROUP_DESCRIPTOR_ALIGNMENT * GROUP_DESCRIPTOR_ALIGNMENT\n         )\n-        # 前缀有跨请求依赖，只扫描一次。描述符也在这名早期AIV上生成，\n+        # 前缀有跨请求依赖，只扫描一次。描述符也在AICPU编排中生成，\n         # 消费者按组号读四个Scalar，避免AIC/双AIV对每个叶重复O(B)定位。\n         for request in pl.range(requests):\n             pl.write(offsets, [request], pl.cast(groups, pl.INT32))\n             begin, end, active = request_bounds(bounds, lengths, request, tokens)\n             if active != 0:\n+                active_requests = active_requests + 1\n+                if end - begin != 6 or begin != request * 6 or inactive_seen != 0:\n+                    uniform_six = pl.cast(0, pl.INT32)\n                 length = pl.cast(pl.tensor.read(lengths, [request]), pl.INDEX)\n                 max_history = pl.max(max_history, pl.min(length // COMPRESS_RATIO, MAX_CANDIDATES))\n                 group_count = (end - begin + GROUP_SIZE - 1) // GROUP_SIZE\n@@ -158,12 +165,16 @@\n                                 0,\n                             )\n                             visible = pl.max(visible, lane_visible)\n+                        else:\n+                            uniform_six = pl.cast(0, pl.INT32)\n                     row = descriptor_base + (groups + local_group) * GROUP_DESCRIPTOR_WORDS\n                     pl.write(offsets, [row], pl.cast(request, pl.INT32))\n                     pl.write(offsets, [row + 1], pl.cast(first, pl.INT32))\n                     pl.write(offsets, [row + 2], pl.cast(live, pl.INT32))\n                     pl.write(offsets, [row + 3], pl.cast(visible, pl.INT32))\n                 groups = groups + group_count\n+            else:\n+                inactive_seen = pl.cast(1, pl.INT32)\n         # 末端索引显式转成INDEX；保持descriptor动态维度，避免后端把裸dim\n         # 当成缺失SSA的Scalar store下标，不读取任何Host数据。\n         pl.write(offsets, [requests], pl.cast(groups, pl.INT32))\n@@ -191,7 +202,9 @@\n             balanced_tag = pl.cast(1, pl.INT32)\n         pl.write(plan, [6], balanced_tag)\n         pl.write(plan, [7], pl.cast(ROOTS_PER_LEAF, pl.INT32))\n-    return offsets, plan\n+        if active_requests == 0:\n+            uniform_six = pl.cast(0, pl.INT32)\n+    return offsets, plan, uniform_six\n \n \n @pl.jit.inline(auto_scope=False)\n@@ -303,19 +316,29 @@\n     worker: pl.Scalar[pl.INDEX],\n     WORKERS: pl.constexpr,\n     GROUP_SIZE: pl.constexpr,\n+    uniform_six: pl.Scalar[pl.INT32],\n ):\n     \"\"\"AIV单写者生成每组完整对角系数块；输入scale/weight须已发布且覆盖T。\"\"\"\n     requests = pl.cast(pl.tensor.dim(lengths, 0), pl.INDEX)\n     groups = pl.cast(pl.read(offsets, [requests]), pl.INDEX)\n     # 前缀与描述符已由唯一planner发布；组号条带本身保证唯一writer。\n     for group in pl.range(worker, groups, WORKERS):\n-        request, first, live, _visible = indexer_decode_group(bounds, lengths, positions, offsets, group, GROUP_SIZE)\n+        if uniform_six != 0:\n+            request = group // (6 // GROUP_SIZE)\n+            first = group * GROUP_SIZE\n+            live = pl.cast(GROUP_SIZE, pl.INDEX)\n+        else:\n+            request, first, live, _visible = indexer_decode_group(\n+                bounds, lengths, positions, offsets, group, GROUP_SIZE\n+            )\n         coefficient_rows = pl.tile.full([COEFFICIENT_ROWS * GROUP_SIZE, HEADS], dtype=pl.FP16, value=0.0)\n         # 固定G只决定矩阵tile；尾lane分支先于任何输入load，非法\n         # metadata也不把旧scale/weights误放到对角线上。\n         for lane in pl.unroll(GROUP_SIZE):\n             if lane < live:\n-                _visible, causal = indexer_query_visibility(bounds, lengths, positions, request, first + lane)\n+                causal = pl.cast(1, pl.INT32)\n+                if uniform_six == 0:\n+                    _visible, causal = indexer_query_visibility(bounds, lengths, positions, request, first + lane)\n                 if causal != 0:\n                     query_scales = pl.load(scales, [first + lane, 0], [1, HEADS])\n                     query_weights = pl.load(weights, [first + lane, 0], [1, HEADS])\n@@ -329,3 +352,47 @@\n         coefficient_matrix = pl.tile.reshape(coefficient_rows, [COEFFICIENT_ROWS, GROUP_SIZE * HEADS])\n         coefficients = pl.store(coefficient_matrix, [group * COEFFICIENT_ROWS, 0], coefficients)\n     return coefficients\n+\n+\n+@pl.jit.inline(auto_scope=False)\n+def indexer_decode_score_group(\n+    uniform_six: pl.Scalar[pl.INT32],\n+    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],\n+    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],\n+    positions: pl.Tensor[[TOKENS_DYN], pl.INT64],\n+    offsets: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],\n+    group: pl.Scalar[pl.INDEX],\n+    GROUP_SIZE: pl.constexpr,\n+):\n+    \"\"\"AICPU本轮证明S6连续前缀后简化Score几何，历史长度仍逐请求读取。\"\"\"\n+    if uniform_six != 0:\n+        owner = group // (6 // GROUP_SIZE)\n+        first = group * GROUP_SIZE\n+        live = pl.cast(GROUP_SIZE, pl.INDEX)\n+        length = pl.cast(pl.read(lengths, [owner]), pl.INDEX)\n+        # 位置证明覆盖全部lane，最后一个lane给出组内最大可见数。\n+        last_end = length - 6 + first - owner * 6 + GROUP_SIZE\n+        visible = pl.max(pl.min(pl.min(length // COMPRESS_RATIO, last_end // COMPRESS_RATIO), MAX_CANDIDATES), 0)\n+    else:\n+        owner, first, live, visible = indexer_decode_group(bounds, lengths, positions, offsets, group, GROUP_SIZE)\n+    return owner, first, live, visible\n+\n+\n+@pl.jit.inline(auto_scope=False)\n+def indexer_score_query_visibility(\n+    uniform_six: pl.Scalar[pl.INT32],\n+    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],\n+    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],\n+    positions: pl.Tensor[[TOKENS_DYN], pl.INT64],\n+    request: pl.Scalar[pl.INDEX],\n+    query: pl.Scalar[pl.INDEX],\n+):\n+    \"\"\"等长分支只省掉已证明的Q/position检查；每条query的causal上界不合并。\"\"\"\n+    if uniform_six != 0:\n+        length = pl.cast(pl.read(lengths, [request]), pl.INDEX)\n+        query_end = length - 6 + query - request * 6 + 1\n+        visible = pl.max(pl.min(pl.min(length // COMPRESS_RATIO, query_end // COMPRESS_RATIO), MAX_CANDIDATES), 0)\n+        causal = pl.cast(1, pl.INT32)\n+    else:\n+        visible, causal = indexer_query_visibility(bounds, lengths, positions, request, query)\n+    return visible, causal\n",
+        "entry.py": "--- a/entry.py\n+++ b/entry.py\n@@ -160,6 +160,7 @@\n \n @pl.jit.incore\n def index_score_topk_cube(\n+    uniform_six: pl.Scalar[pl.INT32],\n     positions: pl.Tensor[[T], pl.INT64],\n     idx_bounds: pl.Tensor[[IQ], pl.INT32],\n     idx_lengths: pl.Tensor[[B], pl.INT32],\n@@ -184,6 +185,7 @@\n     worker = pl.tile.get_block_idx()\n     pl.system.set_ffts(ffts)\n     indexer_transfer = indexer_score_cube_stage(\n+        uniform_six,\n         idx_query_i8,\n         coefficients,\n         idx_key0,\n@@ -212,6 +214,7 @@\n \n @pl.jit.incore\n def index_score_topk_vector(\n+    uniform_six: pl.Scalar[pl.INT32],\n     positions: pl.Tensor[[T], pl.INT64],\n     idx_bounds: pl.Tensor[[IQ], pl.INT32],\n     idx_lengths: pl.Tensor[[B], pl.INT32],\n@@ -234,6 +237,7 @@\n     pl.func_attr({\"split_aiv\": True})\n     pl.system.set_ffts(ffts)\n     (score_arena, pair_arena) = indexer_score_vector_lane_stage(\n+        uniform_six,\n         idx_cache,\n         indexer_table,\n         positions,\n@@ -261,6 +265,7 @@\n \n @pl.jit.inline(auto_scope=False)\n def index_score_topk_group(\n+    uniform_six: pl.Scalar[pl.INT32],\n     positions: pl.Tensor[[T], pl.INT64],\n     idx_bounds: pl.Tensor[[IQ], pl.INT32],\n     idx_lengths: pl.Tensor[[B], pl.INT32],\n@@ -287,6 +292,7 @@\n ):\n     with pl.cluster(name_hint=\"indexer_score\"):\n         indexer_transfer = index_score_topk_cube(\n+            uniform_six,\n             positions,\n             idx_bounds,\n             idx_lengths,\n@@ -309,6 +315,7 @@\n             SPLIT_SCORE_ROWS,\n         )\n         (score_arena, pair_arena) = index_score_topk_vector(\n+            uniform_six,\n             positions,\n             idx_bounds,\n             idx_lengths,\n@@ -1102,7 +1109,7 @@\n         head_weights = indexer_weights_reduce_stage(\n             weights_partial, head_weights, tokens, pl.tile.get_block_idx(), VECTORS\n         )\n-    (group_offsets, group_plan) = indexer_group_plan_stage(\n+    (group_offsets, group_plan, uniform_six) = indexer_group_plan_stage(\n         idx_bounds, idx_lengths, positions, group_offsets, group_plan, tokens, 0, QUERY_GROUP, BALANCED, ROOTS\n     )\n     group_offsets = indexer_scale_page_plan_stage(\n@@ -1137,6 +1144,7 @@\n             pl.tile.get_block_idx(),\n             VECTORS,\n             QUERY_GROUP,\n+            uniform_six,\n         )\n     with pl.spmd(\n         pl.min(requests, VECTORS),\n@@ -1216,6 +1224,7 @@\n         GROUPS, name_hint=\"indexer_score\", allow_early_resolve=True, sync_start=True, deps=[idx_cache_tid]\n     ) as score_tid:\n         (indexer_transfer, score_arena, pair_arena) = index_score_topk_group(\n+            uniform_six,\n             positions,\n             idx_bounds,\n             idx_lengths,\n"
+      },
+      "paired_performance": [
+        {
+          "case": "h131072_b24_s6",
+          "source": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/result.json",
+          "statistics_us": {
+            "mpmd_control": {
+              "min": 1098.34,
+              "mean": 1117.668,
+              "max": 1138.06,
+              "samples": [
+                1125.24,
+                1098.74,
+                1131.06,
+                1117.04,
+                1098.34,
+                1106.12,
+                1115.72,
+                1138.06,
+                1114.14,
+                1132.22
+              ],
+              "median": 1116.38
+            },
+            "mpmd": {
+              "min": 1090.12,
+              "mean": 1104.598,
+              "max": 1131.0,
+              "samples": [
+                1105.56,
+                1090.12,
+                1097.12,
+                1093.48,
+                1098.42,
+                1131.0,
+                1104.62,
+                1105.0,
+                1117.4,
+                1103.26
+              ],
+              "median": 1103.94
+            }
+          },
+          "checks": {
+            "mpmd_control_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            }
+          },
+          "stage_medians_us": {
+            "mpmd_control": {
+              "indexer_head_coefficients/span_us": 7.5600000000000005,
+              "indexer_head_coefficients/incore_max_us": 7.300000000000001,
+              "indexer_head_coefficients/start_us": 390.45,
+              "indexer_score/span_us": 288.79999999999995,
+              "indexer_score/incore_max_us": 288.51,
+              "indexer_score/start_us": 410.19000000000005,
+              "sparse_attention/span_us": 210.88,
+              "sparse_attention/incore_max_us": 210.64000000000001,
+              "sparse_attention/start_us": 742.48
+            },
+            "mpmd": {
+              "indexer_head_coefficients/span_us": 6.71,
+              "indexer_head_coefficients/incore_max_us": 6.5,
+              "indexer_head_coefficients/start_us": 379.44,
+              "indexer_score/span_us": 289.52,
+              "indexer_score/incore_max_us": 289.21000000000004,
+              "indexer_score/start_us": 397.04,
+              "sparse_attention/span_us": 210.83,
+              "sparse_attention/incore_max_us": 210.47,
+              "sparse_attention/start_us": 728.49
+            }
+          },
+          "l1_raw": [
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_00_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_00_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_01_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_01_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_02_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_02_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_03_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_03_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_04_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_04_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_05_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_05_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_06_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_06_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_07_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_07_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_08_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_08_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_09_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b24_s6/l1_09_mpmd_control/chip_swimlane_records.json"
+            }
+          ]
+        },
+        {
+          "case": "h8192_b32_s6",
+          "source": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/result.json",
+          "statistics_us": {
+            "mpmd_control": {
+              "min": 1025.82,
+              "mean": 1056.652,
+              "max": 1091.5,
+              "samples": [
+                1091.5,
+                1033.08,
+                1025.82,
+                1058.32,
+                1045.0,
+                1051.76,
+                1086.8,
+                1074.58,
+                1055.76,
+                1043.9
+              ],
+              "median": 1053.76
+            },
+            "mpmd": {
+              "min": 1039.8,
+              "mean": 1056.6,
+              "max": 1077.12,
+              "samples": [
+                1074.9,
+                1057.76,
+                1047.06,
+                1077.12,
+                1053.5,
+                1039.8,
+                1059.66,
+                1062.12,
+                1044.44,
+                1049.64
+              ],
+              "median": 1055.63
+            }
+          },
+          "checks": {
+            "mpmd_control_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            }
+          },
+          "stage_medians_us": {
+            "mpmd_control": {
+              "indexer_head_coefficients/span_us": 10.42,
+              "indexer_head_coefficients/incore_max_us": 7.99,
+              "indexer_head_coefficients/start_us": 434.5,
+              "indexer_score/span_us": 88.14,
+              "indexer_score/incore_max_us": 87.47,
+              "indexer_score/start_us": 458.0,
+              "sparse_attention/span_us": 253.28000000000003,
+              "sparse_attention/incore_max_us": 252.89000000000001,
+              "sparse_attention/start_us": 589.35
+            },
+            "mpmd": {
+              "indexer_head_coefficients/span_us": 10.719999999999999,
+              "indexer_head_coefficients/incore_max_us": 10.36,
+              "indexer_head_coefficients/start_us": 438.68,
+              "indexer_score/span_us": 85.25,
+              "indexer_score/incore_max_us": 84.35,
+              "indexer_score/start_us": 461.49,
+              "sparse_attention/span_us": 254.68,
+              "sparse_attention/incore_max_us": 254.35,
+              "sparse_attention/start_us": 590.9200000000001
+            }
+          },
+          "l1_raw": [
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_00_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_00_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_01_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_01_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_02_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_02_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_03_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_03_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_04_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_04_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_05_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_05_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_06_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_06_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_07_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_07_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_08_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_08_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_09_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h8192_b32_s6/l1_09_mpmd_control/chip_swimlane_records.json"
+            }
+          ]
+        },
+        {
+          "case": "h131072_b16_mixed",
+          "source": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/result.json",
+          "statistics_us": {
+            "mpmd_control": {
+              "min": 755.74,
+              "mean": 774.498,
+              "max": 788.5,
+              "samples": [
+                781.12,
+                776.5,
+                788.5,
+                772.04,
+                755.74,
+                764.22,
+                764.68,
+                786.52,
+                786.8,
+                768.86
+              ],
+              "median": 774.27
+            },
+            "mpmd": {
+              "min": 757.64,
+              "mean": 770.518,
+              "max": 783.66,
+              "samples": [
+                762.06,
+                775.2,
+                771.06,
+                782.58,
+                757.64,
+                765.72,
+                783.66,
+                770.46,
+                771.74,
+                765.06
+              ],
+              "median": 770.76
+            }
+          },
+          "checks": {
+            "mpmd_control_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            }
+          },
+          "stage_medians_us": {
+            "mpmd_control": {
+              "indexer_head_coefficients/span_us": 5.050000000000001,
+              "indexer_head_coefficients/incore_max_us": 4.95,
+              "indexer_head_coefficients/start_us": 267.71000000000004,
+              "indexer_score/span_us": 185.93,
+              "indexer_score/incore_max_us": 184.93,
+              "indexer_score/start_us": 282.48,
+              "sparse_attention/span_us": 135.38,
+              "sparse_attention/incore_max_us": 135.11,
+              "sparse_attention/start_us": 502.68
+            },
+            "mpmd": {
+              "indexer_head_coefficients/span_us": 5.64,
+              "indexer_head_coefficients/incore_max_us": 5.540000000000001,
+              "indexer_head_coefficients/start_us": 267.63,
+              "indexer_score/span_us": 181.9,
+              "indexer_score/incore_max_us": 180.55,
+              "indexer_score/start_us": 282.91,
+              "sparse_attention/span_us": 125.94,
+              "sparse_attention/incore_max_us": 125.59,
+              "sparse_attention/start_us": 499.19000000000005
+            }
+          },
+          "l1_raw": [
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_00_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_00_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_01_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_01_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_02_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_02_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_03_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_03_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_04_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_04_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_05_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_05_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_06_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_06_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_07_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_07_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_08_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_08_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_09_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_pair_h131072_b16_mixed/l1_09_mpmd_control/chip_swimlane_records.json"
+            }
+          ]
+        }
+      ],
+      "state_validation": {
+        "source": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v26_state_h131072_b28/result.json",
+        "passed": true,
+        "metadata_cases": [
+          {
+            "name": "uniform_s1",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "uniform_s6",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "uniform_s2",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "uniform_s3",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "uniform_s4",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "uniform_s5",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "no_compact_output",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "mixed_reverse_owners",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "uniform_s1_again",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "name": "fragmented_pages",
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          }
+        ],
+        "continuous_steps": [
+          {
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          },
+          {
+            "passed": true,
+            "checks": {
+              "spmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              },
+              "mpmd": {
+                "guards": true,
+                "numerical": true,
+                "bit_equal": true
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "interpretation": "v25短档系数核内有收益，v26进一步在Score复用证明；混长guard为false，其耗时变化不能归因于等长快路径。均维持42提交点和独立任务，无GM信号或Host回读。候选尚未做八档完整验收，不替换生产v22。"
+}

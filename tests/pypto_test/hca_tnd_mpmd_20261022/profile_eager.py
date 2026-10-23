@@ -42,6 +42,7 @@ def extract_windows(trace_path, prefix, count):
                 merged[-1][1] = max(merged[-1][1], hi)
         busy = sum(hi - lo for lo, hi in merged)
         windows.append({"sample": index, "device_span_us": last - first,
+                        "cpu_elapsed_us": end - begin,
                         "busy_union_us": busy, "uncovered_gap_us": last - first - busy,
                         "events": len(rows), "streams": sorted({str(row["tid"]) for row in rows}),
                         "task_types": sorted({row.get("args", {}).get("Task Type", "unknown") for row in rows}),
@@ -50,6 +51,7 @@ def extract_windows(trace_path, prefix, count):
     return {"execution_mode": "eager_direct", "aclgraph_replay": False,
             "scope": "每次直接调用内全部设备流的最早活动到最晚结束；含派发造成的设备空隙",
             "samples_us": values, "median_us": statistics.median(values),
+            "cpu_elapsed_median_us": statistics.median(window["cpu_elapsed_us"] for window in windows),
             "busy_union_median_us": statistics.median(window["busy_union_us"] for window in windows),
             "min_us": min(values), "max_us": max(values), "windows": windows,
             "trace": str(trace_path)}

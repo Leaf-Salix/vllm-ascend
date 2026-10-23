@@ -1,0 +1,743 @@
+{
+  "control": "d86c95f69 v22b",
+  "shared_release": "csa-shared-20261022-logical-codegen",
+  "variants": [
+    {
+      "candidate": "aicpu_v29_indexer_query_priority",
+      "adopted": false,
+      "source_diff": {
+        "entry.py": "--- a/entry.py\n+++ b/entry.py\n@@ -503,8 +503,9 @@\n     cache_rows: pl.InOut[pl.Tensor[[CACHE_ROWS, 512], pl.BF16]],\n     tokens: pl.Scalar[pl.INDEX],\n     kv_workers: pl.Scalar[pl.INDEX],\n+    query_priority_tid: pl.Scalar[pl.TASK_ID],\n ):\n-    with pl.spmd(GROUPS, name_hint=\"qproj_b\", allow_early_resolve=True, sync_start=False):\n+    with pl.spmd(GROUPS, name_hint=\"qproj_b\", allow_early_resolve=True, sync_start=False, deps=[query_priority_tid]):\n         q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, pl.tile.get_block_idx(), GROUPS)\n     with pl.spmd(VECTORS, name_hint=\"qproj_dequant_rms_nope_rope\", allow_early_resolve=True, sync_start=False):\n         q_flat = q_dequant_rope_stage(\n@@ -950,6 +951,7 @@\n             cache_rows,\n             tokens,\n             kv_workers,\n+            qa_tid,  # 短历史维持原次序；QA已经是QR→Q_B的数据前驱。\n         )\n         (main_value, main_score, main_pooled, main_state, main_normed, main_debug, main_cache, main_project_tid) = (\n             main_compressor_tasks(\n@@ -1066,7 +1068,9 @@\n             idx_had = indexer_compressor_hadamard_stage(\n                 idx_normed, hadamard, idx_had, compact_count, pl.tile.get_block_idx(), GROUPS\n             )\n-    with pl.spmd(GROUPS, name_hint=\"indexer_query_proj\", allow_early_resolve=True, sync_start=False):\n+    with pl.spmd(\n+        GROUPS, name_hint=\"indexer_query_proj\", allow_early_resolve=True, sync_start=False\n+    ) as indexer_query_tid:\n         idx_query_acc = indexer_query_project_stage(qr, idx_wq_b, idx_query_acc, pl.tile.get_block_idx(), GROUPS)\n     with pl.spmd(query_rope_workers, name_hint=\"indexer_query_rope\", allow_early_resolve=True, sync_start=False):\n         idx_query_rope = indexer_query_dequant_rope_stage(\n@@ -1211,6 +1215,7 @@\n             cache_rows,\n             tokens,\n             kv_workers,\n+            indexer_query_tid,  # 长历史有意优先Indexer投影；这是调度门控，不是额外数学依赖。\n         )\n     with pl.spmd(\n         GROUPS, name_hint=\"indexer_score\", allow_early_resolve=True, sync_start=True, deps=[idx_cache_tid]\n"
+      },
+      "cpu_receipt": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/cpu_v29_h131072_b24_s6/result.json",
+      "paired_performance": [
+        {
+          "case": "h131072_b24_s6",
+          "source": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/result.json",
+          "statistics_us": {
+            "mpmd_control": {
+              "min": 1089.06,
+              "mean": 1114.842,
+              "max": 1143.62,
+              "samples": [
+                1125.04,
+                1117.76,
+                1143.62,
+                1119.28,
+                1089.06,
+                1113.72,
+                1094.64,
+                1105.08,
+                1139.42,
+                1100.8
+              ],
+              "median": 1115.74
+            },
+            "mpmd": {
+              "min": 1076.4,
+              "mean": 1096.276,
+              "max": 1128.74,
+              "samples": [
+                1096.16,
+                1128.74,
+                1097.56,
+                1076.4,
+                1102.54,
+                1080.04,
+                1103.46,
+                1090.62,
+                1091.24,
+                1096.0
+              ],
+              "median": 1096.08
+            }
+          },
+          "checks": {
+            "mpmd_control_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            }
+          },
+          "stage_medians_us": {
+            "mpmd_control": {
+              "hc_sinkhorn/span_us": 17.400000000000002,
+              "hc_sinkhorn/incore_max_us": 17.26,
+              "hc_sinkhorn/start_us": 58.36,
+              "hc_sinkhorn/end_us": 76.0,
+              "hc_sinkhorn/launch_spread_us": 0.44,
+              "hc_mix_norm/span_us": 19.47,
+              "hc_mix_norm/incore_max_us": 19.21,
+              "hc_mix_norm/start_us": 81.62,
+              "hc_mix_norm/end_us": 101.09,
+              "hc_mix_norm/launch_spread_us": 0.39,
+              "qproj_b/span_us": 114.93,
+              "qproj_b/incore_max_us": 57.64,
+              "qproj_b/start_us": 190.55,
+              "qproj_b/end_us": 302.20000000000005,
+              "qproj_b/launch_spread_us": 74.21000000000001,
+              "indexer_query_proj/span_us": 75.1,
+              "indexer_query_proj/incore_max_us": 29.64,
+              "indexer_query_proj/start_us": 198.34,
+              "indexer_query_proj/end_us": 274.14,
+              "indexer_query_proj/launch_spread_us": 64.72,
+              "indexer_query_hadamard/span_us": 7.76,
+              "indexer_query_hadamard/incore_max_us": 7.42,
+              "indexer_query_hadamard/start_us": 349.44,
+              "indexer_query_hadamard/end_us": 357.27,
+              "indexer_query_hadamard/launch_spread_us": 0.5,
+              "indexer_head_coefficients/span_us": 7.15,
+              "indexer_head_coefficients/incore_max_us": 7.09,
+              "indexer_head_coefficients/start_us": 388.53,
+              "indexer_head_coefficients/end_us": 395.78999999999996,
+              "indexer_head_coefficients/launch_spread_us": 0.55,
+              "indexer_score/span_us": 286.52,
+              "indexer_score/incore_max_us": 286.13,
+              "indexer_score/start_us": 405.34000000000003,
+              "indexer_score/end_us": 691.9000000000001,
+              "indexer_score/launch_spread_us": 0.7000000000000001,
+              "sparse_attention/span_us": 208.23000000000002,
+              "sparse_attention/incore_max_us": 207.91000000000003,
+              "sparse_attention/start_us": 734.9100000000001,
+              "sparse_attention/end_us": 944.13,
+              "sparse_attention/launch_spread_us": 0.73
+            },
+            "mpmd": {
+              "hc_sinkhorn/span_us": 17.86,
+              "hc_sinkhorn/incore_max_us": 17.67,
+              "hc_sinkhorn/start_us": 58.290000000000006,
+              "hc_sinkhorn/end_us": 76.38,
+              "hc_sinkhorn/launch_spread_us": 0.43000000000000005,
+              "hc_mix_norm/span_us": 18.89,
+              "hc_mix_norm/incore_max_us": 18.66,
+              "hc_mix_norm/start_us": 82.39,
+              "hc_mix_norm/end_us": 101.36,
+              "hc_mix_norm/launch_spread_us": 0.47,
+              "qproj_b/span_us": 65.35,
+              "qproj_b/incore_max_us": 65.02000000000001,
+              "qproj_b/start_us": 231.85000000000002,
+              "qproj_b/end_us": 298.36,
+              "qproj_b/launch_spread_us": 10.309999999999999,
+              "indexer_query_proj/span_us": 40.33,
+              "indexer_query_proj/incore_max_us": 25.6,
+              "indexer_query_proj/start_us": 186.25,
+              "indexer_query_proj/end_us": 227.38,
+              "indexer_query_proj/launch_spread_us": 30.37,
+              "indexer_query_hadamard/span_us": 10.440000000000001,
+              "indexer_query_hadamard/incore_max_us": 7.32,
+              "indexer_query_hadamard/start_us": 317.66,
+              "indexer_query_hadamard/end_us": 327.28,
+              "indexer_query_hadamard/launch_spread_us": 4.26,
+              "indexer_head_coefficients/span_us": 8.26,
+              "indexer_head_coefficients/incore_max_us": 7.99,
+              "indexer_head_coefficients/start_us": 368.54,
+              "indexer_head_coefficients/end_us": 376.76,
+              "indexer_head_coefficients/launch_spread_us": 0.88,
+              "indexer_score/span_us": 286.99,
+              "indexer_score/incore_max_us": 286.53,
+              "indexer_score/start_us": 385.62,
+              "indexer_score/end_us": 672.9100000000001,
+              "indexer_score/launch_spread_us": 0.8600000000000001,
+              "sparse_attention/span_us": 215.3,
+              "sparse_attention/incore_max_us": 214.62,
+              "sparse_attention/start_us": 715.11,
+              "sparse_attention/end_us": 929.7,
+              "sparse_attention/launch_spread_us": 0.77
+            }
+          },
+          "l1_raw": [
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_00_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_00_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_01_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_01_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_02_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_02_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_03_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_03_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_04_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_04_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_05_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_05_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_06_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_06_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_07_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_07_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_08_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_08_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_09_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b24_s6/l1_09_mpmd_control/chip_swimlane_records.json"
+            }
+          ]
+        },
+        {
+          "case": "h8192_b32_s6",
+          "source": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/result.json",
+          "statistics_us": {
+            "mpmd_control": {
+              "min": 1039.92,
+              "mean": 1064.396,
+              "max": 1105.2,
+              "samples": [
+                1047.72,
+                1056.1,
+                1065.62,
+                1105.2,
+                1080.28,
+                1042.88,
+                1073.64,
+                1044.7,
+                1087.9,
+                1039.92
+              ],
+              "median": 1060.86
+            },
+            "mpmd": {
+              "min": 1051.16,
+              "mean": 1077.766,
+              "max": 1143.9,
+              "samples": [
+                1078.06,
+                1070.98,
+                1104.3,
+                1084.34,
+                1143.9,
+                1052.56,
+                1075.0,
+                1054.72,
+                1062.64,
+                1051.16
+              ],
+              "median": 1072.99
+            }
+          },
+          "checks": {
+            "mpmd_control_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            }
+          },
+          "stage_medians_us": {
+            "mpmd_control": {
+              "hc_sinkhorn/span_us": 19.810000000000002,
+              "hc_sinkhorn/incore_max_us": 18.89,
+              "hc_sinkhorn/start_us": 63.480000000000004,
+              "hc_sinkhorn/end_us": 83.19,
+              "hc_sinkhorn/launch_spread_us": 0.6100000000000001,
+              "hc_mix_norm/span_us": 20.740000000000002,
+              "hc_mix_norm/incore_max_us": 20.29,
+              "hc_mix_norm/start_us": 91.86,
+              "hc_mix_norm/end_us": 112.84,
+              "hc_mix_norm/launch_spread_us": 1.52,
+              "qproj_b/span_us": 109.16,
+              "qproj_b/incore_max_us": 62.35,
+              "qproj_b/start_us": 253.92000000000002,
+              "qproj_b/end_us": 353.25,
+              "qproj_b/launch_spread_us": 60.480000000000004,
+              "indexer_query_proj/span_us": 70.91,
+              "indexer_query_proj/incore_max_us": 32.03,
+              "indexer_query_proj/start_us": 236.48000000000002,
+              "indexer_query_proj/end_us": 303.39,
+              "indexer_query_proj/launch_spread_us": 58.24,
+              "indexer_query_hadamard/span_us": 15.65,
+              "indexer_query_hadamard/incore_max_us": 9.6,
+              "indexer_query_hadamard/start_us": 371.77,
+              "indexer_query_hadamard/end_us": 391.36,
+              "indexer_query_hadamard/launch_spread_us": 4.05,
+              "indexer_head_coefficients/span_us": 15.100000000000001,
+              "indexer_head_coefficients/incore_max_us": 14.780000000000001,
+              "indexer_head_coefficients/start_us": 438.83000000000004,
+              "indexer_head_coefficients/end_us": 453.98,
+              "indexer_head_coefficients/launch_spread_us": 0.8300000000000001,
+              "indexer_score/span_us": 84.95,
+              "indexer_score/incore_max_us": 84.38,
+              "indexer_score/start_us": 465.8,
+              "indexer_score/end_us": 550.71,
+              "indexer_score/launch_spread_us": 0.74,
+              "sparse_attention/span_us": 247.88,
+              "sparse_attention/incore_max_us": 247.4,
+              "sparse_attention/start_us": 595.88,
+              "sparse_attention/end_us": 843.2,
+              "sparse_attention/launch_spread_us": 0.8200000000000001
+            },
+            "mpmd": {
+              "hc_sinkhorn/span_us": 18.89,
+              "hc_sinkhorn/incore_max_us": 18.71,
+              "hc_sinkhorn/start_us": 50.53,
+              "hc_sinkhorn/end_us": 69.39,
+              "hc_sinkhorn/launch_spread_us": 0.54,
+              "hc_mix_norm/span_us": 21.66,
+              "hc_mix_norm/incore_max_us": 19.55,
+              "hc_mix_norm/start_us": 89.64,
+              "hc_mix_norm/end_us": 111.22,
+              "hc_mix_norm/launch_spread_us": 2.79,
+              "qproj_b/span_us": 106.8,
+              "qproj_b/incore_max_us": 62.160000000000004,
+              "qproj_b/start_us": 244.41000000000003,
+              "qproj_b/end_us": 349.82000000000005,
+              "qproj_b/launch_spread_us": 62.42,
+              "indexer_query_proj/span_us": 47.41,
+              "indexer_query_proj/incore_max_us": 29.660000000000004,
+              "indexer_query_proj/start_us": 231.64,
+              "indexer_query_proj/end_us": 274.07000000000005,
+              "indexer_query_proj/launch_spread_us": 30.07,
+              "indexer_query_hadamard/span_us": 17.78,
+              "indexer_query_hadamard/incore_max_us": 9.73,
+              "indexer_query_hadamard/start_us": 341.34000000000003,
+              "indexer_query_hadamard/end_us": 364.53,
+              "indexer_query_hadamard/launch_spread_us": 10.16,
+              "indexer_head_coefficients/span_us": 17.79,
+              "indexer_head_coefficients/incore_max_us": 11.05,
+              "indexer_head_coefficients/start_us": 436.59000000000003,
+              "indexer_head_coefficients/end_us": 454.71000000000004,
+              "indexer_head_coefficients/launch_spread_us": 10.780000000000001,
+              "indexer_score/span_us": 91.97999999999999,
+              "indexer_score/incore_max_us": 91.55,
+              "indexer_score/start_us": 465.05,
+              "indexer_score/end_us": 557.56,
+              "indexer_score/launch_spread_us": 0.7000000000000001,
+              "sparse_attention/span_us": 248.62,
+              "sparse_attention/incore_max_us": 248.14000000000001,
+              "sparse_attention/start_us": 604.24,
+              "sparse_attention/end_us": 851.05,
+              "sparse_attention/launch_spread_us": 0.85
+            }
+          },
+          "l1_raw": [
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_00_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_00_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_01_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_01_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_02_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_02_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_03_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_03_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_04_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_04_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_05_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_05_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_06_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_06_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_07_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_07_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_08_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_08_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_09_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h8192_b32_s6/l1_09_mpmd_control/chip_swimlane_records.json"
+            }
+          ]
+        },
+        {
+          "case": "h131072_b16_mixed",
+          "source": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/result.json",
+          "statistics_us": {
+            "mpmd_control": {
+              "min": 761.1,
+              "mean": 774.652,
+              "max": 781.58,
+              "samples": [
+                767.0,
+                767.14,
+                775.46,
+                779.92,
+                779.26,
+                780.96,
+                773.12,
+                780.98,
+                781.58,
+                761.1
+              ],
+              "median": 777.36
+            },
+            "mpmd": {
+              "min": 760.1,
+              "mean": 771.72,
+              "max": 782.74,
+              "samples": [
+                764.84,
+                768.72,
+                782.74,
+                776.1,
+                775.1,
+                760.1,
+                777.2,
+                770.2,
+                764.46,
+                777.74
+              ],
+              "median": 772.6500000000001
+            }
+          },
+          "checks": {
+            "mpmd_control_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_eager": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_graph": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_control_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            },
+            "mpmd_post_l1": {
+              "guards": true,
+              "numerical": true,
+              "bit_equal": true
+            }
+          },
+          "stage_medians_us": {
+            "mpmd_control": {
+              "hc_sinkhorn/span_us": 16.02,
+              "hc_sinkhorn/incore_max_us": 15.9,
+              "hc_sinkhorn/start_us": 36.25,
+              "hc_sinkhorn/end_us": 52.32,
+              "hc_sinkhorn/launch_spread_us": 0.26,
+              "hc_mix_norm/span_us": 17.82,
+              "hc_mix_norm/incore_max_us": 17.78,
+              "hc_mix_norm/start_us": 42.74,
+              "hc_mix_norm/end_us": 60.53,
+              "hc_mix_norm/launch_spread_us": 0.25,
+              "qproj_b/span_us": 78.73,
+              "qproj_b/incore_max_us": 42.94,
+              "qproj_b/start_us": 125.73,
+              "qproj_b/end_us": 206.03,
+              "qproj_b/launch_spread_us": 51.510000000000005,
+              "indexer_query_proj/span_us": 58.980000000000004,
+              "indexer_query_proj/incore_max_us": 29.0,
+              "indexer_query_proj/start_us": 135.26,
+              "indexer_query_proj/end_us": 200.41,
+              "indexer_query_proj/launch_spread_us": 51.8,
+              "indexer_query_hadamard/span_us": 5.9,
+              "indexer_query_hadamard/incore_max_us": 5.61,
+              "indexer_query_hadamard/start_us": 239.07999999999998,
+              "indexer_query_hadamard/end_us": 245.59,
+              "indexer_query_hadamard/launch_spread_us": 0.4,
+              "indexer_head_coefficients/span_us": 4.75,
+              "indexer_head_coefficients/incore_max_us": 4.62,
+              "indexer_head_coefficients/start_us": 270.83,
+              "indexer_head_coefficients/end_us": 275.81000000000006,
+              "indexer_head_coefficients/launch_spread_us": 0.54,
+              "indexer_score/span_us": 184.23000000000002,
+              "indexer_score/incore_max_us": 183.76999999999998,
+              "indexer_score/start_us": 286.04,
+              "indexer_score/end_us": 470.12,
+              "indexer_score/launch_spread_us": 1.8900000000000001,
+              "sparse_attention/span_us": 129.66,
+              "sparse_attention/incore_max_us": 129.3,
+              "sparse_attention/start_us": 508.55,
+              "sparse_attention/end_us": 638.4,
+              "sparse_attention/launch_spread_us": 1.05
+            },
+            "mpmd": {
+              "hc_sinkhorn/span_us": 15.89,
+              "hc_sinkhorn/incore_max_us": 15.82,
+              "hc_sinkhorn/start_us": 36.67,
+              "hc_sinkhorn/end_us": 52.66,
+              "hc_sinkhorn/launch_spread_us": 0.3,
+              "hc_mix_norm/span_us": 17.28,
+              "hc_mix_norm/incore_max_us": 17.189999999999998,
+              "hc_mix_norm/start_us": 43.19,
+              "hc_mix_norm/end_us": 60.45,
+              "hc_mix_norm/launch_spread_us": 0.22,
+              "qproj_b/span_us": 52.56,
+              "qproj_b/incore_max_us": 52.05,
+              "qproj_b/start_us": 169.45,
+              "qproj_b/end_us": 222.35,
+              "qproj_b/launch_spread_us": 7.35,
+              "indexer_query_proj/span_us": 44.27,
+              "indexer_query_proj/incore_max_us": 21.04,
+              "indexer_query_proj/start_us": 125.28999999999999,
+              "indexer_query_proj/end_us": 166.41000000000003,
+              "indexer_query_proj/launch_spread_us": 32.620000000000005,
+              "indexer_query_hadamard/span_us": 7.87,
+              "indexer_query_hadamard/incore_max_us": 4.45,
+              "indexer_query_hadamard/start_us": 220.95,
+              "indexer_query_hadamard/end_us": 230.45,
+              "indexer_query_hadamard/launch_spread_us": 4.54,
+              "indexer_head_coefficients/span_us": 5.12,
+              "indexer_head_coefficients/incore_max_us": 5.040000000000001,
+              "indexer_head_coefficients/start_us": 264.6,
+              "indexer_head_coefficients/end_us": 269.89,
+              "indexer_head_coefficients/launch_spread_us": 0.52,
+              "indexer_score/span_us": 184.64,
+              "indexer_score/incore_max_us": 183.77,
+              "indexer_score/start_us": 278.47,
+              "indexer_score/end_us": 461.46000000000004,
+              "indexer_score/launch_spread_us": 2.35,
+              "sparse_attention/span_us": 130.06,
+              "sparse_attention/incore_max_us": 129.74,
+              "sparse_attention/start_us": 496.25,
+              "sparse_attention/end_us": 626.3199999999999,
+              "sparse_attention/launch_spread_us": 0.97
+            }
+          },
+          "l1_raw": [
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_00_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_00_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_01_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_01_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_02_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_02_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_03_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_03_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_04_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_04_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_05_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_05_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_06_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_06_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_07_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_07_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_08_mpmd_control/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_08_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_09_mpmd/chip_swimlane_records.json"
+            },
+            {
+              "side": "mpmd_control",
+              "raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v29_pair_h131072_b16_mixed/l1_09_mpmd_control/chip_swimlane_records.json"
+            }
+          ]
+        }
+      ],
+      "decision": "长B24中位/最大改善，混长小幅改善；短档中位/最大回退。仍未完成八档与状态验收，不采用生产，用户要求本轮收尾后暂停，保留已验证候选补丁与全部证据。"
+    }
+  ]
+}

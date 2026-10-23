@@ -8,7 +8,20 @@ import torch
 
 from ..deepseek_v4_flash_csa.native_adapter import prepare_weights as _prepare_weights
 from ..deepseek_v4_flash_csa.native_storage import physical_pages, table_storage
-from .entry import _decode_hca_tp1_layer, decode_hca_tp1_layer_test
+from ..deepseek_v4_flash_csa.nz_mode import QUANT_WEIGHT_NZ
+from .entry import _decode_hca_tp1_layer, decode_hca_tp1_layer_test, decode_hca_tp1_layer_tall_test
+
+# 64K实测有回退，当前只在至少128K的长历史区间采用；使用Native已有Host字段。
+# 数学正确性不依赖这个阈值，它只选择Q_B/O_B供数策略；缺少Host字段则保持普通入口。
+LONG_HISTORY_MIN = 131072
+TALL_PROJECTION_MIN_TOKENS = 129
+TALL_PROJECTION_MAX_TOKENS = 192
+
+
+def use_tall_projection(tokens, max_seq_lens):
+    """只检查已知shape和Host整数，不对设备Tensor执行item、int或bool。"""
+    return (QUANT_WEIGHT_NZ and TALL_PROJECTION_MIN_TOKENS <= tokens <= TALL_PROJECTION_MAX_TOKENS
+            and isinstance(max_seq_lens, int) and max_seq_lens >= LONG_HISTORY_MIN)
 
 
 def token_capacity_view(value, tokens, width):
@@ -29,6 +42,7 @@ def token_capacity_view(value, tokens, width):
 @dataclass(frozen=True)
 class HCAOperators:
     attention: Any
+    attention_tall: Any = None
 
     @classmethod
     def register(cls, *, config=None):
@@ -39,7 +53,11 @@ class HCAOperators:
         validate_reduction_mode()
         if ATOMIC_ADD:
             raise ValueError("HCA 首版要求 VLLM_ASCEND_PTO_CSA_ATOMIC_ADD=0，请在导入算子前设置")
-        return cls(pypto.torch.register(decode_hca_tp1_layer_test, "dsv4_hca_tnd::attention", config=config))
+        return cls(
+            pypto.torch.register(decode_hca_tp1_layer_test, "dsv4_hca_tnd::attention", config=config),
+            pypto.torch.register(decode_hca_tp1_layer_tall_test, "dsv4_hca_tnd::attention_tall", config=config)
+            if QUANT_WEIGHT_NZ else None,
+        )
 
 
 def prepare_weights(attention, layer):
@@ -100,8 +118,13 @@ class NativeHCACall:
             ori_slots=token_capacity_view(req["swa"].slot_mapping, tokens, 2),
         )
         self.operators = operators
-        # 根 ABI 全部是 Native device Tensor；图捕获后只更新其内容。
-        self.core_args = tuple(self.args[arg.name] for arg in operators.attention._schema.arguments)
+        selected_tall = operators.attention_tall is not None and use_tall_projection(
+            tokens, getattr(main, "max_seq_lens", None),
+        )
+        self.policy = "tall_projection" if selected_tall else "default"
+        self.kernel = operators.attention_tall if selected_tall else operators.attention
+        # 根ABI全部为Native device Tensor；每次调用消费本轮设备内容。
+        self.core_args = tuple(self.args[arg.name] for arg in self.kernel._schema.arguments)
 
     def __call__(self):
-        self.operators.attention(*self.core_args)
+        self.kernel(*self.core_args)

@@ -315,5 +315,384 @@
     "performance": false,
     "shared_release": "csa-shared-20261022-logical-codegen",
     "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_215135_208387121868",
+    "candidate": "aicpu_v17_quant_row_tasks",
+    "control": "aicpu_v16_bsh_start_policy",
+    "case": "h131072_b24_s6",
+    "purpose": "输出量化每32行独立分工，与已采用v16做十窗L1及数值对照",
+    "output": "runs/aicpu_v17_pair_h131072_b24_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_215135_208394721643",
+    "candidate": "aicpu_v17_quant_row_tasks",
+    "control": "aicpu_v16_bsh_start_policy",
+    "case": "h8192_b32_s6",
+    "purpose": "输出量化每32行独立分工，与已采用v16做十窗L1及数值对照",
+    "output": "runs/aicpu_v17_pair_h8192_b32_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_215342_22000345915",
+    "candidate": "aicpu_v18_hc_start_policy",
+    "control": "aicpu_v16_bsh_start_policy",
+    "case": "h131072_b24_s6",
+    "purpose": "仅取消HC六段整组起跑约束，与v16同进程十窗L1及数值对照",
+    "output": "runs/aicpu_v18_pair_h131072_b24_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_215342_220012618655",
+    "candidate": "aicpu_v18_hc_start_policy",
+    "control": "aicpu_v16_bsh_start_policy",
+    "case": "h8192_b32_s6",
+    "purpose": "仅取消HC六段整组起跑约束，与v16同进程十窗L1及数值对照",
+    "output": "runs/aicpu_v18_pair_h8192_b32_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_215924_246298315516",
+    "candidate": "aicpu_v19_bsh_projection_order",
+    "control": "aicpu_v16_bsh_start_policy",
+    "case": "h131072_b24_s6",
+    "purpose": "对齐BSH的QKV/Main Compressor/Indexer提交顺序与compact Hadamard门控",
+    "output": "runs/aicpu_v19_pair_h131072_b24_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_215924_246305815420",
+    "candidate": "aicpu_v19_bsh_projection_order",
+    "control": "aicpu_v16_bsh_start_policy",
+    "case": "h8192_b32_s6",
+    "purpose": "对齐BSH的QKV/Main Compressor/Indexer提交顺序与compact Hadamard门控",
+    "output": "runs/aicpu_v19_pair_h8192_b32_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_220930_28518918144",
+    "candidate": "aicpu_v20_live_indexer_workers",
+    "control": "aicpu_v16_bsh_start_policy",
+    "case": "h131072_b24_s6",
+    "purpose": "按AICPU实际compact行数和query组数减少空Hadamard/系数任务",
+    "output": "runs/aicpu_v20_pair_h131072_b24_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_220930_285199619665",
+    "candidate": "aicpu_v20_live_indexer_workers",
+    "control": "aicpu_v16_bsh_start_policy",
+    "case": "h8192_b32_s6",
+    "purpose": "按AICPU实际compact行数和query组数减少空Hadamard/系数任务",
+    "output": "runs/aicpu_v20_pair_h8192_b32_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_222529_354448811199",
+    "candidate": "aicpu_v21c_short_bsh_order",
+    "case": "h131072_b24_s6",
+    "purpose": "分档共用helper的长档v16回归对照",
+    "output": "runs/aicpu_v21c_pair_h131072_b24_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_222529_3544533951",
+    "candidate": "aicpu_v21c_short_bsh_order",
+    "case": "h8192_b32_s6",
+    "purpose": "短档候选完整L1十窗和含AICPU全流Profiler三十窗、SPMD数值对照",
+    "output": "runs/aicpu_v21c_full_h8192_b32_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_222529_354457319784",
+    "candidate": "aicpu_v21c_short_bsh_order",
+    "case": "h8192_b32",
+    "purpose": "短档同址metadata十场景及四步连续状态验证",
+    "output": "runs/aicpu_v21c_state_h8192_b32",
+    "last_observed_status": "completed (exit=1)",
+    "failure": "测试入口不支持指定的短档状态case，导入/编译算子之前退出；未运行设备计算。使用独立冻结8320/B32状态场景补齐。"
+  },
+  {
+    "task_id": "task_20261022_223520_39630766868",
+    "candidate": "aicpu_v21c_short_state",
+    "case": "h8320_b32_state",
+    "purpose": "短历史策略资格验证：固定同址状态矩阵",
+    "output": "runs/aicpu_v21c_state_fixed_h8320_b32_state",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_223520_39631169088",
+    "candidate": "aicpu_v21c_short_bsh_order",
+    "case": "h8192_b32_s6",
+    "purpose": "共用helper后短档同进程十窗L1对照，确认改写没有吃掉v19收益",
+    "output": "runs/aicpu_v21c_pair_h8192_b32_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_223719_40357266587",
+    "candidate": "aicpu_v20_live_indexer_workers",
+    "case": "h131072_b28",
+    "purpose": "验证按真实计数改变启动数在同址metadata/零compact输出/连续状态下的完整正确性",
+    "output": "runs/aicpu_v20_state_h131072_b28",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_224439_11091929974",
+    "candidate": "aicpu_v22b_bsh_order_live_workers",
+    "case": "h131072_b1_s6",
+    "purpose": "组合版完整L1十窗和全流Profiler三十窗、SPMD数值对照",
+    "output": "runs/aicpu_v22b_full_h131072_b1_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_224439_11097528285",
+    "candidate": "aicpu_v22b_bsh_order_live_workers",
+    "case": "h131072_b24_s6",
+    "purpose": "组合版完整L1十窗和全流Profiler三十窗、SPMD数值对照",
+    "output": "runs/aicpu_v22b_full_h131072_b24_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_224439_11103014903",
+    "candidate": "aicpu_v22b_bsh_order_live_workers",
+    "case": "h8192_b32_s6",
+    "purpose": "组合版完整L1十窗和全流Profiler三十窗、SPMD数值对照",
+    "output": "runs/aicpu_v22b_full_h8192_b32_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_224439_1111009723",
+    "candidate": "aicpu_v22b_bsh_order_live_workers",
+    "case": "h131072_b16_mixed",
+    "purpose": "组合版完整L1十窗和全流Profiler三十窗、SPMD数值对照",
+    "output": "runs/aicpu_v22b_full_h131072_b16_mixed",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_224439_111257553",
+    "candidate": "aicpu_v22b_bsh_order_live_workers",
+    "case": "h131072_b28",
+    "purpose": "组合版同址metadata与连续状态验收",
+    "output": "runs/aicpu_v22b_state_h131072_b28",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_233455_22569172794",
+    "candidate": "aicpu_v22b_bsh_order_live_workers",
+    "control": "aicpu_v16_bsh_start_policy",
+    "case": "h131072_b16_mixed",
+    "purpose": "核实混长回退与短档max波动：只补受影响档的同进程十窗对照",
+    "output": "runs/aicpu_v22b_pair_h131072_b16_mixed",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_233455_225695823338",
+    "candidate": "aicpu_v22b_bsh_order_live_workers",
+    "control": "aicpu_v16_bsh_start_policy",
+    "case": "h8192_b32_s6",
+    "purpose": "核实混长回退与短档max波动：只补受影响档的同进程十窗对照",
+    "output": "runs/aicpu_v22b_pair_h8192_b32_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_235350_284901527694",
+    "candidate": "aicpu_v25_uniform_six_scalar",
+    "case": "h131072_b24_s6",
+    "purpose": "真实等长S6谓词与单task Scalar分支：长/短收益及混长回退十窗对照",
+    "output": "runs/aicpu_v25_pair_h131072_b24_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_235350_284905528834",
+    "candidate": "aicpu_v25_uniform_six_scalar",
+    "case": "h8192_b32_s6",
+    "purpose": "真实等长S6谓词与单task Scalar分支：长/短收益及混长回退十窗对照",
+    "output": "runs/aicpu_v25_pair_h8192_b32_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_235350_284912511407",
+    "candidate": "aicpu_v25_uniform_six_scalar",
+    "case": "h131072_b16_mixed",
+    "purpose": "真实等长S6谓词与单task Scalar分支：长/短收益及混长回退十窗对照",
+    "output": "runs/aicpu_v25_pair_h131072_b16_mixed",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_235350_284921324",
+    "candidate": "aicpu_v25_uniform_six_scalar",
+    "case": "h131072_b28",
+    "purpose": "同一图在等长S6/混长/padding间切换，校验每轮predicate与全部状态",
+    "output": "runs/aicpu_v25_state_h131072_b28",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_235350_284935225597",
+    "candidate": "aicpu_v22b_bsh_order_live_workers",
+    "case": "h262144_b16_s6",
+    "purpose": "组合版剩余四档完整L1/全流Profiler验收，不重测参考性能",
+    "output": "runs/aicpu_v22b_full_h262144_b16_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_235350_284952524935",
+    "candidate": "aicpu_v22b_bsh_order_live_workers",
+    "case": "h131072_b8_s6",
+    "purpose": "组合版剩余四档完整L1/全流Profiler验收，不重测参考性能",
+    "output": "runs/aicpu_v22b_full_h131072_b8_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_235350_284968829682",
+    "candidate": "aicpu_v22b_bsh_order_live_workers",
+    "case": "h131072_b16_s6",
+    "purpose": "组合版剩余四档完整L1/全流Profiler验收，不重测参考性能",
+    "output": "runs/aicpu_v22b_full_h131072_b16_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261022_235350_284984111926",
+    "candidate": "aicpu_v22b_bsh_order_live_workers",
+    "case": "h131072_b28_s6",
+    "purpose": "组合版剩余四档完整L1/全流Profiler验收，不重测参考性能",
+    "output": "runs/aicpu_v22b_full_h131072_b28_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_001843_362329327475",
+    "candidate": "aicpu_v26_uniform_score_geometry",
+    "case": "h131072_b24_s6",
+    "purpose": "S6证明与Score寻址快路径，v22同进程对照",
+    "output": "runs/aicpu_v26_pair_h131072_b24_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_001843_362334515360",
+    "candidate": "aicpu_v26_uniform_score_geometry",
+    "case": "h8192_b32_s6",
+    "purpose": "S6证明与Score寻址快路径，v22同进程对照",
+    "output": "runs/aicpu_v26_pair_h8192_b32_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_001843_362342414369",
+    "candidate": "aicpu_v26_uniform_score_geometry",
+    "case": "h131072_b16_mixed",
+    "purpose": "S6证明与Score寻址快路径，v22同进程对照",
+    "output": "runs/aicpu_v26_pair_h131072_b16_mixed",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_001843_362351824911",
+    "candidate": "aicpu_v26_uniform_score_geometry",
+    "case": "h131072_b28",
+    "purpose": "S6证明及Score寻址的同址10场景与连续4步状态",
+    "output": "runs/aicpu_v26_state_h131072_b28",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_003002_404500723988",
+    "candidate": "aicpu_v27_projection_core_budget",
+    "case": "h131072_b24_s6",
+    "purpose": "只改独立task资源预算；v22同进程调度对照",
+    "output": "runs/aicpu_v27_pair_h131072_b24_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_003002_404509511102",
+    "candidate": "aicpu_v27_projection_core_budget",
+    "case": "h8192_b32_s6",
+    "purpose": "只改独立task资源预算；v22同进程调度对照",
+    "output": "runs/aicpu_v27_pair_h8192_b32_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_003002_404514318523",
+    "candidate": "aicpu_v28_sinkhorn_background",
+    "case": "h131072_b24_s6",
+    "purpose": "只改独立task资源预算；v22同进程调度对照",
+    "output": "runs/aicpu_v28_pair_h131072_b24_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_003002_404518519502",
+    "candidate": "aicpu_v28_sinkhorn_background",
+    "case": "h8192_b32_s6",
+    "purpose": "只改独立task资源预算；v22同进程调度对照",
+    "output": "runs/aicpu_v28_pair_h8192_b32_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_003641_1337298547",
+    "candidate": "aicpu_v28_sinkhorn_background",
+    "case": "h131072_b28",
+    "purpose": "Sinkhorn限核受益候选同址状态验证",
+    "output": "runs/aicpu_v28_state_h131072_b28",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_003641_1337759751",
+    "candidate": "aicpu_v28_sinkhorn_background",
+    "case": "h8192_b32_s6",
+    "purpose": "短档受益候选完整L1十窗及全流三十窗",
+    "output": "runs/aicpu_v28_full_h8192_b32_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_003913_24672216061",
+    "candidate": "aicpu_v29_indexer_query_priority",
+    "case": "h131072_b24_s6",
+    "purpose": "Indexer query优先于Q_B，完整L1同进程v22对照",
+    "output": "runs/aicpu_v29_pair_h131072_b24_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_003913_24682728046",
+    "candidate": "aicpu_v29_indexer_query_priority",
+    "case": "h131072_b16_mixed",
+    "purpose": "Indexer query优先于Q_B，完整L1同进程v22对照",
+    "output": "runs/aicpu_v29_pair_h131072_b16_mixed",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_003913_2468718764",
+    "candidate": "aicpu_v29_indexer_query_priority",
+    "case": "h8192_b32_s6",
+    "purpose": "Indexer query优先于Q_B，完整L1同进程v22对照",
+    "output": "runs/aicpu_v29_pair_h8192_b32_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_011015_158530010941",
+    "candidate": "aicpu_v30_query_chunk_pipeline",
+    "case": "h131072_b24_s6",
+    "purpose": "用户暂停后的既有修改收尾：两块query独立AICPU流水，v26对照",
+    "output": "runs/aicpu_v30_pair_h131072_b24_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_011016_158534111435",
+    "candidate": "aicpu_v30_query_chunk_pipeline",
+    "case": "h8192_b32_s6",
+    "purpose": "用户暂停后的既有修改收尾：两块query独立AICPU流水，v26对照",
+    "output": "runs/aicpu_v30_pair_h8192_b32_s6",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_011016_15853947203",
+    "candidate": "aicpu_v30_query_chunk_pipeline",
+    "case": "h131072_b16_mixed",
+    "purpose": "用户暂停后的既有修改收尾：两块query独立AICPU流水，v26对照",
+    "output": "runs/aicpu_v30_pair_h131072_b16_mixed",
+    "last_observed_status": "completed (exit=0)"
+  },
+  {
+    "task_id": "task_20261023_011016_15855402879",
+    "candidate": "aicpu_v30_query_chunk_pipeline",
+    "case": "h131072_b28",
+    "purpose": "既有query切分修改的同址10场景/连续4步收尾",
+    "output": "runs/aicpu_v30_state_h131072_b28",
+    "last_observed_status": "completed (exit=0)"
   }
 ]
