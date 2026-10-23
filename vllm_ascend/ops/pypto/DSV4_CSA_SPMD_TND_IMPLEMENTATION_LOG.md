@@ -4928,3 +4928,51 @@ Plan494.80→AttentionVector647.78→Out787.28μs；C05是287.94→557.60→
 分档”，每个候选都说明预期减少的工作、为何可覆盖目标档、如何证明完整收益。
 若原数学逐bit约束下某条路径需要改变归约顺序，保留为不同算法议题，不悄悄
 放宽本轮约束。没有新保留优化，本轮阶段材料本地提交，未push，goal继续active。
+
+### 2026-10-23：独立Vector先发射的Attention候选通过CPU门禁，开始两档完整验证
+
+上一轮完成实际生成物审计并改变后续行动，属于进展。新轮核对goal仍active，
+生产merged_schedule_v1与公共logical-codegen/validated SDK未变。知识索引仍缺失，
+未重建或扫描全库；复读已定位的Attention流水slot卡，沿用slot最后消费者、
+数值状态版本、两AIV参与集合及三拍排空约束。该卡为draft、未定位平台，
+具体A3行为仍按当前源码、生成物及设备验证判定。
+
+`vector_before_row_dma.pto`先在独立UB地址发Vector，再做显式逐行DMA；正对照
+无V→MTE2/S等待阻断首行DMA，同址负对照保留V→MTE2等待，后置Vector对照也
+单独保留。均是CPU编译，不是硬件加速证据。记录为`vector_dma_probe_v1.json`。
+首个命令误用了build/tools的Python包装入口，缺package root退出；改用公共
+build/bin/ptoas成功。这是调用路径错误，没有当作SDK故障上报。
+
+`attention_overlap_v1`从已采用版本冻结：当当前压缩块和上一Score块都有效、
+且物理plan可用时，在同一个控制分支中先load索引/Score/bias并发出原softmax，
+再做两次32行KV DMA，最后按原大小档顺序通知KV/Prob。与前轮只前取输入不同，
+这次Vector数学本身位于DMA前。概率及mi/li存储仍在采集之后；PV在线归并、
+最终发布和所有数学次序保持。SWA、失效块、首拍、排空及能力外情况保留原体。
+
+两档完整CPU编译及`audit_attention_overlap.py`通过：AIV Vec均180224B，
+AIC Mat475136B、Acc131072B、Left/Right各65536B；C04原有Cube Vec16384B保留。
+根参数/返回ABI与各自已采用版本一致。真实生成物从softmax首条TMULS、
+TROWMAX/TEXP/TROWSUM/TCVT到首行KV TLOAD之间没有PIPE_ALL或V→MTE2/S完成等待；
+索引的MTE2→S保护仍在。独立DMA持久区不与Score/概率/索引区重叠。
+FP32归约走TRowReduceOps，头文件中的Scalar末块归约等待属于整数分支；
+所用Vector底层实现另核对，不能只以外层C++没有wait判断宏内部行为。
+
+这是**第一组32行DMA与先发出的Vector工作具备重叠路径**，不是全64行都已
+证明重叠：第二半块仍等第一半块GM写完才能复用缓冲；实际时长尚需设备证据。
+
+20项CPU检查通过：从实际AIC/AIV源码反向切出事件控制，对两种通知策略各
+枚举1024种双query有效块mask，序列与原版逐项一致，三角色DAG无环；缺少
+一个AIV通知的负对照被拒绝。另核对原AIC/原AIV体、fallback和softmax数学AST，
+并实际执行双32行采集源码，覆盖两lane、半块边界、负哨兵/容量外地址及
+full→partial→empty→full缓冲复用，逐bit搬运及外部哨兵通过。
+这些不代替硬件事件容量、cache可见性或完整算子设备正确性。
+
+两任务均经task-submit，沿用完整链路、各10个有效72角色L1窗口及原同SDK分母：
+
+- C05/device0：`task_20261023_082544_83204314999`。
+- C04/device8：`task_20261023_082745_88724516982`。
+
+任务source和harness保持冻结，实际进展一度分别到candidate/reference编译，
+CCEC进程仍活跃，并非等待超时或kernel失败。任务清单为
+`attention_overlap_v1_tasks.json`，结果审查脚本为`analyze_attention_overlap.py`。
+本条为CPU阶段交接，尚无性能采用结论；生产、原基线和三项保留机制不变，未push。

@@ -44,7 +44,24 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {},
+  "pending_tasks": {
+    "C05_attention_overlap_v1": {
+      "task_id": "task_20261023_082544_83204314999",
+      "case": "C05",
+      "device": 0,
+      "source": "runs/attention_overlap_v1",
+      "output": "runs/h131072_b24_s6_attention_overlap_v1",
+      "status": "running"
+    },
+    "C04_attention_overlap_v1": {
+      "task_id": "task_20261023_082745_88724516982",
+      "case": "C04",
+      "device": 8,
+      "source": "runs/attention_overlap_v1",
+      "output": "runs/h131072_b16_s6_attention_overlap_v1",
+      "status": "submitted"
+    }
+  },
   "next_steps": [
     "Inspect whether the Attention softmax/score-input schedule can overlap scattered KV gathering with proven disjoint UB lifetimes; deduplicate prior prefetch and row-loop experiments first",
     "Use the measured low-contiguity/low-ordered-reuse result to avoid whole-page loads and query-group KV-residency assumptions",
@@ -321,6 +338,16 @@
       "status": "rejected_at_codegen_overlap_gate",
       "full_codegen_passed": true,
       "codegen_audit": "attention_prefetch_v1_codegen.json"
+    },
+    "attention_overlap_v1": {
+      "source": "attention_overlap_v1.json",
+      "adopted": false,
+      "device_execution": false,
+      "status": "C04_C05_full_L1_submitted",
+      "C05_codegen": "attention_overlap_v1_C05_codegen.json",
+      "cpu_checks": 20,
+      "full_codegen_passed": true,
+      "C04_codegen": "attention_overlap_v1_C04_codegen.json"
     }
   },
   "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
