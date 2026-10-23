@@ -6,6 +6,7 @@ import ast
 import hashlib
 import json
 import shutil
+import struct
 import textwrap
 from pathlib import Path
 
@@ -41,7 +42,7 @@ def cube_transform(source):
                         node,
                         "split_ws_acc = pl.tile.create([16, query_group_size * qk_panel_cols], "
                         "dtype=pl.FP32, target_memory=pl.MemorySpace.Acc)\n"
-                        "gemv_packed_transfer = pl.reshape(buf_score_transfer, "
+                        "gemv_packed_transfer = pl.tensor.view(buf_score_transfer, "
                         "[pl.tensor.dim(buf_score_transfer, 0) * pl.tensor.dim(buf_score_transfer, 1) "
                         "// (query_group_size * qk_panel_cols), query_group_size * qk_panel_cols])\n",
                     )
@@ -112,7 +113,7 @@ def vector_transform(source):
 single_transport = pl.tile.create([query_group_size // 2, score_tile], dtype=pl.FP32)
 if {packed_condition}:
     if buf_live > 3:
-        gemv_transport = pl.reshape(buf_score_transfer, [
+        gemv_transport = pl.tensor.view(buf_score_transfer, [
             pl.tensor.dim(buf_score_transfer, 0) * pl.tensor.dim(buf_score_transfer, 1)
             // (query_group_size * qk_panel_cols), query_group_size * qk_panel_cols,
         ])
@@ -133,14 +134,16 @@ else:
 single_scores = single_transport
 if {packed_condition}:
     if buf_live > 3:
-        gemv_linear = pl.tile.arange(0, [1, (query_group_size // 2) * score_tile], dtype=pl.INT32)
+        gemv_linear_i32 = pl.tile.arange(0, [1, (query_group_size // 2) * score_tile], dtype=pl.INT32)
+        gemv_linear = pl.tile.reinterpret_view(gemv_linear_i32, pl.INT16)
         gemv_query = pl.tile.shrs(gemv_linear, 10)
         gemv_panel = pl.tile.ands(pl.tile.shrs(gemv_linear, 6), 15)
         gemv_position = pl.tile.ands(gemv_linear, 63)
-        gemv_indices = pl.add(
+        gemv_indices_i16 = pl.add(
             pl.add(pl.mul(gemv_panel, (query_group_size // 2) * qk_panel_cols),
                    pl.mul(gemv_query, qk_panel_cols)), gemv_position,
         )
+        gemv_indices = pl.tile.reinterpret_view(gemv_indices_i16, pl.INT32)
         gemv_tmp = pl.tile.create([1, (query_group_size // 2) * score_tile], dtype=pl.INT32)
         gemv_rows = pl.tile.gather(
             pl.tile.reshape(single_transport, [1, (query_group_size // 2) * score_tile]), gemv_indices, gemv_tmp,
@@ -178,6 +181,14 @@ def layout_check():
     # Every lane's 3072 outputs select exactly its original query/token order.
     indices = [((i >> 6) & 15) * 192 + (i >> 10) * 64 + (i & 63) for i in range(3072)]
     assert sorted(indices) == list(range(3072))
+    # A3's bitwise scalar ops accept INT16, but its tcvt has no INT16->INT32
+    # path. Work on both INT16 halves of an INT32 index, preserving its zero
+    # high half, then reinterpret the exact bytes back for TGATHER.
+    for index, expected_index in enumerate(indices):
+        halves = struct.unpack("<hh", struct.pack("<i", index))
+        mapped = [((half >> 6) & 15) * 192 + (half >> 10) * 64 + (half & 63) for half in halves]
+        assert 0 <= mapped[0] <= 3071 and mapped[1] == 0
+        assert struct.unpack("<i", struct.pack("<hh", *mapped))[0] == expected_index
     checked = 0
     for worker in range(24):
         for slot in range(2):
@@ -193,16 +204,19 @@ def layout_check():
                 )
                 assert [rows[i] for i in indices] == expected
                 checked += len(expected)
-    return dict(checked_elements=checked, workers=24, fifo_slots=2, lanes=2, bijective=True)
+    return dict(
+        checked_elements=checked,
+        workers=24,
+        fifo_slots=2,
+        lanes=2,
+        bijective=True,
+        s16_intermediates_in_range=True,
+        int32_high_halves_zero=True,
+    )
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--probe", required=True, type=Path)
-    args = parser.parse_args()
-    proof = json.loads(args.probe.read_text())
-    assert proof["passed"] and not proof["cpu_only"] and len(proof["cases"]) == 24
-    assert all(row["bitwise"] and row["guards"] and row["inputs_unchanged"] for row in proof["cases"])
+def build_source():
+    """Pure source transform; CPU previews do not qualify device execution."""
     here = Path(__file__).resolve().parent
     parent = json.loads((here / "output_rectangle_production_v1.json").read_text())
     source = {p.name: p.read_text() for p in Path(parent["source"]).glob("*.py")}
@@ -215,7 +229,21 @@ def main():
     source["entry.py"] = forward_flag(source["entry.py"], "vector_schedule")
     for text in source.values():
         ast.parse(text)
-    name = "score_gemv_pool_v1"
+    return source
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--probe", required=True, type=Path)
+    parser.add_argument("--revision", type=int, default=1)
+    args = parser.parse_args()
+    assert args.revision > 0
+    proof = json.loads(args.probe.read_text())
+    assert proof["passed"] and not proof["cpu_only"] and len(proof["cases"]) == 24
+    assert all(row["bitwise"] and row["guards"] and row["inputs_unchanged"] for row in proof["cases"])
+    here = Path(__file__).resolve().parent
+    source = build_source()
+    name = f"score_gemv_pool_v{args.revision}"
     target = here / "runs" / name
     target.mkdir(exist_ok=False)
     for filename, text in source.items():

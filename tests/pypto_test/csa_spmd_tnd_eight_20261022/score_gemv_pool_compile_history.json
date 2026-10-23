@@ -1,0 +1,33 @@
+{
+  "sdk_modified": false,
+  "completed_attempts": [
+    {
+      "build": "compile_score_gemv_pool_preview_C04_v1",
+      "passed": false,
+      "error": "The operator tile.store requires third argument to be a TensorType or DistributedTensorType, but got TileType\nCheck failed: output_tensor_type at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-shared-20261022/src/ir/op/tile_ops/memory.cpp:410 at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/score_gemv_pool_cpu_preview_v1/indexer_score_stages.py:1045:29",
+      "device_execution": false
+    },
+    {
+      "build": "compile_score_gemv_pool_preview_C04_v2",
+      "passed": false,
+      "error": "1 function(s) failed to compile:\n\n  Function          | Error\n  ------------------+--------------------------------------------------------------\n  dynamic_csa_full  | ptoas compilation failed:\n                    | loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-\n                    | spmd-tnd-\n                    | 20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/s\n                    | core_gemv_pool_cpu_preview_v2/indexer_score_stages.py\":1668:\n                    | 29): error: 'pto.tands' op expects A2/A3 tands src, scalar,\n                    | and dst element type to be a 1/2-byte integer\n  ------------------+--------------------------------------------------------------\n\n  Full details: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/compile_score_gemv_pool_preview_C04_v2/kernel/report/codegen_errors.txt",
+      "device_execution": false
+    },
+    {
+      "build": "compile_score_gemv_pool_C04_v1",
+      "passed": false,
+      "error": "LegalizeTileCast: no native cast path from int16 to int32 for arch a2a3; pto.tcvt does not support this conversion [/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/score_gemv_pool_v1/indexer_score_stages.py:1674:29]\nCheck failed: !chain.empty() at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-shared-20261022/src/ir/transforms/legalize_tile_cast_pass.cpp:269",
+      "device_execution": false
+    },
+    {
+      "build": "compile_score_gemv_pool_C04_v2",
+      "passed": true,
+      "full_codegen_and_binary_passed": true,
+      "audit": "score_gemv_pool_v2_codegen.json",
+      "device_execution": false
+    }
+  ],
+  "pending": null,
+  "classification": "Prototype API/target dtype corrections; no new SDK issue inferred",
+  "audit_correction": "Initial store filter also matched live_half_split_ws_acc; tightened to exact full-branch operand prefix, no operator source change"
+}

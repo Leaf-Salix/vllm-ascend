@@ -6007,3 +6007,29 @@ AIC已等待全部量化实际写者，若QUANT发布同时覆盖系数，可在
 - 当前唯一探针仍pending；前置全卡任务正在运行，未重复提交。
   生成器要求设备24组通过才生成完整候选，尚未运行该入口或完整
   CSA编译。阶段性本地提交，不push；目标与正式保留版不变。
+
+
+### 2026-10-23：六GEMV列池数值通过，完整B16性能任务已提交
+
+- `task_20261023_212226_36326220432` 在设备3完成/exit0。六GEMV
+  合并一次FIX的24组eager/graph输出逐bit一致，保护区/输入不变/
+  有限值检查全部通过，CPU和设备源码及CPP一致。全部检查原文存于
+  `score_gemv_pool_probe_results.json`；#3132中文补充也已更新并回读。
+- 排队期间把独立CPU资源预检前移，设备性能门禁仍要求探针先通过。
+  preview_v1错用会转Tile的reshape，v2改tensor.view后遇A3不支持
+  INT32 TANDS；正式v1转INT16后又遇无INT16→INT32 tcvt路径。
+  这些是原型接口/目标dtype修正，失败源码与记录均保留，未报新SDK bug。
+- 正式v2从INT32 arange重解释为双INT16半字，以INT16计算索引，
+  高半字始终为0、低半字及中间结果不超过3071，最后原样重解释为
+  INT32给TGATHER。3072项逐bit表示与294912项完整地址模型均通过；
+  不是经FP16转换近似索引。源码模型与记录`score_gemv_pool_index_bits_v2.json`。
+- 完整C04 PyPTO/PTOAS/CCE/host二进制通过。实际96条GEMV替换32条
+  WS矩阵乘，QK数学顺序不变；每1024段仍16次FIX，而独立写回旧负例
+  多80次。24KiB Acc池的六个4KiB槽连续且与两块QK Acc不重叠。
+  AIV实际16×192 strided load，ACK之后3072项gather恢复query序；
+  原ABI、orchestration、源级跨核调用及生成通知/等待数保持。资源
+  未超过原上限，详见`score_gemv_pool_v2_codegen.json`。审计初版
+  把live_half同名后缀的store也计入，已按完整operand前缀更正，未改算子。
+- 唯一完整B16性能任务 `task_20261023_215458_192056520869` 指定设备8，沿用原同SDK历史
+  分母与保留版、6组严格检查及至少10个完整72角色L1窗口。尚未
+  获得性能结果，不提前采用、不扩其它档；公共SDK未改，本地提交不push。

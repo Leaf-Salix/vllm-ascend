@@ -1,0 +1,105 @@
+{
+  "candidate": "score_gemv_pool_v2",
+  "case": "C04",
+  "full_codegen_and_binary_compile_passed": true,
+  "device_execution": false,
+  "performance_eligible": false,
+  "root_abi_unchanged": true,
+  "orchestration_exact": true,
+  "resources": {
+    "cube_schedule": {
+      "mat": 475136,
+      "acc": 131072,
+      "vec": 16384,
+      "left": 65536,
+      "right": 65536
+    },
+    "vector_schedule": {
+      "vec": 180224
+    }
+  },
+  "limits": {
+    "vec": 188416,
+    "mat": 524288,
+    "acc": 131072,
+    "left": 65536,
+    "right": 65536
+  },
+  "accumulator_intervals": {
+    "split_qk_acc0": [
+      [
+        0,
+        49152
+      ]
+    ],
+    "split_qk_acc1": [
+      [
+        49152,
+        98304
+      ]
+    ],
+    "split_ws_acc": [
+      [
+        98304,
+        122880
+      ]
+    ]
+  },
+  "gemv_slots": {
+    "0": [
+      [
+        98304,
+        4096
+      ]
+    ],
+    "1": [
+      [
+        102400,
+        4096
+      ]
+    ],
+    "2": [
+      [
+        106496,
+        4096
+      ]
+    ],
+    "3": [
+      [
+        110592,
+        4096
+      ]
+    ],
+    "4": [
+      [
+        114688,
+        4096
+      ]
+    ],
+    "5": [
+      [
+        118784,
+        4096
+      ]
+    ]
+  },
+  "actual_GEMV_count": 96,
+  "replaced_WS_MMA_count": 32,
+  "pooled_FIX_stores": 16,
+  "added_FIX_stores": 0,
+  "actual_AIV_packed_load": "16x192 FP32 from a 384-column GM view",
+  "actual_AIV_gather": "3072 INT32 indices, derived within safe INT16 range",
+  "unchanged_QK_MMA_order": true,
+  "explicit_protocol_source_and_counts_unchanged": true,
+  "cpp_sha256": {
+    "orchestration/decode_csa_spmd.cpp": "03d1254f1a71e64890b1823b323a614e2770dea5bb2d0559d92ca62e49fb86fa",
+    "ptoas/dynamic_csa_full.cpp": "a8744c3e2ba33dc87994fbd5ca9d4d6684bd4782db42272a570416cc65999a25",
+    "kernels/aic/cube_schedule.cpp": "a4c9d3f3cdae1e516059935d4a1cc8a2542959f6897e7e8dc880624c5493a36d",
+    "kernels/aiv/vector_schedule.cpp": "341cf88c9589413068f91c872b933c2b999559279b238ed7d7f921f9f45f17f0"
+  },
+  "scope": "Full-kernel code generation/resources and binary only; full CSA device correctness/L1 pending",
+  "matched_GM_views": [
+    "%gemv_packed_transfer_inline6019__ssa_v0 = pto.make_tensor_view %arg42, shape = [%2200, %c384_index], strides = [%c384_index, %c1_index] {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf32>",
+    "%gemv_transport_inline939__ssa_v0 = pto.make_tensor_view %arg42, shape = [%3000, %c384_index], strides = [%c384_index, %c1_index] {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf32>"
+  ]
+}
