@@ -1,7 +1,7 @@
 # HCA attention后续候选与混长参考核对
 
 共享SDK csa-shared-20261022-logical-codegen；以下均为已有结果，不新增设备测试。
-上一轮已收口；用户随后要求继续优化，目标保持active。所有已测新候选均未采用，正式算子仍为37bbd0f3c的区间策略。
+本轮已收口，用户再次要求结束后停下；归档提交后暂停。所有新候选均未采用，正式算子仍为37bbd0f3c的区间策略。
 
 | 候选/场景 | 控制μs | 候选μs | 性能提升 | 更快配对 | Native输出 |
 |---|---:|---:|---:|---:|---|
@@ -23,13 +23,19 @@
 | attention_gather_policy_h262144_b16_v2 | 659.04 | 655.28 | +0.57% | 2/5 | PASS |
 | attention_gather_policy_h131072_b16_v2 | 517.40 | 521.16 | -0.72% | 2/5 | PASS |
 | attention_gather_policy_h8192_b32_v2 | 597.52 | 612.46 | -2.44% | 1/5 | PASS |
+| attention_gather_dispatch_h131072_b28_v3 | 757.08 | 764.48 | -0.97% | 3/7 | PASS |
+| attention_gather_dispatch_h8192_b32_v3 | 584.24 | 597.88 | -2.28% | 1/5 | PASS |
+| attention_gather_dispatch_h131072_b24_v3 | 673.54 | 681.60 | -1.18% | 2/7 | PASS |
+| attention_gather_dispatch_h262144_b16_v3 | 664.48 | 663.82 | +0.10% | 2/5 | PASS |
+| attention_direct_kv_b16_v3 | 504.08 | 641.22 | -21.39% | 0/7 | PASS |
+| attention_direct_kv_b28_v3 | 745.84 | 961.44 | -22.42% | 0/7 | PASS |
 
 N64/H8的控制是累计max候选，不能把该增量当作相对正式算子的收益。
 全部严格Native cache/state检查尚未通过，任务正常退出或输出PASS不等于整层验收。
 
 ## 尚未结束的设备任务
 
-无。本汇总内的已提交设备任务全部终态；新一轮任务另行记录，不重复提交历史任务。
+无。已提交设备任务全部终态；不再启动下一轮，按用户要求暂停。
 
 ## 混长padding参考的纠正
 
