@@ -8,6 +8,12 @@
 
 ## 当前阶段
 
+最新正式attention分档见[完整记录](ATTENTION_SUMMARY.md)：NZ且Native已有Host
+max_seq_lens≥131072、T≥33时启用K512；短历史/小T保留K128，129～192行叠加已有投影策略。
+后续累计max/N64候选与Native混长参考输入失配的定位见[本轮工作](ATTENTION_NEXT_STAGE.md)。
+任务明细与已结束结果见[后续候选汇总](ATTENTION_NEXT_RESULTS.md)。混长padding的Native参考已修正，
+尚有一项冷S1输出差异；双query复用候选仍在实验，正式源码保持已验证区间策略。
+
 2026-10-23最新投影区间优化见[本轮完整结果](PROJECTION_RESUME_SUMMARY.md)：
 Native已有Host历史上界至少128K且129≤T≤192时，独立入口对Q_B/O_B采用M192/N128。
 最终B24/B28相对本轮原版分别为717.94→701.02μs、782.08→772.30μs，
@@ -65,6 +71,7 @@ task-submit --device auto --max-time 1500 \
 `run_native.py` 和 `measure_hca.py` 只保存用户新指令前已运行的历史图基准，入口停用；
 其 573.25 μs 结果不得当作后续 eager 对照的分母。
 八档输入见 `cases.json`，从三个 CSA 会话最新固定性能规范迁移，不把旧 HCA 七档数据混算。
+这八档含256K/B16及128K/B16混长；额外测试的128K/B4、8K/B16不替代这两项目标档。
 
 大权重、编译二进制、私有 OPP、张量快照仅本地保存；Git 归档时仅纳入源码和有用的
 报告/日志/trace，逐次中文说明实现、失败原因与采用依据。

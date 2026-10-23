@@ -49,6 +49,9 @@ def main():
     parser.add_argument("--compressor-probe-only", action="store_true", help="固定 Native RMS 输出验证 C128；不测性能")
     parser.add_argument("--metadata-sequence", action="store_true", help="固定设备地址，直接调用 S1/S5/混长 A→B→A；不测性能")
     parser.add_argument("--precision-probe", action="store_true", help="同一生产数学的中间值及Native尾链诊断；不测性能")
+    parser.add_argument("--sync-native-capture", action="store_true", help="仅在精度诊断中分段同步Native，定位异步异常")
+    parser.add_argument("--capture-native-attention-only", action="store_true",
+                        help="只保存Native attention实际输入并在执行前停止；不进行正确性/性能判定")
     parser.add_argument("--service-probe", action="store_true", help="真实custom op服务接管与KV钩子验证；不测性能")
     parser.add_argument("--device", type=int)
     args = parser.parse_args()
@@ -67,6 +70,10 @@ def main():
         raise ValueError("attention数学诊断须有冻结双侧源码，不与其他数学迁移标记混用")
     if args.precision_probe and (args.windows or args.profile or args.native_only):
         raise ValueError("中间值诊断不与性能采集混用")
+    if args.sync_native_capture and not args.precision_probe:
+        raise ValueError("Native分段同步只允许用于precision-probe")
+    if args.capture_native_attention_only and not (args.precision_probe and args.sync_native_capture):
+        raise ValueError("只截取Native输入须显式启用precision-probe和分段同步")
     if args.service_probe and (args.windows or args.profile or args.native_only or args.precision_probe):
         raise ValueError("服务接管验证独立执行，不混入计时或中间值诊断")
     args.output = args.output.resolve()
@@ -248,13 +255,34 @@ def main():
                 table_history=(args.history // 128 * 128 + 512) if args.metadata_sequence else None,
             )
             output = torch.empty_like(fixture["hidden"])
+            # Native内部会把Q裁到num_actual_tokens；参考metadata也必须止于真实请求。
+            # PTO仍消费原容量/padding，不能把末尾为容量的cu_seqlens送给已裁短的Native Q。
+            # 两侧共用相同有效hidden、物理cache和初态，仅Native参考的metadata去掉dummy后缀。
+            native_fixture = fixture
+            if fixture["tokens"] != fixture["actual_tokens"] or fixture["request_capacity"] != args.batch:
+                native_fixture = make_fixture(
+                    config, layer.self_attn, args.batch, args.history, 1024, device,
+                    query_lengths=queries, history_lengths=histories,
+                    token_capacity=fixture["actual_tokens"], request_capacity=args.batch,
+                    physical_request_capacity=fixture["request_capacity"],
+                    table_history=fixture["table_history"], cache_template=fixture["groups"],
+                )
+                report["native_active_reference"] = {
+                    "native_query_tokens": fixture["actual_tokens"], "native_requests": args.batch,
+                    "pto_token_capacity": fixture["tokens"], "pto_request_capacity": fixture["request_capacity"],
+                    "shared_cache_initial_state": True,
+                    "reason": "Native Q裁短后不能使用仍包含dummy容量的cu_seqlens；有效输入和cache未改变",
+                }
             native_intermediates = {}
             norm_hook = None
             release_native_capture = None
             if args.precision_probe:
                 from precision_probe import capture_native
 
-                native_intermediates, release_native_capture = capture_native(layer)
+                native_intermediates, release_native_capture = capture_native(
+                    layer, args.output / "native_capture_steps.jsonl" if args.sync_native_capture else None,
+                    args.output / "native_attention_inputs.pt" if args.capture_native_attention_only else None,
+                )
             if args.compressor_probe_only:
                 def capture_norm(module, inputs, value):
                     native_intermediates["normalized"] = value.detach().clone()
@@ -268,12 +296,29 @@ def main():
 
             restore(fixture)
             def native_call():
+                native_tokens = (fixture["actual_tokens"] if native_fixture is not fixture else fixture["tokens"])
                 with set_ascend_forward_context(
-                    fixture["metadata"], config, num_tokens=fixture["tokens"],
+                    native_fixture["metadata"], config, num_tokens=native_tokens,
                     num_actual_tokens=fixture["actual_tokens"],
                 ):
-                    native_attention_half(layer.self_attn.dsa_attn, fixture["hidden"], fixture["positions"], output)
+                    if native_tokens < fixture["tokens"]:
+                        output[native_tokens:].zero_()  # 未执行的Native容量尾行只供重复检查，不参与数值验收。
+                    native_attention_half(layer.self_attn.dsa_attn, fixture["hidden"][:native_tokens],
+                                          fixture["positions"][:native_tokens], output[:native_tokens])
 
+            if args.capture_native_attention_only:
+                from precision_probe import NativeAttentionCaptured
+
+                try:
+                    native_call()
+                except NativeAttentionCaptured:
+                    release_native_capture()
+                    report["device_execution"] = True
+                    report["native_attention_executed"] = False
+                    report["local_snapshot"] = str(args.output / "native_attention_inputs.pt")
+                    save("native_attention_inputs_captured")
+                    return
+                raise RuntimeError("没有进入期望的Native attention，不能声称已截取输入")
             native_call()
             torch.npu.synchronize()
             if release_native_capture is not None:
@@ -282,6 +327,10 @@ def main():
                 norm_hook.remove()
             native = collect()
             report["native_guards"] = guard_checks(fixture)
+            if native_fixture is not fixture:
+                report["native_active_guards"] = guard_checks(native_fixture)
+                if any(check["status"] != "PASS" for check in report["native_active_guards"].values()):
+                    raise AssertionError("Native真实请求参考的只读metadata或写保护失败")
             save("native_reference_ready")
             if args.native_only:
                 from profile_eager import profile_call
@@ -335,7 +384,12 @@ def main():
                 keys = ("cmp_wkv", "cmp_wgate", "cmp_ape", "cmp_norm_w", "state", "state_table",
                         "state_slots", "positions", "query_bounds", "seq_lens", "cmp_cos", "cmp_sin",
                         "cmp_slots", "cmp_cache")
-                probe(native_intermediates["normalized"], *(descriptors[key] for key in keys))
+                normalized = native_intermediates["normalized"]
+                if normalized.shape[0] != fixture["tokens"]:
+                    padded_normalized = normalized.new_zeros((fixture["tokens"], normalized.shape[1]))
+                    padded_normalized[:fixture["actual_tokens"]].copy_(normalized[:fixture["actual_tokens"]])
+                    normalized = padded_normalized
+                probe(normalized, *(descriptors[key] for key in keys))
                 torch.npu.synchronize()
                 actual = collect()
                 report["device_execution"] = True
@@ -437,7 +491,10 @@ def main():
                                                for a, b in zip(eager[name], native[name])]
             if legacy is not None:
                 report["pto_reference"] = {"output": compare_tensor(eager["output"], legacy["output"], 0, 0)}
-                report["reference_native"] = {"output": compare_tensor(legacy["output"], native["output"], 0.01, 0.01)}
+                # Native只执行真实token，控制组对Native也只比较同一有效范围；
+                # 两份PTO之间仍对完整容量逐bit比较，不能因此放松dummy写保护。
+                report["reference_native"] = {"output": compare_tensor(
+                    legacy["output"][:actual], native["output"][:actual], 0.01, 0.01)}
                 for name in fixture["groups"]:
                     report["pto_reference"][name] = [compare_tensor(a, b, 0, 0) for a, b in zip(eager[name], legacy[name])]
                     report["reference_native"][name] = [compare_tensor(a, b, 1e-5, 1e-5) for a, b in zip(legacy[name], native[name])]

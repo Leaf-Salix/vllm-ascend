@@ -1,0 +1,134 @@
+[
+  {
+    "name": "attention_online_fp64_v1",
+    "task_id": "task_20261023_192806_286292032619",
+    "command": [
+      "bash",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/launch.sh",
+      "--script",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_online_v1/attention_probe.py",
+      "--baseline",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_probe_base_v1/operator",
+      "--candidate",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_online_v1/operator",
+      "--queries",
+      "1,5,6,1,2",
+      "--output",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/runs/attention_online_fp64_v1"
+    ],
+    "status": "completed (exit=1)",
+    "log": "evidence/attention_online_fp64_v1.log"
+  },
+  {
+    "name": "attention_online_fp64_retry_v1",
+    "task_id": "task_20261023_194935_173524234",
+    "command": [
+      "bash",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/launch.sh",
+      "--script",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_online_v1/attention_probe.py",
+      "--baseline",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_probe_base_v1/operator",
+      "--candidate",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_online_v1/operator",
+      "--queries",
+      "1,5,6,1,2",
+      "--output",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/runs/attention_online_fp64_retry_v1"
+    ],
+    "status": "completed (exit=0)",
+    "note": "首次online任务在SetDevice超时，算子未执行；仅终止确认后重提，冻结源码不变",
+    "log": "evidence/attention_online_fp64_retry_v1.log"
+  },
+  {
+    "name": "attention_online_n64_fp64_v1",
+    "task_id": "task_20261023_194935_18299673",
+    "command": [
+      "bash",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/launch.sh",
+      "--script",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_online_n64_v1/attention_probe.py",
+      "--baseline",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_online_v1/operator",
+      "--candidate",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_online_n64_v1/operator",
+      "--queries",
+      "1,5,6,1,2",
+      "--output",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/runs/attention_online_n64_fp64_v1"
+    ],
+    "status": "completed (exit=0)",
+    "note": "N64/H8变更相对online原候选，检查完整attention输出是否精确",
+    "log": "evidence/attention_online_n64_fp64_v1.log"
+  },
+  {
+    "name": "attention_online_b16_v1",
+    "task_id": "task_20261023_200843_103100214513",
+    "command": [
+      "bash",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/launch.sh",
+      "--experiment",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_online_v1",
+      "--control-source",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_boundary_diag_v5/operator",
+      "--diagnostic-perf",
+      "--batch",
+      "16",
+      "--windows",
+      "7",
+      "--output",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/runs/attention_online_b16_v1",
+      "--attention-math-evidence",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/runs/attention_online_fp64_retry_v1/result.json"
+    ],
+    "status": "completed (exit=0)",
+    "control_note": "当前正式K512块内max",
+    "log": "evidence/attention_online_b16_v1.log"
+  },
+  {
+    "name": "attention_online_b28_v1",
+    "task_id": "task_20261023_200843_103104319942",
+    "command": [
+      "bash",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/launch.sh",
+      "--experiment",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_online_v1",
+      "--control-source",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_boundary_diag_v5/operator",
+      "--diagnostic-perf",
+      "--batch",
+      "28",
+      "--windows",
+      "7",
+      "--output",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/runs/attention_online_b28_v1",
+      "--attention-math-evidence",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/runs/attention_online_fp64_retry_v1/result.json"
+    ],
+    "status": "completed (exit=0)",
+    "control_note": "当前正式K512块内max",
+    "log": "evidence/attention_online_b28_v1.log"
+  },
+  {
+    "name": "attention_online_n64_b16_v1",
+    "task_id": "task_20261023_200843_10310884788",
+    "command": [
+      "bash",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/launch.sh",
+      "--experiment",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_online_n64_v1",
+      "--control-source",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_online_v1/operator",
+      "--diagnostic-perf",
+      "--batch",
+      "16",
+      "--windows",
+      "7",
+      "--output",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/runs/attention_online_n64_b16_v1"
+    ],
+    "status": "completed (exit=0)",
+    "control_note": "online候选，不是正式原版；只看N64/H8增量",
+    "log": "evidence/attention_online_n64_b16_v1.log"
+  }
+]
