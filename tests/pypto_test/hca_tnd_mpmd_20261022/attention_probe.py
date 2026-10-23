@@ -84,6 +84,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--device", type=int)
     parser.add_argument("--queries", help="独立合成B5的各请求Q长度；选择历史S6 fixture内的前几行")
+    parser.add_argument("--shuffle-compressed-pages", action="store_true",
+                        help="仅在CPU fixture打乱物理压缩页并反向更新页表，逻辑KV及独立FP64参考不变")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     os.environ["PYPTO_PROG_BUILD_DIR"] = str(args.output / "build")
@@ -115,10 +117,22 @@ def main():
                  for name, module in modules.items()}
     module = modules["candidate"]
     report = {"scope": "合成分页attention对密集FP64；非真实层/模型精度验收", "aclgraph_replay": False,
+              "physical_compressed_pages_shuffled": args.shuffle_compressed_pages,
               "shared_toolchain": os.environ.get("CSA_SHARED_TOOLCHAIN_RELEASE"), "cases": {},
               "candidate_attention_source": str(args.candidate.resolve() / "deepseek_v4_flash_hca_tnd/attention.py")}
     for history, edge in ((131072, False), (16507, True)):
         inputs, reference = fixture(module, history, edge)
+        if args.shuffle_compressed_pages:
+            # 参考先按原逻辑页独立计算；仅重排物理存放位置，页表用逆置换，不能重写参考算法。
+            page_count = inputs[3].shape[0]
+            permutation = torch.randperm(page_count, generator=torch.Generator().manual_seed(20261024 + history))
+            inverse = torch.empty_like(permutation)
+            inverse[permutation] = torch.arange(page_count)
+            table = inputs[4].clone()
+            valid = (table >= 0) & (table < page_count)
+            table[valid] = inverse[table[valid].long()].to(table.dtype)
+            inputs[3] = inputs[3].index_select(0, permutation)
+            inputs[4] = table
         queries = [6] * 5 if args.queries is None else [int(v) for v in args.queries.split(",")]
         if len(queries) != 5 or any(not 1 <= q <= 6 for q in queries):
             raise ValueError("独立fixture为B5，每请求须有1..6行")

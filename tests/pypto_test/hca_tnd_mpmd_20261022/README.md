@@ -11,9 +11,10 @@
 最新正式attention分档见[完整记录](ATTENTION_SUMMARY.md)：NZ且Native已有Host
 max_seq_lens≥131072、T≥33时启用K512；短历史/小T保留K128，129～192行叠加已有投影策略。
 后续累计max/N64候选与Native混长参考输入失配的定位见[本轮工作](ATTENTION_NEXT_STAGE.md)。
-任务明细与已结束结果见[后续候选汇总](ATTENTION_NEXT_RESULTS.md)。上一轮已收口；用户随后要求继续，目标保持active。
+任务明细与已结束结果见[后续候选汇总](ATTENTION_NEXT_RESULTS.md)。2026-10-24本轮已收口，用户再次要求结束后停止；归档提交后暂停。
 双query、Vector mask核内分档、H32 UB重置均未采用；正式源码保持已验证区间策略，未push。
 混长padding的Native参考已修正，尚有一项冷S1输出差异；30%目标和严格storage等遗留未完成。
+最后的核外分档与直接KV结果见[直接KV收口记录](ATTENTION_DIRECT_KV.md)，两者均未接入正式算子。
 
 2026-10-23最新投影区间优化见[本轮完整结果](PROJECTION_RESUME_SUMMARY.md)：
 Native已有Host历史上界至少128K且129≤T≤192时，独立入口对Q_B/O_B采用M192/N128。

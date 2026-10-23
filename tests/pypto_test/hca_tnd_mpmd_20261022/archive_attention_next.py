@@ -4,6 +4,7 @@
 import concurrent.futures
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
@@ -12,11 +13,13 @@ from summarize_native_output import all_passed
 
 HERE = Path(__file__).resolve().parent
 MANIFESTS = ("ATTENTION_ONLINE_TASKS.json", "ATTENTION_BOUNDARY_TASKS.json", "ATTENTION_PAIR_TASKS.json",
-             "ATTENTION_GATHER_TASKS.json")
+             "ATTENTION_GATHER_TASKS.json", "ATTENTION_GATHER_DISPATCH_TASKS.json", "ATTENTION_DIRECT_KV_TASKS.json")
 CPU_RUNS = ("attention_online_cpu_v1", "attention_online_n64_cpu_v1",
             "attention_pair_plan_cpu_v1", "attention_pair_plan_cpu_v2", "attention_pair_plan_cpu_v3",
             *(f"attention_pair512_cpu_v{i}" for i in range(1, 7)), "attention_gather_mask_cpu_v1",
-            "attention_gather_mask_policy_cpu_v2", "attention_reset_alpha_h32_cpu_v1")
+            "attention_gather_mask_policy_cpu_v2", "attention_reset_alpha_h32_cpu_v1",
+            *(f"attention_gather_dispatch_cpu_v{i}" for i in range(1, 4)),
+            *(f"attention_direct_cmp_kv_cpu_v{i}" for i in range(1, 4)), "dead_tile_init_cpu_v1")
 
 
 def status(task):
@@ -73,18 +76,28 @@ def main():
                                                                pair["candidate"]["samples_us"]))
                 row["attention_stage"] = {side: attention_stages(
                     run, side, ("hca_unified_attention_aic", "hca_unified_attention_aiv", "_pair_cube", "_pair_vector",
-                                "hca_pair_plan", "hca_cmp_work_gather"))
+                                "hca_pair_plan", "hca_cmp_work_gather", "hca_cmp_page_plan"))
                     for side in ("control", "candidate")}
         path.write_text(json.dumps(tasks, ensure_ascii=False, indent=2) + "\n")
     cpu = {}
     for name in CPU_RUNS:
         run = HERE / "runs" / name
         if (run / "result.json").exists():
-            cpu[name] = json.loads((run / "result.json").read_text())
-            shutil.copy2(run / "result.json", HERE / "evidence" / (name + "_result.json"))
+            result = json.loads((run / "result.json").read_text())
+            trace = result.get("traceback", "")
+            if len(trace) > 100000:
+                # SSA诊断会重复整份模型IR；原42MB结果本地保留，Git只存错误摘要及路径/大小。
+                result.pop("traceback")
+                result["traceback_excerpt"] = trace[:3000]
+                result["diagnostic_messages"] = sorted(set(re.findall(r"Message: ([^\n]+)", trace)))
+                result["local_full_result"] = {"path": str(run / "result.json"),
+                                                "bytes": (run / "result.json").stat().st_size}
+            cpu[name] = result
+            (HERE / "evidence" / (name + "_result.json")).write_text(
+                json.dumps(result, ensure_ascii=False, indent=2) + "\n")
             local.add(run)
     for pattern in ("attention_online*", "attention_boundary_diag*", "attention_pair*", "attention_gather*",
-                    "attention_reset_alpha*"):
+                    "attention_reset_alpha*", "attention_direct*"):
         local.update((HERE / "experiments").glob(pattern))
     artifacts = []
     for path in sorted(local):
@@ -93,12 +106,14 @@ def main():
     report = {"production_head": "37bbd0f3c12d32966695ad45e7059557d1fc03ad",
               "production_changed": False, "metric": "完整HCA eager L1 incore首尾；无ACLGraph",
               "reference_correction": "旧混长padding Native Q仅15行而cu_q尾为24，参考无效；v6统一真实范围后剩1项输出超差",
-              "adoption": "本轮全部候选未采用；Vector mask初版B28正向，但核内分档版收益不稳定且8K回退；正式算子仍为37bbd0f3c的已验证策略",
+              "adoption": "全部新候选未采用；核外gather分档及直接KV也未获益；正式算子仍为37bbd0f3c的已验证策略",
+              "work_state": "本轮已收口，按用户再次要求在归档提交后暂停；未完成30%目标，未push",
+              "component_issue": "https://github.com/hw-native-sys/pypto/issues/3136",
               "rows": rows, "cpu": cpu, "local_artifacts_no_hash": artifacts}
     (HERE / "ATTENTION_NEXT_RESULTS.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     lines = ["# HCA attention后续候选与混长参考核对", "",
              "共享SDK csa-shared-20261022-logical-codegen；以下均为已有结果，不新增设备测试。",
-             "上一轮已收口；用户随后要求继续优化，目标保持active。所有已测新候选均未采用，正式算子仍为37bbd0f3c的区间策略。", "",
+             "本轮已收口，用户再次要求结束后停下；归档提交后暂停。所有新候选均未采用，正式算子仍为37bbd0f3c的区间策略。", "",
              "| 候选/场景 | 控制μs | 候选μs | 性能提升 | 更快配对 | Native输出 |",
              "|---|---:|---:|---:|---:|---|"]
     for row in rows:
@@ -116,7 +131,7 @@ def main():
         if not row['status'].startswith('completed'):
             lines.append(f"- `{row['name']}`：{row['status']}，`{row['task_id']}`。")
     if not pending:
-        lines.append("无。本汇总内的已提交设备任务全部终态；新一轮任务另行记录，不重复提交历史任务。")
+        lines.append("无。已提交设备任务全部终态；不再启动下一轮，按用户要求暂停。")
     lines += ["",
               "## 混长padding参考的纠正", "",
               "旧Native输入Q=[15,64,512]而cu_q包含padding至24，产生无效参考或MTE错误。",
