@@ -26,9 +26,13 @@ from typing import Any
 def _pto_csa_atomic_add() -> int:
     """TND variants default to fixed reduction; legacy BSH keeps its policy."""
     variant = os.getenv("PTO_CSA_VARIANT", "precision").strip().lower()
-    fixed_reduction = variant in ("performance", "perf", "tnd_precision", "tnd_full_precision") or variant.startswith(
-        "pkg:"
-    )
+    fixed_reduction = variant in (
+        "performance",
+        "perf",
+        "tnd_precision",
+        "tnd_full_precision",
+        "tnd_precision_combined",
+    ) or variant.startswith("pkg:")
     default = "0" if fixed_reduction else "1"
     return int(os.getenv("VLLM_ASCEND_PTO_CSA_ATOMIC_ADD", default))
 
