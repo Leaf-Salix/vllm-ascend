@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """生成结束后记录TND绑定/工作区；不向forward增加同步或tensor读取。"""
 
+from collections import Counter
+
 from offline_pd.observer import OfflineCSAObserver
 
 from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.graph_contract import TNDGraphContract
@@ -25,7 +27,25 @@ install_graph_observer()
 
 class TNDObserver(OfflineCSAObserver):
     def offline_begin_observation(self):
+        from vllm.forward_context import get_forward_context
+
         result = super().offline_begin_observation()
+        self._tnd_decode_occupancy = Counter()
+        self._tnd_occupancy_origin = self.model_runner._model_forward
+        prefix = self._offline_csa_layer_names[0]
+
+        def count_occupancy(num_tokens_padded, *args, **kwargs):
+            context = get_forward_context()
+            if not context.capturing and not getattr(context, "is_draft_model", False):
+                metadata = (context.attn_metadata or {}).get(prefix)
+                if metadata is not None and not metadata.num_prefills and metadata.decode is not None:
+                    # 只用Native已有Host计数，不能把图padding容量当成真实batch。
+                    requests = metadata.decode.num_reqs_actual
+                    if requests is not None:
+                        self._tnd_decode_occupancy[(requests, metadata.num_actual_tokens, num_tokens_padded)] += 1
+            return self._tnd_occupancy_origin(num_tokens_padded, *args, **kwargs)
+
+        self.model_runner._model_forward = count_occupancy
         self._tnd_before = {}
         for index, layer in enumerate(self.model_runner.get_model().model.layers):
             runtime = getattr(layer.self_attn.dsa_attn, "_pto_csa_runtime", None)
@@ -36,7 +56,12 @@ class TNDObserver(OfflineCSAObserver):
     def offline_end_observation(self):
         import torch
 
+        self.model_runner._model_forward = self._tnd_occupancy_origin
         result = super().offline_end_observation()
+        result["decode_occupancy"] = [
+            {"actual_requests": b, "actual_tokens": t, "padded_tokens": capacity, "steps": steps}
+            for (b, t, capacity), steps in sorted(self._tnd_decode_occupancy.items())
+        ]
         rows = []
         unique_storage = {}
         for index, layer in enumerate(self.model_runner.get_model().model.layers):

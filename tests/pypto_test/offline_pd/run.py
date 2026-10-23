@@ -22,6 +22,16 @@ FORMAL_MODEL = "/data/model/DeepSeek-V4-Flash-0731-w8a8"
 FIRST_TARGET_CSA_LAYER = 2
 
 
+def hccl_buffer_mb(args):
+    """显式容量贯穿父/子启动器；未设置时保留历史prefill/decode默认值。"""
+    value = getattr(args, "hccl_buffer_mb", None)
+    if value is None:
+        return 1024 if args.command == "prefill" else 1800
+    if value <= 0:
+        raise ValueError("HCCL缓冲容量必须为正数")
+    return value
+
+
 def decode_additional_config(args):
     """两侧共用 runtime/decode/run_dp_template.sh 的计算配置；eager 仅用于诊断。"""
     graph = args.graph_mode != "eager"
@@ -757,6 +767,7 @@ def worker(args):
     os.environ["VLLM_ASCEND_ENABLE_NZ"] = str(args.weight_nz_mode)
     os.environ["DYNAMIC_EPLB"] = "false"
     os.environ["EXPERT_MAP_RECORD"] = "false"
+    os.environ["HCCL_BUFFSIZE"] = str(hccl_buffer_mb(args))
     print(f"OFFLINE_WEIGHT_NZ requested={args.weight_nz_mode} "
           f"environment={os.environ['VLLM_ASCEND_ENABLE_NZ']} rank={args.rank} "
           f"backend={args.backend}", flush=True)
@@ -860,6 +871,9 @@ def worker(args):
     )
     print(f"OFFLINE_MODEL_READY role={args.command} dp={args.rank}", flush=True)
     args.worker_runtime_config = llm.collective_rpc("offline_runtime_config")
+    if any(config["runtime_environment"]["HCCL_BUFFSIZE"] != str(hccl_buffer_mb(args))
+           for config in args.worker_runtime_config):
+        raise RuntimeError(f"Worker实际HCCL缓冲容量未按显式配置生效：{args.worker_runtime_config}")
     if not prefill:
         expected = decode_additional_config(args)
         expected["ascend_compilation_config"].pop("align_decode_capture_sizes", None)
@@ -1048,13 +1062,13 @@ def launch(args):
                 # 采集窗口会在各 rank 上做同步和落盘，给集合通信留出等待余量。
                 "HCCL_CONNECT_TIMEOUT": "120",
                 "HCCL_EXEC_TIMEOUT": "1800" if args.command != "decode" else "204",
-                # decode 侧 HCCL buffer 固定为 1800 MB，
-                # prefill 侧为 1024。1024 在 max_num_seqs=40 时不够：算子按
+                # 默认decode为1800 MB、prefill为1024；显式CLI可覆盖。
+                # 1024 在 max_num_seqs=40 时不够：算子按
                 # ((maxBs*tokenNeedSizeDispatch*epWorldSize*localMoeExpertNum)
                 #  + (maxBs*tokenNeedSizeCombine*(k+sharedExpertNum))) * 2 计算，
                 # maxBs=240 需 1043MB，实测直接在 npu_moe_distribute_dispatch_v2
                 # 报 HCCL_BUFFSIZE_EP is too SMALL（错误码 561002）。
-                "HCCL_BUFFSIZE": "1024" if prefill else "1800",
+                "HCCL_BUFFSIZE": str(hccl_buffer_mb(args)),
                 "HCCL_OP_EXPANSION_MODE": "AIV",
                 # HCCL 默认 HCCL_DETERMINISTIC=false（见 libhccl.so 的
                 # "HCCL_DETERMINISTIC set by default to [false]"）。开启后集合通信保序归约。
@@ -1082,6 +1096,7 @@ def launch(args):
                    "--pto-attention", args.pto_attention,
                    "--decode-dp", str(args.decode_dp),
                    "--gpu-memory-utilization", str(args.gpu_memory_utilization),
+                   "--hccl-buffer-mb", str(hccl_buffer_mb(args)),
                    "--weight-nz-mode", str(args.weight_nz_mode),
                    "--decode-tokens", str(args.decode_tokens),
                    "--warmup-rounds", str(args.warmup_rounds),
@@ -1171,6 +1186,8 @@ def main():
     parser.add_argument("--decode-dp", type=int, choices=[8, 16], default=16,
                         help="正式验证为 DP/EP16；8 仅用于 HCA decode 预验证")
     parser.add_argument("--batch", type=int, default=1)
+    parser.add_argument("--hccl-buffer-mb", type=int,
+                        help="HCCL通信缓冲容量MB；默认decode=1800、prefill=1024，显式值传到实际Worker并核对")
     parser.add_argument("--max-num-batched-tokens", type=int,
                         help="worker token 总容量，包含 DSpark 草稿预留；默认覆盖 --batch 的出5验6满档")
     parser.add_argument("--sweep-batches", type=int, nargs="+",

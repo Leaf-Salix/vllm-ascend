@@ -93,6 +93,7 @@ python "$source_tree/tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py"
     "$source_tree/tests/pypto_test/offline_pd/run.py" decode \
     --bank "$bank" --output "$output" --backend "$backend" --pto-attention csa --mixed-requests \
     --decode-dp 16 --gpu-memory-utilization "$budget" --batch "$batch" --deterministic \
+    --hccl-buffer-mb "$hccl_buffer_mb" \
     --decode-tokens 192 --weight-nz-mode 2 --graph-mode full_decode_only --no-static-kernel \
     --capture-sizes 6 "$((batch * 6))" --event-work-mode 1 --port 30881 \
     > "$output/launch.log" 2>&1

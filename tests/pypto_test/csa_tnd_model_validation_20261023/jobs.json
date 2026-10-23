@@ -106,12 +106,13 @@
     "state": "completed_exit_0",
     "summary": "b24_workspace_validation.json"
   },
-  "b24": {
+  "b24_invalid_v11": {
     "native": {
       "task": "task_20261023_214627_15185825199",
       "source": "experiments/v11_b24_hccl512/source",
       "output": "runs/v11_native_b24",
-      "state": "running"
+      "state": "completed_exit_0_rejected_as_full_b24",
+      "reason": "请求512但Worker实际1800；首步仅22路，缺少有效24×6证据"
     },
     "configuration": {
       "gpu_memory_utilization": 0.925,
@@ -130,15 +131,39 @@
       "task": "task_20261023_215109_17296011908",
       "source": "experiments/v11_b24_hccl512/source",
       "output": "runs/v11_mpmd_b24",
-      "state": "pending",
-      "single_card_evidence": "b24_workspace_validation.json"
+      "state": "terminated_exit_130",
+      "single_card_evidence": "b24_workspace_validation.json",
+      "reason": "已确认启动器覆盖了HCCL配置，停止无效对照"
     },
     "spmd_tnd": {
       "task": "task_20261023_215109_17296539735",
       "source": "experiments/v11_b24_hccl512/source",
       "output": "runs/v11_spmd_b24",
-      "state": "pending",
-      "single_card_evidence": "b24_workspace_validation.json"
+      "state": "cancelled_before_execution",
+      "single_card_evidence": "b24_workspace_validation.json",
+      "reason": "启动器HCCL覆盖需先修复"
     }
+  },
+  "b24": {
+    "native": {
+      "task": "task_20261023_220617_238843122886",
+      "source": "experiments/v12_b24_effective_capacity/source",
+      "output": "runs/v12_native_b24",
+      "state": "pending"
+    },
+    "configuration": {
+      "gpu_memory_utilization": 0.935,
+      "hccl_buffer_mb": 768,
+      "ring_config": {
+        "heap_mb": [
+          16,
+          16,
+          16,
+          16
+        ],
+        "task_window": 4096
+      }
+    },
+    "gate": "必须由真实Worker记录768，且每卡有actual_requests=24、actual_tokens=144的forward"
   }
 }

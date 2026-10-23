@@ -46,7 +46,7 @@
 - `workspace_pool_estimate.json`：CPU meta容量估算，不是模型设备峰值。
 - `redispatch_failures.json`：v05两种PTO在收尾阶段触发的Native query/Q前缀容量不一致。
 - `redispatch_validation.json`：修复后SWA/HCA/CSA的单卡Native容量图参考对照通过。
-- `jobs.json`：当前v09两种PTO B16整模型任务及其前置验证路径。B16三侧整模型及输出对照已完成，B24单卡已通过，三侧整模型已启动或排队。
+- `jobs.json`：当前v09两种PTO B16整模型任务及其前置验证路径。B16三侧整模型及输出对照已完成，B24单卡已通过，修正整模型启动器的HCCL覆盖后正在重跑。
 
 有工作区修复的冻结包使用`prepare.py <实验名> --revision 99268437c --workspace-fix`；
 图回退修复再加`--redispatch-fix`。
@@ -70,8 +70,10 @@
 B16完整对照见`b16_comparison.json`及`b16_comparison.texts.md`。
 两种PTO全部输出token和接受事件一致；对Native简单问题全部一致，复杂问题仍有差异。
 B24已通过每ring16MiB、window4096的单卡验证；
-整模型三侧统一`--hccl-buffer-mb 512`、预算0.925，避免只增大KV预算压垮临时空间。
+整模型当前三侧统一`--hccl-buffer-mb 768`、预算0.935。旧v11的父进程512被旧启动器覆盖成1800，不能用于验收。
 
-B24任务：Native `task_20261023_214627_15185825199`，
-MPMD `task_20261023_215109_17296011908`，
-SPMD `task_20261023_215109_17296539735`。实际状态以队列及`jobs.json`更新为准。
+当前B24 Native任务为`task_20261023_220617_238843122886`，冻结v12。
+PTO在同档单卡通过的基础上，等待Native确认新HCCL配置后继续提交。
+旧v11三项任务已退出或取消，原因见`b24_v11_configuration_failure.json`。
+新的检查同时要求Worker实际HCCL配置匹配，并记录已有Host metadata中的
+有效请求数、有效token数；图padding到144行本身不能作为24×S6通过证据。

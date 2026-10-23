@@ -38,11 +38,18 @@ def check(root):
         else:
             assert all(r["implementation"] == "native" for r in csa)
         (runtime,) = data["worker_runtime_config"]
+        assert runtime["runtime_environment"]["HCCL_BUFFSIZE"] == str(config.get("hccl_buffer_mb", 1800))
         assert runtime["deterministic_level"] == 1 and not runtime["dynamic_eplb"]
         assert runtime["cann_event_work_mode"] == 1
         compilation = runtime["decode_optimizations"]["ascend_compilation_config"]
         assert not compilation["enable_static_kernel"] and compilation["enable_npugraph_ex"]
         (observation,) = data["observation"]
+        occupancy = observation.get("decode_occupancy", [])
+        full_s6_steps = sum(
+            r["steps"] for r in occupancy if r["actual_requests"] == batch and r["actual_tokens"] == batch * 6
+        )
+        if batch == 24 or occupancy:
+            assert full_s6_steps > 0, (rank, "没有有效B×S6，图padding容量不能代替真实并发", occupancy)
         key = f"FULL_tokens{batch * 6}"
         assert observation["model_forward_counts"].get(key, 0) > 0, (rank, observation["model_forward_counts"])
         if package:
@@ -61,6 +68,8 @@ def check(root):
             {
                 "rank": rank,
                 "full_s6_graph_forwards": observation["model_forward_counts"][key],
+                "actual_full_s6_steps": full_s6_steps if occupancy else None,
+                "decode_occupancy": occupancy,
                 "memory": observation["memory"],
                 "physical_workspace_bytes": observation.get("tnd_physical_workspace_bytes"),
                 "all_csa_graph_replay_proven": bool(package)

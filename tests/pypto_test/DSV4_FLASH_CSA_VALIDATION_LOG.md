@@ -23213,7 +23213,7 @@ task_window=4096。两种TND的共享工作区与独占参考在eager及graph重
 这是当前TND的设备功能证据；CPU容量查询0.597GiB仍不是整模型显存峰值。
 
 B16三侧输出对照完成后，才启动B24。B24使用相同v11冻结算子、同一公共SDK，
-三侧统一显存预算0.925、HCCL_BUFFSIZE=512；PTO使用上述已验证ring配置。
+三侧启动器名义上配置显存预算0.925、HCCL_BUFFSIZE=512；后续发现HCCL被下级启动器覆盖，故此配置未实际生效，见735.102。PTO使用上述已验证ring配置。
 权重、Native HCA、CANN9.2、NZ2、确定性、图模式与无静态编译口径沿用。
 固定取既有KV的前24个不同问题（8个Python推演、8个状态转移、4个账本、
 4个简单重复）；每卡192token/请求。HCCL容量和KV预算写入配置、三侧对齐。
@@ -23224,3 +23224,30 @@ B16三侧输出对照完成后，才启动B24。B24使用相同v11冻结算子�
 
 此时Native正在执行，PTO排队。B24整模型及输出对照仍未完成，不能以单卡
 PASS替代真实24路decode验收；不跨B16/B24配置比较性能。
+
+### 735.102 撤回v11的满B24判断，修复子进程HCCL覆盖并记录真实有效batch（2026-10-23）
+
+v11 Native任务exit=0，384个请求确实生成结束，但不能判为满B24通过。
+审查实际Worker发现HCCL_BUFFSIZE仍为1800，父进程请求的512被
+`offline_pd/run.py`的固定decode默认值覆盖。首步是`NONE_tokens22`，
+之后虽有`FULL_tokens144`，该值只是图容量；零抢占也不能排除请求分批入场。
+证据`b24_v11_configuration_failure.json`。原始运行文件保留，状态重分类为
+`completed_exit_0_rejected_as_full_b24`；不把此结果用于三侧B24验收。
+
+立即终止尚在加载/准备中的v11 MPMD（exit=130）并取消未启动SPMD，避免
+已知错误配置继续占卡。新的修复只在测试启动与观测层：
+
+- offline启动器增加`--hccl-buffer-mb`，显式值同时写入每个DP子进程环境和CLI，
+  Worker启动前再次采用，并在模型加载后对实际Worker环境做一致性检查。
+  无显式参数的历史默认decode1800/prefill1024保持不变。
+- TND观测器逐步记录Native已有Host计数：有效请求数、有效token数、padding容量。
+  不读取device metadata、不增加同步。B24检查必须有真实24请求/144有效token，
+  不接受只有FULL_tokens144。
+- CPU模拟真实launch流程，检查全部DP子进程，覆盖默认decode、显式768、默认prefill；
+  三种情况通过。新检查明确拒绝旧v11的错误配置；Ruff、Python编译与bash语法通过。
+
+本次实际将使用HCCL768MB、显存预算0.935，PTO ring仍沿用已单卡通过的
+16MiB×4/window4096。512MB按144行MoE dispatch容量估算不足，尚未真的在
+Worker中使用过；768MB覆盖当前图容量，仍须由真实模型验证。
+先提交v12 Native `task_20261023_220617_238843122886`，确认实际配置和满档后
+继续两种PTO。B16使用的默认1800配置实际匹配，其已完成结论不受此传参缺陷影响。
