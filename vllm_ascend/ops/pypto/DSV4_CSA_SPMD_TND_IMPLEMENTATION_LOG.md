@@ -5789,3 +5789,27 @@ AIC已等待全部量化实际写者，若QUANT发布同时覆盖系数，可在
 - 证据 `score_gemv_probe_results.json`、`upstream_issue_3132.json`。
   数值探针不替代完整 CSA 正确性、状态/服务检查与 L1 性能。下一步在
   C04 尝试独立写回 GEMV，核对新增指令/搬运的代价；生产保留版和分母不变。
+
+
+### 2026-10-23：B16 独立 GEMV 完整候选通过编译门禁并提交
+
+- `prepare_score_gemv.py` 冻结 `score_gemv_v3`：只改已有长 G6 分支的
+  WS，不改 QK/INT32→FP16 FIX+ReLU、Key 页读取、scale、TopK 或事件协议。
+  live≤3 分支、其余 Python 模块、ABI、orchestration、实际 AIV 函数及
+  wrapper 均与保留版一致。使用原六行 FIFO、原 GM 容量，无额外 GM 回搬。
+- 六个系数行先以物理 K256/有效 K64 搬到 Left；FP16 QK Mat 父池扩成
+  384 行，显式 TEXTRACT 的目的物理 K256/有效 K64，每次只读取真实生成
+  的 192 行内对应的 64 行。独立 GEMV 顺次复用原 4KiB WS Acc。
+  实际每个 1024 列步骤为 96 次 GEMV，替代原 32 次 WS MMA，增加 80 次
+  FIX 写回。这是明确的开销权衡，不用少算零值推断性能必然提高。
+- v1 的 Left K64 切片不满足 boxed subview 要求；v2 的 Mat 子视图在
+  PTOResolveBufferSelect 后源形状从256×64扩大成384×64，触发TMOV形状
+  检查。已抽出无 GEMV 依赖的 Python/PTO 最小复现，并直接调用 PTOAS
+  定位失败 pass；查重后以中文提交 PTOAS #1680。v3 使用显式 TEXTRACT，
+  公共 SDK 未修改。CPU 历史见 `score_gemv_compile_history.json`。
+- `audit_score_gemv.py` 完成实际指令、有效尺寸边界、原同步参数、资源、
+  独立 Acc 区间和完整 CCE/host 二进制门禁。资源证据见
+  `score_gemv_v3_codegen.json`。
+- 唯一完整 C04 任务 `task_20261023_183940_8927319593`，设备8，
+  同 SDK/同卡历史原基线与保留版；沿用6组严格检查和10个完整72角色
+  L1窗口。待终态；未采用、未扩测其他档位、未push。
