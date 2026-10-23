@@ -23114,3 +23114,51 @@ Native cache布局或MPMD调度。只在无微批并发时共享；DBO/ubatching
 本次三个场景实际共享scratch约148.83MB；21层整模型的节省量仍以之前CPU容量
 估算为准，不能将其称为实测峰值。v05两个B16整模型任务已满足启动前单卡
 PASS条件，继续排队；整模型输出对照及B24目标仍未完成。
+
+### 735.99 定位并修复TND图回退后的Native query容量不一致（2026-10-23）
+
+v05的两次16卡B16运行都跨过了旧OOM位置并连续生成，但未完整结束。
+MPMD任务`task_20261023_192605_27404711194`在请求退出到7路时失败；
+SPMD任务`task_20261023_192605_27405926637`退出到4路时失败。实际异常来自
+Native `SparseAttnSharedkv`，错误507015/MTE访问非法GM。不能将它们记为功能通过。
+
+使用CANN解析库读取异常dump的header和Q/L小数组，没有导出或hash整块KV：
+
+| 实现 | 有效请求 | Native query形状 | Q前缀末项 | 结果 |
+|---|---:|---|---:|---|
+| MPMD，三个异常dump | 7 | `[42,64,512]` | 96 | 不一致 |
+| SPMD | 4 | `[24,64,512]` | 96 | 不一致 |
+
+证据在`csa_tnd_model_validation_20261023/redispatch_failures.json`。原因是本地
+TND图合同拒绝重放后，将整图转到正常Python派发；metadata仍按96行图档位
+补齐，Native eager却按有效num_decode_tokens截成42/24行。Native正常图捕获
+固定使用96行query，因此之前Native基线能通过。这属于TND接入的调用合同
+错误，不定性为Native SparseAttn算子bug，也不是PTO核内数值误差。
+
+修复只作用于TND拒绝重放期间的Native custom-op：临时设置回退标记，Native
+入口建立只用于本次调用的容量视图，复用已有positions、slots和顶层完整RoPE；
+decode计算范围取96行，压缩输出容量沿Native的
+`min(T, T//ratio + num_decodes)`规则。真实num_actual_tokens和num_reqs_actual
+不变，全局metadata不变，PTO继续读取原始TND合同；无device内容回读、无
+额外metadata算子。标记在finally中恢复，Native普通路径不受影响。
+
+单卡验证先用42行eager作参考，发现少量BF16差异（输出688128项中74项，
+RMSE约2.8e-5），该对照同时改变了Native运行容量，不能用来单独归因本修复。
+随后改用原Native builder准备96行捕获并实际重放，device Q/L仍包含有效请求
+与padding，保持比较口径一致：
+
+- `task_20261023_205202_324089827485`：SWA layer1的42→96、HCA layer3的24→96
+  输出及cache/state零容差一致，保护区通过；CSA因compact RoPE容量26/40不符
+  被Native tiling检查拒绝，任务exit=1，如实保留。
+- 补齐同一Native compact容量规则后，
+  `task_20261023_205940_349068815445`只补测受影响的CSA layer2，42→96的输出、
+  SWA/压缩cache、Compressor状态、Indexer key/scale/state全部零容差一致，
+  保护区与原metadata保持检查通过，任务exit=0。中间一次启动器未接收队列
+  附加的`--device`参数，在参数解析阶段退出，已修正，不算算子失败。
+- 五个CPU检查覆盖回退标记、容量view别名、真实计数保持、缺失存储拒绝和
+  两种压缩比的容量规则；全部通过。
+
+聚合证据为`redispatch_validation.json`。此处浮点采用atol=rtol=0比较，
+不区分+0/-0的表示，准确口径为零容差逐元素一致；没有放宽容差。
+修复版16卡MPMD `task_20261023_210324_365776931582`及SPMD
+`task_20261023_210324_36579134321`已排队。仍先完成B16三侧对照，再进入B24。

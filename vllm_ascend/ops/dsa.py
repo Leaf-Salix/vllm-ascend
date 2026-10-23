@@ -196,6 +196,13 @@ def dsa_forward(
 
     kv_cache = _build_kv_cache(self, forward_context)
 
+    if getattr(forward_context, "additional_kwargs", {}).get("pto_csa_tnd_padded_redispatch") is True:
+        from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.graph_contract import native_decode_capacity_views
+
+        attn_metadata = native_decode_capacity_views(
+            attn_metadata, hidden_states.shape[0], self.dsa_attn.impl.compress_ratio
+        )
+
     self.dsa_attn.impl.forward(
         self.dsa_attn.layer_name, hidden_states, kv_cache, attn_metadata, need_gather_q_kv, output
     )

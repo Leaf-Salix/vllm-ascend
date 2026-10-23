@@ -253,14 +253,22 @@ class ACLGraphWrapper:
         if entry.csa_tnd_contracts and not all(
             contract.allows_replay(forward_context) for contract in entry.csa_tnd_contracts.values()
         ):
+            from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.graph_contract import TND_PADDED_REDISPATCH
+
             # 旧图可能捕获了Native/空路径，或请求容量/策略/输入地址已经变化。
             # 走正常Python派发，支持的调用仍可进入SPMD，范围外由服务回退Native。
             previous_mode = forward_context.cudagraph_runtime_mode
+            previous_redispatch = forward_context.additional_kwargs.get(TND_PADDED_REDISPATCH)
             forward_context.cudagraph_runtime_mode = CUDAGraphMode.NONE
+            forward_context.additional_kwargs[TND_PADDED_REDISPATCH] = True
             try:
                 return self.runnable(*args, **kwargs)
             finally:
                 forward_context.cudagraph_runtime_mode = previous_mode
+                if previous_redispatch is None:
+                    forward_context.additional_kwargs.pop(TND_PADDED_REDISPATCH, None)
+                else:
+                    forward_context.additional_kwargs[TND_PADDED_REDISPATCH] = previous_redispatch
 
         if entry.csa_hbg_host_metadata:
             from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.host_metadata import validate_graph_replay

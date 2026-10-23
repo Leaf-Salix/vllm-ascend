@@ -44,8 +44,11 @@
 - `workspace_validation.json`：两种TND的临时工作区复用单卡验证通过。
   128K/B16的S1/S6及两层交替，eager和graph的输出、Top-K、cache/state逐bit一致，保护区通过。
 - `workspace_pool_estimate.json`：CPU meta容量估算，不是模型设备峰值。
-- `jobs.json`：两种PTO B16整模型任务及其前置验证路径。整模型和B24尚待完成。
+- `redispatch_failures.json`：v05两种PTO在收尾阶段触发的Native query/Q前缀容量不一致。
+- `redispatch_validation.json`：修复后SWA/HCA/CSA的单卡Native容量图参考对照通过。
+- `jobs.json`：当前v09两种PTO B16整模型任务及其前置验证路径。整模型和B24尚待完成。
 
 有工作区修复的冻结包使用`prepare.py <实验名> --revision 99268437c --workspace-fix`；
+图回退修复再加`--redispatch-fix`。
 启动`run.sh`时第六个参数提供单卡`result.json`。该结果必须包含两种实现的PASS，
 否则启动器直接退出。该门槛不替代后续整模型正确性检查。

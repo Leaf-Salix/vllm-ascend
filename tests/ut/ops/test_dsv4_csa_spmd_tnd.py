@@ -569,7 +569,7 @@ def test_model_graph_contract_mismatch_redispatches_outside_graph(monkeypatch):
     from vllm_ascend.compilation import acl_graph
 
     descriptor = BatchDescriptor(9)
-    context = NS(batch_descriptor=descriptor, cudagraph_runtime_mode=CUDAGraphMode.FULL)
+    context = NS(batch_descriptor=descriptor, cudagraph_runtime_mode=CUDAGraphMode.FULL, additional_kwargs={})
     replay_calls, dispatch_modes = [], []
     entry = acl_graph.ACLGraphEntry(
         batch_descriptor=descriptor,
@@ -581,6 +581,7 @@ def test_model_graph_contract_mismatch_redispatches_outside_graph(monkeypatch):
     wrapper.concrete_aclgraph_entries = {descriptor: entry}
 
     def run(value):
+        assert context.additional_kwargs["pto_csa_tnd_padded_redispatch"]
         dispatch_modes.append(context.cudagraph_runtime_mode)
         return value + 1
 
@@ -589,6 +590,93 @@ def test_model_graph_contract_mismatch_redispatches_outside_graph(monkeypatch):
     assert wrapper(3) == 4
     assert dispatch_modes == [CUDAGraphMode.NONE] and not replay_calls
     assert context.cudagraph_runtime_mode == CUDAGraphMode.FULL
+    assert not context.additional_kwargs
+
+
+def test_native_redispatch_uses_initialized_capacity_without_changing_actual_metadata(monkeypatch):
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.graph_contract import native_decode_capacity_views
+
+    positions = torch.arange(96, dtype=torch.int64)
+    slots = torch.full((96, 2), -1, dtype=torch.int32)
+    full_cos, full_sin = {"layer": torch.ones(96, 64)}, {"layer": torch.zeros(96, 64)}
+    bounds = torch.arange(0, 97, 6, dtype=torch.int32)
+    decoded = NS(
+        input_positions=positions[:42],
+        slot_mapping=slots[:42],
+        cos={"layer": full_cos["layer"][:42]},
+        sin={"layer": full_sin["layer"][:42]},
+        query_start_loc=bounds,
+        num_reqs_actual=7,
+    )
+    item = NS(
+        num_prefills=0,
+        num_decodes=16,
+        num_decode_tokens=42,
+        num_actual_tokens=42,
+        num_input_tokens=96,
+        decode=decoded,
+        cos=full_cos,
+        sin=full_sin,
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Native回退容量适配不得读取device tensor内容")
+
+    for name in ("item", "cpu", "tolist", "numpy"):
+        monkeypatch.setattr(torch.Tensor, name, forbidden)
+    (adapted,) = native_decode_capacity_views([item], 96, 4)
+    assert adapted.num_decode_tokens == 96 and adapted.num_actual_tokens == 42
+    assert adapted.decode.num_reqs_actual == 7
+    assert adapted.decode.input_positions.shape == (96,)
+    assert adapted.decode.slot_mapping.shape == (96, 2)
+    assert adapted.decode.input_positions.data_ptr() == positions.data_ptr()
+    assert adapted.decode.slot_mapping.data_ptr() == slots.data_ptr()
+    assert adapted.decode.query_start_loc is bounds
+    assert adapted.decode.cos is full_cos and adapted.decode.sin is full_sin
+    assert item.num_decode_tokens == 42 and item.decode is decoded
+    assert decoded.input_positions.shape == (42,) and decoded.slot_mapping.shape == (42, 2)
+
+
+def test_native_redispatch_rejects_missing_capacity_storage():
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.graph_contract import native_decode_capacity_views
+
+    item = NS(
+        num_prefills=0,
+        num_decode_tokens=42,
+        num_actual_tokens=42,
+        num_input_tokens=96,
+        decode=NS(input_positions=torch.zeros(42, dtype=torch.int64), slot_mapping=None),
+    )
+    with pytest.raises(ValueError, match="存储不足"):
+        native_decode_capacity_views([item], 96, 4)
+
+
+@pytest.mark.parametrize("ratio,expected", [(4, 40), (128, 16)])
+def test_native_redispatch_compact_capacity_matches_native_builder(ratio, expected):
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.graph_contract import native_decode_capacity_views
+
+    positions = torch.zeros(96, dtype=torch.int64)
+    decoded = NS(
+        input_positions=positions[:42],
+        slot_mapping=None,
+        full_compress_cos=torch.empty(1),
+        num_compressed_tokens=min(42, 42 // ratio + 16),
+        num_reqs_actual=7,
+    )
+    item = NS(
+        num_prefills=0,
+        num_decodes=16,
+        num_decode_tokens=42,
+        num_actual_tokens=42,
+        num_input_tokens=96,
+        decode=decoded,
+        cos={},
+        sin={},
+    )
+    (adapted,) = native_decode_capacity_views([item], 96, ratio)
+    assert adapted.decode.num_compressed_tokens == expected
+    assert decoded.num_compressed_tokens == min(42, 42 // ratio + 16)
+    assert adapted.decode.num_reqs_actual == decoded.num_reqs_actual == 7
 
 
 @pytest.mark.parametrize(

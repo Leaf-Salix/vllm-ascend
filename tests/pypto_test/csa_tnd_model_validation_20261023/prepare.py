@@ -16,6 +16,7 @@ def main():
     parser.add_argument("name")
     parser.add_argument("--revision", default="HEAD")
     parser.add_argument("--workspace-fix", action="store_true")
+    parser.add_argument("--redispatch-fix", action="store_true")
     args = parser.parse_args()
     here = Path(__file__).resolve().parent
     repo = here.parents[2]
@@ -57,13 +58,21 @@ def main():
                 pending.update(alias.name for alias in node.names if alias.name.startswith("dsv4_"))
     overlays = []
     if args.workspace_fix:
-        overlays = [
+        overlays += [
             "vllm_ascend/models/pypto_deepseek_v4.py",
             "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/service.py",
             "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/workspace.py",
         ]
-        for path in overlays:
-            shutil.copy2(repo / path, source / path)
+    if args.redispatch_fix:
+        overlays += [
+            "vllm_ascend/compilation/acl_graph.py",
+            "vllm_ascend/ops/dsa.py",
+            "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/graph_contract.py",
+            "tests/pypto_test/dsv4_csa_native_case.py",
+        ]
+    for path in overlays:
+        shutil.copy2(repo / path, source / path)
+    if overlays:
         (root / "workspace.patch").write_text(
             subprocess.check_output(["git", "-C", str(repo), "diff", revision, "--", *overlays], text=True)
         )
