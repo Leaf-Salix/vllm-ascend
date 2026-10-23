@@ -54,20 +54,9 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {
-    "score_half_interleave_C04": {
-      "task_id": "task_20261023_173612_10939417938",
-      "device": 8,
-      "output": "runs/h131072_b16_s6_score_half_interleave_v1",
-      "cpu_kernel": "runs/compile_score_half_interleave_C04_v1/kernel",
-      "retained_result": "runs/h131072_b16_s6_leaf_scale_one_row_v1/result.json",
-      "retained_cpu_kernel": "runs/compile_output_rectangle_production_C04_v1/kernel",
-      "original_result": "runs/h131072_b16_s6_baseline_sdk_v1/result.json",
-      "command": "bash /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/launch_sdk_measure_v2.sh candidate /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/score_half_interleave_v1 h131072_b16_s6 score_half_interleave_v1 /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/h131072_b16_s6_baseline_sdk_v1/result.json"
-    }
-  },
+  "pending_tasks": {},
   "next_steps": [
-    "Collect B16 score_half_interleave_v1 strict checks and complete-L1 results; do not expand before the result",
+    "Continue source-backed B16 Indexer/Attention pipeline work; both packed-key and N64 half-interleaving complete-L1 pilots are negative",
     "Packed AIV key supply is a measured negative; do not expand its state/service/case matrix or scan nearby buffering parameters",
     "Attention follow-up must differ from measured direct-AIC gather, persistent-KV buffering and simple producer/consumer reorderings",
     "Preserve original arithmetic, A3 resource bounds and cache/slot visibility; require mechanism evidence before another device candidate",
@@ -115,7 +104,7 @@
     "packed_score_keys_v6": 21,
     "score_half_interleave": 2
   },
-  "updated_at": "2026-10-23T17:22:45.609488+08:00",
+  "updated_at": "2026-10-23T17:50:38.729522+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -309,6 +298,14 @@
       "retained_median_us": 763.65,
       "change_pct": 11.325869180907478,
       "reason": "Strict checks passed but complete-L1 regressed; no domain expansion or production adoption"
+    },
+    {
+      "candidate": "score_half_interleave_v1",
+      "case_id": "C04",
+      "evidence": "score_half_interleave_v1_results.json",
+      "median_us": 782.05,
+      "retained_median_us": 763.65,
+      "change_pct": 2.4094807830812526
     }
   ],
   "promising_candidates": [
