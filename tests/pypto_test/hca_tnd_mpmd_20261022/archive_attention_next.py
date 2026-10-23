@@ -15,7 +15,8 @@ MANIFESTS = ("ATTENTION_ONLINE_TASKS.json", "ATTENTION_BOUNDARY_TASKS.json", "AT
              "ATTENTION_GATHER_TASKS.json")
 CPU_RUNS = ("attention_online_cpu_v1", "attention_online_n64_cpu_v1",
             "attention_pair_plan_cpu_v1", "attention_pair_plan_cpu_v2", "attention_pair_plan_cpu_v3",
-            *(f"attention_pair512_cpu_v{i}" for i in range(1, 7)), "attention_gather_mask_cpu_v1")
+            *(f"attention_pair512_cpu_v{i}" for i in range(1, 7)), "attention_gather_mask_cpu_v1",
+            "attention_gather_mask_policy_cpu_v2", "attention_reset_alpha_h32_cpu_v1")
 
 
 def status(task):
@@ -82,7 +83,8 @@ def main():
             cpu[name] = json.loads((run / "result.json").read_text())
             shutil.copy2(run / "result.json", HERE / "evidence" / (name + "_result.json"))
             local.add(run)
-    for pattern in ("attention_online*", "attention_boundary_diag*", "attention_pair*", "attention_gather*"):
+    for pattern in ("attention_online*", "attention_boundary_diag*", "attention_pair*", "attention_gather*",
+                    "attention_reset_alpha*"):
         local.update((HERE / "experiments").glob(pattern))
     artifacts = []
     for path in sorted(local):
@@ -91,12 +93,12 @@ def main():
     report = {"production_head": "37bbd0f3c12d32966695ad45e7059557d1fc03ad",
               "production_changed": False, "metric": "完整HCA eager L1 incore首尾；无ACLGraph",
               "reference_correction": "旧混长padding Native Q仅15行而cu_q尾为24，参考无效；v6统一真实范围后剩1项输出超差",
-              "adoption": "累计max/N64及已测双query版本未采用；恢复early与gather Vector mask候选以逐任务结果为准，当前正式算子不变",
+              "adoption": "本轮全部候选未采用；Vector mask初版B28正向，但核内分档版收益不稳定且8K回退；正式算子仍为37bbd0f3c的已验证策略",
               "rows": rows, "cpu": cpu, "local_artifacts_no_hash": artifacts}
     (HERE / "ATTENTION_NEXT_RESULTS.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     lines = ["# HCA attention后续候选与混长参考核对", "",
              "共享SDK csa-shared-20261022-logical-codegen；以下均为已有结果，不新增设备测试。",
-             "正式算子仍为37bbd0f3c的区间策略；累计max/N64未采用，双query与gather mask仍为实验。", "",
+             "上一轮已收口；用户随后要求继续优化，目标保持active。所有已测新候选均未采用，正式算子仍为37bbd0f3c的区间策略。", "",
              "| 候选/场景 | 控制μs | 候选μs | 性能提升 | 更快配对 | Native输出 |",
              "|---|---:|---:|---:|---:|---|"]
     for row in rows:
@@ -109,9 +111,12 @@ def main():
     lines += ["", "N64/H8的控制是累计max候选，不能把该增量当作相对正式算子的收益。",
               "全部严格Native cache/state检查尚未通过，任务正常退出或输出PASS不等于整层验收。", "",
               "## 尚未结束的设备任务", ""]
-    for row in rows:
+    pending = [row for row in rows if not row['status'].startswith('completed')]
+    for row in pending:
         if not row['status'].startswith('completed'):
             lines.append(f"- `{row['name']}`：{row['status']}，`{row['task_id']}`。")
+    if not pending:
+        lines.append("无。本汇总内的已提交设备任务全部终态；新一轮任务另行记录，不重复提交历史任务。")
     lines += ["",
               "## 混长padding参考的纠正", "",
               "旧Native输入Q=[15,64,512]而cu_q包含padding至24，产生无效参考或MTE错误。",

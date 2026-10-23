@@ -1,0 +1,72 @@
+{
+  "scope": "合成分页attention对密集FP64；非真实层/模型精度验收",
+  "aclgraph_replay": false,
+  "shared_toolchain": "csa-shared-20261022-logical-codegen",
+  "cases": {
+    "131072": {
+      "edge": false,
+      "queries": [
+        1,
+        5,
+        6,
+        1,
+        2
+      ],
+      "vs_dense_fp64": {
+        "control": {
+          "max_abs": 0.0011099760255940394,
+          "rmse": 0.00012980176717641875,
+          "nonfinite": 0,
+          "repeat_eager_exact": true,
+          "output_padding_guard": true
+        },
+        "candidate": {
+          "max_abs": 0.0011099760255940394,
+          "rmse": 0.00012980176717641875,
+          "nonfinite": 0,
+          "repeat_eager_exact": true,
+          "output_padding_guard": true
+        }
+      },
+      "candidate_vs_control": {
+        "max_abs": 0.0,
+        "rmse": 0.0,
+        "nonfinite": 0
+      }
+    },
+    "16507": {
+      "edge": true,
+      "queries": [
+        1,
+        5,
+        6,
+        1,
+        2
+      ],
+      "vs_dense_fp64": {
+        "control": {
+          "max_abs": 0.002377886009350072,
+          "rmse": 0.00021786064719458962,
+          "nonfinite": 0,
+          "repeat_eager_exact": true,
+          "output_padding_guard": true
+        },
+        "candidate": {
+          "max_abs": 0.002377886009350072,
+          "rmse": 0.00021786064719458962,
+          "nonfinite": 0,
+          "repeat_eager_exact": true,
+          "output_padding_guard": true
+        }
+      },
+      "candidate_vs_control": {
+        "max_abs": 0.0,
+        "rmse": 0.0,
+        "nonfinite": 0
+      }
+    }
+  },
+  "candidate_attention_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_gather_mask_v1/operator/deepseek_v4_flash_hca_tnd/attention.py",
+  "status": "DIAGNOSTIC_COMPLETE",
+  "acceptance": "误差如实报告，后续真实层仍使用冻结Native输出容差，不由此推导新容差"
+}

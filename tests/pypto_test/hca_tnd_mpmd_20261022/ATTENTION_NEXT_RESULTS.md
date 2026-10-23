@@ -1,7 +1,7 @@
 # HCA attention后续候选与混长参考核对
 
 共享SDK csa-shared-20261022-logical-codegen；以下均为已有结果，不新增设备测试。
-正式算子仍为37bbd0f3c的区间策略；累计max/N64未采用，双query与gather mask仍为实验。
+上一轮已收口；用户随后要求继续优化，目标保持active。所有已测新候选均未采用，正式算子仍为37bbd0f3c的区间策略。
 
 | 候选/场景 | 控制μs | 候选μs | 性能提升 | 更快配对 | Native输出 |
 |---|---:|---:|---:|---:|---|
@@ -14,17 +14,22 @@
 | attention_pair512_wait0_b28_v8 | 756.52 | 867.38 | -12.78% | 0/7 | PASS |
 | attention_pair512_score_ack_b16_v9 | 528.90 | 593.66 | -10.91% | 0/7 | PASS |
 | attention_pair512_score_ack_b28_v9 | 737.94 | 820.36 | -10.05% | 0/7 | PASS |
+| attention_pair512_early_b16_v10 | 510.24 | 563.40 | -9.44% | 0/7 | PASS |
+| attention_pair512_early_b28_v10 | 756.10 | 836.06 | -9.56% | 0/7 | PASS |
+| attention_gather_mask_b16_v1 | 520.48 | 517.60 | +0.56% | 3/7 | PASS |
+| attention_gather_mask_b28_v1 | 772.92 | 762.22 | +1.40% | 7/7 | PASS |
+| attention_gather_policy_h131072_b24_v2 | 692.80 | 692.04 | +0.11% | 5/7 | PASS |
+| attention_gather_policy_h131072_b28_v2 | 769.52 | 768.50 | +0.13% | 5/7 | PASS |
+| attention_gather_policy_h262144_b16_v2 | 659.04 | 655.28 | +0.57% | 2/5 | PASS |
+| attention_gather_policy_h131072_b16_v2 | 517.40 | 521.16 | -0.72% | 2/5 | PASS |
+| attention_gather_policy_h8192_b32_v2 | 597.52 | 612.46 | -2.44% | 1/5 | PASS |
 
 N64/H8的控制是累计max候选，不能把该增量当作相对正式算子的收益。
 全部严格Native cache/state检查尚未通过，任务正常退出或输出PASS不等于整层验收。
 
 ## 尚未结束的设备任务
 
-- `attention_pair512_early_b16_v10`：pending，`task_20261023_221759_285535015367`。
-- `attention_pair512_early_b28_v10`：pending，`task_20261023_221759_285539110415`。
-- `attention_gather_mask_b16_v1`：pending，`task_20261023_221830_287315610184`。
-- `attention_gather_mask_b28_v1`：pending，`task_20261023_221830_287333427491`。
-- `attention_gather_mask_fp64_v1`：pending，`task_20261023_221830_287352913134`。
+无。本汇总内的已提交设备任务全部终态；新一轮任务另行记录，不重复提交历史任务。
 
 ## 混长padding参考的纠正
 
