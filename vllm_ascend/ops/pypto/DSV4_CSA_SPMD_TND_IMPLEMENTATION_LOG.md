@@ -5764,3 +5764,28 @@ AIC已等待全部量化实际写者，若QUANT发布同时覆盖系数，可在
 - 不采用、不扩状态/服务/其它档位，不继续扫描附近发射排列。
   当前正式五项保留机制和八档几何平均0.984349891857不变；
   原10%目标未达到，继续B16 Indexer/Attention核内流水研究。
+
+
+### 2026-10-23：Indexer 真 GEMV 数值探针通过，Acc 列池问题已上报
+
+- 沿用户指定 recipes 的 Indexer/Attention 数据流对照，继续检查本地
+  ops-transformer 的 A3 QLI WS：它逐 query 计算 K64、M16。保留版
+  使用对角系数的两段 K192；本轮检查真正 M1 的 TGEMV 能否减少无效计算。
+  这不是把 Native 的源码写法直接当作性能结论。
+- `score_gemv_probe.py` 的原两次 K192 matmul 与六次 K64 GEMV，
+  在 3 个种子、4 类输入（正负/正/零/宽动态范围）的 eager/graph 共
+  24 组检查中 FP32 位级一致，含 signed-zero 比较、输入不变及输出保护区。
+  唯一成功任务 `task_20261023_182030_349647015713`，设备1，exit0。
+  CPU 完整二进制编译通过，设备生成 CPP 与 CPU 完全相同；未计性能。
+- 初版漏了 A3 单行 Mat→Left 的 512B 物理 K 对齐，任务
+  `task_20261023_181703_335272912270` 在设备内核执行前编译失败；
+  改成物理 K256/有效 K64，并把完整二进制编译加入 CPU 门禁。
+  该问题属于探针布局错误，不作为 SDK bug。
+- Acc 列池版本另有独立 CPU 复现：已共享 MemRef 的 GEMV 输出在 assemble
+  时仍生成 Acc→Acc TMOV。最小复现 `score_gemv_alias_repro.py` 已按
+  512B 对齐修正后再次确认；查重后提交 PyPTO #3132。公共 SDK 未修改。
+  按用户新要求，#3132 标题和正文已改为中文并回读核验，后续 issue
+  同样使用中文，代码和报错保留原文。
+- 证据 `score_gemv_probe_results.json`、`upstream_issue_3132.json`。
+  数值探针不替代完整 CSA 正确性、状态/服务检查与 L1 性能。下一步在
+  C04 尝试独立写回 GEMV，核对新增指令/搬运的代价；生产保留版和分母不变。
