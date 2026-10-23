@@ -49,17 +49,10 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {
-    "task_20261023_133922_3154216781": {
-      "case": "C05",
-      "candidate": "output_rectangle_v3",
-      "mode": "complete_L1_candidate",
-      "performance_eligible": true
-    }
-  },
+  "pending_tasks": {},
   "next_steps": [
     "Preserve four retained mechanisms and the original eight-case denominator; 10% goal remains active",
-    "Collect task_20261023_133922_3154216781 and run analyze_priority_candidate.py output_rectangle_v3; no C04 timing repeat because all four CPP are identical",
+    "Integrate the validated rectangle NZ path; preserve the existing ND helper; verify production equivalence and retain C05 995.01 us only after integration checks",
     "Reduce measured full-chain service work or exploit demonstrated resource complementarity; no more simple DMA/Vector reorderings",
     "Do not implement whole-leaf-round Attention insertion on existing owners: optimistic serialized-resource model already increases C05 waiting",
     "Do not repeat negative head partitioning or direct HC tail-copy removal without a new mechanism",
@@ -102,7 +95,7 @@
     "hc_cooperative_packed_math_ownership": 11,
     "output_rectangle_v3": 29
   },
-  "updated_at": "2026-10-23T13:41:47+08:00",
+  "updated_at": "2026-10-23T14:19:46.481782+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -290,6 +283,13 @@
       "gain_pct": 3.6969778263875153,
       "adopted": false,
       "evidence": "physical_capacity_2080_v1_C02_result.json"
+    },
+    {
+      "candidate": "output_rectangle_v3",
+      "case": "C05",
+      "gain_pct": 0.7985882634443997,
+      "adopted": false,
+      "evidence": "output_rectangle_v3_results.json"
     }
   ],
   "priority_cases": [
@@ -508,8 +508,12 @@
       "codegen": "output_rectangle_v3_codegen.json",
       "closed_C04_all_four_cpp_equal": true,
       "tasks": "output_rectangle_v3_tasks.json",
-      "status": "complete_L1_pending",
-      "mechanism": "Single M160 with five N192 tiles plus static N64 tail, 48 O_A tasks; original O_B owners retained"
+      "status": "all_pilot_gates_passed_integration_pending",
+      "mechanism": "Single M160 with five N192 tiles plus static N64 tail, 48 O_A tasks; original O_B owners retained",
+      "measurement": "output_rectangle_v3_results.json",
+      "validation": "output_rectangle_v3_validation_tasks.json",
+      "runtime_validation": "output_rectangle_v3_runtime_validation.json",
+      "all_eight_codegen": "output_rectangle_v3_codegen_validation.json"
     }
   },
   "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
@@ -670,7 +674,7 @@
   "current_sdk_C08_reference": "baseline_current_sdk_C08.json",
   "current_implementation": "physical_capacity_production_v1",
   "earlier_stage_commit": "3a0f423c6",
-  "latest_stage": "hc_diagnostic_not_causal_output_rectangle_C05_full_L1_submitted",
+  "latest_stage": "output_rectangle_C05_all_validation_passed_production_integration_pending",
   "retained_results": "retained_physical_capacity.json",
   "production_source_manifest": "physical_capacity_production_v1.json",
   "prior_production_commit": "32a1426d9",

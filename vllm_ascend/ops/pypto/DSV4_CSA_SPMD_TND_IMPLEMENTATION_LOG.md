@@ -5487,3 +5487,24 @@ task_20261023_133922_3154216781。来源绑定output_rectangle_v3_tasks.json；
 收取器允许明确的非空重点档子集，仍核对全72角色原始窗口、原固定分母、
 同卡同SDK及全部四份执行CPP。候选尚未采用，四项正式机制、八档比值
 0.985336943775587及10%目标均不变。本轮签名本地提交，不push。
+
+### 2026-10-23：输出矩形试验有小幅全链收益，进入采用门禁
+
+task_20261023_133922_3154216781已completed/exit0。C05完整72角色十窗中位
+995.01μs，对当前保留1003.02μs降低0.798588%；六组逐bit/保护检查、
+同卡同SDK、源冻结清单及实际四份CPP核验通过。output_rectangle_v3_results.json
+保留全部样本和原1014.46μs分母；这是待采用候选，正式八档比值暂不更新。
+
+已提交C05的16种同地址metadata及4步连续状态：
+task_20261023_135137_7079796761；正式service/custom-op、ACLGraphWrapper、
+空调用与回退：task_20261023_135138_70859816005。均使用既有验证壳与公共SDK，
+不采性能。另补其余六档关闭域的CPU四CPP/ABI等价验证；C04已通过，不重编，
+C05已测且CPU通过，不重复计时。任务绑定output_rectangle_v3_validation_tasks.json。
+
+输出矩形的八档CPU核验已完成：C05改变O_A，其他七档各四CPP逐字一致
+（仅忽略pto位置注释），八档root ABI及编排均保持。两项设备门禁均exit0：
+16 metadata + 4连续状态共40组逐bit、同地址、geometry、代际与保护通过；
+正式service及两次ACLGraphWrapper重放、workspace复用、空调用和Native回退
+通过。两次执行的四CPP均匹配已测候选，SDK与源码绑定一致。见
+output_rectangle_v3_codegen_validation.json及output_rectangle_v3_runtime_validation.json。
+正式版本整理仍待完成，暂不改八档保留汇总。
