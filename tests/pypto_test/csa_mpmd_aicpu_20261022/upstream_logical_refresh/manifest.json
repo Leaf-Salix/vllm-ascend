@@ -1,0 +1,158 @@
+{
+  "status": "validated",
+  "upstream_issue": "https://github.com/hw-native-sys/pypto/issues/2984",
+  "upstream_pr": "https://github.com/hw-native-sys/pypto/pull/3000",
+  "upstream_commit": "2b3b7dc33d81ff663e0290a233d76bc522d48d96",
+  "selected": {
+    "release": "csa-shared-20261022-logical-codegen",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-shared-20261022",
+      "commit": "26e94e05627eb47710dcc214bae1774b8829df8a"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_mpmd_aicpu_20261022/upstream_logical_refresh/manifest.json",
+    "published_for_validation_at": "2026-10-22T18:00:10+08:00",
+    "validated_at": "2026-10-22T18:14:28+08:00"
+  },
+  "changes": {
+    "production": "17 lines in src/codegen/codegen_base.cpp",
+    "regression_tests": "123 lines from official PR",
+    "ptoas": "unchanged",
+    "simpler": "unchanged"
+  },
+  "cpu_evidence": {
+    "build": "../runs/pypto_3000_build.log",
+    "torch_bridge_build": "../runs/pypto_3000_torch_build.log",
+    "codegen_tests": "../runs/pypto_3000_codegen_tests.xml",
+    "test_count": 113,
+    "passed": 113,
+    "warnings": 4,
+    "affected_c05_compile": "../runs/cpu_v6_c05_sdk3000/result.json",
+    "affected_c05_passed": true
+  },
+  "excluded_attempt": "Initial pytest loaded the old editable installation; preserved wrong_import logs are not validation evidence. Source binding was corrected before the passing run.",
+  "device_evidence": [
+    {
+      "task_id": "task_20261022_180304_146804123112",
+      "case": "h131072_b24_s6",
+      "result": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v8_h131072_b24_s6/result.json",
+      "passed": true,
+      "all_checks": {
+        "spmd_eager": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        }
+      }
+    },
+    {
+      "task_id": "task_20261022_180304_146808129732",
+      "case": "h131072_b16",
+      "result": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v8_h131072_b16/result.json",
+      "passed": true,
+      "all_checks": {
+        "spmd_eager": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_eager": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "mpmd_eager": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "spmd_graph": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_graph": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "mpmd_graph": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "spmd_post_l1": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "mpmd_control_post_l1": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        },
+        "mpmd_post_l1": {
+          "guards": true,
+          "numerical": true,
+          "all_bit_equal": true
+        }
+      }
+    }
+  ],
+  "publication_policy": "New immutable source/build path; previously published SDK remains untouched. New launches select this manifest; existing process imports stay pinned. Historical samples retain their original release.",
+  "performance_note": "C05 functional checks pass but AICPU full-page layout verification is slow. SDK validation does not mean operator performance acceptance."
+}

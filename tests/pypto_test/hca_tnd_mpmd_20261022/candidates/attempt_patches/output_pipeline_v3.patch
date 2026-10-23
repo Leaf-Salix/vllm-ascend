@@ -1,0 +1,38 @@
+--- a/output_fused.py
++++ b/output_fused.py
+@@ -132,14 +132,14 @@
+     output_flat = pl.reshape(output, [tokens, HC_DIM])
+     row_blocks = (tokens + MM_ROWS - 1) // MM_ROWS
+     units = row_blocks * (D // OUTPUT_COLUMNS)
+-    # T>=1时至少32个输出列块，始终足够24组核；使用固定正步长保留NZ地址证明。
++    workers = pl.min(OUTPUT_GROUPS, units)
+     # 槽号只属于一个逻辑 worker；它循环处理多个列块时，离开上一块前排空确认。
+     transfer = pl.create_tensor([OUTPUT_GROUPS * OUTPUT_SLOTS * MM_ROWS, OUTPUT_COLUMNS], dtype=pl.INT32)
+     ffts = pl.create_tensor([256], dtype=pl.INT64)
+-    with pl.spmd(OUTPUT_GROUPS, name_hint="hca_output_pipeline", deps=[ready], allow_early_resolve=True):
++    with pl.spmd(workers, name_hint="hca_output_pipeline", deps=[ready], allow_early_resolve=True):
+         worker = pl.tile.get_block_idx()
+         pl.system.set_ffts(ffts)
+-        for unit in pl.range(worker, units, OUTPUT_GROUPS):
++        for unit in pl.range(worker, units, workers):
+             row0 = unit // (D // OUTPUT_COLUMNS) * MM_ROWS
+             col0 = pl.max(unit % (D // OUTPUT_COLUMNS), 0) * OUTPUT_COLUMNS
+             rows = pl.min(MM_ROWS, tokens - row0)
+@@ -162,7 +162,7 @@
+                     k0 = kb * OUTPUT_K_TILE
+                     wk0 = pl.max(group, 0) * O_LORA + k0
+                     weight = pl.load(
+-                        wo_b, [wk0, pl.max(0, col0)], [OUTPUT_K_TILE, OUTPUT_COLUMNS],
++                        wo_b, [wk0, pl.max(col0, 0)], [OUTPUT_K_TILE, OUTPUT_COLUMNS],
+                         target_memory=pl.MemorySpace.Mat,
+                     )
+                     act = pl.tile.slice(activation, [MM_ROWS, OUTPUT_K_TILE], [0, k0])
+@@ -177,7 +177,7 @@
+         for lane in pl.split_aiv(2, mode=pl.SplitMode.NONE):
+             pl.system.set_ffts(ffts)
+             lane_col = lane * (OUTPUT_COLUMNS // 2)
+-            for vec_unit in pl.range(worker, units, OUTPUT_GROUPS):
++            for vec_unit in pl.range(worker, units, workers):
+                 vec_row0 = vec_unit // (D // OUTPUT_COLUMNS) * MM_ROWS
+                 vec_col0 = vec_unit % (D // OUTPUT_COLUMNS) * OUTPUT_COLUMNS + lane_col
+                 vec_rows = pl.min(MM_ROWS, tokens - vec_row0)

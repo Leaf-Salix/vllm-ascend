@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Indexer Native FP16 scale的设备端页所有权计划；在已有META阶段内执行。
+"""Indexer Native FP16 scale的页所有权计划，由AICPU编排执行。
 
 整体思路与阅读顺序
-    indexer_scale_page_plan_stage由前置metadata的唯一AIV扫描本轮Q/L、位置、
+    indexer_scale_page_plan_stage由AICPU编排扫描本轮Q/L、位置、
     compact offsets及slots，把合法scale写入分给page%WORKERS对应的AIV。
     输出是每worker的链表头及每项(page,offset,compact_row,next)；量化结束后，
     本文件的scale提交沿自己的链执行原64B读改写。
@@ -18,7 +18,7 @@
 同步、缓存与生命周期
     全计划仅由调用方选定的一个Scalar写；即使相邻项共享缓存行也没有多写者。
     首先覆盖全部head为-1，只从本轮可达链读取，不清空也不读取工作区陈旧尾部。
-    外层PHASE_META的发布/获取维护DCache；scale消费者另须等待量化完成。
+    描述符由AICPU运行时标量写入；scale提交task通过Tensor依赖等待量化完成。
     本文件不发task、不创建SPMD、不自行notify；完整调用期间输入metadata不变。
     page_bytes必须至少4160且为64的倍数，由绑定层保证；这让不同物理页的
     64B scale区不重叠。合法slot应唯一；重复slot的输入合同错误不由此计划修复。
@@ -77,24 +77,31 @@ def indexer_scale_page_plan_stage(
             count = length // 4 - history // 4
             first_token = begin + 3 - history % 4
             prefix = pl.cast(pl.read(compact_offsets, [request]), pl.INDEX) + history // 4 + 1
-            if prefix >= 0 and prefix + count <= scale_capacity and prefix + count <= pl.tensor.dim(slots, 0):
-                for local_row in pl.range(count):
-                    token = first_token + local_row * 4
-                    position = pl.cast(pl.read(positions, [token]), pl.INDEX)
-                    if position == history + token - begin:
-                        page = pl.cast(pl.read(slots, [prefix + local_row, 0]), pl.INDEX)
-                        offset = pl.cast(pl.read(slots, [prefix + local_row, 1]), pl.INDEX)
-                        if page >= 0 and page < pl.tensor.dim(cache, 0) and offset >= 0 and offset < SCALE_PAGE_ROWS:
-                            if pl.tensor.dim(cache, 1) >= SCALE_CACHE_MIN_BYTES:
-                                owner = page % WORKERS
-                                head = pl.read(workspace, [base + owner])
-                                row = base + WORKERS + jobs * SCALE_JOB_WORDS
-                                pl.write(workspace, [row], pl.cast(page, pl.INT32))
-                                pl.write(workspace, [row + 1], pl.cast(offset, pl.INT32))
-                                pl.write(workspace, [row + 2], pl.cast(prefix + local_row, pl.INT32))
-                                pl.write(workspace, [row + 3], head)
-                                pl.write(workspace, [base + owner], pl.cast(jobs, pl.INT32))
-                                jobs = jobs + 1
+            if prefix >= 0:
+                if prefix + count <= scale_capacity:
+                    if prefix + count <= pl.tensor.dim(slots, 0):
+                        for local_row in pl.range(count):
+                            token = first_token + local_row * 4
+                            position = pl.cast(pl.read(positions, [token]), pl.INDEX)
+                            if position == history + token - begin:
+                                page = pl.cast(pl.read(slots, [prefix + local_row, 0]), pl.INDEX)
+                                offset = pl.cast(pl.read(slots, [prefix + local_row, 1]), pl.INDEX)
+                                if page >= 0:
+                                    if page < pl.tensor.dim(cache, 0):
+                                        if offset >= 0:
+                                            if offset < SCALE_PAGE_ROWS:
+                                                if pl.tensor.dim(cache, 1) >= SCALE_CACHE_MIN_BYTES:
+                                                    owner = page % WORKERS
+                                                    head = pl.read(workspace, [base + owner])
+                                                    row = base + WORKERS + jobs * SCALE_JOB_WORDS
+                                                    pl.write(workspace, [row], pl.cast(page, pl.INT32))
+                                                    pl.write(workspace, [row + 1], pl.cast(offset, pl.INT32))
+                                                    pl.write(
+                                                        workspace, [row + 2], pl.cast(prefix + local_row, pl.INT32)
+                                                    )
+                                                    pl.write(workspace, [row + 3], head)
+                                                    pl.write(workspace, [base + owner], pl.cast(jobs, pl.INT32))
+                                                    jobs = jobs + 1
     return workspace
 
 

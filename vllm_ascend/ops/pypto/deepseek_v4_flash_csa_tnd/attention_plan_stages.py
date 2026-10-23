@@ -61,7 +61,7 @@
     EARLY_ATTENTION_GEOMETRY由policy按工作量区间选择。开启时，
     attention_geometry_prepare_stage在前段执行不依赖Top-K的请求/位置/页检查；
     attention_slot_plan_stage在Top-K后完成候选相关的工作。前段暂借indices
-    每行前五项保存owner/begin/position/pages_ok/visible，由原PHASE_ROPE
+    每行前五项保存owner/begin/position/pages_ok/visible，由独立几何task
     发布；Top-K读取这些几何，plan最后再覆盖为512项最终索引。不增加Host
     适配、根Tensor或跨调用缓存。preparer与plan均按八行tile%48分工，plan
     等本行Top-K发布后才覆盖。失活行每轮重写owner=-1及其它零值。
@@ -192,7 +192,7 @@ def attention_geometry_prepare_stage(
     仍由晚期plan逐候选回退，不能据此把整行判为非法。每八行tile沿用原
     request缓存粒度。先在UB写五项，再用MTE3写八列对齐前缀（余三列为零），
     后续最终索引同样用MTE3，避免同一个GM根混用Scalar与MTE3写。仅写实际T。
-    原ROPE phase负责发布；Top-K此前已获取该phase。整个调用的Q/L、位置、
+    独立几何task生产，Top-K通过Tensor依赖等待。整个调用的Q/L、位置、
     页表不变，压缩器更新cache payload不会改变这个只读判定。
     """
     tokens = pl.tensor.dim(positions, 0)

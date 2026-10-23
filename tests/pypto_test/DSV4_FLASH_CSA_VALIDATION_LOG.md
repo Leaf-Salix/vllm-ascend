@@ -21999,3 +21999,369 @@ reshape编译失败。复用task_20261021_204807_386597714的原始通过快照�
 路径，不为采集额外打开分数输出或改变算法。最后一列严格用未舍入中位数计算
 (Native−TND-SPMD)/TND-SPMD；不增加几何平均，不解释为整网吞吐提升。
 本轮只修改测试与证据，生产算子和公共SDK未变，未恢复优化Goal，未跑16卡，未push。
+
+### 735.58：按用户新目标纠正TND多task架构，禁止算法层软同步
+
+用户在审查八档L1后指出：当前实现偏向分段常驻SPMD，不能以“仍有多个task”
+代替BSH-MPMD的独立任务与动态依赖图。新Goal要求跨task只用AICPU调度，删除
+GM信号、phase/代际及轮询工作区；单个数学task内必要的硬件流水同步保留。
+本阶段启动基线为`67134f28b`，公共SDK仍为csa-shared-20261021-upstream-fixes，
+具体版本和两套测试口径索引见
+[baseline.json](csa_mpmd_aicpu_20261022/baseline.json)。旧结果和粗粒度源码保留原历史。
+
+128K/B16/S6同口径原始记录：BSH为67个独立任务组、970条incore记录，当前TND为
+12个独立任务组、385条incore记录。前者不能与核数或源码函数个数混淆。需要恢复的边界：
+
+| 当前大任务 | 恢复的计算任务与依赖 |
+|---|---|
+| hc_prefix | widen/RMS、linear、reduce、gates、mix/norm；Sinkhorn独立 |
+| index_front | Indexer投影、pool/state、norm/RoPE、Hadamard、量化/cache；query和weights各自成链 |
+| main_front | 主Compressor各阶段、Q_B及dequant/RoPE、KV及norm/cache独立 |
+| middle | Score局部Cube/Vector数学流水、Top-K归并、页计划、Attention独立 |
+| output_chain | O_A、量化、O_B、HC_post独立，后续按数据切片恢复可调度分组 |
+
+metadata处理：请求/组/叶标量规划迁至AICPU；紧凑行偏移和实际关闭数仍需正确计算；
+Native Q/L、slots、页表直接复用。scale页写入计划保护同页64B读改写唯一所有权，
+不能直接删掉。先迁移标量规划并保持数据合同，再缩减冗余GM表和恢复参数/切片粒度。
+不新增Host回读，不把图捕获时的Q/L冻结，不把AICPU时间隐藏到测试复位过程。
+
+当前仅开始重构，未声明新实现编译或设备通过。首轮先恢复全链独立调度、删除软同步，
+再验证混长和同址metadata。新八档性能按现行规范采集，旧10%目标场景、权重与参考
+保持原义分别判断。本Goal仅单卡，阶段中文Signed-off-by提交，不自动push。
+
+### 735.59：删除阶段软同步，长短两档正确性通过；性能仍未达标
+
+首阶段删除11个软同步/常驻流水模块及6类signal根参数、分配、清零和policy分支。
+HC、Indexer/Main各计算阶段、Score/Top-K/Attention、O_A/量化/O_B/HCpost恢复独立
+任务。保留已验证四token Hadamard数学，将其从软同步容器移入纯计算模块。
+Score与Attention内部仍用必要的硬件FIFO/FFTS，不存在算法层GM轮询。
+长档生成42处runtime submit，原csa_row_offsets不再是AICore task；标量规划由
+AICPU的get/set_tensor_data执行。对应源码/生成编排检查见
+[aicpu_v3_architecture.json](csa_mpmd_aicpu_20261022/aicpu_v3_architecture.json)。
+
+CPU首轮遇到编排后端未实现And表达式，改成等价嵌套if，未修改公共SDK。
+原scale页证明含Vector归约，不能直接放到编排；改为首尾筛选后逐页整数校验，
+保持正/逆序、碎片回退和保守容量边界。此路径仍需后续连续/碎片页专门验证，
+本次两档采用的scale_page_coalescing均为False。
+
+长档v2首次eager失败：cache/state及保护区全部通过，Top-K有效行全部失效。
+小型中间值对照明确定位唯一规划差异：group_plan[6]在SPMD是-1、AICPU是1；
+其余group_offsets、紧凑偏移/count、query量化、head weights和coefficients逐bit相同。
+PTO后端将BOOL转INT32生成为arith.extsi i1→i32，而AICPU用static_cast得到1。
+v3在planner和Top-K两侧明确编码整数0/1，不依赖BOOL扩展，也不放宽数值规则。
+证据见[aicpu_v2_diagnostic.json](csa_mpmd_aicpu_20261022/aicpu_v2_diagnostic.json)。
+
+两档均为旧优化合同的固定混长/padding场景，**不是新八档S6表的同名行**。
+每侧10个交替单次L1窗口，以下为中位数，全部样本、min/mean/max及任务号保存在
+[stage1_evidence.json](csa_mpmd_aicpu_20261022/stage1_evidence.json)。
+
+| 场景 | 候选 | SPMD L1中位数μs | MPMD L1中位数μs | 数值与保护区 |
+|---|---|---:|---:|---|
+| 128K/B16，实际T55/容量64，请求容量17 | v3 | 721.40 | 922.52 | eager/图/post-L1全部逐bit，保护区通过 |
+| 8K/B32，实际T112/容量112，请求容量33 | v2 | 733.73 | 1039.61 | eager/图/post-L1全部逐bit，保护区通过 |
+
+诊断启动器一次替换断言失败后误提交了未加dump的副本，已主动终止该任务并记录，
+不算有效验证。正确诊断仅导出每侧约1.5MB中间量，没有复制大KV或新增性能数据。
+
+当前只是架构纠正检查点：仍需把全量Score/输出等任务进一步按数据范围拆分，
+减少临时GM规划表，验证同址metadata与连续状态，补最新八档含AICPU的性能。
+短档代表窗口HC结束65.44μs、下一任务127.20μs，中间无incore活动；Indexer query
+投影也明显晚于QR生产完成。应继续分析规划成本和派发先后，不能退回软同步融合。
+不以这两档代表全矩阵、不宣布达到超SPMD10%目标；公共工具链未变，未push。
+
+### 735.60：输出投影按八组恢复动态依赖，长短两档数值通过
+
+新增output_tasks，沿BSH-MPMD按八个互不相交的输出组提交O_A、量化、O_B。
+manual_scope中每组只写自身列和scale行，用TaskId显式连接三段；HCpost在scope
+外等待八个O_B及原HC的post/comb。保留原NZ权重、K256规约次序和量化数学，
+没有增加软同步。独立NZ O_B task保留完整权重，在核内按group/block计算偏移，
+解决嵌套inline捕获group时的NZ范围证明失败；最初两个CPU失败候选不作设备证据。
+
+实际长短档均为63个调度任务组，而生成源码仍只有42个submit调用点，其中输出
+三处位于八次循环内。不能把静态调用点数量当成实际任务组数量。源码/生成检查见
+[aicpu_v6_architecture.json](csa_mpmd_aicpu_20261022/aicpu_v6_architecture.json)。
+
+两档沿用旧优化合同的固定混长及padding输入，每侧10窗，三侧同一任务交替采集。
+SPMD、此前MPMD v3和输出分组v6的eager/图/post-L1输出、Top-K/score、cache/state
+逐bit一致，保护区通过。数据和全部窗口分段保存在
+[output_groups_evidence.json](csa_mpmd_aicpu_20261022/output_groups_evidence.json)。
+
+| 场景 | SPMD中位数μs | MPMD v3中位数μs | 分组v6中位数μs | v3均值/最大μs | v6均值/最大μs |
+|---|---:|---:|---:|---:|---:|
+| 128K/B16，T55/容量64 | 725.63 | 901.26 | 895.67 | 902.94 / 925.82 | 904.408 / 996.02 |
+| 8K/B32，T112/容量112 | 743.39 | 1059.48 | 1045.42 | 1061.44 / 1088.98 | 1045.83 / 1072.82 |
+
+长档第10窗996.02μs完整保留，未过滤。其前段结束于482.90μs，其他窗口约
+380–437μs；输出段165.90μs仍在本轮158–166μs范围。故本轮支持保留分组架构，
+但不能宣称长档均值或尾延迟改善；下一步要定位前段规划/派发和Score粒度。
+
+新规范C05 128K/B24/S6启用scale_page_coalescing后，CPU编译仍报
+GenerateExprString not implemented for expression type: And。把入口改成嵌套if
+未消除编译Pass产生的And，已撤销无效绕行。核对官方
+[issue #2984](https://github.com/hw-native-sys/pypto/issues/2984)及
+[PR #3000](https://github.com/hw-native-sys/pypto/pull/3000)：官方已在2026-10-15修复
+编排层And/Or/Xor/Not，当前公共e891351e尚未包含。准备下一版公共SDK，保持
+IR两边求值语义，采用原修复和回归；现有发布源码及运行任务不原地修改。
+此处尚未声称新SDK或大容量设备验证通过。新八档和原10%目标均未完成，未push。
+
+### 735.61：统一发布官方逻辑表达式修复，大容量编译及设备功能解除阻塞
+
+核对官方#2984/#3000后，建立独立PyPTO工作树，在公共e891351e上移植官方
+2b3b7dc3的17行生成代码及123行原回归，提交`26e94e05`。保持IR两侧求值语义，
+不以C++短路运算替代。PTOAS 914863ed、Simpler 57e49923和CANN9.2均未改变。
+旧发布源码与二进制未原地修改；新启动统一选择
+`csa-shared-20261022-logical-codegen`，原进程保留启动时绑定路径。
+
+构建pypto_core及torch_npu适配器通过，三文件113项回归全部通过；官方修复前
+失败的同一个v6 C05（128K/B24/S6，scale_page_coalescing=True）CPU编译通过。
+第一次pytest受旧editable安装影响导向另一份PyPTO，保留wrong_import记录但
+不计入新构建验证；固定父/子进程来源后重跑，未修改任何测试断言。
+
+公共工具链父子进程来源检查及两档单卡验证通过，清单由validating改为validated。
+任务`task_20261022_180304_146804123112`（C05）及
+`task_20261022_180304_146808129732`（旧混长B16）均退出0。冻结SPMD、v6控制组、
+规划后置v8的eager、图及post-L1全部输出/Top-K/score/cache/state逐bit一致，
+保护区通过。版本、构建和每项检查见
+[升级证据](csa_mpmd_aicpu_20261022/upstream_logical_refresh/manifest.json)，
+原始数据见[规划重叠证据](csa_mpmd_aicpu_20261022/plan_overlap_evidence.json)。
+
+SDK功能通过不代表算子性能通过。v8先提交独立投影再做组/叶/scale规划，旧混长
+B16中位数900.55→873.50μs，均值903.39→876.864μs，最大920.90→904.74μs。
+C05中位数4980.48→4815.07μs，但绝对值仍明显不合格：代表窗275.10至3846.12μs
+没有AICore活动，与编排逐页证明连续布局的区间重合。必须解决串行页扫描，不能
+因为And不再报错便接受这一性能，也不能把它移出计时范围掩盖。
+
+下一步将连续页证明缩到Score实际消费的叶，在消费者本核沿用已验证Vector差值
+归约，结果只留Scalar；删除AICPU整请求页扫描及2*B项GM证明表。该修改不新增
+AICore metadata任务或软同步；后续仍须验证连续/碎片页、图重放和完整性能。
+当前只发布SDK修复，算子v9仍在验证，旧10%目标及新八档验收尚未完成，未push。
+
+### 735.62：连续页证明移入实际Score消费者，CPU通过，设备验证排队
+
+v9保持原coalescing分档和scale读取数学，在Score每叶的AIV内校验本叶最多256页。
+复用SPMD已验证的FP32整数精确域、8行广播/差值归约，首尾筛选后仍检查所有有效
+中间页；正序和逆序分别返回本叶首物理页与方向，碎片或非法范围返回方向0，保留
+原逐页gather。结果只在本核Scalar存活，不写GM、不依赖其他核的证明、不新增任务。
+已删除AICPU整请求逐页循环及group_offsets尾部2*B项证明容量；scale写入所有权
+链表仍由AICPU计算，因为它保护Native同页64B读改写，不能混同为连续页读取证明。
+
+冻结包aicpu_v9_leaf_layout的C05 CPU编译通过，布局策略仍为True；源码/生成编排
+检查见[aicpu_v9_architecture.json](csa_mpmd_aicpu_20261022/aicpu_v9_architecture.json)。
+本条记录不代表设备正确性或性能通过。v9性能任务为
+`task_20261022_182109_22496531443`，同址metadata/连续状态任务为
+`task_20261022_182109_224969431143`；后者复用固定旧B28功能矩阵，包含S1–S6、
+padding、逆序owner、碎片页、请求重排和连续状态，不用于性能表。
+v8短档回归为`task_20261022_181533_2018311554`。提交后设备被CI的16卡任务占用，
+三个任务均正常排队，不重复提交、不终止其他任务。公共SDK已验证，算子改动待结果。
+
+### 735.63：叶内页布局校验设备通过，删除毫秒级编排空档；规划后置同时保留
+
+v9的C05任务、旧B28状态任务及v8短档任务均退出0。
+[完整样本与检查摘要](csa_mpmd_aicpu_20261022/leaf_layout_evidence.json)保留所有窗口，
+不按速度筛选。以下均为阶段诊断，不替代最终新八档六列表，也不混入旧10%目标的场景。
+
+- 旧8K/B32混长，v6/v8同一任务各10窗：中位数1041.14→983.46μs，
+  均值1039.048→983.436μs，最大1063.02→995.40μs，三侧检查逐bit一致。
+  结合上轮旧长B16同轮900.55→873.50μs的中位数，保留AICPU规划与前段投影重叠。
+- C05 128K/B24/S6，v8与v9是同公共SDK、同固定输入的前后两轮，各10窗：
+  中位数4815.07→1269.11μs，均值4820.16→1265.074μs。
+  新v9每窗最大无incore区间为7.58–12.32μs，原代表窗3.57ms空档消失。
+  原来的全请求AICPU扫描已删除，校验改为实际Score内的Vector工作，耗时仍计入完整L1。
+  v9同轮冻结SPMD中位数1021.00μs，MPMD仍更慢，不能宣布达到10%目标。
+- v9状态矩阵10个同址metadata场景、4个连续状态step全部通过，两侧逐bit一致，
+  offsets/count、保护区和地址稳定性均通过；覆盖S1～S6、零compact输出、padding、
+  请求重排/增删、倒序页及碎片页回退。这里的original页序实际为倒序，不能把
+  reverse_owners称作正序页证明；正序页覆盖另补下一轮功能样例，不修改性能输入。
+
+保留v9的Score本叶证明及去掉2*B证明工作区，保留八组输出链和前段规划后置。
+没有恢复独立AICore metadata任务，没有增加阶段信号。新增私有v10/v11继续缩减
+metadata迁移接口：v10把8项GM group_plan改为AICPU Scalar实参，v11进一步删除
+无人消费的B+1组前缀，仅保留真实四项组描述符和scale页写入所有权链表。
+v10 B1/C05及v11 C05/短档CPU通过；v11尚待设备结果，不据CPU宣称功能或性能通过。
+
+为避免重复编译已验收SPMD，测试入口新增可选--mpmd-only，须显式提供已验收MPMD
+控制组，禁止与状态/服务/baseline-only模式混用。数值容差、保护区、图及10窗门槛
+不变，报告明确数值参考和未新增SPMD样本；v11性能比较用已通过的v9长档/v8短档
+控制组。独立状态模式仍直接对照SPMD，另补已存在构造器的ascending_history样例。
+所有已排队副本保持冻结；未运行16卡，未push，完整性能及架构收尾继续推进。
+
+### 735.64：Scalar计划与删除组前缀功能通过，但暂不作为性能改动接入
+
+私有v11删除8项GM group_plan，通过AICPU任务Scalar参数传递组数、最大历史、叶数、
+叶宽和余叶数。G/balanced/roots为同一根入口constexpr，不再把它们写入GM后核对。
+同时删除无人消费的B+1请求组前缀，组数直接传给系数与Score；组描述符从4*T分区
+起点读取，scale链表基址同步调整。没有修改原叶区间、可见性、Top-K归并规则或容差。
+未启用的短Vector Score发布helper一并在私有候选中移除，现有policy仍拒绝该路径。
+
+两项性能任务及独立状态任务全部退出0。C05与短档每侧各10窗，使用已验收MPMD
+控制组直接对照，不新增SPMD性能样本。输出/Top-K/cache/state、图与保护区均逐bit
+一致。独立状态模式仍直接对照SPMD，11个同址metadata场景和4步连续状态全部通过，
+其中新增的ascending_history明确覆盖正序页，另有原倒序页及碎片页回退。
+证据见[scalar_plan_evidence.json](csa_mpmd_aicpu_20261022/scalar_plan_evidence.json)。
+
+| 阶段场景 | 控制组中位数μs | v11中位数μs | 控制组均值/最大μs | v11均值/最大μs |
+|---|---:|---:|---:|---:|
+| C05 128K/B24/S6 | 1257.61 | 1279.74 | 1259.938 / 1277.78 | 1277.422 / 1293.10 |
+| 旧8K/B32混长 | 979.08 | 988.05 | 981.920 / 995.88 | 988.554 / 1013.74 |
+
+减少GM字段不等于总性能受益。当前不把v11覆盖到正式入口，正式实现保持已验证的
+v9（d263bc3f2），v11作为后续分组任务直接传参的功能基础保留。核内Score/系数段
+有小幅缩短，但整体时序没有受益；不能只据局部变化宣布优化成功。
+
+接着准备私有v12：沿v9的任务和buffer布局，让AICPU在已有组规划中归纳“所有实际
+组均为完整G6”谓词，只在成立时派发固定live=6的Cube二进制，混长仍用原动态路径。
+不新增Host metadata，不改变分叶/归并，不把固定S6强加给混长输入；先验证CPU编译，
+再做同场景MPMD控制组对照。该思路只是一项待验证的核内特化，当前未声明性能收益。
+
+### 735.65：按当前八档六列规范冻结已验收实现并补齐数据
+
+用户要求按正式 CSA_PERFORMANCE_TEST_SPEC.md 出一版数据，暂不启动新的算法候选。
+冻结 TND-MPMD d263bc3f2（v9、AICPU 动态依赖、无阶段软同步）；v11 未保留，
+v12 仅 CPU 通过，均不进入性能表。BSH 沿用已验证快照与兼容修正。另一会话的
+TND-SPMD score_group_order_v4 已有原始服务 complete/PASS、v3 同址状态 PASS，
+故选该最新完整验证快照；其余七档由既有生成代码等价证据限定适用范围。
+
+公共 SDK 固定 csa-shared-20261022-logical-codegen，不在测量中更换。
+Native 八档各 30 窗复用 CANN9.2 实测；C05 MPMD-L1 复用同一 v9 两任务全部
+20 窗，C08 SPMD 复用等价开启分档十窗。其余 PTO 旧表 SDK 为 e891351e，
+不能改标 26e94e0，按逐格缺项补测。百分比依最新 cc9d844a5 规范以 TND-SPMD
+中位数为分母，不与优化 Goal 的其他场景或权重混用。
+
+独立目录 [csa_performance_20261022_aicpu](csa_performance_20261022_aicpu/README.md)
+保存规范、版本、逐格清单、所有原始样本和队列记录。新任务每侧十次单 replay
+L1，含 AICPU 列同进程同图另采三十次全流 Profiler；已合格侧不重复计时。
+首次四档 TND 及对应 BSH 已按 task-submit 分配单卡，当前仍在编译/采集，
+本条不预记最终 PASS 或完整八档数据。没有运行 16 卡，没有 push。
+
+### 735.66：当前 AICPU 多 task 八档六列采集完成
+
+本轮 15 个单卡补测任务全部 completed/exit0。最终八行表见
+[PERFORMANCE.md](csa_performance_20261022_aicpu/PERFORMANCE.md)，完整来源、
+实际分档、公共 SDK 及全部原始样本见
+[PERFORMANCE.json](csa_performance_20261022_aicpu/PERFORMANCE.json)。
+只按规范展示每格中位数，末列为 `(Native - TND-SPMD) / TND-SPMD`，不增加综合行。
+
+46 个有效格、2 个 BSH 混长 N/A，共 790 个样本；每格至少 10 次。
+其中 Native 八格各 30 窗，TND-MPMD 含 AICPU 八格各 30 窗；L1 各格 10 窗，
+C05 已接受 v9 两次全部有效记录合并为 20 窗。没有剔除慢窗口，也没有将窗口
+均值冒充单次测量。已有合格侧跳过重复计时，其余 PTO 只补工具链不匹配的格子。
+
+所有新增任务的 eager、图重放、post-L1，以及 TND post-Profiler 的输出、TopK、
+score、cache/state 和保护区检查通过；PTO 对照张量均逐 bit 一致。Native 延用
+自身 eager/graph 验收和既有跨实现浮点差异，不声明 Native/PTO bit 一致或整模型
+token 一致。Native 八格均确认 CANN9.2、npugraph_ex dynamic=False、inplace_pass、
+静态编译、实际 SuperKernel/NZ 内核及多流；没有只依据开关文字贴标签。
+
+按原始 incore 首尾和全设备 CSV 重算全部格，与保存的所有样本一致，
+[只读核验收据](csa_performance_20261022_aicpu/VALIDATION.json)通过。
+Ruff 和 shell 语法检查通过。当前 TND-MPMD 的八档完整 L1 均慢于选定 TND-SPMD，
+架构恢复并不等于性能目标达成；本轮按用户要求冻结结果，没有临时改算法追数。
+仅本地详细中文提交，未 push，未启动新的优化候选或 16 卡测试。
+
+### 735.67：八档 TND-MPMD 单次 L1 泳道汇总与名称还原
+
+按用户要求，各档选择最接近完整样本中位数的一次真实执行，汇总到工作区
+`downloads/CSA_TND_MPMD_L1_8cases_20261022_AICPU/`。八个 JSON 共约 2.9 MB，
+只使用一次执行，不拼接、不新增设备测试；C05 是 v11 实验里的 v9 控制组。
+导出记录见 [download_manifest.json](csa_performance_20261022_aicpu/download_manifest.json)。
+
+原转换器未采集 deps 时仅显示 task(rXtY)，且条形包含 local setup；本次从原始
+L1 的 incore begin/end 重建，保留每个物理核和全部计算记录，首个 incore 归零。
+对应生成编排明确给出各提交点和函数 ID。依据公共 Simpler 的 TaskId 编码与
+scope 深度：外层任务在 ring1，八组 O_A→quant→O_B 的 manual scope 在 ring2，
+两个 ring 独立计数。不能把 TaskId 数值排序当成全局提交顺序；例如 C04 的
+r1t38 是 HC_post，r2t23 是第七组 O_B。名称按该实际结构还原并核对全部任务集合、
+AIC/AIV 类型和记录数量，未根据执行开始时间猜名，也未伪造依赖箭头。
+
+图内显示 hc_pre 各阶段、投影、Compressor、Indexer、TopK、Attention、八组输出
+和 HC_post。C01/C03/C08 各 62 组，其余各 63 组，粒度保持独立 task。
+导出全量记录数、TaskId 计数及首尾跨度与原始数据相同，Ruff 检查通过。
+
+### 735.68：按BSH多task的调度策略分项验证起跑约束
+
+用户确认当前泳道基本恢复MPMD，要求主要参考deepseek_v4_flash_csa优化核间调度。
+已核对BSH的decode_csa、decode_o_proj、decode_indexer：根入口auto_scope=False，
+用显式scope管理生命周期；分组O_A/quant/O_B以及多数前段投影/量化不强制sync_start。
+当前TND根默认自动scope，且这些独立task普遍sync_start=True，两者并不相同。
+
+先独立验证两个调度改动，均从已接受v9出发，未改变数学、分工、allow_early_resolve
+或Tensor/TaskId依赖。每侧10次单调用L1，原始样本和所有检查见
+[scheduling_v12_v14_results.json](csa_mpmd_aicpu_20261022/scheduling_v12_v14_results.json)。
+
+| 候选 | 场景 | 控制/候选中位数μs | 控制/候选最大值μs |
+|---|---|---:|---:|
+| v13：只去掉八组输出链的整组起跑 | 128K/B24/S6 | 1254.82 / 1236.12 | 1275.98 / 1248.18 |
+| v13 | 8K/B32/S6 | 1214.12 / 1178.07 | 1250.46 / 1207.80 |
+| v14：只去掉前段28项起跑约束 | 128K/B24/S6 | 1281.25 / 1135.54 | 1311.98 / 1163.38 |
+| v14 | 8K/B32/S6 | 1232.02 / 1090.17 | 1284.50 / 1107.90 |
+
+四项任务均退出0，eager、graph、post-L1的输出/TopK/score/cache/state、保护区
+全部通过，PTO对照逐bit一致。v14保留HC六段、Score、TopK、Attention和输出原设置；
+v13保留前段和HC_post原设置。分开测量避免把收益直接归因于多个同时变化的因素。
+新v16仅组合这两项，正在四个代表档验证并采L1十窗和全设备Profiler三十窗；SPMD
+只作为数值参考，不重测其性能。此记录尚未把组合标为已采用，也未改旧八档报告。
+
+此前G6特化v12的两档也完整通过。长S6中位数1269.44→1265.90μs，仅0.28%；
+混长回退916.17→897.14μs。由于混长并未启用固定G6数学，不能把它的收益归因于
+G6特化；该版本的条件分支还改变了Score的scope层级。保留证据，不把它混入v16。
+
+原始v9按正确ring/task映射分段，C05 Score前区间中位520.27μs，Score跨度287.41μs，
+Attention跨度209.96μs，输出链196.89μs。各分段中位数不可相加冒充完整中位数。
+[分段证据](csa_mpmd_aicpu_20261022/v9_named_stage_breakdown.json)包含每窗端点与来源，
+这说明只优化Score核内不足以解决当前完整差距。
+
+### 735.69：显式scope实验的CPU边界与设备待验证状态
+
+v15直接在默认auto_scope=True的根中手放pl.scope被编译器正确拒绝。v15b改为
+auto_scope=False，并用一个显式整层scope保持原生命周期；显式作用域内给已有
+参数重绑定不同符号shape被拒绝。v15c将三项reshape改用独立局部view名字，保持
+外部ABI及真实地址。上述失败均仅发生CPU，没有设备失败或性能样本。
+
+v15c C05全量CPU编译通过。去除scope包装并还原三个局部别名后，算术AST与v9
+相同；生成编排SIMPLER_SCOPE静态位置112→2，任务提交点仍42，Tensor读/写
+位置仍22/24。实际动态执行次数不等于静态位置数，不能据此直接宣称性能收益。
+证据见[explicit_scope_codegen.json](csa_mpmd_aicpu_20261022/explicit_scope_codegen.json)。
+两档单卡v9对照已排队，未叠加起跑策略；完整功能和性能仍待设备结果。
+公共SDK保持26e94e056/914863ed3/57e499238，无算法层软同步、无Host回读、无16卡。
+
+### 735.70：保留BSH起跑策略组合，八档及同址状态验收通过
+
+v16组合在完整八档均通过eager、图重放、post-L1与post-Profiler检查，输出、
+TopK/score、cache/state与所选SPMD参考逐bit一致，保护区通过。每档候选十次
+单调用L1及三十次完整全流Profiler；SPMD仅为数值参考，没有重复采集其性能。
+同址metadata十场景、四步连续状态全部通过，包括S1～S6、padding、请求重排、
+零compact输出、碎片页和连续状态；偏移/count、地址稳定性、保护区逐项通过。
+
+| 固定场景 | v9 L1中位数μs | v16 L1中位数μs | v9最大值μs | v16最大值μs |
+|---|---:|---:|---:|---:|
+| 128K/B1/S6 | 447.37 | 383.09 | 453.82 | 406.22 |
+| 256K/B16/S6 | 1208.96 | 1048.77 | 1231.86 | 1064.18 |
+| 128K/B8/S6 | 749.22 | 641.03 | 767.70 | 650.92 |
+| 128K/B16/S6 | 1007.10 | 875.50 | 1033.02 | 897.10 |
+| 128K/B24/S6 | 1263.25 | 1119.29 | 1277.78 | 1140.80 |
+| 128K/B28/S6 | 1429.94 | 1284.74 | 1452.22 | 1324.76 |
+| 8K/B32/S6 | 1218.12 | 1056.85 | 1232.14 | 1078.16 |
+| 128K/B16/混长T56 | 902.94 | 770.11 | 922.02 | 783.78 |
+
+以上v9为同SDK、同固定输入的合格历史样本，包含C05全部20窗；同进程分项
+控制结果见735.68，支持组合的收益归因。完整六列规范表见
+[scheduling_v16_PERFORMANCE.md](csa_mpmd_aicpu_20261022/scheduling_v16_PERFORMANCE.md)，
+全部样本与原始路径见[scheduling_v16_qualified.json](csa_mpmd_aicpu_20261022/scheduling_v16_qualified.json)，
+状态收据见[scheduling_v16_state_validation.json](csa_mpmd_aicpu_20261022/scheduling_v16_state_validation.json)。
+Native、BSH、SPMD列复用同条件合格记录；没有覆盖先前v9报告或下载的泳道。
+
+正式接入仅entry.py的28个和output_tasks.py的3个sync_start值；保留其他
+任务起跑设置、所有allow_early_resolve及Tensor/TaskId依赖。除注释和格式外，
+当前正式AST与实测v16一致；将这些布尔值归一后，与v9算术AST完全相同。
+42处提交点及62/63组实际task保持，算法层软同步审查通过。Ruff检查通过。
+采用记录见[scheduling_v16_adoption.json](csa_mpmd_aicpu_20261022/scheduling_v16_adoption.json)。
+
+v15c显式scope两档功能逐bit通过；长档中位1261.81→1267.00μs、短档
+1211.43→1198.95μs，未在长档形成收益，本轮不采用，也不把112→2个scope
+位置当成性能成功。v12 G6和v15系列均保留为私有诊断，不进入本次正式版本。
+
+下一步只准备了v17：参考BSH的32行量化任务粒度，把输出量化每组worker上限
+4→8，针对T144/T168/T192的5/6个行块避免某个worker额外执行第二块；保留
+8行双级流水和最后活动块的尾零所有权。目前仅CPU解析通过，未设备验证、未采用。
+当前八档TND-MPMD仍慢于TND-SPMD，未达到原10%目标，目标保持active。
+本轮只做单卡，公共SDK未变；阶段本地中文Signed-off-by提交，不自动push。

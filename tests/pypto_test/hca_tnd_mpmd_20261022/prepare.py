@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: Apache-2.0
+"""提交前冻结 HCA 算子、共同数学依赖与测试入口，不复制 SDK 或二进制。"""
+
+import argparse
+import json
+import shutil
+import subprocess
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+REPO = HERE.parents[2]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("name")
+    parser.add_argument("--legacy-signature-compat", action="store_true")
+    args = parser.parse_args()
+    if Path(args.name).name != args.name:
+        raise ValueError("实验名必须是单段目录名")
+    target = HERE / "experiments" / args.name
+    target.mkdir(parents=True, exist_ok=False)
+    source = REPO / "vllm_ascend/ops/pypto"
+    operator = target / "operator"
+    operator.mkdir()
+    for path in source.glob("*.py"):
+        shutil.copy2(path, operator / path.name)
+    for name in ("deepseek_v4_flash_csa", "deepseek_v4_flash_hca", "deepseek_v4_flash_hca_tnd"):
+        (operator / name).mkdir()
+        for path in (source / name).glob("*.py"):
+            shutil.copy2(path, operator / name / path.name)
+    shutil.copy2(HERE / "run_case.py", target / "run_case.py")
+    shutil.copy2(HERE / "compressor_probe.py", target / "compressor_probe.py")
+    shutil.copy2(HERE / "profile_eager.py", target / "profile_eager.py")
+    shutil.copy2(HERE / "metadata_sequence.py", target / "metadata_sequence.py")
+    if args.legacy_signature_compat:
+        path = operator / "deepseek_v4_flash_hca/o_proj_hc_post.py"
+        text = path.read_text()
+        old = "o_r_i8_pad, wo_b, partials, g, col_g, proj_b_t_rows, q_tid, ROW_TILE,"
+        if text.count(old) != 1:
+            raise ValueError("旧 HCA 签名已经改变，必须重新检查参考")
+        path.write_text(text.replace(old, "o_r_i8_pad, wo_b, partials, g, col_g, proj_b_t_rows, q_tid, t_dim, ROW_TILE,"))
+        # 公共新版前端把 valid_length 推断为 INDEX，后端要求经整数类型转 FP32。
+        # 该长度始终在 [0,128]，INT32 桥接不改变数值或原调度。
+        path = operator / "deepseek_v4_flash_hca/decode_sparse_attn_hca.py"
+        text = path.read_text()
+        if text.count("pl.cast(valid_length, pl.FP32)") != 3:
+            raise ValueError("旧 HCA valid_length 转换点已变化")
+        path.write_text(text.replace("pl.cast(valid_length, pl.FP32)",
+                                     "pl.cast(pl.cast(valid_length, pl.INT32), pl.FP32)"))
+    manifest = {
+        "source_head": subprocess.check_output(["git", "-C", str(REPO), "rev-parse", "HEAD"], text=True).strip(),
+        "includes_uncommitted_hca_tnd": True,
+        "legacy_signature_compat": args.legacy_signature_compat,
+        "shared_toolchain": json.loads((HERE.parent / "csa_shared_toolchain/manifest.json").read_text()),
+        "files": [{"path": str(p.relative_to(target)), "bytes": p.stat().st_size}
+                  for p in sorted(target.rglob("*.py"))],
+        "scope": "HCA TND attention 半层；无 CSA TND 实验源码，无权重、SDK 或编译产物",
+    }
+    (target / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+    print(target)
+
+
+if __name__ == "__main__":
+    main()

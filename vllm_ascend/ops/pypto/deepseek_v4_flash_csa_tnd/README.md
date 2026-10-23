@@ -1,51 +1,48 @@
-# TND CSA 多 task 实现
+# TND CSA：AICPU 调度的多 task 实现
 
-以 `84751e34` 的 `deepseek_v4_flash_csa` 多 task 编排为骨架，结合同提交
-`deepseek_v4_flash_csa_spmd_tnd` 的真实 Q/L、混长、padding 和核内数学实现。
+本目录按用户2026-10-22的架构约束重构，以`deepseek_v4_flash_csa`的独立计算任务
+及动态依赖图为骨架，复用TND SPMD已验证的输入合同和核内数学。禁止GM完成标志、
+代际、轮询等算法层软同步；跨task依赖由AICPU的Tensor/切片和显式TaskId管理。
+Score、Attention自身的Cube/Vector硬件流水保留。
 
-`entry.decode_csa_tnd` 保持多个可独立调度的task，包含HC局部流水、metadata、
-Q_A/QR、Indexer和Main两条前段、Score/Top-K/Attention以及输出局部流水。
-长历史BALANCED路径把Score到Attention按行衔接，其他路径保留四个独立task；
-按资源策略保留11、12或15个task（B1为11，长B4为15）。跨task使用
-Tensor/TaskId依赖，局部MIX内部
-使用独立代际信号和实际生产者等待，没有把完整CSA改为单SPMD。
+当前八档性能规范的单卡功能、图、状态及完整计时已通过；保持62/63组实际任务。
+前段投影/量化/cache和八组输出链按BSH策略取消额外整组起跑等待，保留Tensor/TaskId
+依赖及原数学；HC、Score、TopK、Attention和HC_post仍保留既有起跑设置。
+本轮完整L1中位数较v9下降10.15%～14.71%，八档最大值也下降；仍慢于TND-SPMD，
+**尚未达到原10%目标**。同址metadata十场景及四步连续状态均通过。
+长档保留AICPU与AICore的BOOL整数0/1编码修复。旧融合实现的结果不代替本实现验收。
+旧源码和八档性能保留在Git `67134f28b`与原证据目录中。
 
-`binding.PreparedDynamicCSA` 在捕获前准备工作区、绑定 Native 原存储，直接
-接收 `hidden[T_capacity,4,4096]`、设备 `query_start_loc`/`seq_lens`、页表、
-slots 和 compact metadata。活动请求为 S1～S6；T/B 分别表示 token/请求
-容量，不能相除推导 query 长度。失活请求及尾部 padding 由设备元数据排除。
-Host 只使用原有描述符，逐请求计划由设备 task 生成并计入完整 L1。
+## 任务与数据
 
-当前代码采用已完成固定八档设备验证的v49组合：HC按有效行分工并局部衔接，
-大容量保留8行gate/norm；Indexer完整M8的head分组与固定RoPE索引准备优化；
-长G6 Score按实际live选择固定M64/128/192，保持六行FIFO及双半累加顺序。
-Indexer/Main默认8/16个AIC核组，KV纳入Main，输出逐组衔接O_A/量化/O_B/HCpost。
-信号由准备对象首次清零，各角色每调用推进一次代际，不能跨并发流共享工作区。
+- HC的widen/RMS、linear、reduce、gates、mix/norm、Sinkhorn独立。
+- Q_A/QR、Indexer Compressor、Indexer query/weights、主Compressor、Q_B、KV各自成链。
+- Score、Top-K、Attention页计划、Attention独立；O_A→量化→O_B按八个输出组独立调度，
+  HC_post通过TaskId等待全部输出组。
+- 输入沿用Native TND hidden、设备Q/L、页表、slots、compact RoPE和cache/state。
+  活动query由Q/L决定，不用`T/B`或`token//6`猜测；padding不参与业务计算。
+- 请求/组/叶和压缩偏移目前在AICPU编排计算，仍保留旧消费者的数据描述表作为迁移接口。
+  后续须缩减冗余表、通过任务参数/切片表达工作范围，不能把此状态当作最终任务粒度达标。
+- scale页写入保持同页唯一写者，避免64B读改写竞争。连续页读取证明由实际Score消费者
+  对本叶页表做Vector校验，结果只留本核Scalar，没有独立metadata任务或GM证明表。
+  每次图重放重新读取真实输入；规划和校验成本属于CSA，不移到Host准备或测试复位。
 
-在v49上追加已配对验证的长历史HC资源分支：16/24组最大投影波数相同时，
-用16组为metadata保留AIV，继续sync_start。当前八档仅长B28命中，mean/max
-改善；短B32试验回退，因此短历史保留原资源。详见验证日志735.44。
+`binding.PreparedDynamicCSA`只按描述符准备工作区并绑定Native存储，不增加Host
+`.item()`/D2H。原信号工作区、初始化和根参数已移除。业务临时量仍由单流/单图独占。
+服务入口名称保持`PTO_CSA_VARIANT=mpmd_tnd`；本轮不运行16卡或整模型。
 
-最近完整八档为追加该分支前的v49，相对冻结SPMD：G128=0.964896、
-G8=1.017087、综合G=0.975115；追加分支后的统一八档G仍待测，
-尚未达到0.90目标。所有八档的eager/图/采样后输出、Top-K、cache/state逐bit
-一致、保护区通过；B28存在前段启动波动，短B32仍慢于参考。具体min/mean/max、
-全部样本和限制见验证日志735.35～735.42及
-[`hc_score_rope_matrix.json`](../../../../tests/pypto_test/csa_mpmd_tnd_20261021/hc_score_rope_matrix.json)。
+## 验证与记录
 
-已注册独立 vLLM variant：`PTO_CSA_VARIANT=mpmd_tnd`，服务输入、图与回退
-合同复用 TND 路径，权重签名、策略和实际提交使用本包。CPU 合同检查已通过，
-新组合的T64/R17及T112/R29同址metadata、连续状态矩阵已通过，包含混合S1～S6、
-请求成员变化及碎片页回退。真实单层custom-op、ACLGraph重放、空调用和短历史
-Native回退也已通过；16卡整模型验证仍待完成。这些单卡结果不代替整模型验收，
-也不表示已达到10%性能目标。
-进度与设备证据统一追加到
-[`DSV4_FLASH_CSA_VALIDATION_LOG.md`](../../../../tests/pypto_test/DSV4_FLASH_CSA_VALIDATION_LOG.md)。
+重构实验在`tests/pypto_test/csa_mpmd_aicpu_20261022/`，通过`prepare.py`冻结算子和
+测试入口；SDK统一采用公共manifest。CPU检查不占卡，NPU执行通过`task-submit`。
+最新八档表为该目录的`scheduling_v16_PERFORMANCE.md`，对应完整样本与实际路径见
+`scheduling_v16_qualified.json`，同址状态见`scheduling_v16_state_validation.json`。
+Native、BSH和SPMD复用同条件合格记录；本轮只补变更的TND-MPMD两列。
 
-单卡验证工具与固定场景在 `tests/pypto_test/csa_mpmd_tnd_20261021/`。
-先通过 `prepare_experiment.py <名称>` 冻结实验副本，再通过 `task-submit`
-执行该副本的 `launch.sh <实验目录> <新输出目录> <场景名>`。CPU 预编译
-增加 `--cpu --compile`，无需占卡；CPU 成功不代替设备数值验证。
+原10%优化目标的固定混长/padding场景与参考保持原义；最新八档六列性能另按
+`CSA_PERFORMANCE_TEST_SPEC.md`汇总，不能混算场景、权重和分母。主比较为完整CSA
+L1首尾跨度，同时记录含AICPU的完整device跨度，不把规划前移误报成成本消失。
 
-单卡以完整 HCpre→RMSNorm→CSA→HCpost 的 L1 首尾跨度验收，记录五个
-交替窗口的 min/mean/max。最终目标还要求真实 vLLM TND 路径与 16 卡验证。
+全过程追加到
+[DSV4_FLASH_CSA_VALIDATION_LOG.md](../../../../tests/pypto_test/DSV4_FLASH_CSA_VALIDATION_LOG.md)
+第735.58节起。架构、功能、性能分别给出证据，不用task数量或局部收益代替完整验收。

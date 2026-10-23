@@ -47,17 +47,20 @@ def request_bounds(
     end = pl.cast(0, pl.INDEX)
     active = pl.cast(0, pl.INT32)
     # 两个 Tensor 的轴分别检查；即使传入长度不匹配也不能越界读 Q[r+1]。
-    if request >= 0 and request < pl.tensor.dim(seq_lens, 0):
-        if request + 1 < pl.tensor.dim(query_start_loc, 0):
-            length = pl.cast(pl.tensor.read(seq_lens, [request]), pl.INDEX)
-            if length > 0:
-                raw_begin = pl.cast(pl.tensor.read(query_start_loc, [request]), pl.INDEX)
-                raw_end = pl.cast(pl.tensor.read(query_start_loc, [request + 1]), pl.INDEX)
-                if raw_begin >= 0 and raw_begin < raw_end and raw_end <= token_capacity:
-                    if raw_end - raw_begin <= length:
-                        begin = raw_begin
-                        end = raw_end
-                        active = pl.cast(1, pl.INT32)
+    if request >= 0:
+        if request < pl.tensor.dim(seq_lens, 0):
+            if request + 1 < pl.tensor.dim(query_start_loc, 0):
+                length = pl.cast(pl.tensor.read(seq_lens, [request]), pl.INDEX)
+                if length > 0:
+                    raw_begin = pl.cast(pl.tensor.read(query_start_loc, [request]), pl.INDEX)
+                    raw_end = pl.cast(pl.tensor.read(query_start_loc, [request + 1]), pl.INDEX)
+                    if raw_begin >= 0:
+                        if raw_begin < raw_end:
+                            if raw_end <= token_capacity:
+                                if raw_end - raw_begin <= length:
+                                    begin = raw_begin
+                                    end = raw_end
+                                    active = pl.cast(1, pl.INT32)
     return begin, end, active
 
 
@@ -113,9 +116,7 @@ def compression_geometry(
         prefix = pl.cast(0, pl.INDEX)
         # 只统计本请求之前的真实关闭组数；dummy 和非法 Q 不推进前缀。
         for previous in pl.range(request):
-            prior_begin, prior_end, prior_active = request_bounds(
-                query_start_loc, seq_lens, previous, token_capacity
-            )
+            prior_begin, prior_end, prior_active = request_bounds(query_start_loc, seq_lens, previous, token_capacity)
             if prior_active != 0:
                 prior_length = pl.cast(pl.tensor.read(seq_lens, [previous]), pl.INDEX)
                 prior_start = prior_length - (prior_end - prior_begin)

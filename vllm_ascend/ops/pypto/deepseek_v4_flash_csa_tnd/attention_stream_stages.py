@@ -302,7 +302,7 @@ def attention_qk_pv_vector_lane_stage(
                 # physical_mode最后化简为0仍可能留下额外loop-carried Tile。
                 if PLAN_PHYSICAL_ROWS and physical_mode != 0 and qk_sb > 0:
                     # 本轮plan已验证唯一owner、causal位置和每个被选中页。外层已
-                    # 获取其phase和业务缓存；mask来自同一plan，不是外部任意标记。
+                    # plan task已通过Tensor依赖完成；mask来自同一plan，不是外部任意标记。
                     # 因此这里无需再次扫描Q/L或逐行查页，仍检查最终物理行容量。
                     # 无效候选为-1，保持本块初始化的零KV；顺序及64行分工不变。
                     # 索引来自已发布的本轮物理plan；一次DMA读64项到UB，避免

@@ -13,10 +13,10 @@
     两AIV读取分数、乘Native key scale并生成叶Top512根。二者必须在一个
     MIX内并发推进，不能先等完整AIC阶段后才调用AIV。本模块不含short Vector
     score、最终query Top-K发布或完整CSA入口；不创建spmd/task/阶段通知。
-    连续页策略只优化balanced路径的Native scale读取：前置META唯一planner已
-    在设备证明整请求页表是否为正序/逆序连续物理页。每叶两条AIV只读证明，
+    连续页策略只优化balanced路径的Native scale读取：每叶两条AIV在实际
+    消费范围内各自用Vector检查正/逆序连续页，结果只保留在本核Scalar中。
     成立时每个score块以一次二维stride搬运取得至多32页scale；不成立时执行
-    原逐页gather。证明写在group_offsets尾部2*B项，无Host回读或cache转换。
+    原逐页gather。没有独立metadata任务、GM证明表、Host回读或cache转换。
     页表、容量、尾页均按实际metadata检查；启用区间及真机证据见policy与统一日志。
     关闭策略不读证明，仍逐页gather；保留等价FP16零初始化，不宣称C++逐字未变。
 
@@ -37,7 +37,8 @@
 
 策略、分核与工作区
     G、QK panel、score_tile768/1024、prefetch和balanced均为显式策略，
-    必须与plan的G/balanced/roots配置一致，不能按T重新猜。常驻核组数固定24。
+    必须与plan的G/balanced/roots配置一致，不能按T重新猜。Score的并行worker上限为24，
+    每个MIX只计算Score及对应叶根，前后业务task仍由AICPU独立调度。
     所有角色用同一work_item/leaf_range计算core按24条带领取的(group,leaf)。
     score_transfer FP32[>=24*2*G,score_tile]每core双槽；仅AIC写、两AIV读。
     score_arena FP32[>=24*2*G,8192]是非balanced AIV私有半叶scratch，
@@ -90,7 +91,7 @@ from .indexer_group_stages import (
     indexer_query_visibility,
     indexer_work_item,
 )
-from .indexer_scale_layout_stages import LAYOUT_WORDS_PER_REQUEST, indexer_scale_layout_base
+from .indexer_scale_layout_stages import indexer_leaf_scale_layout
 from .indexer_topk_stages import (
     PAIR_ROWS_DYN,
     SCORE_ROWS_DYN,
@@ -2564,23 +2565,20 @@ def indexer_score_vector_lane_stage(
                 single_capacity = buf_leaf_capacity
                 single_valid = pl.min(single_capacity, single_visible - single_begin)
                 single_steps = (single_valid + score_tile - 1) // score_tile
-                # 叶起点按1024对齐，且META已检查整请求所有有效页。
-                # 当前角色在外层取得PHASE_META，方向/页号来自同一次调用。
-                # 不再对每叶、每lane重复做Vector证明；0方向保留原逐页路径。
+                # 叶起点按1024对齐，只校验本叶实际读取的页。
+                # 结果是本核Scalar，0方向保留原逐页路径；没有跨核共享证明。
                 single_page_begin = single_begin // BLOCK_SIZE
                 single_page_count = (single_valid + BLOCK_SIZE - 1) // BLOCK_SIZE
                 single_contiguous = pl.cast(0, pl.INT32)
                 single_first_page = pl.cast(0, pl.INDEX)
                 if scale_page_coalescing:
-                    layout_base = indexer_scale_layout_base(
-                        pl.cast(pl.tensor.dim(kv_seq_lens, 0), pl.INDEX),
-                        pl.tensor.dim(position_ids, 0),
-                        TOPK_SCORE_WORKERS * 2,
+                    single_first_page, single_contiguous = indexer_leaf_scale_layout(
+                        idx_block_table,
+                        single_batch,
+                        single_page_begin,
+                        single_page_count,
+                        pl.tensor.dim(idx_native_kv_cache, 0),
                     )
-                    layout_row = layout_base + LAYOUT_WORDS_PER_REQUEST * single_batch
-                    single_contiguous = pl.read(offsets, [layout_row + 1])
-                    single_first_page = pl.cast(pl.read(offsets, [layout_row]), pl.INDEX)
-                    single_first_page = single_first_page + pl.cast(single_contiguous, pl.INDEX) * single_page_begin
                 single_roots = pl.tile.full([query_group_size // 2, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF)
                 single_segments = pl.tile.full(
                     [query_group_size, BUFFERED_LONG_SCORE_TILE], dtype=pl.FP32, value=FP32_NEG_INF
