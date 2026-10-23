@@ -54,17 +54,10 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {
-    "task_20261023_144806_271128030529": {
-      "case": "C04",
-      "candidate": "output_group_owners_v2",
-      "mode": "complete_L1_candidate",
-      "performance_eligible": true
-    }
-  },
+  "pending_tasks": {},
   "next_steps": [
     "Preserve five retained mechanisms and original eight-case denominator; 10% goal remains active",
-    "Collect task_20261023_144806_271128030529; analyze_priority_candidate.py output_group_owners_v2 --retained retained_output_rectangle.json; do not repeat C05 timing",
+    "Review query quantization/coefficient fusion: keep token%48 owners, prezero coefficient matrices and build a token->group/lane map during META, publish after fused writes; prioritize the leaf-layout domain where META has observed slack",
     "Reduce measured full-chain service work or exploit demonstrated resource complementarity; no more simple DMA/Vector reorderings",
     "Do not implement whole-leaf-round Attention insertion on existing owners: optimistic serialized-resource model already increases C05 waiting",
     "Do not repeat negative head partitioning or direct HC tail-copy removal without a new mechanism",
@@ -105,9 +98,11 @@
     "capacity_production_contracts": 164,
     "hc_cooperative_math_ownership": 11,
     "hc_cooperative_packed_math_ownership": 11,
-    "output_rectangle_v3": 29
+    "output_rectangle_v3": 29,
+    "attention_pv_first_events": 13,
+    "qb_tail_helpers_ownership": 18
   },
-  "updated_at": "2026-10-23T14:49:02.641859+08:00",
+  "updated_at": "2026-10-23T15:40:00.993386+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -286,6 +281,12 @@
       ],
       "evidence": "hc_cooperative_v4_results.json",
       "reason": "All strict checks pass; full L1 regresses +1.300334%/+1.797571%; no adoption"
+    },
+    {
+      "candidate": "output_group_owners_v2",
+      "case_id": "C04",
+      "evidence": "output_group_owners_v2_results.json",
+      "reason": "Strict checks pass; complete L1 786.10 versus 763.65 us, +2.939828%, not adopted"
     }
   ],
   "promising_candidates": [
@@ -525,13 +526,30 @@
     "output_group_owners_v2": {
       "source": "output_group_owners_v2.json",
       "adopted": false,
-      "status": "complete_L1_pending",
+      "status": "rejected_complete_L1",
       "parent": "output_rectangle_production_v1",
       "planned_case": "C04",
       "source_checks": 29,
       "codegen": "output_group_owners_v2_codegen.json",
       "closed_C05_all_four_cpp_equal": true,
-      "tasks": "output_group_owners_v2_tasks.json"
+      "tasks": "output_group_owners_v2_tasks.json",
+      "measurement": "output_group_owners_v2_results.json"
+    },
+    "attention_pv_first_v1": {
+      "source": "attention_pv_first_v1.json",
+      "status": "parked_duplicate_of_historical_negative",
+      "source_checks": 13,
+      "evidence": "attention_pv_first_dedup.json",
+      "device_execution": false
+    },
+    "qb_tail_helpers_v1": {
+      "source": "qb_tail_helpers_v1.json",
+      "status": "CPU_passed_parked_after_consumer_readiness_review",
+      "source_checks": 18,
+      "evidence": "qb_tail_readiness_review.json",
+      "device_execution": false,
+      "codegen": "qb_tail_helpers_v1_codegen.json",
+      "closed_C03_all_four_cpp_equal": true
     }
   },
   "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
@@ -671,7 +689,9 @@
     "coarse_interleaving": "coarse_interleaving_resource_model.json",
     "hc_cooperative_v4_C04": "hc_cooperative_v4_C04_phase.json",
     "hc_endpoint_direction_mismatch": "hc_cooperative_v4_C04_phase_comparison.json",
-    "C05_OA_observed_service": "C05_output_observed_service.json"
+    "C05_OA_observed_service": "C05_output_observed_service.json",
+    "QB_producer_and_consumer_readiness": "qb_tail_readiness_review.json",
+    "PV_first_historical_negative": "attention_pv_first_dedup.json"
   },
   "same_sdk_reused_other_references": "same_sdk_reused_other_references.json",
   "same_sdk_reference_coverage": {
@@ -692,7 +712,7 @@
   "current_sdk_C08_reference": "baseline_current_sdk_C08.json",
   "current_implementation": "output_rectangle_production_v1",
   "earlier_stage_commit": "3a0f423c6",
-  "latest_stage": "output_group_owners_C04_complete_L1_submitted",
+  "latest_stage": "negative_archived_pv_first_deduplicated_QB_consumer_readiness_reviewed",
   "retained_results": "retained_output_rectangle.json",
   "production_source_manifest": "output_rectangle_production_v1.json",
   "prior_production_commit": "32a1426d9",
