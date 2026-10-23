@@ -54,10 +54,17 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {},
+  "pending_tasks": {
+    "task_20261023_144806_271128030529": {
+      "case": "C04",
+      "candidate": "output_group_owners_v2",
+      "mode": "complete_L1_candidate",
+      "performance_eligible": true
+    }
+  },
   "next_steps": [
     "Preserve five retained mechanisms and original eight-case denominator; 10% goal remains active",
-    "Model a C04 output-group ownership grid that reduces activation reloads and balances columns per AIC; check resource and dependency costs before device work",
+    "Collect task_20261023_144806_271128030529; analyze_priority_candidate.py output_group_owners_v2 --retained retained_output_rectangle.json; do not repeat C05 timing",
     "Reduce measured full-chain service work or exploit demonstrated resource complementarity; no more simple DMA/Vector reorderings",
     "Do not implement whole-leaf-round Attention insertion on existing owners: optimistic serialized-resource model already increases C05 waiting",
     "Do not repeat negative head partitioning or direct HC tail-copy removal without a new mechanism",
@@ -100,7 +107,7 @@
     "hc_cooperative_packed_math_ownership": 11,
     "output_rectangle_v3": 29
   },
-  "updated_at": "2026-10-23T14:30:41.453033+08:00",
+  "updated_at": "2026-10-23T14:49:02.641859+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -514,6 +521,17 @@
       "all_eight_codegen": "output_rectangle_v3_codegen_validation.json",
       "adopted": true,
       "integration": "output_rectangle_integration.json"
+    },
+    "output_group_owners_v2": {
+      "source": "output_group_owners_v2.json",
+      "adopted": false,
+      "status": "complete_L1_pending",
+      "parent": "output_rectangle_production_v1",
+      "planned_case": "C04",
+      "source_checks": 29,
+      "codegen": "output_group_owners_v2_codegen.json",
+      "closed_C05_all_four_cpp_equal": true,
+      "tasks": "output_group_owners_v2_tasks.json"
     }
   },
   "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
@@ -674,7 +692,7 @@
   "current_sdk_C08_reference": "baseline_current_sdk_C08.json",
   "current_implementation": "output_rectangle_production_v1",
   "earlier_stage_commit": "3a0f423c6",
-  "latest_stage": "output_rectangle_adopted_all_eight_production_cpp_equal",
+  "latest_stage": "output_group_owners_C04_complete_L1_submitted",
   "retained_results": "retained_output_rectangle.json",
   "production_source_manifest": "output_rectangle_production_v1.json",
   "prior_production_commit": "32a1426d9",
@@ -703,6 +721,11 @@
     "output_rectangle_v2": {
       "result": "runs/compile_output_rectangle_C05_v2/result.json",
       "reason": "NZ dynamic last-dimension unsupported; static N192/N64 calls in v3; C04 closed path passed"
+    },
+    "output_group_owners_v1": {
+      "evidence": "output_group_owners_v1_memory_failure.json",
+      "reason": "N80 lowering retains an additional Right allocation; 106496 > 65536 bytes",
+      "device_execution": false
     }
   }
 }
