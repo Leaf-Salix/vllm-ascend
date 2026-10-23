@@ -3,7 +3,6 @@
 
 import pypto.language as pl
 
-from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision_spmd.hc_prefix_indexer import packed_prefix_indexer_cube
 from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision_spmd.hc_prefix_indexer_stages import (
     VEC_ROWS,
     indexer_projection_round,
@@ -28,6 +27,8 @@ from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision_spmd.norm_wkv_sta
 )
 from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision_spmd.rendezvous import GROUPS, handoff
 from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision_spmd_bf16layout.input_layout import hc_pack_input_bf16
+
+from .prefix_cube import packed_prefix_indexer_cube
 
 
 @pl.jit.incore
@@ -67,7 +68,6 @@ def prepacked_prefix_indexer_vector(
         packed_flat = hc_pack_input(wide, packed_flat, worker)
     handoff()
     vec_ws = packed_hc_rms(square_read, vec_ws, wide, worker)
-    handoff()
     handoff()
     vec_ws = packed_hc_linear_reduce(linear_read, vec_ws, worker)
     handoff()
