@@ -22774,3 +22774,54 @@ bb37e1cce。C05使用其完整十窗；其它七档依据已有四份生成代�
 按仓库要求尝试format.sh ci，环境缺pre-commit；另检查提交中的Python源码，
 发现HCA既有lint问题。本次不改写这些历史提交或另一会话的开发文件，不将检查
 记录为全量格式通过；新CSA导出及现有CSA提交的对应检查通过。
+
+### 735.85：恢复目标，定位query分块的物理核重复占位
+
+2026-10-23恢复Goal。先fetch确认生产分支与远端同为b758e9695，公共SDK仍为
+26e94e056/914863ed3/57e499238；前一轮更新远端完成核对，但未产生优化进展。
+继续原架构、功能与超过冻结SPMD 10%的目标，不把现行八档表或v30局部收益改作
+完成条件。本轮仍仅单卡task-submit，未修改共享SDK或启动16卡。
+
+复查v30长B24的全部十窗，按实际生成编排映射ring/local TaskId：五窗两块Score
+使用完全不同的12个AIC，起跑差中位8.16μs；另五窗复用了4～9个AIC，起跑差
+中位277.84μs。后者能看到第一块结束后，同一物理核才运行第二块，同时其它核
+长期空闲。不能将两类窗口先取中位，再把约150μs误解为每次都有的固定成本。
+原始逐窗核集合、时间和编排路径见
+[scheduling_v30_placement_diagnosis.json](csa_mpmd_aicpu_20261022/scheduling_v30_placement_diagnosis.json)。
+
+公共Simpler的stage_sync_start_cores在gated MIX分支直接从
+get_mix_split_cluster_offset_states选核，集合同时包含空闲核与可挂pending的忙核，
+没有先遍历全部空闲cluster再选择忙cluster。因此第二个提前派发的整组可能排到
+第一组后面，尽管全芯片还有空闲核。这与L1现象相符；L1没有提前派发时间，尚不
+将源码路径推断当作已采集的唯一成因。Top-K/plan的提前占位仍可能产生额外影响。
+
+Attention也有五窗复用AIC，起跑差中位178.42μs，逐窗集合一并保存在上述证据。
+先做Score单因素实验，不因Score可能改善就预判完整CSA长尾已经解决；其余
+阶段的占位是否仍存在，以候选的实际泳道为准。
+
+v31从冻结v30复制，只将共同生产者indexer_head_coefficients的
+allow_early_resolve改为False；让两个Score满足真实依赖后再进入ready派发，
+保留各组sync_start、所有TaskId、核内算法及scratch归属。该flag作用于生产者
+对后继的提前释放，不是关闭Score计算本身。CPU完整后端通过，单卡任务
+task_20261023_160427_137463223349以v30为同进程控制、每侧十窗验证因果；
+结果出来前不宣称性能改善，也不替换生产v22。冻结说明及精确一行补丁见
+[scheduling_v31_preparation.json](csa_mpmd_aicpu_20261022/scheduling_v31_preparation.json)。
+
+### 735.86：独立移植已验证的O_A矩形，保持八组MPMD输出链
+
+设备被其它任务占用期间，准备与v31不叠加的v32。基于生产v22，参考已提交并
+验证的SPMD c086ecd67，仅128<token容量<=160选M160/N192与静态N64尾块。
+每组由八个O_A计算块减至六个，八组共64→48；K4096仍以原次序进行16个K256
+累加，量化、O_B、HCpost与TaskId依赖不变，不合并业务task或引入软同步。
+
+SPMD使用全局worker余数定位本组首项，不能照抄到每组独立提交的MPMD。
+v32保留MPMD的first=group_first+worker_id，并使编排层oa_units与M160/六列块
+一致，每组实际提交六个worker。参考核内helper来自固定Git提交，生成器与差异
+分别在prepare_output_rectangle_mpmd.py和scheduling_v32_output_rectangle.patch。
+其它容量选择原tile；真实T、有效行和padding仍由原device合同消费。
+
+CPU完整后端及涉及Python的Ruff通过，实际生成代码包含M160×N192和M160×N64
+两种Acc，仍为42处静态提交点。没有把少16个O_A实例解释为少16个业务阶段。
+单卡task_20261023_160954_16402756805与生产v22同进程各采十窗，输入固定为
+128K/B24/S6，检查eager、graph、post-L1结果及保护区。两项试验均等待正常队列，
+源码已冻结，不改排队包；设备数值与收益尚未得出，不更新生产或验收表。
