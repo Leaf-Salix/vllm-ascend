@@ -19,8 +19,16 @@ def stage_statistics(run, side):
         events = [e for e in json.loads(source.read_text())["traceEvents"]
                   if e.get("ph") == "X" and e.get("pid") == 4]
         begin = min(e["ts"] for e in events)
-        for prefix in ("hca_qb_stream", "qproj_dequant", "hca_unified_attention_aic", "proj_a_mm"):
-            selected = [e for e in events if e["name"].startswith(prefix)]
+        for prefix, aliases in (
+            ("hca_qb_stream", ("hca_qb_stream",)),
+            ("qproj_dequant", ("qproj_dequant",)),
+            ("hca_unified_attention_aic", ("hca_unified_attention_aic",)),
+            ("proj_a_mm", ("proj_a_mm", "hca_oa_tall", "hca_native_oa_all")),
+            ("hca_native_ob_split", ("hca_native_ob_split",)),
+        ):
+            selected = [e for e in events if e["name"].startswith(aliases)]
+            if not selected:
+                continue
             samples[prefix].append({
                 "source": str(source.relative_to(HERE)),
                 "begin_us": min(e["ts"] for e in selected) - begin,

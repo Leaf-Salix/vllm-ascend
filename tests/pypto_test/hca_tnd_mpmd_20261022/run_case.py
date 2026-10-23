@@ -104,15 +104,24 @@ def main():
         options = CompileOptions(platform="a2a3", memory_planner=passes.MemoryPlanner.PYPTO)
         if args.cpu:
             entry.decode_hca_tp1_layer_test.compile(config=options)
+            if hasattr(entry, "decode_hca_tp1_layer_tall_test"):
+                entry.decode_hca_tp1_layer_tall_test.compile(config=options)
             if args.precision_probe:
                 probes = importlib.import_module(PACKAGE + ".trace_entry")
                 probes.trace_hca.compile(config=options)
+                if hasattr(probes, "trace_hca_tall"):
+                    probes.trace_hca_tall.compile(config=options)
                 probes.trace_output.compile(config=options)
+                if hasattr(probes, "trace_output_tall"):
+                    probes.trace_output_tall.compile(config=options)
             if args.compare_legacy:
                 legacy_entry = importlib.import_module("vllm_ascend.ops.pypto.deepseek_v4_flash_hca.decode_hca")
                 legacy_entry.decode_hca_tp1_layer_test.compile(config=options)
             if control_package:
-                importlib.import_module(control_package + ".entry").decode_hca_tp1_layer_test.compile(config=options)
+                control_entry = importlib.import_module(control_package + ".entry")
+                control_entry.decode_hca_tp1_layer_test.compile(config=options)
+                if hasattr(control_entry, "decode_hca_tp1_layer_tall_test"):
+                    control_entry.decode_hca_tp1_layer_tall_test.compile(config=options)
             # .compile完成IR/PTOAS设备代码，但编排C++原先到首次执行才编译。
             # 在CPU阶段也完成它，避免把明显的编排codegen错误留到占卡之后。
             from pypto.runtime.kernel_compiler import KernelCompiler
@@ -333,8 +342,15 @@ def main():
                 legacy_op = pypto.torch.register(
                     decode_hca_tp1_layer_test, "dsv4_hca_legacy_diagnostic::attention", config=options,
                 )
+                legacy_operators = legacy_adapter.HCAOperators(legacy_op)
+                if hasattr(reference_module, "decode_hca_tp1_layer_tall_test"):
+                    legacy_tall = pypto.torch.register(
+                        reference_module.decode_hca_tp1_layer_tall_test,
+                        "dsv4_hca_legacy_diagnostic::attention_tall", config=options,
+                    )
+                    legacy_operators = legacy_adapter.HCAOperators(legacy_op, legacy_tall)
                 legacy_call = legacy_adapter.NativeHCACall(
-                    legacy_adapter.HCAOperators(legacy_op), legacy_adapter.prepare_weights(layer.self_attn, layer),
+                    legacy_operators, legacy_adapter.prepare_weights(layer.self_attn, layer),
                     fixture["hidden"], fixture["positions"], groups,
                     layer_name=layer.self_attn.dsa_attn.dsa_attn.layer_name,
                     compact_metadata=fixture["compact"]["compressed"], output=output,
@@ -348,6 +364,7 @@ def main():
                     raise RuntimeError("控制组需要唯一 kernel_config")
                 reference_config = reference_configs.pop()
                 reference_call = legacy_call
+                report["reference_policy"] = getattr(legacy_call, "policy", "default")
                 legacy = collect()
                 report["reference_guards"] = guard_checks(fixture)
                 save("numerical_reference_ready")
@@ -357,6 +374,7 @@ def main():
                 layer_name=layer.self_attn.dsa_attn.dsa_attn.layer_name,
                 compact_metadata=fixture["compact"]["compressed"], output=output,
             )
+            report["selected_policy"] = getattr(call, "policy", "default")
             if args.metadata_sequence:
                 from metadata_sequence import validate
 
@@ -585,7 +603,11 @@ def main():
                         from host_probe import prepared_operator
 
                         entry = importlib.import_module(PACKAGE + ".entry")
-                        prepared = prepared_operator(entry.decode_hca_tp1_layer_test, call.operators.attention._schema)
+                        prepared_root = (entry.decode_hca_tp1_layer_tall_test
+                                         if getattr(call, "policy", "default") != "default"
+                                         else entry.decode_hca_tp1_layer_test)
+                        selected_operator = getattr(call, "kernel", call.operators.attention)
+                        prepared = prepared_operator(prepared_root, selected_operator._schema)
                         prepared_runtime = service.HCATNDServiceRuntime(
                             layer.self_attn, adapter.HCAOperators(prepared), 64, layer, 384,
                         )

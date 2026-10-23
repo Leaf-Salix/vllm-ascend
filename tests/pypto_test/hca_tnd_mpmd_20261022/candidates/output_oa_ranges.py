@@ -17,7 +17,7 @@
 最坏整数绝对和8192*128*128=134217728，低于INT32上限。这里恢复Native的
 可见舍入/量化边界，不能与历史八组FP32反量化求和版本要求输出逐bit相同。
 动态T及Native布局不变；外部B、query长度由上游TND几何处理，本段不假设T=B*S。
-精度证据和区间选择的正负性能结果见同目录OPTIMIZATION_LOG.md。
+精度证据和区间选择的正负性能结果见ops/pypto/HCA_TND_MPMD_OPTIMIZATION_LOG.md。
 """
 
 import pypto.language as pl

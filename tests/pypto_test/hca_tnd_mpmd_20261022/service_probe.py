@@ -18,13 +18,18 @@ def validate(*, package, layer, call, config, fixture, output, baseline, restore
     old_forward = layer.forward
     old_runtime = getattr(wrapper, "_pto_hca_runtime", None)
     events = []
+    selected_policies = []
 
     class CountedOperator:
-        _schema = call.operators.attention._schema
+        def __init__(self, operator, policy):
+            self.operator = operator
+            self.policy = policy
+            self._schema = operator._schema
 
         def __call__(self, *args):
             events.append("pto")
-            call.operators.attention(*args)
+            selected_policies.append(self.policy)
+            self.operator(*args)
 
     originals = {}
     for name, label in (("wait_for_kv_layer_from_connector", "wait"),
@@ -55,7 +60,11 @@ def validate(*, package, layer, call, config, fixture, output, baseline, restore
     impl._compute_compressor_metadata = compact
     results = []
     try:
-        runtime = module.bind_layer(layer, adapter.HCAOperators(CountedOperator()),
+        counted = adapter.HCAOperators(CountedOperator(call.operators.attention, "default"))
+        if getattr(call.operators, "attention_tall", None) is not None:
+            tall_policy = "tall_projection" if hasattr(adapter, "use_tall_projection") else "tall_qb"
+            counted = adapter.HCAOperators(counted.attention, CountedOperator(call.operators.attention_tall, tall_policy))
+        runtime = module.bind_layer(layer, counted,
                                     max_num_seqs=64, max_num_batched_tokens=384)
         for step, calls in ((0, 2), (1, 1)):
             # 两次同context调用复用compact；下一个context必须重新执行Native producer。
@@ -82,7 +91,10 @@ def validate(*, package, layer, call, config, fixture, output, baseline, restore
                     expected = ["wait"] + (["compact"] if iteration == 0 else []) + ["compute", "pto", "notify", "save"]
                     results.append({"step": step, "iteration": iteration, "eligible": eligible,
                                     "events": list(events), "expected_events": expected, "exact": checks,
-                                    "passed": events == expected and all(q["status"] == "PASS" for q in flat)})
+                                    "selected_policy": selected_policies[-1],
+                                    "passed": events == expected
+                                              and selected_policies[-1] == getattr(call, "policy", "default")
+                                              and all(q["status"] == "PASS" for q in flat)})
         return {"passed": all(row["passed"] for row in results), "calls": results,
                 "aclgraph_replay": False, "performance_measured": False,
                 "scope": "真实attention半层custom op接管及KV钩子；不包含FFN/整模型token验收"}

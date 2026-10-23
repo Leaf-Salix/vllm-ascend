@@ -16,7 +16,7 @@ from pathlib import Path
 def generate_entry(package):
     package = Path(package)
     tree = ast.parse((package / "entry.py").read_text())
-    root = copy.deepcopy(next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+    root = copy.deepcopy(next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
                               and n.name == "_decode_hca_tp1_layer"))
     root.name = "trace_hca"
     root.decorator_list = [ast.parse("pl.jit(auto_scope=False)", mode="eval").body]
@@ -77,10 +77,24 @@ def trace_output(
     output = o_proj_hc_post(packed, wo_a, wo_b, wo_scale, residual, post, comb, output, ready)
     return output
 '''
+    extra_trace = ""
+    if any(isinstance(n, ast.FunctionDef) and n.name == "_make_decode_hca" for n in tree.body):
+        tall_root = copy.deepcopy(root)
+        tall_root.name = "trace_hca_tall"
+        for node in ast.walk(tall_root):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "qkv_proj_rope":
+                node.func.id = "qkv_proj_rope_tall"
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "o_proj_hc_post" and "o_proj_hc_post_tall" in ast.unparse(tree)):
+                node.func.id = "o_proj_hc_post_tall"
+        extra_trace = "\n\n" + ast.unparse(tall_root)
+    if "o_proj_hc_post_tall" in ast.unparse(tree):
+        tail += tail.replace("def trace_output(", "def trace_output_tall(").replace(
+            "output = o_proj_hc_post(", "output = o_proj_hc_post_tall(")
     (package / "trace_entry.py").write_text(
         '# SPDX-License-Identifier: Apache-2.0\n'
         '"""自动提取生产入口，只增加中间工作区采集；不用于性能计时。"""\n'
-        'from .entry import *\n\n' + ast.unparse(root) + '\n' + tail)
+        'from .entry import *\n\n' + ast.unparse(root) + extra_trace + '\n' + tail)
 
 
 def capture_native(layer):
@@ -144,8 +158,12 @@ def run_probe(*, package, options, call, fixture, layer, config, output, baselin
         "debug_packed": torch.empty((8 * module.T_PAD, 4096), dtype=torch.bfloat16, device=output.device),
         "debug_q": torch.empty((tokens, 32768), dtype=torch.bfloat16, device=output.device),
     }
-    trace = pypto.torch.register(module.trace_hca, "hca_tnd_stage_probe::attention", config=options)
-    tail = pypto.torch.register(module.trace_output, "hca_tnd_stage_probe::output", config=options)
+    trace_root = (module.trace_hca_tall if getattr(call, "policy", "default") != "default"
+                  else module.trace_hca)
+    trace = pypto.torch.register(trace_root, "hca_tnd_stage_probe::attention", config=options)
+    tail_root = (module.trace_output_tall if getattr(call, "policy", "default") == "tall_projection"
+                 else module.trace_output)
+    tail = pypto.torch.register(tail_root, "hca_tnd_stage_probe::output", config=options)
     restore(fixture)
     trace(**call.args, **captures)
     torch.npu.synchronize()

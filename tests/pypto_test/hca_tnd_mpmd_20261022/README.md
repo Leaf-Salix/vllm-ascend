@@ -8,6 +8,13 @@
 
 ## 当前阶段
 
+2026-10-23最新投影区间优化见[本轮完整结果](PROJECTION_RESUME_SUMMARY.md)：
+Native已有Host历史上界至少128K且129≤T≤192时，独立入口对Q_B/O_B采用M192/N128。
+最终B24/B28相对本轮原版分别为717.94→701.02μs、782.08→772.30μs，
+控制输出及全状态精确、原Native输出容差通过；最终S5真实服务接管通过。
+64K策略和O_A组合的负结果全部保留，没有采用或向所有历史长度推广。
+完整过程日志已移动到[HCA_TND_MPMD_OPTIMIZATION_LOG.md](../../../vllm_ascend/ops/pypto/HCA_TND_MPMD_OPTIMIZATION_LOG.md)。
+
 最新进展见[输出差异定位与修正](NATIVE_OUTPUT_PRECISION.md)及
 [完整配对结果](NATIVE_OUTPUT_SUMMARY.md)。八档输出均通过原容差；8K/B32原3处超差
 通过恢复Native O_A BF16及整token量化语义消除。正式`output.py`已采用该数学路径，
@@ -24,7 +31,7 @@
 `experiments/initial_v2` 冻结首次设备候选及直接数学依赖。首个 v1 任务在 pending
 阶段取消，用于补齐测试层的 `_pto_hca_layer` 绑定；没有执行设备，未覆盖旧记录。
 初始任务 `task_20261022_164106_175565826883` 已完成；其图重放结果只保留作历史。
-后续全部使用 eager 直接调用，详见正式目录 OPTIMIZATION_LOG.md。
+后续全部使用 eager 直接调用，详见上述HCA TND MPMD过程日志。
 
 本日后续已核对 [Native核内路径与大项优先级](NATIVE_KERNEL_REVIEW.md)：
 Q_B扩24核在B16/B28均回退，未采用；O_B归约/HC_post合并流水在B16严格保持结果，

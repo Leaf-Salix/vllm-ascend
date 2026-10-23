@@ -16,7 +16,7 @@
 最坏整数绝对和8192*128*128=134217728，低于INT32上限。这里恢复Native的
 可见舍入/量化边界，不能与历史八组FP32反量化求和版本要求输出逐bit相同。
 动态T及Native布局不变；外部B、query长度由上游TND几何处理，本段不假设T=B*S。
-精度证据和区间选择的正负性能结果见同目录OPTIMIZATION_LOG.md。
+精度证据和区间选择的正负性能结果见上层HCA_TND_MPMD_OPTIMIZATION_LOG.md。
 """
 
 import pypto.language as pl
@@ -171,4 +171,28 @@ def o_proj_hc_post(
     else:
         output = _native_output(packed, wo_a, wo_b, wo_scale, residual, post, comb, output, heads_dep,
                                 PROJ_B_MM_T_TILE, PROJ_A_LARGE_N_TILE, 256, 2, 128)
+    return output
+
+
+@pl.jit.inline
+def o_proj_hc_post_tall(
+    packed: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
+    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, WO_A_WEIGHT_LAYOUT],
+    wo_b: pl.Tensor[[O_WIDTH, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
+    wo_scale: pl.Tensor[[D], pl.FP32],
+    residual: pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16],
+    post: pl.Tensor[[T_DYN, HC_MULT], pl.FP32],
+    comb: pl.Tensor[[T_DYN, HC_MULT * HC_MULT], pl.FP32],
+    output: pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16],
+    heads_dep: pl.Scalar[pl.TASK_ID],
+):
+    """长历史129～192行入口：O_B一轮M覆盖，保持相同INT32分段求和。
+
+    O_A沿用原M128/N256；只将O_B的M128/N256换成M192/N128，K仍分两段。
+    相同行数区间仍有64份Cube工作，权重遍历从两轮M降为一轮；两段结果在
+    INT32域相加后才转FP32，量化、反量化和HC_post公式与普通入口完全相同。
+    上层已经按Host描述符选择入口，这里无需再次展开三个TMR档位分支。
+    """
+    output = _native_output(packed, wo_a, wo_b, wo_scale, residual, post, comb, output, heads_dep,
+                            192, PROJ_A_LARGE_N_TILE, 128, 2, 128)
     return output

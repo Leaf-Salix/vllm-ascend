@@ -49,6 +49,11 @@ def main():
         if entry_text.count(old_import) != 1:
             raise ValueError("TND的QKV引用已改变，须重新核对候选与控制隔离")
         entry.write_text(entry_text.replace(old_import, "from .qkv_proj_rope import qkv_proj_rope"))
+        if "from .q_projection import qkv_proj_rope_tall" in entry.read_text():
+            entry.write_text(entry.read_text().replace(
+                "from .q_projection import qkv_proj_rope_tall",
+                "from .qkv_proj_rope import qkv_proj_rope as qkv_proj_rope_tall",
+            ))
     shutil.copy2(HERE / "run_case.py", target / "run_case.py")
     shutil.copy2(HERE / "compressor_probe.py", target / "compressor_probe.py")
     shutil.copy2(HERE / "profile_eager.py", target / "profile_eager.py")
