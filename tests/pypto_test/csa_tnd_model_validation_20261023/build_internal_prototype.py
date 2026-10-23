@@ -72,8 +72,8 @@ def indexer_scale_page_commit_task(
     return cache
 """
         path = directory / "entry.py"
-        assert "def indexer_scale_page_commit_task(" not in path.read_text()
-        path.write_text(path.read_text() + helper)
+        if "def indexer_scale_page_commit_task(" not in path.read_text():
+            path.write_text(path.read_text() + helper)
         replacements = 0
         for node in ast.walk(body):
             if (
@@ -172,13 +172,11 @@ def indexer_scale_page_commit_task(
         "    group = QUERY_GROUP",
         "    mm = pl.max(p128, (t + OB_ROWS - 1) // OB_ROWS * OB_ROWS)",
     ]
-    if spmd:
-        code += [
-            "    coalescing_rows = 0",
-            "    if SCALE_PAGE_COALESCING:",
-            "        coalescing_rows = 2 * b",
-        ]
     for name, shape, dtype in allocations:
+        if spmd and name == "group_offsets":
+            assert "coalescing_rows" in shape
+            # 只预留每请求两个INT32槽；使用策略不变，避免局部尺寸别名及分支类型冲突。
+            shape = shape.replace("coalescing_rows", "2 * b")
         code.append(f"    {name} = pl.create_tensor({shape}, dtype=pl.{dtype})")
     code += [
         "    q_heads = pl.reshape(q_flat, [t * 64, 512])",

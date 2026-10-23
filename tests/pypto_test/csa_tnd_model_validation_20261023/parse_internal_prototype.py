@@ -12,6 +12,8 @@ parser.add_argument("--specialize", action="store_true", help="在CPU完成完�
 parser.add_argument("--compile-output", type=Path, help="CPU完成完整编译流水线并保存产物，不执行设备")
 parser.add_argument("--entry", help="仅检查指定入口，用于定位编译问题")
 parser.add_argument("--kernel-artifact", action="store_true", help="按实际eager的kernel ABI生成产物，不运行设备")
+parser.add_argument("--service-binding", action="store_true", help="编译实际服务entry.py而不是私有原型模块")
+parser.add_argument("--shape", type=int, nargs=2, metavar=("TOKENS", "REQUESTS"), help="只检查指定的已知容量")
 args = parser.parse_args()
 # 与单卡/整模型的固定NZ2合同一致，须在导入算子布局常量之前设置。
 os.environ["VLLM_ASCEND_ENABLE_NZ"] = "2"
@@ -20,7 +22,10 @@ for package, name in (
     ("deepseek_v4_flash_csa_spmd_tnd", "decode_csa_spmd_internal_debug"),
     ("deepseek_v4_flash_csa_tnd", "decode_csa_tnd_internal_debug"),
 ):
-    module = importlib.import_module(f"vllm_ascend.ops.pypto.{package}.internal_prototype")
+    if args.service_binding:
+        name = name.replace("_internal_debug", "_debug")
+    source = "entry" if args.service_binding else "internal_prototype"
+    module = importlib.import_module(f"vllm_ascend.ops.pypto.{package}.{source}")
     for entry in (name, name.removesuffix("_debug")):
         if args.entry and args.entry != entry:
             continue
@@ -31,7 +36,7 @@ for package, name in (
         )
         if args.specialize or args.compile_output:
             select = importlib.import_module(f"vllm_ascend.ops.pypto.{package}.policy").select_policy
-            for tokens, requests in ((16, 16), (144, 24)):
+            for tokens, requests in [args.shape] if args.shape else ((16, 16), (144, 24)):
                 policy = select(
                     tokens=tokens,
                     requests=requests,

@@ -46,14 +46,18 @@ if ring_config:
 data = json.load(open(record))
 assert data['toolchain'] == json.load(open(shared)), '公共SDK变化，请重新冻结'
 assert data['toolchain']['status'] == 'validated'
-if data.get('source_overlays') and variant != 'native':
+if (data.get('source_overlays') or data.get('internal_workspace')) and variant != 'native':
     assert single_card_gate, '工作区修复必须先通过单卡验证'
     gate = json.load(open(single_card_gate))
     assert gate['status'] == 'PASS', '单卡验证尚未通过，禁止启动整模型'
     assert set(gate['variants']) == {'deepseek_v4_flash_csa_spmd_tnd', 'deepseek_v4_flash_csa_tnd'}
     assert all(row['status'] == 'PASS' and row['guard_status'] == 'PASS' for row in gate['variants'].values())
+    if data.get('internal_workspace'):
+        assert gate.get('service_binding') is True, '内部工作区须验证实际服务绑定'
+        assert all(gate['toolchain'][name] == data['toolchain'][name] for name in ('pypto', 'ptoas', 'simpler')), '单卡证据SDK须一致'
     if ring_config:
-        assert gate.get('batch') == int(batch) and gate.get('ring_config') == ring_config, 'ring配置须有同档单卡证据'
+        batches = gate.get('batches', [gate.get('batch')])
+        assert int(batch) in batches and gate.get('ring_config') == ring_config, 'ring配置须有同档单卡证据'
     data['single_card_gate'] = single_card_gate
 plan = json.load(open(pathlib.Path(bank) / 'plan.json'))
 assert plan['mixed_requests'] and len(plan['cases']) >= int(batch)

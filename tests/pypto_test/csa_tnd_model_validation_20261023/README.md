@@ -117,3 +117,12 @@ v21保留原有直接编排，只给scale page commit增加显式incore类型边
 
 独立编译成功仍不等于内部内存生命周期、数值或graph replay正确。
 `build_internal_service.py`只生成私有服务接入副本；生产目录尚未迁移。
+
+
+当前公共候选为`d44925c1`，已修复#3138并通过178项相关CPU回归，仍为validating。
+私有v24服务版本已去掉Python scratch/Top-K缓存及模型池，group_offsets统一
+预留每请求2个INT32尾槽，数学开关保持原样。SPMD T144/B24完整kernel编译通过；
+单卡实际服务绑定任务`task_20261024_030756_251976919366`使用四ring
+`[256,16,16,16] MiB`、window4096，检查两种TND、三个容量场景、Top-K分数及图重放。
+当前设备结论以`jobs.json`和`runs/internal_service_v24/result.json`为准；
+不把旧v21的MPMD原型PASS当作这版两种服务都PASS。

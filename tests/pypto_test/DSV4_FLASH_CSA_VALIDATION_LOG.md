@@ -23441,3 +23441,42 @@ state与旧外部参考逐bit一致；普通入口不接收外部Top-K，连续�
 证据`internal_workspace_mpmd_validation.json`，原始结果
 `runs/internal_workspace_v21/result.json`。当前ring配置四个各256MiB、window4096，
 只证明该容量可运行；不是生产服务或16卡验收，也不是SPMD通过。
+
+
+### 735.108 修复Group动态类型绑定，继续收口内部服务与单卡门槛（2026-10-24）
+
+PyPTO独立候选`d44925c17d9ff7d7fa8e5067e41c4b4f80bf3063`已构建并中文签名
+提交。BuildGroupAbiAdapter只增加参数类型维度映射，复用DeduceCallTypeBindings，
+没有改Group调度、同步或ABI参数顺序。新增回归在cda77ec0失败、在候选通过；
+独立小例cluster及分开派发均编译通过。A2/A3、A5、split AIV和跨函数类型推导
+178项CPU回归通过，日志`runs/pypto_group_dims_tests.log`/XML。
+结果已追加到中文[#3138](https://github.com/hw-native-sys/pypto/issues/3138)。
+公共清单统一切到`csa-shared-20261024-group-dims`，仍为validating，旧源码/构建
+原样保留。发布时队列无pending/running任务；Simpler、PTOAS及CANN未变。
+
+私有v22服务直接使用内部根入口，删除Python scratch、Top-K缓存、模型级共享池。
+普通入口只接收55个外部Tensor参数，诊断入口额外接收Top-K输出。
+移除旧工作区相关的CPU桩预期后，同文件168项服务合同检查通过，未使用NPU。
+测试脚本增加实际PreparedDynamicCSA路径、冻结旧实现数值参考和Top-K分数
+对照；整模型门槛要求单卡真实服务绑定、两种TND都PASS且ring配置匹配。
+
+完整SPMD已越过#3138：v22 T16/B16 kernel编译通过。T144/B24在后续wrapper
+恢复coalescing_rows时触发#3137同类复合形状限制；日志
+`runs/internal_service_v22_spmd_kernel.log`。v23尝试在constexpr if分支内分配，
+前端拒绝同名Tensor不同物理类型，未运行设备；不将该无效调用声称为新SDK修复。
+v24统一预留group_offsets尾部2B个INT32，是否使用仍按原SCALE_PAGE_COALESCING
+策略。B16/S1相对旧逻辑只多128逻辑字节，在当前1024字节内部打包对齐下容量
+不增加；启用策略的S6/B24本来就需这些槽。完整编译与设备结果待追加。
+
+内存配置核对：Simpler scope_stack_top从-1开始，根SIMPLER_SCOPE中的所有
+内部alloc_tensors使用ring0；当前总临时容量可放入256MiB。下一轮实际服务单卡
+拟用heap_mb=[256,16,16,16]、window4096，不把四ring均256MiB的原型配置带到
+整模型。该配置尚未设备通过，不能写成已验收。SPMD信号容量从原PHASE_COUNT、
+CORES、SIGNAL_SLOT_WORDS派生，每调用在设备初始化，图重放包含初始化与依赖。
+
+同节补记：v24的SPMD T144/B24正常入口已通过实际kernel ABI完整编译，日志
+`runs/internal_service_v24_spmd_kernel.log`。原先的Group旧尺寸符号问题和当前
+容量场景的coalescing局部变量捕获均已跨过；这仍不是设备验证结论。
+单卡实际服务绑定任务`task_20261024_030756_251976919366`已开始，两个实现
+共用d44925c1、固定三场景和[256,16,16,16]MiB配置；旧外部冻结v21只作数值参考。
+诊断入口增加Top-K分数逐bit对照，普通入口保持Top-K完全内部申请。

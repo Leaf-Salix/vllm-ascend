@@ -24,6 +24,14 @@ def migrate_entry(directory, symbol):
     prototype = ast.parse((directory / "internal_prototype.py").read_text())
     if any(isinstance(node, ast.FunctionDef) and node.name == "_arithmetic_body" for node in prototype.body):
         raise ValueError("服务迁移仅接受direct-body原型，不能重新引入额外inline包装")
+    if directory.name.endswith("spmd_tnd"):
+        text = replace_once(
+            text,
+            "import pypto.language as pl\n",
+            "import pypto.language as pl\n\n"
+            "from .phase_sync import SIGNAL_SLOT_WORDS\n"
+            "from .runtime_abi import CORES, PHASE_COUNT, VECTORS\n",
+        )
     for node in prototype.body:
         if not isinstance(node, ast.FunctionDef):
             continue
@@ -32,6 +40,33 @@ def migrate_entry(directory, symbol):
         elif node.name == symbol + "_internal_debug":
             node.name = symbol + "_debug"
         text += "\n\n" + ast.unparse(node) + "\n"
+    if directory.name.endswith("spmd_tnd"):
+        text = text.replace("60 * 72 * 128", "PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS")
+        text = text.replace("11520", "(PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS)")
+        text = text.replace(
+            "decode_csa_spmd只创建一次24组SPMD", "decode_csa_spmd先清零内部信号，再创建一次24组业务SPMD"
+        )
+        text = text.replace("不创建额外meta或适配task", "不创建额外meta或布局适配task；信号清零属于本次调用")
+        text = text.replace("外部Top-K、工作区容量", "Top-K结果、工作区容量")
+        text = text.replace(
+            "外部工作区与无损视图（捕获前按shape/stride绑定，禁止Host读取device值）",
+            "内部工作区与无损视图（禁止Host读取device值）",
+        )
+        text = text.replace(
+            "所有暂存由调用层预分配，参数签名保持pl.dynamic。", "所有暂存由编排层pl.create_tensor交给Simpler申请。"
+        )
+        text = text.replace(
+            "SCALE_PAGE_COALESCING启用时尾部另加2*B项，关闭时保留原容量；",
+            "尾部统一预留2*B项，是否使用仍由SCALE_PAGE_COALESCING决定；",
+        )
+        text = text.replace(
+            "signal为独立、首次清零的INT32 Tensor，至少PHASE_COUNT*72*128项；\n"
+            "    每核每调用begin一次，阶段含义和参与集合不能跨工作区复用时改变。只能\n"
+            "    单图/单流顺序使用，失败或INT32代际将溢出时在捕获外重新初始化。",
+            "signal为调用内部独立INT32 Tensor，容量由PHASE_COUNT、CORES和槽步长决定；\n"
+            "    每次调用均通过设备任务清零，再由依赖启动业务SPMD。图重放包含同样的\n"
+            "    初始化，不保留跨调用的旧信号代际。普通Top-K也在内部，诊断入口才接收输出。",
+        )
     path.write_text(text)
 
 

@@ -259,6 +259,41 @@
       "spmd_failure": "ExpandMixedKernel成员参数改形后遗漏局部类型动态尺寸替换",
       "spmd_issue": "https://github.com/hw-native-sys/pypto/issues/3138",
       "result": "internal_workspace_mpmd_validation.json"
+    },
+    "v22": {
+      "source": "experiments/v22_internal_service_direct/source",
+      "state": "cpu_compilation_partial",
+      "sdk": "d44925c1",
+      "cpu_service_contract": "168 passed，runs/internal_service_v22_cpu.log",
+      "kernel_compile": "SPMD T16/B16正常入口kernel编译通过；T144/B24失败",
+      "failure": "coalescing_rows局部标量仅存在于复合尺寸，wrapper不能反推；属于#3137同类问题",
+      "npu_validated": false
+    },
+    "v23": {
+      "source": "experiments/v23_internal_service_constexpr/source",
+      "state": "cpu_specialize_failed",
+      "failure": "constexpr if两分支创建不同物理形状但同名Tensor，当前前端拒绝类型重赋值；未执行设备",
+      "npu_validated": false
+    },
+    "v24": {
+      "source": "experiments/v24_internal_service_capacity/source",
+      "state": "running",
+      "change": "group_offsets统一预留2B个INT32尾槽，原数学策略不变；所有尺寸直接由外部Tensor维度构成",
+      "npu_validated": false,
+      "task": "task_20261024_030756_251976919366",
+      "output": "runs/internal_service_v24",
+      "cpu_result": "SPMD T144/B24普通入口完整kernel编译通过",
+      "cpu_log": "runs/internal_service_v24_spmd_kernel.log",
+      "ring_config": {
+        "heap_mb": [
+          256,
+          16,
+          16,
+          16
+        ],
+        "task_window": 4096
+      },
+      "service_binding": true
     }
   }
 }

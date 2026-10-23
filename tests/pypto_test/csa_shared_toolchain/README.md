@@ -6,10 +6,12 @@
 无需安装 vLLM、vLLM-Ascend 或编译 Native 自定义算子。
 
 CSA-SPMD、CSA-SPMD-TND、CSA-MPMD-TND共用本目录的`manifest.json`。
-当前选择`csa-shared-20261024-internal-workspace`，状态为`validating`。
-PyPTO在独立源码/构建目录移植官方#2937的动态尺寸内联修复及所需parser兼容，
-提交`cda77ec0`；Simpler、PTOAS和CANN保持原版本。构建与312项编译器定向检查
-通过，完整CSA编译、内部工作区单卡数值/状态/图重放仍在验证，不能标作正式通过。
+当前选择`csa-shared-20261024-group-dims`，状态为`validating`。
+PyPTO当前提交`d44925c1`在官方#2937相关移植`cda77ec0`之上，修复了
+[#3138](https://github.com/hw-native-sys/pypto/issues/3138)的Group成员动态类型绑定。
+独立构建与178项相关CPU回归通过；前一候选的MPMD内部工作区单卡已通过，
+当前候选的完整SPMD编译及服务绑定单卡仍在验证，不能标作正式通过。
+Simpler、PTOAS和CANN保持原版本。
 证据见[`internal_toolchain_upgrade.json`](../csa_tnd_model_validation_20261023/internal_toolchain_upgrade.json)。
 
 上一版`csa-shared-20261022-logical-codegen`保留为已验证历史：完成独立构建、
