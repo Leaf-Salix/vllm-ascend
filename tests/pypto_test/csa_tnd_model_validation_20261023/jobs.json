@@ -191,14 +191,35 @@
       "task": "task_20261023_233304_90552910652",
       "state": "completed_exit_1",
       "stage": "旧参考已计算，内部入口JIT元数据推导失败，未执行内部版本",
-      "reason": "当前JIT形状推导只识别ast.List；原型误沿用Torch规格的tuple"
+      "reason": "当前JIT形状推导只识别ast.List，而create_tensor公开接口接受Sequence；main的#2880已修复tuple支持，本地尚未包含"
     },
     "v14": {
       "task": "task_20261023_234544_132217121267",
       "source": "experiments/v14_internal_workspace_lists/source",
       "output": "runs/internal_workspace_v14",
-      "state": "pending_or_running",
-      "change": "形状统一为list；普通入口71/72个纯临时区均由pl.create_tensor申请；诊断输出单独入口"
+      "state": "completed_exit_1",
+      "change": "形状统一为list；普通入口71/72个纯临时区均由pl.create_tensor申请；诊断输出单独入口",
+      "reason": "p16局部标量参与reshape导致idx_query_rope_heads缺少metadata，纯CPU复现见jit_shape_repro_20261024.py",
+      "issue_comment": "https://github.com/hw-native-sys/pypto/issues/3033#issuecomment-6369484280"
+    },
+    "v15": {
+      "source": "experiments/v15_internal_workspace_views/source",
+      "state": "cpu_specialize_failed",
+      "reason": "signal清零原型误将pl.full返回的Tensor传给要求Tile的pl.store；同时排除pl.cdiv误用，均属调用侧问题"
+    },
+    "v16": {
+      "source": "experiments/v16_internal_workspace_api/source",
+      "state": "cpu_specialize_failed",
+      "log": "runs/internal_workspace_v16_specialize.log",
+      "reason": "SPMD工作区尺寸仍沿用Torch侧三元IfExp，当前DSL不支持；改成constexpr条件语句"
+    },
+    "v17": {
+      "source": "experiments/v17_internal_workspace_shape_branch/source",
+      "state": "cpu_specialize_pass",
+      "log": "runs/internal_workspace_v17_specialize.log",
+      "summary": "internal_workspace_cpu_validation.json",
+      "change": "使用描述符读取绕过动态局部尺寸推导问题；修正ceil、Tile与constexpr分支；未修改公共SDK",
+      "npu_validated": false
     }
   }
 }

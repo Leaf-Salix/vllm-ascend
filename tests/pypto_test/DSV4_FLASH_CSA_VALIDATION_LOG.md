@@ -23308,3 +23308,48 @@ metadata for offsets。定位当前JIT的形状提取只识别ast.List，原型�
 通过（`internal_workspace_parse.json`），但这不是完整编译或设备正确性结论。
 v14单卡 `task_20261023_234544_132217121267`已提交，先验输出、Top-K、全部
 cache/state、连续调用和图重放，再迁移生产接入并继续16卡验收。
+
+### 735.105 内部工作区的JIT问题最小复现及中文上游反馈（2026-10-24）
+
+v14单卡任务exit=1，内部算子未执行。列表形状绕过第一处问题后，
+`idx_query_rope_heads`仍缺少传给`_arithmetic_body`的metadata。已将问题缩成
+`csa_tnd_model_validation_20261023/jit_shape_repro_20261024.py`，仅调用
+`specialize()`，不分配NPU Tensor、不编译设备代码，不需要模型或权重。
+公共工具链保持`csa-shared-20261022-logical-codegen`，PyPTO为`26e94e056`，
+不在公共SDK上进行热修改。
+
+| CPU最小场景 | 结果 | 判断 |
+|---|---|---|
+| `create_tensor((16, 8), ...)`后传给incore | FAIL | 公开Sequence接口与旧JIT只接受list的实现不一致 |
+| 同样形状改用`[16, 8]` | PASS | 列表可绕过tuple问题 |
+| `padded=(n+15)//16*16`，`reshape(work,[padded*2,8])` | FAIL | 维度算术经局部标量绑定后未继续传播metadata |
+| 从`work`读取`rows=pl.tensor.dim(work,0)`再用`rows*2` | PASS | 描述符来源的等价尺寸在当前局部补丁下可推导 |
+
+这里的PASS仅代表CPU前端特化，不代表完整CSA或设备执行通过。证据为
+`runs/jit_shape_repro_20261024.log`。维度只来自描述符和整数常量，未混入
+`tensor.read`，元素数量关系为`padded*16 == (padded*2)*8`。
+
+更正735.104对第一处报错的归因：tuple不是公开API层面非法写法，不能笼统归为
+原型调用错误。已核对上游main的
+[#2880](https://github.com/hw-native-sys/pypto/pull/2880)，
+`d5fa131d0bcd4270438bcbaa20016aaa5c26c989`已补充tuple/list等合法形状写法。
+本地统一工具链尚未包含，先使用列表，不重复提一个“main尚未修复”的issue。
+
+第二处属于既有动态reshape问题，已在
+[#3033追加中文复现](https://github.com/hw-native-sys/pypto/issues/3033#issuecomment-6369484280)，
+包含完整CPU代码、失败/通过对照、精确版本和局部尺寸变量追踪建议。
+本地已有该issue建议的直接描述符算术补丁`47c2bf6c7`，仍未覆盖此次局部标量链。
+核对时main为`9f3ca5352`，kernel-mode分支为`3cc5c61d8`；最新main仅做源码
+核对，未冒称已运行验证。后续若修SDK，必须按公共工具链规则统一发布。
+
+同时排除原型自己的API错误：`pl.cdiv`不是当前DSL支持的操作，改用整数整除；
+信号清零误用`pl.full`返回Tensor，现改成`pl.tile.full`供`pl.store`使用。
+这两项未列为PyPTO缺陷。v16完整CPU特化又检查出从Torch规格直接带入的
+三元`IfExp`不被当前DSL接受，v17将其改成constexpr条件语句。
+这几轮CPU检查不占卡；生产入口尚未切换，旧整模型结果仍属于外部工作区版本。
+
+v17随后完整CPU特化exit=0：MPMD/SPMD各自的普通、诊断入口，在16token/16请求
+和144token/24请求两组策略下均通过，共8项。证据
+`internal_workspace_cpu_validation.json`与`runs/internal_workspace_v17_specialize.log`。
+这里使用descriptor读取绕过局部标量推导缺口，没有修复共享PyPTO；设备分配、
+算子输出和graph replay仍未验证，下一步才是内部工作区单卡检查。

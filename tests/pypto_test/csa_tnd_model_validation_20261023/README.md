@@ -89,8 +89,14 @@ Native、MPMD均已通过每卡33个有效24×S6 step与零抢占；SPMD在收�
 和管理，不能在Python中外部分配，也不以外部共享池作为最终方案。
 现有B16和B24 MPMD证据属于旧外部工作区实现；生产路径尚未完成该项迁移。
 
-私有原型位于v14，普通入口内部创建MPMD71个、SPMD72个临时Tensor（含Top-K）。
+私有原型推进到v17，普通入口内部创建MPMD71个、SPMD72个临时Tensor（含Top-K）。
 诊断入口只额外接受测试需要观察的Top-K输出；旧外部实现仅作数值参考。
 SPMD内部信号有设备清零任务，初始化依赖及全部开销属于这次调用；不能隐藏为
 捕获前一次性外部分配。数学任务主体沿用冻结源，MPMD不引入软同步。
-四个入口的依赖图解析通过，设备验证仍在进行；不把PARSED写成编译/功能通过。
+v14在JIT动态reshape metadata推导失败，未运行内部版本。纯CPU最小复现
+`jit_shape_repro_20261024.py`区分tuple形状支持与动态局部尺寸变量两类问题。
+前者main已有[#2880](https://github.com/hw-native-sys/pypto/pull/2880)修复；
+后者已在[#3033追加中文复现](https://github.com/hw-native-sys/pypto/issues/3033#issuecomment-6369484280)。
+v17四个入口×两组策略共8项完整CPU特化已通过，证据为
+`internal_workspace_cpu_validation.json`。下一步才是设备验证；不把CPU特化
+成功写成NPU编译、内部内存生命周期或功能正确性通过。

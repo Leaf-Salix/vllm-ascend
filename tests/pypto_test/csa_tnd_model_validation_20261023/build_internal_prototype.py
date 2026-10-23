@@ -8,6 +8,12 @@ from pathlib import Path
 
 
 class ShapeExpression(ast.NodeTransformer):
+    def visit_IfExp(self, node):
+        node = self.generic_visit(node)
+        if ast.unparse(node) != "2 * b if SCALE_PAGE_COALESCING else 0":
+            raise ValueError(f"未处理的工作区尺寸分支: {ast.unparse(node)}")
+        return ast.copy_location(ast.Name("coalescing_rows", ast.Load()), node)
+
     def visit_Attribute(self, node):
         if isinstance(node.value, ast.Attribute) and ast.unparse(node.value) == "self.policy":
             return ast.copy_location(ast.Name(node.attr.upper(), ast.Load()), node)
@@ -19,7 +25,15 @@ class ShapeExpression(ast.NodeTransformer):
             value, size = node.args
             return ast.copy_location(
                 ast.BinOp(
-                    ast.Call(ast.Attribute(ast.Name("pl", ast.Load()), "cdiv", ast.Load()), [value, size], []),
+                    ast.BinOp(
+                        ast.BinOp(
+                            ast.BinOp(value, ast.Add(), copy.deepcopy(size)),
+                            ast.Sub(),
+                            ast.Constant(1),
+                        ),
+                        ast.FloorDiv(),
+                        copy.deepcopy(size),
+                    ),
                     ast.Mult(),
                     copy.deepcopy(size),
                 ),
@@ -98,7 +112,7 @@ def make(source, package, function):
             "@pl.jit.incore",
             "def _clear_internal_signal(area: pl.Out[pl.Tensor[[48, 11520], pl.INT32]]):",
             "    core = pl.tile.get_block_idx()",
-            "    zero = pl.full([1, 11520], dtype=pl.INT32, value=0)",
+            "    zero = pl.tile.full([1, 11520], dtype=pl.INT32, value=0)",
             "    pl.store(zero, [core, 0], area)",
             "    return area",
             "",
@@ -110,18 +124,25 @@ def make(source, package, function):
         "):",
         "    t = pl.tensor.dim(x, 0)",
         "    b = pl.tensor.dim(idx_lengths, 0)",
-        "    p8 = pl.cdiv(t, 8) * 8",
-        "    p16 = pl.cdiv(t, 16) * 16",
-        "    p64 = pl.cdiv(t, 64) * 64",
-        "    p128 = pl.cdiv(t, 128) * 128",
+        "    p8 = (t + 7) // 8 * 8",
+        "    p16 = (t + 15) // 16 * 16",
+        "    p64 = (t + 63) // 64 * 64",
+        "    p128 = (t + 127) // 128 * 128",
         "    group = QUERY_GROUP",
-        "    mm = pl.max(p128, pl.cdiv(t, OB_ROWS) * OB_ROWS)",
+        "    mm = pl.max(p128, (t + OB_ROWS - 1) // OB_ROWS * OB_ROWS)",
     ]
+    if spmd:
+        code += [
+            "    coalescing_rows = 0",
+            "    if SCALE_PAGE_COALESCING:",
+            "        coalescing_rows = 2 * b",
+        ]
     for name, shape, dtype in allocations:
         code.append(f"    {name} = pl.create_tensor({shape}, dtype=pl.{dtype})")
     code += [
         "    q_heads = pl.reshape(q_flat, [t * 64, 512])",
-        "    idx_query_rope_heads = pl.reshape(idx_query_rope, [p16 * 64, 128])",
+        "    rope_rows = pl.tensor.dim(idx_query_rope, 0)",
+        "    idx_query_rope_heads = pl.reshape(idx_query_rope, [rope_rows * 64, 128])",
         "    idx_query_scale_heads = pl.reshape(idx_query_scale, [t, 64])",
     ]
     if spmd:
