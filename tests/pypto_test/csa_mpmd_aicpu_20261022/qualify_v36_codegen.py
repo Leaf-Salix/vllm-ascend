@@ -74,7 +74,7 @@ def main():
     report = dict(
         candidate="aicpu_v36_capacity_rectangle",
         passed=True,
-        adopted=False,
+        adoption_record="scheduling_v36_adoption.json",
         cases=reports,
         normalization=(
             "Whole-line comments removed. Generated _inlineN site identifiers bijectively renamed in first-occurrence "

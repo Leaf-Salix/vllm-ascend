@@ -55,6 +55,9 @@ compact行数和query组数减少空worker。数学helper共用、任务仍由AI
 v22基线八档表为该目录的`scheduling_v22_PERFORMANCE.md`，对应完整样本、同进程对照
 与状态来源见`scheduling_v22_qualified.json`；v16记录仍保留供前后比较。
 Native、BSH和SPMD复用同条件合格记录；本轮只补变更的TND-MPMD两列。
+采用矩形与容量分档后的八行表为`scheduling_v36_PERFORMANCE.md`；配套JSON仅保存
+C02/C05更新单元格及来源，其余格子明确继承2026-10-23已验收表，避免重复复制记录。
+当前生产及门禁对应关系见`scheduling_v36_adoption.json`，两项修改分别提交。
 
 原10%优化目标的固定混长/padding场景与参考保持原义；最新八档六列性能另按
 `CSA_PERFORMANCE_TEST_SPEC.md`汇总，不能混算场景、权重和分母。主比较为完整CSA
