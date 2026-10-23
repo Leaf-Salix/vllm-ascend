@@ -23269,3 +23269,42 @@ CANN9.2及固定24个不同问题保持。16卡全部384请求×192=73,728个tok
 MPMD `task_20261023_221211_264822030157`、
 SPMD `task_20261023_221211_264826628465`，输出分别为
 `runs/v12_mpmd_b24`、`runs/v12_spmd_b24`。两项当前排队，B24 PTO目标尚未完成。
+
+### 735.104 B24 MPMD完成、SPMD收尾OOM；确认精度口径并纠正工作区归属（2026-10-23）
+
+MPMD `task_20261023_221211_264822030157` exit=0：384请求×192token完整生成，
+每卡33个有效24×S6 step，无抢占，平均接受3.737538149。对Native有144/384
+请求全部token一致，64个简单请求全部一致，跨DP token差异0。最紧rank结束
+时设备free约42MiB，Torch reserved-allocated约0.616GiB，两者不可混为一项。
+证据`mpmd_b24_summary.json`。
+
+SPMD `task_20261023_221211_264826628465`未完成，exit=1。曾观察24路同时
+生成、waiting0，但收尾Native `npu_hc_pre_v2_51`申请210MiB失败，当时free
+207.11MiB。已映射到该次FX产物第991行，不将其误说成PTO直接申请210MiB。
+部分其他rank同刻在MTP metadata构建出现120→144行slot_mapping不匹配，
+尚未独立确认与OOM的因果，不据此贸然改Native builder。见`spmd_b24_failure.json`。
+
+用户明确回复：**“沿用此前口径，完整披露复杂问题差异”**。根据用户要求，
+将B16与B24已完成的Native/PTO问题和回答全文导出到
+`/data/pyptouser/qinchuanyu/pto-eager/downloads/CSA_TND_128K_B16_B24_QA_20261023/`。
+HTML左右对照，另有Markdown、输出token JSON及24份完整128K输入。
+16个DP副本相同才折叠展示；全部已生成192token保留，没有补写或截取。
+B16 SPMD与MPMD全量相同，B24 SPMD失败没有伪造回答。
+
+用户指出并明确要求：MPMD、SPMD的纯临时内存都应在执行过程中由Simpler
+申请、管理、跨调用复用，**不应由Python外部分配工作区**。先前2.6–2.7GiB
+是binding层torch.empty的21层外部Tensor合计，非Simpler内部arena；模型共享池
+只缓解外部分配，不能作为最终接入方案。该要求已纳入当前目标，生产迁移未完成。
+
+私有v13/v14原型将普通入口的MPMD71个、SPMD72个临时Tensor（含Top-K）
+移入pl.create_tensor；旧外部版本只作为测试参考。SPMD信号须设备初始化，
+当前SDK已删除create(init_value)填充能力，因此使用显式设备清零任务并建立
+消费者依赖；全部属于调用内开销，主数学SPMD及MPMD的业务切分不改变。
+诊断入口仅将Top-K作为可观察的输出，不代表生产工作区仍外置。
+
+v13单卡任务在旧参考完成后，内部入口JIT推导失败：missing inferred tensor
+metadata for offsets。定位当前JIT的形状提取只识别ast.List，原型误沿用Torch
+规格的tuple；v14统一使用list，不修改公共SDK。四个普通/诊断入口依赖图解析
+通过（`internal_workspace_parse.json`），但这不是完整编译或设备正确性结论。
+v14单卡 `task_20261023_234544_132217121267`已提交，先验输出、Top-K、全部
+cache/state、连续调用和图重放，再迁移生产接入并继续16卡验收。

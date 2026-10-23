@@ -170,15 +170,35 @@
       "task": "task_20261023_221211_264822030157",
       "source": "experiments/v12_b24_effective_capacity/source",
       "output": "runs/v12_mpmd_b24",
-      "state": "pending",
-      "single_card_evidence": "b24_workspace_validation.json"
+      "state": "completed_exit_0",
+      "single_card_evidence": "b24_workspace_validation.json",
+      "summary": "mpmd_b24_summary.json"
     },
     "spmd_tnd": {
       "task": "task_20261023_221211_264826628465",
       "source": "experiments/v12_b24_effective_capacity/source",
       "output": "runs/v12_spmd_b24",
-      "state": "pending",
-      "single_card_evidence": "b24_workspace_validation.json"
+      "state": "completed_exit_1",
+      "single_card_evidence": "b24_workspace_validation.json",
+      "failure": "收尾Native HC_pre申请210MiB OOM；其他rank同刻MTP槽位120/144不匹配；尚未独立确认后者因果",
+      "failure_summary": "spmd_b24_failure.json"
+    }
+  },
+  "workspace_direction": "用户明确：MPMD与SPMD临时工作区都必须在执行过程中由Simpler内部分配/管理；外部torch.empty与共享池方案需要移除。",
+  "accuracy_acceptance": "用户明确沿用此前口径，完整披露复杂问题差异。",
+  "internal_workspace": {
+    "v13": {
+      "task": "task_20261023_233304_90552910652",
+      "state": "completed_exit_1",
+      "stage": "旧参考已计算，内部入口JIT元数据推导失败，未执行内部版本",
+      "reason": "当前JIT形状推导只识别ast.List；原型误沿用Torch规格的tuple"
+    },
+    "v14": {
+      "task": "task_20261023_234544_132217121267",
+      "source": "experiments/v14_internal_workspace_lists/source",
+      "output": "runs/internal_workspace_v14",
+      "state": "pending_or_running",
+      "change": "形状统一为list；普通入口71/72个纯临时区均由pl.create_tensor申请；诊断输出单独入口"
     }
   }
 }
