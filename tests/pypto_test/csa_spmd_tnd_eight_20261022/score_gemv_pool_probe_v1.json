@@ -1,0 +1,58 @@
+{
+  "passed": true,
+  "cpu_only": true,
+  "full_csa_validated": false,
+  "performance_measured": false,
+  "shared_toolchain": {
+    "release": "csa-shared-20261022-logical-codegen",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-shared-20261022",
+      "commit": "26e94e05627eb47710dcc214bae1774b8829df8a"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_mpmd_aicpu_20261022/upstream_logical_refresh/manifest.json",
+    "published_for_validation_at": "2026-10-22T18:00:10+08:00",
+    "validated_at": "2026-10-22T18:14:28+08:00"
+  },
+  "shared_manifest": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_shared_toolchain/manifest.json",
+  "source_sha256": "377d502a69c7cc0f096be11ca25bbdb2f65c6be220d440b57765bfe0a7f19cd2",
+  "cases": [],
+  "artifact": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/score_gemv_pool_probe_cpu_v1/kernel",
+  "binary_compile_passed": true,
+  "codegen": {
+    "cpp": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/score_gemv_pool_probe_cpu_v1/kernel/kernels/aic/ws_compare.cpp",
+    "sha256": "9c39b1818e56b491f8935b93309226c71b1fff82e5fd9037b0632cc8934eabd6",
+    "operations": {
+      "TGEMV": 6,
+      "TGEMV_ACC": 0,
+      "TMATMUL": 1,
+      "TMATMUL_ACC": 1
+    }
+  },
+  "task_id": "task_20261023_212226_36326220432",
+  "task_status": "pending",
+  "device_output": "runs/score_gemv_pool_probe_device_v1",
+  "expected_cases": 24,
+  "reference": "Original two-K192 diagonal WS",
+  "mechanism": "Six GEMVs alias one physical-M16 Acc column pool; one candidate FIX store",
+  "source_workaround": "Use named pl.tile.set_validshape(pool, 1, 384) before each slice; physical rows remain 16",
+  "device_qualification_passed": false,
+  "last_verified_at": "2026-10-23T13:35:42.355407+00:00",
+  "full_candidate_generator": "prepare_pooled_gemv.py",
+  "full_candidate_generated": false,
+  "layout_review": "score_gemv_pool_layout_review.json"
+}

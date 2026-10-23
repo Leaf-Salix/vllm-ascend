@@ -5970,3 +5970,40 @@ AIC已等待全部量化实际写者，若QUANT发布同时覆盖系数，可在
   本轮设备/编译任务全部结束，负例已归档；后续继续按B16的
   Attention/Indexer范围寻找新机制，不重复已完成的相同试验。
   本地阶段提交，不push。
+
+
+### 2026-10-23：找到GEMV Acc池的公开API布局规避写法
+
+- 上一轮根归并完整负例已归档。本轮先排重Key L1槽级依赖修正及
+  两级预取历史；已测机制不直接重复。转向此前被#3132阻断的
+  六GEMV合并写回路径，区别于已退步42.74%的六次独立FIX版本。
+- CPU对照发现：结果后加静态slice/set_validshape、让空间自动推导、
+  对父池重设完整有效形状均仍生成Acc→Acc TMOV。失败IR的slot
+  显式row_major/none_box/fractal512，结果为Acc规范布局；不是仅凭
+  静态/动态有效尺寸即可解释。源码DeduceTileSliceType在父Tile
+  无显式TileView时只按shape推blayout，写回SSA别名又要求相同签名。
+- 对每次slice先建立命名父视图`pool_live=pl.tile.set_validshape(
+  pool,1,128)`，物理16行不变，可保留规范布局。两个列偏移的
+  PyPTO/PTOAS/CCE/host完整编译通过，没有Acc搬运，未改公共SDK。
+  直接把窄视图回赋pool的首版被前端类型检查拒绝，改为命名视图；
+  该原型错误不作为SDK bug。完整对照见`gemv_acc_views_review.json`。
+- 六GEMV数值探针已完整CPU/二进制通过，原两K192矩阵乘作参考，
+  六GEMV写入16×384列池后一次FIX；原三种子×四输入×eager/graph
+  24组检查、输入不变和保护区校验器AST未变。唯一设备任务
+  `task_20261023_212226_36326220432` 使用auto卡，仅验证数值/布局，不计性能。
+  尚未生成完整CSA候选；完整应用仍需处理GM交接布局及AIV解包，
+  不能把少FIX次数当端到端收益。原八档目标和生产源码保持。
+
+- 已将布局定位、四种编译失败写法与命名父视图规避方案补充到原
+  PyPTO #3132，全文中文并回读确认；明确仅CPU完整编译通过，
+  不称SDK缺陷已修复或已有性能收益。
+- `prepare_pooled_gemv.py`已准备完整接入变换：生产端改同容量GM的
+  panel-major布局，消费端MTE2完成后先发原ACK，再在私有UB用TGATHER
+  恢复query顺序。原SPLIT_SCORE_ROWS constexpr从entry传到AIV，
+  G6/N64/1024、balanced、buf_live>3两侧共同决定新布局，短/尾分支
+  保留。整数模型覆盖24worker×2slot×2lane的294912项；其它Score
+  helper、<=3分支及源级FFTS调用AST保持一致，记录见
+  `score_gemv_pool_layout_review.json`。这不代替资源和设备验收。
+- 当前唯一探针仍pending；前置全卡任务正在运行，未重复提交。
+  生成器要求设备24组通过才生成完整候选，尚未运行该入口或完整
+  CSA编译。阶段性本地提交，不push；目标与正式保留版不变。
