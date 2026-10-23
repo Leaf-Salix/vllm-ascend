@@ -5898,3 +5898,29 @@ AIC已等待全部量化实际写者，若QUANT发布同时覆盖系数，可在
   等权比值仍0.9843498918572288；10%目标未达成。新轮继续聚焦B16
   Attention/Indexer，但不把已测单Right/双Right、分块gather、PV整行
   或连续写回方案改名重复。公共SDK未变，没有未完成的本轮任务。
+
+
+### 2026-10-23：Indexer三query根归并合批，先验证同分语义
+
+- 上一轮PV完整负例已归档，属完成进展。本轮继续B16 Indexer内核，
+  没有重复PV粒度、双Right或KV分块试验，生产保留版不变。
+- 现有G6完整分支已经合批三个query的Sort32/三级MRGSort，但末尾
+  new512+old512仍各自调用format2。当前PTO-ISA的format2先写tmp，
+  再经PIPE_V屏障和UB→UB复制写dst；format1重复归并直接写dst。
+  这是源码机制，不将字节/指令减少直接当成性能收益。
+- 将每个已排序512项根分成两个256项有序run，可把两路归并表示为
+  四路256-run归并。三query按每行2048个FP32 pair元素排列，展平后
+  用block_len=512、repeat=3；数学上query边界独立，但硬件同分index
+  优先级不能推定。探针同时检查自然排列和根内两半交换的排列。
+- `probe_batched_root_merge.py`完整CPU/PTOAS/CCE二进制通过，实际
+  3次原format2与2次候选format1均生成；后两条的真实块长为512，
+  输入/输出都是6144个FP32元素。独立设备任务
+  `task_20261023_201156_121183621901`已提交auto卡，尚pending。
+  计划3种子×8类输入×eager/graph共48组，每组3query，逐bit比较
+  Top512的score/index，同时记录整1024项结果、输入不变和两侧保护。
+  包含普通/量化多同分、全同分、新/旧根优势、正负零、最小值和pad。
+- `prepare_batched_root_merge.py`已准备两种排列，AST检查证明原
+  新分数排序、可见性证明、完整/尾部分支、Cube和FFTS均不变；只有
+  原三次根merge替换为合批。入口强制要求对应设备探针通过，未生成
+  或编译完整CSA候选，不把小探针当完整性能或状态验收。
+  公共SDK未改，八档原目标和分母不变；本阶段本地提交，不push。
