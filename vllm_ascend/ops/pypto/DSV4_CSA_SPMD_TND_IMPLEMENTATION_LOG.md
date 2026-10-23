@@ -5204,3 +5204,39 @@ AIV Vec163872，均在既有边界内。证据head_partition2_v1_C01_codegen.jso
 这只是C01隔离pilot，未全局改变策略或生产代码。通过task-submit提交卡8
 task_20261023_110504_25167107437，按完整链路十窗和原严格检查验收；采用
 与否仍取决于其完整L1结果，不能由新增活跃核数推断收益。无push。
+
+### 2026-10-23：B1双核组分头完整L1负向，转向HC尾行冗余GM搬运
+
+head_partition2_v1的卡8任务task_20261023_110504_25167107437最终
+completed/exit0；排队期间沿原句柄等待，没有因等待改卡或重复提交。
+reference/candidate的eager、graph、post-L1六组逐bit输出/TopK/score/
+cache-state及保护全部通过，实际执行四份CPP与CPU门禁匹配。十个全72角色
+窗口为379.08、368.14、368.48、365.92、369.26、365.50、366.46、372.94、
+370.70、367.90μs，中位368.31μs，对原同卡同SDK合格358.02μs回退2.87414%。
+结果head_partition2_v1_C01_result.json保留全部原始窗口。该候选拒绝，不做
+采用所需的额外服务/状态矩阵，不继续仅提高head分区数。复制KV是明确新增
+工作，但本测量没有单独隔离其占比，不能把整个回退唯一归因于它。
+
+当前B1阶段还显示INPUT35.30、NORM66.88、COMB83.58、QR92.02μs等早期
+端点；这些带探针值只定位前段链路，不当作独占耗时。定向核对HC源码发现
+widen尾行和norm尾行均存在“GM暂存→UB重读→正式输出”的往返。该位置
+不需要跨核共享临时结果，因此新候选只消除复制，不改变行分工或浮点归约。
+它独立基于当前已保留实现，未叠加失败的head拆分。
+
+hc_direct_tail_v1的3项AST数学检查通过，但完整CPU解析拒绝pl.store的
+TensorType输入；这是原型API用法错误，未上卡、不报SDK issue。保留失败
+runs/compile_hc_direct_tail_C01_v1/result.json。冻结v2改用Tensor assemble，
+返回更新后的x_hc32_flat别名；RMS K512/K256顺序、fillpad、BF16舍入、完整
+8行路径及所有发布依赖保持。v1/v2共6项源码检查通过，v2完整CPU编译通过。
+
+实际生成物已确认widen_tail与norm_tail视图只剩定义，没有消费者；四个
+展开的widen store和两个norm store都直达正式根，并保留动态有效行的
+set_validshape及min(8,T-row)目标窗口。root/return ABI和orchestration不变，
+完整cube_schedule C++函数也逐字不变。每个per-core CPP文件实际包含两侧
+静态函数，所以不把含已改变Vector函数的整个aic文件误称不变。AIC Mat
+475136/Acc131072，AIV Vec163872，均通过资源门禁。证据
+hc_direct_tail_v2_C01_codegen.json；这仍不是设备精度或性能证据。
+
+task_20261023_114005_400243722917已通过task-submit提交卡8，按原完整
+链路十窗与六组严格检查验收。正式四项保留机制、1.46631%八档结果和固定
+分母未变，10% goal继续active；未push。

@@ -50,10 +50,10 @@
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
   "pending_tasks": {
-    "task_20261023_110504_25167107437": {
+    "task_20261023_114005_400243722917": {
       "case": "C01",
+      "candidate": "hc_direct_tail_v2",
       "mode": "complete_L1_candidate",
-      "candidate": "head_partition2_v1",
       "performance_eligible": true
     }
   },
@@ -98,7 +98,7 @@
     "capacity_state_observer": 3,
     "capacity_production_contracts": 164
   },
-  "updated_at": "2026-10-23T11:06:33.643699+08:00",
+  "updated_at": "2026-10-23T11:41:51.760704+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -247,6 +247,12 @@
       ],
       "evidence": "attention_valid_overlap_v1_results.json",
       "reason": "Strict checks and runtime proof witness pass; complete L1 is 3.59% / 1.91% slower than retained implementations"
+    },
+    {
+      "candidate": "head_partition2_v1",
+      "case_id": "C01",
+      "evidence": "head_partition2_v1_C01_result.json",
+      "reason": "Exact full-chain checks pass, but complete L1 median regresses 2.87414 percent"
     }
   ],
   "promising_candidates": [
@@ -418,7 +424,17 @@
       "event_mask_instances": 4608,
       "full_codegen_passed": true,
       "codegen": "head_partition2_v1_C01_codegen.json",
-      "status": "candidate_measurement_submitted"
+      "status": "rejected_complete_L1",
+      "device_execution": true,
+      "measurement": "head_partition2_v1_C01_result.json"
+    },
+    "hc_direct_tail_v2": {
+      "source": "hc_direct_tail_v2.json",
+      "adopted": false,
+      "cpu_checks": 6,
+      "full_codegen_passed": true,
+      "codegen": "hc_direct_tail_v2_C01_codegen.json",
+      "status": "complete_L1_task_submitted"
     }
   },
   "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
@@ -525,7 +541,10 @@
       "2": 30.396517014888545,
       "4": 16.57129811323237,
       "8": 8.660686510808702
-    }
+    },
+    "C01_head_partition": "More active clusters alone regressed; keep exact full-L1 evidence and do not scan another partition degree without a new mechanism",
+    "C01_current_phase": "retained_C01_phase_sdk_v1.json",
+    "C01_frontend_transfer_candidate": "hc_direct_tail_v2.json"
   },
   "parked_candidates": [
     {
@@ -565,8 +584,16 @@
   "current_sdk_C08_reference": "baseline_current_sdk_C08.json",
   "current_implementation": "physical_capacity_production_v1",
   "earlier_stage_commit": "3a0f423c6",
-  "latest_stage": "C01_head_partition2_CPU_passed_complete_L1_submitted",
+  "latest_stage": "head_partition_rejected_hc_direct_tail_full_L1_pending",
   "retained_results": "retained_physical_capacity.json",
   "production_source_manifest": "physical_capacity_production_v1.json",
-  "prior_production_commit": "32a1426d9"
+  "prior_production_commit": "32a1426d9",
+  "cpu_failures": {
+    "hc_direct_tail_v1": {
+      "result": "runs/compile_hc_direct_tail_C01_v1/result.json",
+      "reason": "Pilot used tile.store on existing TensorType intermediates",
+      "component_bug": false,
+      "resolution": "v2 uses tensor assemble; full CPU compilation and emitted valid-row audit pass"
+    }
+  }
 }
