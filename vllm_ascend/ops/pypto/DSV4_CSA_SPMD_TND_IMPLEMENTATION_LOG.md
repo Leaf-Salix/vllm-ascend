@@ -5837,3 +5837,36 @@ AIC已等待全部量化实际写者，若QUANT发布同时覆盖系数，可在
   任务。#3132已中文回读确认，新报PTOAS #1680也为中文；本地阶段提交，
   未push。下一轮仍按用户要求聚焦B16的Attention/Indexer核内流水，
   避免重复已有负向候选。
+
+
+### 2026-10-23：Attention PV 保持四次N128/K128，聚合Acc后一次写回
+
+- 上一轮GEMV完整负例与两处组件复现属于已完成进展，本轮不重测。
+  核对共享工具链仍为 validated/logical-codegen，生产保留版不变。
+- 直接对照用户指定recipes的KV队列生命周期及本地ops-transformer
+  arch22 SparseFlashMLA源码，检查三槽KV复用、PV写回及Cube/FIX同步。
+  原实现已让QK/PV共享一次L1 KV，不再把此项当新增优化。
+- 校正一个源级推断：当前PV确有两个交替Acc，但四次Right提取实际
+  全部使用地址0的32KiB，不能由N128和全核Right峰值64KiB推断双缓冲。
+  又查到旧Acc96/受限GM修复组合中，真实Right 0/32768交替已经B16
+  821.96→838.00us回退；32行KV分块也有负例。本轮均未重跑，且不把
+  旧SDK组合结果当当前性能分母。见`attention_pv_history_review.json`。
+- 独立候选`attention_pv_pool_v1`只改PV：原M64/N128/K128四次乘法
+  依次写入一个64×512 Acc的四列窗，再一次连续写回。不同于旧N256
+  扩Right和32-head/N512改K64。保留当前单32KiB Right、原QK/Vector
+  数学、三槽/事件、输入ABI、GM容量及布局，不叠加GEMV或双Right。
+- C04完整代码及CCE/host二进制门禁通过。四列窗字节区间0/32768/
+  65536/98304，各32768B；Acc池131072B，QK使用前32768B。源级
+  同步调用参数不变，实际AIV及wrapper/orchestration与保留版一致。
+  片上峰值与保留版相同，实际四次PV乘法和K128不变，TSTORE 4→1；
+  整份产物FIX barrier80→76，其余各pipe barrier计数不变。
+  这些仅为机制/资源证据，不推出性能收益。
+- 唯一B16设备8完整任务`task_20261023_191200_189585727090`已提交。
+  沿用6组严格检查及10个完整72角色L1窗口，分母不重测，待终态。
+- Native的MMAD/FIX使用unitFlag配对，而公共PyPTO的Matmul/Acc接口
+  不接受acc_phase。独立CPU对照默认入口通过，两个phase入口分别
+  报对应关键字错误；最小PTO可以生成Final模板，但仍保留M→FIX
+  set/wait，因此不声称开放参数就能加速。已查重并以中文提交PyPTO
+  #3134，未修改公共SDK、未运行phase设备内核。首版把三分支放进
+  constexpr if导致控制组也被前端解析失败，已分开入口更正，不报成
+  组件bug。证据`matmul_phase_api_evidence.json`。
