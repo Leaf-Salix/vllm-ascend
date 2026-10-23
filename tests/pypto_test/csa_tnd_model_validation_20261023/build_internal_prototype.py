@@ -42,10 +42,51 @@ class ShapeExpression(ast.NodeTransformer):
         return node
 
 
-def make(source, package, function):
+def external_returns_only(function):
+    names = {argument.arg for argument in function.args.args}
+    tail = function.body[-1]
+    if not isinstance(tail, ast.Return):
+        return
+    assert isinstance(tail.value, ast.Tuple)
+    kept = [value for value in tail.value.elts if isinstance(value, ast.Name) and value.id in names]
+    assert any(value.id == "output" for value in kept)
+    tail.value = ast.Tuple(kept, ast.Load())
+
+
+def make(source, package, function, *, direct_body=False, scale_task_boundary=False):
     directory = source / "vllm_ascend/ops/pypto" / package
     module = ast.parse((directory / "entry.py").read_text())
     body = next(n for n in module.body if isinstance(n, ast.FunctionDef) and n.name == function)
+    if scale_task_boundary and not package.endswith("spmd_tnd"):
+        helper = """\n\n@pl.jit.incore
+def indexer_scale_page_commit_task(
+    scales: pl.Tensor[[ISCALES, 1], pl.FP32],
+    offsets: pl.Tensor[[GROUP_OFFSET_ROWS], pl.INT32],
+    cache: pl.InOut[pl.Tensor[[ICACHE_PAGES, ICACHE_BYTES], pl.INT8]],
+    tokens: pl.Scalar[pl.INDEX],
+    requests: pl.Scalar[pl.INDEX],
+):
+    cache = indexer_scale_page_commit_stage(
+        scales, offsets, cache, tokens, requests, pl.tile.get_block_idx(), VECTORS
+    )
+    return cache
+"""
+        path = directory / "entry.py"
+        assert "def indexer_scale_page_commit_task(" not in path.read_text()
+        path.write_text(path.read_text() + helper)
+        replacements = 0
+        for node in ast.walk(body):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "indexer_scale_page_commit_stage"
+            ):
+                assert ast.unparse(node.args[-2]) == "pl.tile.get_block_idx()"
+                assert ast.unparse(node.args[-1]) == "VECTORS"
+                node.func.id = "indexer_scale_page_commit_task"
+                node.args = node.args[:-2]
+                replacements += 1
+        assert replacements == 1
     binding = ast.parse((directory / "binding.py").read_text())
     specs = next(
         n.value
@@ -158,6 +199,15 @@ def make(source, package, function):
     target = directory / "internal_prototype.py"
     text = "\n".join(code)
     tree = ast.parse(text)
+    if direct_body:
+        wrapper = next(
+            n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function + "_internal_debug"
+        )
+        assert isinstance(wrapper.body[-1], ast.Expr)
+        wrapper.body[-1:] = copy.deepcopy(body.body)
+        external_returns_only(wrapper)
+        tree.body = [n for n in tree.body if not isinstance(n, ast.FunctionDef) or n.name != "_arithmetic_body"]
+        text = ast.unparse(tree) + "\n"
     normal = copy.deepcopy(
         next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function + "_internal_debug")
     )
@@ -167,6 +217,7 @@ def make(source, package, function):
         "topk_indices = pl.create_tensor([t, 512], dtype=pl.INT32)\n"
         "topk_scores = pl.create_tensor([t, 512], dtype=pl.FP32)\n"
     ).body
+    external_returns_only(normal)
     text += "\n" + ast.unparse(normal) + "\n"
     target.write_text(text)
     print(target, "normal_internal_buffers", len(allocations) + 2, "normal_external_arguments", len(signature) - 2)
@@ -175,9 +226,14 @@ def make(source, package, function):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
+    parser.add_argument("--direct-body", action="store_true", help="保持原编排函数体层级，避免额外inline包装")
+    parser.add_argument("--scale-task-boundary", action="store_true", help="MPMD的scale写回使用独立incore参数边界")
     args = parser.parse_args()
-    make(args.source, "deepseek_v4_flash_csa_spmd_tnd", "decode_csa_spmd")
-    make(args.source, "deepseek_v4_flash_csa_tnd", "decode_csa_tnd")
+    for package, function in (
+        ("deepseek_v4_flash_csa_spmd_tnd", "decode_csa_spmd"),
+        ("deepseek_v4_flash_csa_tnd", "decode_csa_tnd"),
+    ):
+        make(args.source, package, function, direct_body=args.direct_body, scale_task_boundary=args.scale_task_boundary)
 
 
 if __name__ == "__main__":

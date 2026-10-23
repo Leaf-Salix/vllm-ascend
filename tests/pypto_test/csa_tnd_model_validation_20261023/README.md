@@ -46,7 +46,8 @@
 - `workspace_pool_estimate.json`：CPU meta容量估算，不是模型设备峰值。
 - `redispatch_failures.json`：v05两种PTO在收尾阶段触发的Native query/Q前缀容量不一致。
 - `redispatch_validation.json`：修复后SWA/HCA/CSA的单卡Native容量图参考对照通过。
-- `jobs.json`：当前v09两种PTO B16整模型任务及其前置验证路径。B16三侧整模型及输出对照已完成，B24单卡已通过，修正整模型启动器的HCCL覆盖后正在重跑。
+- `jobs.json`：B16三侧旧外部工作区实现已完成，B24 Native/MPMD完成、SPMD收尾OOM；
+  以及后续内部工作区原型的编译、设备任务和失败归因。旧实现结果不能代替新实现验收。
 
 有工作区修复的冻结包使用`prepare.py <实验名> --revision 99268437c --workspace-fix`；
 图回退修复再加`--redispatch-fix`。
@@ -89,7 +90,7 @@ Native、MPMD均已通过每卡33个有效24×S6 step与零抢占；SPMD在收�
 和管理，不能在Python中外部分配，也不以外部共享池作为最终方案。
 现有B16和B24 MPMD证据属于旧外部工作区实现；生产路径尚未完成该项迁移。
 
-私有原型推进到v17，普通入口内部创建MPMD71个、SPMD72个临时Tensor（含Top-K）。
+私有原型推进到v21，普通入口内部创建MPMD71个、SPMD72个临时Tensor（含Top-K）。
 诊断入口只额外接受测试需要观察的Top-K输出；旧外部实现仅作数值参考。
 SPMD内部信号有设备清零任务，初始化依赖及全部开销属于这次调用；不能隐藏为
 捕获前一次性外部分配。数学任务主体沿用冻结源，MPMD不引入软同步。
@@ -97,6 +98,22 @@ v14在JIT动态reshape metadata推导失败，未运行内部版本。纯CPU最�
 `jit_shape_repro_20261024.py`区分tuple形状支持与动态局部尺寸变量两类问题。
 前者main已有[#2880](https://github.com/hw-native-sys/pypto/pull/2880)修复；
 后者已在[#3033追加中文复现](https://github.com/hw-native-sys/pypto/issues/3033#issuecomment-6369484280)。
-v17四个入口×两组策略共8项完整CPU特化已通过，证据为
-`internal_workspace_cpu_validation.json`。下一步才是设备验证；不把CPU特化
-成功写成NPU编译、内部内存生命周期或功能正确性通过。
+v17的8项CPU特化通过后，完整编译暴露内联动态尺寸问题；官方[#2937](https://github.com/hw-native-sys/pypto/pull/2937)
+对应部分已移植到公共候选`cda77ec0`。公共清单仍为`validating`，不能视为设备验收通过。
+
+v21保留原有直接编排，只给scale page commit增加显式incore类型边界；根返回值
+仅保留外部cache/state和输出，不把内部scratch作为kernel输出。MPMD普通/诊断入口
+各在T16/B16、T144/B24完成实际kernel ABI编译，共4项通过，日志为
+`runs/internal_kernel_v21_{debug,normal}.log`。单卡任务为
+`task_20261024_023856_172582927933`，设备终态以`jobs.json`及对应`result.json`为准。
+
+另外两类已确认的PyPTO编译问题均用中文提交：
+
+- [#3137](https://github.com/hw-native-sys/pypto/issues/3137)：复合尺寸内部Tensor在自动SPMD切分时不能恢复原维度；
+  显式incore参数边界可通过，复现`compound_extent_repro_20261024.py`。
+- [#3138](https://github.com/hw-native-sys/pypto/issues/3138)：Group ABI规范化更换参数尺寸，遗漏局部Tensor类型中的旧尺寸。
+  `mixed_param_extent_repro_20261024.py`在同一版本下cluster失败、分开派发通过；
+  `trace_internal_scale_symbol.py`记录完整SPMD在ExpandMixedKernel前后的实际类型变化。
+
+独立编译成功仍不等于内部内存生命周期、数值或graph replay正确。
+`build_internal_service.py`只生成私有服务接入副本；生产目录尚未迁移。

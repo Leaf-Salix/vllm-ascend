@@ -1,0 +1,143 @@
+{
+  "status": "PASS",
+  "scope": "内部工作区原型单卡，尚未接入生产服务",
+  "requested_variant": "mpmd_tnd",
+  "variants": {
+    "deepseek_v4_flash_csa_tnd": {
+      "status": "PASS",
+      "debug_output_topk_cache_bit_equal": [
+        [
+          "x_out",
+          "idx_topk",
+          "swa.0",
+          "compressed.0",
+          "state.0",
+          "indexer.0",
+          "indexer.1",
+          "indexer_state.0"
+        ],
+        [
+          "x_out",
+          "idx_topk",
+          "swa.0",
+          "compressed.0",
+          "state.0",
+          "indexer.0",
+          "indexer.1",
+          "indexer_state.0"
+        ],
+        [
+          "x_out",
+          "idx_topk",
+          "swa.0",
+          "compressed.0",
+          "state.0",
+          "indexer.0",
+          "indexer.1",
+          "indexer_state.0"
+        ]
+      ],
+      "normal_graph_output_cache_bit_equal": [
+        [
+          [
+            "x_out",
+            "swa.0",
+            "compressed.0",
+            "state.0",
+            "indexer.0",
+            "indexer.1",
+            "indexer_state.0"
+          ],
+          [
+            "x_out",
+            "swa.0",
+            "compressed.0",
+            "state.0",
+            "indexer.0",
+            "indexer.1",
+            "indexer_state.0"
+          ],
+          [
+            "x_out",
+            "swa.0",
+            "compressed.0",
+            "state.0",
+            "indexer.0",
+            "indexer.1",
+            "indexer_state.0"
+          ]
+        ],
+        [
+          [
+            "x_out",
+            "swa.0",
+            "compressed.0",
+            "state.0",
+            "indexer.0",
+            "indexer.1",
+            "indexer_state.0"
+          ],
+          [
+            "x_out",
+            "swa.0",
+            "compressed.0",
+            "state.0",
+            "indexer.0",
+            "indexer.1",
+            "indexer_state.0"
+          ],
+          [
+            "x_out",
+            "swa.0",
+            "compressed.0",
+            "state.0",
+            "indexer.0",
+            "indexer.1",
+            "indexer_state.0"
+          ]
+        ]
+      ],
+      "guard_status": "PASS",
+      "normal_ignores_external_debug_outputs": true,
+      "normal_external_tensor_arguments": 55,
+      "internal_allocation": "pl.create_tensor，普通入口的Top-K也在内部"
+    }
+  },
+  "scenes": [
+    "128K/B16/S1/layer2",
+    "128K/B16/S6/layer2",
+    "128K/B24/S6/layer4"
+  ],
+  "stage": "complete",
+  "task": "task_20261024_023856_172582927933",
+  "toolchain": {
+    "release": "csa-shared-20261024-internal-workspace",
+    "status": "validating",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-shared-internal-workspace-20261024",
+      "commit": "cda77ec0307c1dfd837be4610f7b771f856bb0b5"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_tnd_model_validation_20261023/internal_toolchain_upgrade.json",
+    "published_for_validation_at": "2026-10-24T01:06:47+08:00"
+  },
+  "source": "experiments/v21_internal_kernel_outputs/source",
+  "limitations": [
+    "仅MPMD内部工作区原型，不是生产服务或16卡验收",
+    "Top-K分数未作为逐bit对照项，索引已对照",
+    "已验证配置为四ring各256MiB、task_window4096，不代表最小容量"
+  ]
+}

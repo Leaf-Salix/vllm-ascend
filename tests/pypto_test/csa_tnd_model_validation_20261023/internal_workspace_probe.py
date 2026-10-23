@@ -22,9 +22,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
     parser.add_argument("--device", type=int)
+    parser.add_argument("--variant", choices=("both", "mpmd_tnd", "spmd_tnd"), default="both")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
-    report = {"status": "RUNNING", "scope": "内部工作区原型单卡，尚未接入生产服务", "variants": {}}
+    report = {
+        "status": "RUNNING",
+        "scope": "内部工作区原型单卡，尚未接入生产服务",
+        "requested_variant": args.variant,
+        "variants": {},
+    }
 
     def save():
         (args.output / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
@@ -92,6 +98,10 @@ def main():
             ("deepseek_v4_flash_csa_tnd", "decode_csa_tnd"),
             ("deepseek_v4_flash_csa_spmd_tnd", "decode_csa_spmd"),
         ):
+            if args.variant == "mpmd_tnd" and package.endswith("spmd_tnd"):
+                continue
+            if args.variant == "spmd_tnd" and not package.endswith("spmd_tnd"):
+                continue
             binding = importlib.import_module(f"vllm_ascend.ops.pypto.{package}.binding").PreparedDynamicCSA
             internal = importlib.import_module(f"vllm_ascend.ops.pypto.{package}.internal_prototype")
             debug = getattr(internal, function + "_internal_debug")
@@ -115,6 +125,7 @@ def main():
                 debug(**kwargs, **policy)
             torch.npu.synchronize()
             debug_checks = [compare(snapshot(f, n), e) for (f, n), e in zip(scenes, expected)]
+            assert all(bool(torch.isfinite(native["x_out"]).all()) for _, native in scenes)
             normal_args = [
                 {k: v for k, v in kwargs.items() if k not in ("topk_indices", "topk_scores")} for kwargs, _ in call_args
             ]

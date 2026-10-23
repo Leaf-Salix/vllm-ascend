@@ -23353,3 +23353,91 @@ v17随后完整CPU特化exit=0：MPMD/SPMD各自的普通、诊断入口，在16
 `internal_workspace_cpu_validation.json`与`runs/internal_workspace_v17_specialize.log`。
 这里使用descriptor读取绕过局部标量推导缺口，没有修复共享PyPTO；设备分配、
 算子输出和graph replay仍未验证，下一步才是内部工作区单卡检查。
+
+### 735.106 内部工作区触发已知inline动态尺寸缺陷，构建下一版公共工具链（2026-10-24）
+
+v17单卡`task_20261024_002717_245586523053`终态exit=1，卡已释放。三个旧外部
+参考场景算完后，首个内部MPMD入口在完整编译的`ConvertToSSA`校验失败：
+`CSA_FULL_P16`、`CSA_FULL_PARTIAL`、`CSA_FULL_O_MM_ROWS`被报为超出定义作用域。
+内部版本没有执行，735.105的CPU特化PASS不能当作完整编译PASS。
+后续CPU入口增加`--compile-output`，先跑完整编译流水线再排设备。
+
+已找到官方已关闭issue[#2936](https://github.com/hw-native-sys/pypto/issues/2936)及
+修复[#2937](https://github.com/hw-native-sys/pypto/pull/2937)。局部工作区尺寸穿过
+inline/循环时，被调方维度符号未完整替换为调用方表达式，与本次错误同型。
+新增`inline_extent_repro_20261024.py`，旧公共版本仅在CPU运行inline校验即失败，
+不需要模型或设备；错误为`CSA_INTERNAL_CALLEE_ROWS used before definition`。
+
+以公共`26e94e056`为基础建立独立目录
+`.worktrees/pypto-csa-shared-internal-workspace-20261024`，移植上游
+`5f71449f2372317cd9e0c8d71afc9d7b29cb7875`中的内联类型特化、DeepClone及
+共享类型推导/SSA工具和回归。同PR的AUTO作用域提升属于另一组改动，本次未移植。
+调试分支还缺少上游parser对有效区域细化赋值的支持，补入同一上游版本的对应
+helper与条件，物理形状、dtype、布局仍严格检查，没有放宽错误保护或修改测试预期。
+
+独立构建的pypto_core和torch_npu桥接通过。最小复现由失败转为通过，相关
+内联/SSA/DeepClone/flatten/跨函数类型回归289项通过，parser错误保护23项通过。
+首次裸PYTHONPATH自测被旧editable finder抢占，`wrong_import`日志明确排除；
+候选SDK自测显式绑定当前构建目录，确认加载来源后才取得上述312项结果。
+PyPTO中文签名提交`cda77ec0`，未push；Simpler仍为`57e49923`、PTOAS仍为
+`914863ed`、CANN仍为9.2。旧公共源码/构建未修改。
+
+公共清单已统一进入`csa-shared-20261024-internal-workspace`、`status=validating`，
+新CSA测试通过公共bootstrap读取该版本；当前仅进行完整CPU编译，不能标作正式
+设备或整模型验收通过。证据`internal_toolchain_upgrade.json`，CPU日志在
+`runs/pypto_2937_*`及`runs/internal_compile_2937.log`。
+
+同时准备私有`v18_internal_service_draft`：普通入口内部申请全部scratch与Top-K，
+诊断入口才显式接受Top-K输出；服务不再缓存Top-K工作区，binding不再torch.empty，
+模型共享池及其传参删除。两种数学体AST与冻结源码相同，MPMD切分不改、未新增
+软同步。生成脚本`build_internal_service.py`仅允许写入私有experiments目录，
+生产源码尚未替换；设备验证通过后才迁移正式接入并重做B16、B24整模型。
+
+
+### 735.107 内部工作区完成MPMD kernel编译门槛，中文上报两类后续编译缺陷（2026-10-24）
+
+本轮明确区分编写错误、前端特化通过和完整kernel编译通过，避免把CPU解析成功
+误写为设备可用。v19去掉原型额外的inline数学包装，恢复原有编排层的tensor.dim
+折叠；v20在原scale page commit的SPMD scope内使用显式incore参数边界，
+worker数量、early_resolve、sync_start和数学体未改变，MPMD仍只用AICPU依赖。
+
+复合尺寸内部Tensor在自动SPMD切分时无法反推出原始维度，已有独立CPU复现：
+相同代码显式incore边界可以编译，自动切分失败。已提交中文
+[#3137](https://github.com/hw-native-sys/pypto/issues/3137)，代码
+`csa_tnd_model_validation_20261023/compound_extent_repro_20261024.py`，
+有效对照为`runs/compound_extent_2937_v2/result.json`。
+
+v20单卡`task_20261024_020029_74912015872`在候选执行前失败，原因属于原型写法：
+根函数仍返回内部scratch，而kernel ABI要求输出别名外部Tensor参数。
+v21仅返回外部cache/state、正式output及诊断入口的Top-K；普通Top-K和全部
+scratch留在内部。普通/诊断入口分别在T16/B16和T144/B24完成实际kernel ABI
+编译，共4项通过；日志`runs/internal_kernel_v21_debug.log`和
+`runs/internal_kernel_v21_normal.log`，不是仅运行program.compile的结果。
+单卡任务`task_20261024_023856_172582927933`继续验证eager、图重放与状态，
+设备结果另行追加，当前不能标记内部路径验收完成。
+
+SPMD后续失败定位到ExpandMixedKernel：`vector_schedule`的o_scales形参由
+`[8,CSA_FULL_O_SCALE_ROWS]`变成`[8,p128__ssa_v0]`，局部alias、循环携带值
+和返回类型仍携带旧符号，最后输出反量化的标量读取无法生成地址。证据
+`runs/internal_scale_trace.json`，采集脚本`trace_internal_scale_symbol.py`。
+独立小例`mixed_param_extent_repro_20261024.py`已复现cluster失败、相同成员
+分开派发通过，实际证据`runs/mixed_extent_v8/result.json`。此前小例草稿的
+无效API尝试及没有触发问题的结果不作为该结论依据。
+已提交中文[#3138](https://github.com/hw-native-sys/pypto/issues/3138)，包含完整
+可运行小例、pass前后IR、版本与验证边界。核对GitHub main的相关函数逻辑相同，
+但未另行构建main，不宣称main已真机或编译实测。
+
+下一版候选独立目录`.worktrees/pypto-csa-shared-group-dims-20261024`复用既有
+DeduceCallTypeBindings，将成员参数的动态类型维度一并映射到Group实参。
+新增回归在现用cda77ec0上稳定失败；候选正在独立构建，不修改当前设备任务
+使用的源码或二进制，公共清单仍保持上一候选validating。
+
+同节设备结果补记：v21单卡任务已exit=0，卡已释放。128K/B16/S1/layer2、
+128K/B16/S6/layer2、128K/B24/S6/layer4三个场景的MPMD内部入口均通过。
+诊断入口output、Top-K索引、SWA/compressed/indexer cache及两个compressor
+state与旧外部参考逐bit一致；普通入口不接收外部Top-K，连续三次调用捕获后
+两次graph replay的output及cache/state逐bit一致，保护区通过，输出有限。
+外部诊断索引/分数保持预置哨兵不变。Top-K分数本轮未作逐bit对照，不扩大结论。
+证据`internal_workspace_mpmd_validation.json`，原始结果
+`runs/internal_workspace_v21/result.json`。当前ring配置四个各256MiB、window4096，
+只证明该容量可运行；不是生产服务或16卡验收，也不是SPMD通过。

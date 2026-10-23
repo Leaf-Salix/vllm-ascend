@@ -215,11 +215,50 @@
     },
     "v17": {
       "source": "experiments/v17_internal_workspace_shape_branch/source",
-      "state": "cpu_specialize_pass",
+      "state": "completed_exit_1",
       "log": "runs/internal_workspace_v17_specialize.log",
       "summary": "internal_workspace_cpu_validation.json",
       "change": "使用描述符读取绕过动态局部尺寸推导问题；修正ceil、Tile与constexpr分支；未修改公共SDK",
-      "npu_validated": false
+      "npu_validated": false,
+      "task": "task_20261024_002717_245586523053",
+      "output": "runs/internal_workspace_v17",
+      "failure": "ConvertToSSA: CSA_FULL_P16/PARTIAL/O_MM_ROWS used outside its defining scope; internal candidate not executed",
+      "upstream_issue": "https://github.com/hw-native-sys/pypto/issues/2936",
+      "upstream_fix": "https://github.com/hw-native-sys/pypto/pull/2937"
+    },
+    "v18": {
+      "source": "experiments/v18_internal_service_draft/source",
+      "state": "draft_superseded",
+      "reason": "服务迁移草稿仍使用额外inline数学包装；v19已改为直接编排，未接入生产"
+    },
+    "v19": {
+      "source": "experiments/v19_internal_direct_body/source",
+      "state": "cpu_compilation_failed",
+      "change": "还原原有直接编排，消除额外inline对tensor.dim折叠的干扰",
+      "remaining": "MPMD复合尺寸自动SPMD边界；SPMD Group成员尺寸映射"
+    },
+    "v20": {
+      "source": "experiments/v20_internal_task_boundary/source",
+      "task": "task_20261024_020029_74912015872",
+      "state": "completed_exit_1",
+      "change": "MPMD的scale page commit保留原有SPMD scope，改成显式incore参数边界；编译通过",
+      "failure": "原型根函数错误地返回内部scratch，违反kernel输出必须别名外部参数的ABI；候选未执行",
+      "issue": "https://github.com/hw-native-sys/pypto/issues/3137"
+    },
+    "v21": {
+      "source": "experiments/v21_internal_kernel_outputs/source",
+      "task": "task_20261024_023856_172582927933",
+      "output": "runs/internal_workspace_v21",
+      "state": "completed_exit_0",
+      "change": "根函数只返回Native cache/state及正式输出，普通Top-K和全部scratch留在内部",
+      "cpu_evidence": [
+        "runs/internal_kernel_v21_debug.log",
+        "runs/internal_kernel_v21_normal.log"
+      ],
+      "cpu_result": "MPMD普通/诊断入口，各T16/B16和T144/B24，实际kernel ABI完整编译4项通过",
+      "spmd_failure": "ExpandMixedKernel成员参数改形后遗漏局部类型动态尺寸替换",
+      "spmd_issue": "https://github.com/hw-native-sys/pypto/issues/3138",
+      "result": "internal_workspace_mpmd_validation.json"
     }
   }
 }
