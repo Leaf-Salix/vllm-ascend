@@ -54,9 +54,7 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {
-    "batched_root_natural_v1_C04": "task_20261023_205221_325224127705"
-  },
+  "pending_tasks": {},
   "next_steps": [
     "Continue source-backed B16 Attention/Indexer work; four-column PV Acc pool is now a measured negative",
     "Do not repeat PV whole-row accumulation or Right double buffering without a distinct mechanism; fewer FIX stores alone did not improve complete L1",
@@ -108,7 +106,7 @@
     "packed_score_keys_v6": 21,
     "score_half_interleave": 2
   },
-  "updated_at": "2026-10-23T12:52:21.243787+00:00",
+  "updated_at": "2026-10-23T13:02:02.734767+00:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -328,6 +326,15 @@
       "retained_median_us": 763.65,
       "change_pct": 1.3409284358017581,
       "reason": "Full-L1 regression despite one contiguous store instead of four; no adoption"
+    },
+    {
+      "candidate": "batched_root_natural_v1",
+      "case_id": "C04",
+      "evidence": "batched_root_natural_v1_results.json",
+      "median_us": 773.02,
+      "retained_median_us": 763.65,
+      "change_pct": 1.227001898775626,
+      "reason": "Fewer root merge/copy/barrier operations did not improve complete L1; no adoption or broader validation"
     }
   ],
   "promising_candidates": [
@@ -680,11 +687,11 @@
     }
   ],
   "pending_observation": {
-    "own_pending_tasks": 1,
+    "own_pending_tasks": 0,
     "tasks": {
-      "task_20261023_205221_325224127705": "pending"
+      "task_20261023_205221_325224127705": "completed (exit=0)"
     },
-    "verified_at": "2026-10-23T12:53:24.330329+00:00"
+    "verified_at": "2026-10-23T13:02:02.734767+00:00"
   },
   "prepared_uniform_state": "uniform_meta_state_v1.json",
   "macro_review": {
@@ -771,7 +778,7 @@
   "current_sdk_C08_reference": "baseline_current_sdk_C08.json",
   "current_implementation": "output_rectangle_production_v1",
   "earlier_stage_commit": "3a0f423c6",
-  "latest_stage": "Natural batched-root layout passed 48 probe checks and complete C04 codegen/binary/resource/Cube/ABI gates; full L1 pilot submitted on device 8",
+  "latest_stage": "B16 natural batched-root merge passed strict complete-chain checks but full L1 regressed 1.227%; rejected, production unchanged",
   "retained_results": "retained_output_rectangle.json",
   "production_source_manifest": "output_rectangle_production_v1.json",
   "prior_production_commit": "32a1426d9",
