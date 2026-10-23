@@ -54,6 +54,12 @@
 
 本机完整项目UT被原conftest的vLLM依赖阻断；相同正式文件的纯CPU路由测试已在227无设备任务通过，没有改动原conftest或安装本机vLLM。
 
+## 整模型加载契约修复
+
+首次8K设备任务`task_20261023_153328_7760827457`在模型权重加载后exit1，尚未开始token对拍。`prepare_csa_model`会动态导入所选package的`qkv_proj_rope`，只读取QR_OK/KV_OK作日志；新组合包漏了这个元数据模块。正式新增重导出文件，与原overlap对应文件逐字节相同，QR_OK=KV_OK=1，七个计算/路由文件未变。此项不是算子数值失败，原始16rank日志完整保留。
+
+修复在独立`postload-v2`目录执行：新30文件manifest和完整64Tensor编译通过；真实导入新metadata并与原模块相等的CPU回归通过。另一个无设备检查明确在新增导入**之后**读取/assert NPU未初始化。原v1八组数值/性能证据及29文件manifest不覆盖；POSTLOAD_FIX_PROOF将v1与正式v2的非数学差异连接起来。whole预检现在拒绝没有postload门禁的旧CPU收据。
+
 ## 复现资产与参数
 
 | 资产 | 本轮身份/参数 |
