@@ -54,12 +54,11 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {
-    "C04_score_gemv_v3": "task_20261023_183940_8927319593"
-  },
+  "pending_tasks": {},
   "next_steps": [
-    "Continue source-backed B16 Indexer/Attention pipeline work; both packed-key and N64 half-interleaving complete-L1 pilots are negative",
+    "Continue source-backed B16 Attention/Indexer pipeline work; packed-key, N64 interleave and independent-store GEMV pilots are negative",
     "Packed AIV key supply is a measured negative; do not expand its state/service/case matrix or scan nearby buffering parameters",
+    "Do not scan independent-store GEMV parameters; reconsider only with a distinct proven mechanism, such as a usable Acc pool after issue 3132, and new full-L1 evidence",
     "Attention follow-up must differ from measured direct-AIC gather, persistent-KV buffering and simple producer/consumer reorderings",
     "Preserve original arithmetic, A3 resource bounds and cache/slot visibility; require mechanism evidence before another device candidate",
     "Original eight-case 0.90 geomean objective and final regression remain active",
@@ -308,6 +307,15 @@
       "median_us": 782.05,
       "retained_median_us": 763.65,
       "change_pct": 2.4094807830812526
+    },
+    {
+      "candidate": "score_gemv_v3",
+      "case_id": "C04",
+      "evidence": "score_gemv_v3_results.json",
+      "median_us": 1090.01,
+      "retained_median_us": 763.65,
+      "change_pct": 42.73685588947818,
+      "reason": "Independent-store GEMV passes strict checks but complete-L1 regresses 42.74%; no adoption"
     }
   ],
   "promising_candidates": [
@@ -656,8 +664,9 @@
   "pending_observation": {
     "own_pending_tasks": 0,
     "tasks": {
-      "task_20261023_101533_4702752956": "completed (exit=0)",
-      "task_20261023_101534_47081128521": "completed (exit=0)"
+      "task_20261023_181703_335272912270": "completed (exit=1; alignment error before kernel execution)",
+      "task_20261023_182030_349647015713": "completed (exit=0; numerical probe)",
+      "task_20261023_183940_8927319593": "completed (exit=0; C04 full candidate rejected)"
     }
   },
   "prepared_uniform_state": "uniform_meta_state_v1.json",
@@ -745,7 +754,7 @@
   "current_sdk_C08_reference": "baseline_current_sdk_C08.json",
   "current_implementation": "output_rectangle_production_v1",
   "earlier_stage_commit": "3a0f423c6",
-  "latest_stage": "B16 GEMV probe bitwise passed; complete C04 candidate compiled and submitted",
+  "latest_stage": "B16 independent-store GEMV rejected after strict complete-L1; two upstream issues filed in Chinese",
   "retained_results": "retained_output_rectangle.json",
   "production_source_manifest": "output_rectangle_production_v1.json",
   "prior_production_commit": "32a1426d9",

@@ -47,6 +47,9 @@ def main():
     assert all("loc=left, dtype=f16, rows=1, cols=256" in line for line in gemv)
     assert all("loc=right, dtype=f16, rows=256, cols=64" in line for line in gemv)
     assert all("loc=acc, dtype=f32, rows=16, cols=64" in line for line in gemv)
+    right_allocations = [line for line in cube.splitlines() if "gemv_right" in line and "pto.alloc_tile" in line]
+    assert len(right_allocations) == 96
+    assert all("valid_row = %c64_index valid_col = %c64_index" in line for line in right_allocations)
     destinations = {re.search(r"outs\((%[\w.]+)", line).group(1) for line in gemv}
     assert len(destinations) == 1, destinations
     old_ops, new_ops = operations(native), operations(current)
@@ -106,6 +109,7 @@ def main():
         limits=limits,
         accumulator_intervals={name: sorted(value) for name, value in accumulators.items()},
         actual_GEMV_count=96,
+        actual_Right_valid_K64_N64_count=96,
         replaced_WS_MMA_count=32,
         added_FIX_stores=80,
         unchanged_QK_MMA_order=True,
