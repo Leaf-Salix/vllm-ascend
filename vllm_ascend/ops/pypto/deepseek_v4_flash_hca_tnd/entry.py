@@ -42,6 +42,7 @@ from .attention import (
     ORI_TABLE_COLUMNS_DYN,
     T_PAD,
     sparse_attn_hca_tp1,
+    sparse_attn_hca_tp1_long,
 )
 from ..deepseek_v4_flash_hca.hc_pre_fused import NORM_EPS, hc_pre_norm
 from .output import o_proj_hc_post, o_proj_hc_post_tall
@@ -70,11 +71,12 @@ RMS_COLS = 512
 WIDEN_WORKERS = 48
 CACHE_WORKERS = 8
 
-def _make_decode_hca(qkv_proj_rope, o_proj_hc_post):
-    """初始化时绑定投影策略；两个入口共享同一层主体和36项device Tensor ABI。
+def _make_decode_hca(qkv_proj_rope, o_proj_hc_post, sparse_attn_hca_tp1):
+    """初始化时绑定投影/attention策略；三个入口共享层主体和36项device Tensor ABI。
 
     qkv_proj_rope是编译时Python依赖，不是Host数值入参，也不会生成TMR选择分支。
-    普通入口绑定原Q_B/O_B，大T入口绑定两处M192/N128；实际T/Q/L仍由设备描述符提供。
+    普通入口使用K128；长历史较大T使用K512；其中大T还绑定Q_B/O_B M192/N128。
+    实际T/Q/L仍由设备描述符提供，入口选择不把device长度变为Host入参。
     """
     def _decode_hca_tp1_layer(
         x_hc: pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16],
@@ -221,8 +223,10 @@ def _make_decode_hca(qkv_proj_rope, o_proj_hc_post):
     return _decode_hca_tp1_layer
 
 
-_decode_hca_tp1_layer = _make_decode_hca(qkv_proj_rope, o_proj_hc_post)
-_decode_hca_tp1_layer_tall = _make_decode_hca(qkv_proj_rope_tall, o_proj_hc_post_tall)
+_decode_hca_tp1_layer = _make_decode_hca(qkv_proj_rope, o_proj_hc_post, sparse_attn_hca_tp1)
+_decode_hca_tp1_layer_long = _make_decode_hca(qkv_proj_rope, o_proj_hc_post, sparse_attn_hca_tp1_long)
+_decode_hca_tp1_layer_tall = _make_decode_hca(qkv_proj_rope_tall, o_proj_hc_post_tall, sparse_attn_hca_tp1_long)
 decode_hca_tp1_layer = pl.jit.inline(auto_scope=False)(_decode_hca_tp1_layer)
 decode_hca_tp1_layer_test = pl.jit(auto_scope=False)(_decode_hca_tp1_layer)
+decode_hca_tp1_layer_long_test = pl.jit(auto_scope=False)(_decode_hca_tp1_layer_long)
 decode_hca_tp1_layer_tall_test = pl.jit(auto_scope=False)(_decode_hca_tp1_layer_tall)

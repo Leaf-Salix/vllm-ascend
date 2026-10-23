@@ -64,6 +64,9 @@ def validate(*, package, layer, call, config, fixture, output, baseline, restore
         if getattr(call.operators, "attention_tall", None) is not None:
             tall_policy = "tall_projection" if hasattr(adapter, "use_tall_projection") else "tall_qb"
             counted = adapter.HCAOperators(counted.attention, CountedOperator(call.operators.attention_tall, tall_policy))
+        if getattr(call.operators, "attention_long", None) is not None:
+            counted = adapter.HCAOperators(counted.attention, counted.attention_tall,
+                                           CountedOperator(call.operators.attention_long, "long_attention"))
         runtime = module.bind_layer(layer, counted,
                                     max_num_seqs=64, max_num_batched_tokens=384)
         for step, calls in ((0, 2), (1, 1)):

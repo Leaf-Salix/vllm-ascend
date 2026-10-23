@@ -87,7 +87,17 @@ def trace_output(
             if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                     and node.func.id == "o_proj_hc_post" and "o_proj_hc_post_tall" in ast.unparse(tree)):
                 node.func.id = "o_proj_hc_post_tall"
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "sparse_attn_hca_tp1" and "sparse_attn_hca_tp1_long" in ast.unparse(tree)):
+                node.func.id = "sparse_attn_hca_tp1_long"
         extra_trace = "\n\n" + ast.unparse(tall_root)
+    if "sparse_attn_hca_tp1_long" in ast.unparse(tree):
+        long_root = copy.deepcopy(root)
+        long_root.name = "trace_hca_long"
+        for node in ast.walk(long_root):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "sparse_attn_hca_tp1":
+                node.func.id = "sparse_attn_hca_tp1_long"
+        extra_trace += "\n\n" + ast.unparse(long_root)
     if "o_proj_hc_post_tall" in ast.unparse(tree):
         tail += tail.replace("def trace_output(", "def trace_output_tall(").replace(
             "output = o_proj_hc_post(", "output = o_proj_hc_post_tall(")
@@ -158,8 +168,12 @@ def run_probe(*, package, options, call, fixture, layer, config, output, baselin
         "debug_packed": torch.empty((8 * module.T_PAD, 4096), dtype=torch.bfloat16, device=output.device),
         "debug_q": torch.empty((tokens, 32768), dtype=torch.bfloat16, device=output.device),
     }
-    trace_root = (module.trace_hca_tall if getattr(call, "policy", "default") != "default"
-                  else module.trace_hca)
+    policy = getattr(call, "policy", "default")
+    trace_root = module.trace_hca
+    if policy == "tall_projection":
+        trace_root = module.trace_hca_tall
+    elif policy == "long_attention":
+        trace_root = module.trace_hca_long
     trace = pypto.torch.register(trace_root, "hca_tnd_stage_probe::attention", config=options)
     tail_root = (module.trace_output_tall if getattr(call, "policy", "default") == "tall_projection"
                  else module.trace_output)

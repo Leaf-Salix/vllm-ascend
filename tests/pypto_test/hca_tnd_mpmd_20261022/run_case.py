@@ -43,6 +43,8 @@ def main():
                         help="仅在与冻结控制组全部逐bit一致时，保留 Native 误差并诊断性能；不改 passed")
     parser.add_argument("--native-output-math", action="store_true",
                         help="已做同输入诊断的Native输出量化语义修正；性能门禁仍要求cache/state精确及Native输出通过")
+    parser.add_argument("--attention-math-evidence", type=Path,
+                        help="独立attention FP64诊断报告；允许该候选输出与控制非逐bit，但不放宽Native输出/状态门禁")
     parser.add_argument("--compare-legacy", action="store_true", help="S6 上核实 TND 迁移是否改变旧 HCA 数学")
     parser.add_argument("--compressor-probe-only", action="store_true", help="固定 Native RMS 输出验证 C128；不测性能")
     parser.add_argument("--metadata-sequence", action="store_true", help="固定设备地址，直接调用 S1/S5/混长 A→B→A；不测性能")
@@ -60,6 +62,9 @@ def main():
         raise ValueError("预绑定SDK对照只用于独立Host诊断")
     if args.native_output_math and (not args.diagnostic_perf or not args.control_source):
         raise ValueError("Native输出数学迁移必须有冻结控制组和显式诊断性能标记")
+    if args.attention_math_evidence and (
+            not args.diagnostic_perf or not args.control_source or not args.source or args.native_output_math):
+        raise ValueError("attention数学诊断须有冻结双侧源码，不与其他数学迁移标记混用")
     if args.precision_probe and (args.windows or args.profile or args.native_only):
         raise ValueError("中间值诊断不与性能采集混用")
     if args.service_probe and (args.windows or args.profile or args.native_only or args.precision_probe):
@@ -72,6 +77,20 @@ def main():
               "execution_mode": "eager_direct", "aclgraph_replay": False,
               "source": str(args.source), "layer": 3, "nz_mode": 2,
               "shared_toolchain": os.environ.get("CSA_SHARED_TOOLCHAIN_RELEASE")}
+    if args.attention_math_evidence:
+        evidence = json.loads(args.attention_math_evidence.read_text())
+        leaf = args.source / "deepseek_v4_flash_hca_tnd/attention.py"
+        checked_leaf = Path(evidence["candidate_attention_source"])
+        if (evidence.get("status") != "DIAGNOSTIC_COMPLETE" or evidence.get("aclgraph_replay") is not False
+                or evidence.get("shared_toolchain") != report["shared_toolchain"]
+                or leaf.read_text() != checked_leaf.read_text()
+                or not {"131072", "16507"}.issubset(evidence.get("cases", {}))):
+            raise ValueError("独立attention证据未完成、工具链/实际计算源码不一致或缺少边界场景")
+        for case in evidence["cases"].values():
+            for check in case["vs_dense_fp64"].values():
+                if check["nonfinite"] or not check["repeat_eager_exact"] or not check["output_padding_guard"]:
+                    raise ValueError("独立attention诊断存在功能/写保护问题")
+        report["attention_independent_probe"] = str(args.attention_math_evidence.resolve())
 
     def save(stage):
         report["stage"] = stage
@@ -106,6 +125,8 @@ def main():
             entry.decode_hca_tp1_layer_test.compile(config=options)
             if hasattr(entry, "decode_hca_tp1_layer_tall_test"):
                 entry.decode_hca_tp1_layer_tall_test.compile(config=options)
+            if hasattr(entry, "decode_hca_tp1_layer_long_test"):
+                entry.decode_hca_tp1_layer_long_test.compile(config=options)
             if args.precision_probe:
                 probes = importlib.import_module(PACKAGE + ".trace_entry")
                 probes.trace_hca.compile(config=options)
@@ -122,6 +143,8 @@ def main():
                 control_entry.decode_hca_tp1_layer_test.compile(config=options)
                 if hasattr(control_entry, "decode_hca_tp1_layer_tall_test"):
                     control_entry.decode_hca_tp1_layer_tall_test.compile(config=options)
+                if hasattr(control_entry, "decode_hca_tp1_layer_long_test"):
+                    control_entry.decode_hca_tp1_layer_long_test.compile(config=options)
             # .compile完成IR/PTOAS设备代码，但编排C++原先到首次执行才编译。
             # 在CPU阶段也完成它，避免把明显的编排codegen错误留到占卡之后。
             from pypto.runtime.kernel_compiler import KernelCompiler
@@ -349,6 +372,12 @@ def main():
                         "dsv4_hca_legacy_diagnostic::attention_tall", config=options,
                     )
                     legacy_operators = legacy_adapter.HCAOperators(legacy_op, legacy_tall)
+                if hasattr(reference_module, "decode_hca_tp1_layer_long_test"):
+                    legacy_long = pypto.torch.register(
+                        reference_module.decode_hca_tp1_layer_long_test,
+                        "dsv4_hca_legacy_diagnostic::attention_long", config=options,
+                    )
+                    legacy_operators = legacy_adapter.HCAOperators(legacy_op, legacy_tall, legacy_long)
                 legacy_call = legacy_adapter.NativeHCACall(
                     legacy_operators, legacy_adapter.prepare_weights(layer.self_attn, layer),
                     fixture["hidden"], fixture["positions"], groups,
@@ -495,6 +524,22 @@ def main():
                     and all_passed(report["repeat_eager"]) and all_passed(report["repeat_guards"])
                     and not report["nonfinite_output"]
                 )
+            if args.attention_math_evidence:
+                state_exact = all(all_passed(checks) for name, checks in report["pto_reference"].items()
+                                  if name != "output")
+                report["attention_math_transition"] = {
+                    "independent_evidence": report["attention_independent_probe"],
+                    "description": "扩大softmax/PV归约块；改变舍入，保留原Native输出容差及控制cache/state精确要求",
+                    "cache_state_exact_to_control": state_exact,
+                    "output_bitwise_equal_to_control": all_passed(report["pto_reference"]["output"]),
+                    "native_output_with_existing_tolerance": all_passed(report["pto_native"]["output"]),
+                }
+                diagnostic_allowed = (
+                    state_exact and all_passed(report["pto_native"]["output"])
+                    and all_passed(report["reference_guards"]) and all_passed(report["pto_guards"])
+                    and all_passed(report["repeat_eager"]) and all_passed(report["repeat_guards"])
+                    and not report["nonfinite_output"]
+                )
             report["preserves_reference"] = all_passed(report["pto_reference"]) if legacy is not None else None
             report["diagnostic_performance_only"] = bool(diagnostic_allowed and not report["passed"])
             if not report["passed"] and not diagnostic_allowed:
@@ -603,9 +648,12 @@ def main():
                         from host_probe import prepared_operator
 
                         entry = importlib.import_module(PACKAGE + ".entry")
-                        prepared_root = (entry.decode_hca_tp1_layer_tall_test
-                                         if getattr(call, "policy", "default") != "default"
-                                         else entry.decode_hca_tp1_layer_test)
+                        prepared_policy = getattr(call, "policy", "default")
+                        prepared_root = entry.decode_hca_tp1_layer_test
+                        if prepared_policy == "tall_projection":
+                            prepared_root = entry.decode_hca_tp1_layer_tall_test
+                        elif prepared_policy == "long_attention":
+                            prepared_root = entry.decode_hca_tp1_layer_long_test
                         selected_operator = getattr(call, "kernel", call.operators.attention)
                         prepared = prepared_operator(prepared_root, selected_operator._schema)
                         prepared_runtime = service.HCATNDServiceRuntime(
