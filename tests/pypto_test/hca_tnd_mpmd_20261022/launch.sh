@@ -17,6 +17,9 @@ if [[ "${1:-}" == --experiment ]]; then
     shift 2
     hca_runner="$hca_experiment/run_case.py"
     set -- --source "$hca_experiment/operator" "$@"
+elif [[ "${1:-}" == --script ]]; then
+    hca_runner=${2:?独立测试脚本}
+    shift 2
 fi
 exec python "$hca_repo/tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py" \
     --shared-toolchain --workspace-root "$hca_workspace" \

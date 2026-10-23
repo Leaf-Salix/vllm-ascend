@@ -1,0 +1,38 @@
+CSA_SHARED_TOOLCHAIN {"release": "csa-shared-20261022-logical-codegen", "status": "validated", "manifest": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_shared_toolchain/manifest.json", "pypto": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-shared-20261022", "ptoas": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/ptoas-csa-mpmd-upstream-20261021/build", "simpler": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016"}
+INFO 10-23 18:27:23 [__init__.py:44] Available plugins for group vllm.platform_plugins:
+INFO 10-23 18:27:23 [__init__.py:46] - ascend -> vllm_ascend:register
+INFO 10-23 18:27:23 [__init__.py:49] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+INFO 10-23 18:27:23 [__init__.py:237] Platform plugin ascend is activated
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+INFO 10-23 18:27:28 [platform.py:61] Breakable cudagraph is force disabled on Ascend because DeepSeek V4 PIECEWISE cudagraph is not supported yet.
+WARNING 10-23 18:27:31 [import_utils.py:408] Module vllm.third_party.triton_kernels was found but failed to import
+WARNING 10-23 18:27:31 [import_utils.py:408] Traceback (most recent call last):
+WARNING 10-23 18:27:31 [import_utils.py:408]   File "/data/pyptouser/qinchuanyu/pto-eager/.cache/migration-v0.25.1rc1/vllm/vllm/utils/import_utils.py", line 404, in _has_module
+WARNING 10-23 18:27:31 [import_utils.py:408]     if importlib.util.find_spec(module_name) is None:
+WARNING 10-23 18:27:31 [import_utils.py:408]   File "/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/importlib/util.py", line 103, in find_spec
+WARNING 10-23 18:27:31 [import_utils.py:408]     return _find_spec(fullname, parent_path)
+WARNING 10-23 18:27:31 [import_utils.py:408]   File "<frozen importlib._bootstrap>", line 945, in _find_spec
+WARNING 10-23 18:27:31 [import_utils.py:408]   File "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py", line 87, in find_spec
+WARNING 10-23 18:27:31 [import_utils.py:408]     raise ImportError(f"指定源码路径无法加载 {fullname}: {roots[top]}")
+WARNING 10-23 18:27:31 [import_utils.py:408] ImportError: 指定源码路径无法加载 vllm.third_party.triton_kernels: /data/pyptouser/qinchuanyu/pto-eager/.cache/migration-v0.25.1rc1/vllm
+{"stage": "failed", "passed": false}
+Error: Unknown operation 'pl.constexpr'
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_policy_v1/operator/deepseek_v4_flash_hca_tnd/attention.py:300:13
+    |
+298 |             pl.system.set_ffts(ffts)
+299 |             # 编译期只保留选中计算体，不在核内增加策略判断或额外任务。
+300 |             if pl.constexpr(MACRO_K == ATTN_K_TILE):
+    |             ^^ Unknown operation 'pl.constexpr'
+301 |                 # QK进入下一query时保留上一query的KV槽；只在本worker最后一条query排空。
+302 |                 kv_l1 = pl.create_tile([QK_TRANSFER_SLOTS * ATTN_K_TILE, HEAD_DIM],
+    |
+   = help: Check spelling, or use pl.tensor.*/pl.tile.*/pl.system.* for explicit namespacing
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

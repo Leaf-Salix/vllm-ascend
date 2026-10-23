@@ -9,18 +9,35 @@ import torch
 from ..deepseek_v4_flash_csa.native_adapter import prepare_weights as _prepare_weights
 from ..deepseek_v4_flash_csa.native_storage import physical_pages, table_storage
 from ..deepseek_v4_flash_csa.nz_mode import QUANT_WEIGHT_NZ
-from .entry import _decode_hca_tp1_layer, decode_hca_tp1_layer_test, decode_hca_tp1_layer_tall_test
+from .entry import (
+    _decode_hca_tp1_layer,
+    decode_hca_tp1_layer_test,
+    decode_hca_tp1_layer_tall_test,
+    decode_hca_tp1_layer_long_test,
+)
 
 # 64K实测有回退，当前只在至少128K的长历史区间采用；使用Native已有Host字段。
 # 数学正确性不依赖这个阈值，它只选择Q_B/O_B供数策略；缺少Host字段则保持普通入口。
 LONG_HISTORY_MIN = 131072
 TALL_PROJECTION_MIN_TOKENS = 129
 TALL_PROJECTION_MAX_TOKENS = 192
+LONG_ATTENTION_MIN_TOKENS = 33
 
 
 def use_tall_projection(tokens, max_seq_lens):
     """只检查已知shape和Host整数，不对设备Tensor执行item、int或bool。"""
     return (QUANT_WEIGHT_NZ and TALL_PROJECTION_MIN_TOKENS <= tokens <= TALL_PROJECTION_MAX_TOKENS
+            and isinstance(max_seq_lens, int) and max_seq_lens >= LONG_HISTORY_MIN)
+
+
+def use_long_attention(tokens, max_seq_lens):
+    """K512用于长历史且T>32；短历史/小T保留KV驻留L1的K128流水。
+
+    B8/B16/B28的长历史实测支持此区间；B4及8K/B32反例要求保留原路径。
+    这里读的是Native既有Host max_seq_lens和输入shape；每个请求的实际Q/L
+    仍在设备端裁剪，混长请求不会被补成同长度。
+    """
+    return (QUANT_WEIGHT_NZ and tokens >= LONG_ATTENTION_MIN_TOKENS
             and isinstance(max_seq_lens, int) and max_seq_lens >= LONG_HISTORY_MIN)
 
 
@@ -43,6 +60,7 @@ def token_capacity_view(value, tokens, width):
 class HCAOperators:
     attention: Any
     attention_tall: Any = None
+    attention_long: Any = None
 
     @classmethod
     def register(cls, *, config=None):
@@ -56,6 +74,8 @@ class HCAOperators:
         return cls(
             pypto.torch.register(decode_hca_tp1_layer_test, "dsv4_hca_tnd::attention", config=config),
             pypto.torch.register(decode_hca_tp1_layer_tall_test, "dsv4_hca_tnd::attention_tall", config=config)
+            if QUANT_WEIGHT_NZ else None,
+            pypto.torch.register(decode_hca_tp1_layer_long_test, "dsv4_hca_tnd::attention_long", config=config)
             if QUANT_WEIGHT_NZ else None,
         )
 
@@ -123,6 +143,11 @@ class NativeHCACall:
         )
         self.policy = "tall_projection" if selected_tall else "default"
         self.kernel = operators.attention_tall if selected_tall else operators.attention
+        if not selected_tall and operators.attention_long is not None and use_long_attention(
+            tokens, getattr(main, "max_seq_lens", None),
+        ):
+            self.policy = "long_attention"
+            self.kernel = operators.attention_long
         # 根ABI全部为Native device Tensor；每次调用消费本轮设备内容。
         self.core_args = tuple(self.args[arg.name] for arg in self.kernel._schema.arguments)
 

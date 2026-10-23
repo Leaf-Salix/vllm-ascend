@@ -503,3 +503,101 @@ Native最终输出仍通过原0.01/0.01容差；Native严格storage既有差异�
 本日志按用户要求从算子子目录上移至`ops/pypto/HCA_TND_MPMD_OPTIMIZATION_LOG.md`，
 更新当前文档引用；历史冻结包和结果路径保持原样，避免改写旧证据。
 用户要求将本地积累详细中文commit；只提交本会话vllm-ascend文件，不push。
+
+## 2026-10-23：按用户要求转向attention核内流水，参考recipes及Native A3实现
+
+本轮先在`tests/pypto_test/hca_tnd_mpmd_20261022/`冻结包验证，随后按用户允许的区间接入正式attention。
+保持公共SDK、正式第3层W8A8/NZ2、直接调用，不使用ACLGraph，唯一性能指标仍是完整HCA
+L1 incore首尾。源码来源与算法差异见`ATTENTION_NATIVE_PIPELINE_REVIEW.md`；任务ID、
+原始样本、精度、attention AIC/AIV核耗时见`ATTENTION_SUMMARY.md/json`。
+
+### 实际参考范围
+
+GitCode限流且本地部分clone缺少attention blob，随后按本地相同提交
+`6d060311ae75f6105fe4216e20566875da5a8838`从GitHub镜像取得recipes CFA/SWA PyPTO、
+TileLang sparse attention及AscendC接口说明。旧CFA示例固定四个压缩页、128页大小并用T//B，
+不能直接用于本实现的32页、长历史与混长TND。实际供数/缓冲细节核对本仓arch32 SWA/CFA：
+K512 softmax块，QK N128/D256/L0K128，PV分块，L0乒乓和三槽跨query调度。
+
+### 两项逐bit候选未整体采用
+
+- PV补齐Right与Acc双缓冲：B16 499.04→506.34μs，B28 766.96→758.38μs；
+  B16回退，不能只报B28收益。第一版只有Right双缓冲却失去Acc双缓冲，未上卡。
+- Q的K1/2/3驻留48KiB L0A，K0/PV共用16KiB：B16 514.90→520.02μs，
+  B28 765.52→768.08μs；输出/cache/state精确但无稳定完整层收益，不采用。
+
+### K512+D256大块候选的首轮证据
+
+保留三CV槽、两步QK提前执行、跨query流水、原gather和device Q/L；
+QK按D256供L1、K128供L0；PV用四份L0C完成整个K512后才写GM，减少PV中间写回和Vector更新。
+代价是PV重载KV；不能宣称所有搬运都减少。扩大softmax块改变舍入，未当作逐bit优化。
+
+独立B5/S6对密集FP64：128K候选max_abs=0.00110998、RMSE=0.000129745；
+16507边界组合max_abs=0.00237789、RMSE=0.000206933，与原版量级接近。
+负页、未初始化NaN、部分历史、零有效长度、两次eager精确和尾部写保护通过。
+候选对原版attention最大差0.001953125，报告明确记录，未改容差。
+
+完整层首轮同任务7窗：B16 **517.60→497.80μs**，B28 **769.46→748.48μs**，
+均7/7配对更快；Native输出通过原0.01/0.01，cache/state相对控制逐bit一致。
+attention AIC平均核耗时只分别缩短约7.4/9.6μs，其余完整层变化不能全部算作核内算术收益。
+Native严格storage既有差异仍保留，不声称完整精度、整网token或30%目标已完成。
+其余档位和动态边界验证继续记录到测试目录汇总。
+
+### 工具链问题与有明确停止条件的尝试
+
+大块v1/v2中，外层循环携带的Scalar偏移进入内层pipeline后被克隆为free variable。
+四组纯CPU对照确认：条件yield/直接算术来源在pipeline下均失败，range下均通过；
+`LowerPipelineLoops`首次丢失绑定。已提交[PyPTO #3130](https://github.com/hw-native-sys/pypto/issues/3130)，
+含完整复现、pass证据及DeepClone区分内部定义/外部IterArg的建议，无SDK改动、无PR。
+v3算子绕开该地址别名组合后完整CPU编译及真机验证通过。
+
+每AIV Softmax由H16改H32需要202080B Vec，超过188416B，在CPU阶段停止，未占卡。
+QK相邻N128用pipeline深度2的候选已完整编译，两个QK L0C地址0/32768；
+另以已含K512版本为控制做B16/B28增量验证，收益不能与不同任务样本相加。
+独立探针首次遗漏`--device`导致CLI退出2，修运行器后重提，保留失败记录。
+
+### 多区间接入与最终结果
+
+用户随后明确“不用全局替换，可以多一点档位选择”。正式`attention.py`合为工厂，
+K128/K512共用请求聚合、mask、FFTS、PV输出归约和inverse RoPE；没有复制整份算子。
+`entry.py`的三个根共享36项device Tensor ABI；`native_adapter.py`只用Native既有Host
+max_seq_lens及输入shape选择，不新增设备回读或运行时TMR策略任务。
+
+- 非NZ、max_seq_lens缺失或<131072、T≤32：K128并在L1复用KV。
+- NZ、max_seq_lens≥131072、T>32：K512；T129～192叠加已有的大T Q_B/O_B投影。
+  T>192仍用原通用投影，尚未补这一区间的新性能数据，不把已有测量推广为实测结论。
+- 每个请求实际Q/L、position、slot和页表保持动态；S1/S5/S6不按B×6恢复。
+
+共用模板v4完整三个JIT根及编排/incore C++编译通过。相对本轮原版，正式区间配对：
+
+| 场景 | 原版μs | 正式分档μs | 性能提升 | 更快配对 |
+|---|---:|---:|---:|---:|
+| 128K/B8/S6 | 351.50 | 347.58 | +1.13% | 5/5 |
+| 128K/B16/S6 | 537.84 | 518.42 | +3.75% | 7/7 |
+| 128K/B24/S6 | 687.20 | 676.86 | +1.53% | 4/5 |
+| 128K/B28/S6 | 771.66 | 765.88 | +0.75% | 6/7 |
+
+短历史/小T保留K128：128K/B4为273.22→266.30μs，8K/B32为603.94→598.44μs，
+输出/cache/state与原版精确。它们不是K512收益。首轮8K/B32强制K512的598.60→628.40μs
+反例是保留短历史原策略的直接依据。
+
+B28正式收益小于首轮，另做同任务K512原候选→共用模板对照为762.66→748.12μs，7/7更快，
+输出/cache/state精确；没有证据支持共用模板导致回退。不同任务的控制不能拼接或相减报收益。
+QK跨N128深度2候选在B16/B28均回退，不叠加。所有数据使用同一公共SDK、直接调用L1首尾。
+
+真实custom op验证：S1/B16走default，S5/B28走tall_projection，混长Q=[3,6,6,6,6,6]、
+T=33走long_attention；三次服务调用、KV钩子/compact复用、Native输出以及对应冻结数学的
+精确比较通过。256K/B16的K512输出也与独立候选精确，Native输出通过原容差。
+
+独立K512混长Q=[1,5,6,1,2]对FP64在128K为max_abs=0.00110998、RMSE=0.000129802，
+16507边界组合为max_abs=0.00237789、RMSE=0.000217861；重复及写保护通过。
+但**整层混长C128边界仍有遗留**：history=[127,16383,131073,0,16507]、T容量24、请求容量8，
+旧K128与K512对Native最大差都为0.0810546875，旧版25702个超差、候选11332个超差。
+候选cache/state与旧版精确，重复/保护通过，但Native输出门禁失败，未采性能，不记PASS。
+这需要后续定位压缩更新边界的既有整层数值差异，不能用S1/S5或独立attention结果替代。
+
+集成时发现H16归约写入H32宽环的列subview被A3 TMOV拒绝；最小CPU对照确认后，补在
+[PyPTO #2717](https://github.com/hw-native-sys/pypto/issues/2717#issuecomment-6363110842)，未重复建issue。
+正式统一用6×16环，K128一次写两行、K512逐行写，逻辑顺序和总字节数相同。
+v1的constexpr误用、v2未选分支类型检查、v3列子视图失败均保存，v4才是验过的集成版本。
+本轮两个组件报告都附复现和修改建议，没有修改/重建共享SDK，没有提交PR。
