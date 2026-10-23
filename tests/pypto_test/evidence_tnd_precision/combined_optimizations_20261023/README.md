@@ -12,9 +12,9 @@
 - `LAUNCH_ARGUMENT_CHECK.json`：调度附加参数的纯shell header控制；不执行框架或设备代码。
 - `TASKS.json`、`TASK_STATUS.json`、CPU任务日志：实际任务和终态。早期启动失败单独保留，不算数值失败。
 - `executed_helpers.tar.gz`、`EXECUTED_FILES.json`：实际单层和整模型助手、formal package/alias/env overlay、manifest与复算脚本的原样归档和SHA；不含模型、bank cache payload、SDK二进制或编译缓存。
-- 整模型验收进行中；`whole8k_summary.json`、`whole128k_summary.json`和raw归档尚未生成。完成后才归档各16rank的warm192和测192输出/事件、FULL轨迹、计时、配置及容量。
+- `whole8k_summary.json`、`whole8k_raw.tar.gz`及`WHOLE8K_RAW_FILES.json`：已通过8K整模型16rank的完整warm192/测192输出、事件、FULL轨迹、计时、配置和容量；128K仍待验收，尚无128K通过收据。
 
-计划在整模型通过后，公开whole摘要仅将可重算的输出/事件SHA字段warm_tokens_events_sha256、measured_tokens_events_sha256重命名为warm_payload_sha256、measured_payload_sha256，避免密钥扫描误判。原样SUMMARY保留在raw归档；字段映射、反向还原等价和SHA见PUBLIC_SUMMARY_DERIVATION.json。
+公开whole摘要仅将可重算的输出/事件SHA字段warm_tokens_events_sha256、measured_tokens_events_sha256重命名为warm_payload_sha256、measured_payload_sha256，避免密钥扫描误判。原样SUMMARY保留在raw归档；字段映射、反向还原等价和SHA见PUBLIC_SUMMARY_DERIVATION.json。
 
 ## 整模型加载修复证据
 
