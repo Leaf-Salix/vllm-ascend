@@ -49,9 +49,23 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {},
+  "pending_tasks": {
+    "task_20261023_121507_140089517903": {
+      "case": "C04",
+      "candidate": "hc_cooperative_v2",
+      "mode": "complete_L1_candidate",
+      "performance_eligible": true
+    },
+    "task_20261023_121508_14009351506": {
+      "case": "C05",
+      "candidate": "hc_cooperative_v2",
+      "mode": "complete_L1_candidate",
+      "performance_eligible": true
+    }
+  },
   "next_steps": [
     "Preserve four retained mechanisms and the original eight-case denominator; 10% goal remains active",
+    "Collect the two hc_cooperative_v2 priority tasks; use existing retained full-L1 references and all strict checks; no baseline remeasurement",
     "Reduce measured full-chain service work or exploit demonstrated resource complementarity; no more simple DMA/Vector reorderings",
     "Do not implement whole-leaf-round Attention insertion on existing owners: optimistic serialized-resource model already increases C05 waiting",
     "Do not repeat negative head partitioning or direct HC tail-copy removal without a new mechanism",
@@ -89,9 +103,10 @@
     "plan_gather_valid": 27,
     "capacity_tier_isolated_contracts": 165,
     "capacity_state_observer": 3,
-    "capacity_production_contracts": 164
+    "capacity_production_contracts": 164,
+    "hc_cooperative_math_ownership": 11
   },
-  "updated_at": "2026-10-23T11:58:59+08:00",
+  "updated_at": "2026-10-23T12:16:26+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -435,6 +450,20 @@
       "codegen": "hc_direct_tail_v2_C01_codegen.json",
       "status": "rejected_complete_L1",
       "measurement": "hc_direct_tail_v2_C01_result.json"
+    },
+    "hc_cooperative_v2": {
+      "source": "hc_cooperative_v2.json",
+      "cases": [
+        "C04",
+        "C05"
+      ],
+      "source_tests": 11,
+      "codegen": [
+        "hc_cooperative_v2_C04_codegen.json",
+        "hc_cooperative_v2_C05_codegen.json"
+      ],
+      "status": "complete_L1_pending",
+      "mechanism": "Four K4096 AIV owners per M8; original 32-step RMS left fold and split-specific Cube input acquire"
     }
   },
   "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
@@ -587,7 +616,7 @@
   "current_sdk_C08_reference": "baseline_current_sdk_C08.json",
   "current_implementation": "physical_capacity_production_v1",
   "earlier_stage_commit": "3a0f423c6",
-  "latest_stage": "hc_direct_tail_rejected_coarse_interleaving_resource_screen_complete",
+  "latest_stage": "hc_cooperative_CPU_gates_passed_two_priority_L1_tasks_submitted",
   "retained_results": "retained_physical_capacity.json",
   "production_source_manifest": "physical_capacity_production_v1.json",
   "prior_production_commit": "32a1426d9",
@@ -597,6 +626,10 @@
       "reason": "Pilot used tile.store on existing TensorType intermediates",
       "component_bug": false,
       "resolution": "v2 uses tensor assemble; full CPU compilation and emitted valid-row audit pass"
+    },
+    "hc_cooperative_v1": {
+      "result": "runs/compile_hc_cooperative_C04_v1/result.json",
+      "reason": "Prototype full/tail Tensor type mismatch; corrected in v2, no shared SDK change"
     }
   }
 }

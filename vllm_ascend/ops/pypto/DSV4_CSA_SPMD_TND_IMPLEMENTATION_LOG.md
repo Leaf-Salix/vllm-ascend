@@ -5278,3 +5278,54 @@ AIC/AIV/搬运资源，或减少总工作、修正真实服务成本不均衡。
 当前无自有待收设备任务，生产仍为physical_capacity_production_v1，正式
 保留四项优化，原八档几何平均比值0.985336943775587，10%目标保持active。
 没有改变共享SDK，没有push。
+
+### 2026-10-23：HC输入四路列分工，保持原RMS累加顺序
+
+上一goal轮完成HC直接尾写的设备负例和粗粒度交错资源模型，属于实质进展。
+本轮从整链输入供给重新检查：现有widen/RMS以M8分给一个AIV，该核串行
+处理全部16384列，四个AIC K4096投影片都要等这份输入完整完成。新的隔离
+候选按(row_tile,K4096 split)将同样的工作分给四个AIV；AIC只等对应split的
+两个M8写者，保留原四份投影及其K256归约，不复制输入计算或扩张query/head。
+
+每个AIV仍对八个K512片做原FP32平方及row_sum，不先合成一个split部分和。
+原widen_tail仅在此候选中改作RMS partial区：split独占一条16384列物理行，
+每个M8块占128个FP32即512B槽，八个1×8和使用前256B。原行owner在获取
+四个实际写者后，从+0按K512的0..31顺序逐次相加，再做原比例、epsilon和
+高精度rsqrt。没有重排归约树；inv仍由原M8 owner写并在本核供gates/comb。
+INPUT含义在此隔离包中改为FP32列片及RMS片完成；全体先发布再获取，没有
+互相等待未发布的生产者。完整scratch支持T<=1024，本轮pilot只覆盖规范
+T<=192，不作为无保护的生产通用策略。
+
+这个改变有成本：每token增加32个FP32部分和的GM写/读，以及每M8四写者
+获取；原metadata planner还可能先承担一个K4096片而晚到。源码widen最忙
+AIV的K512片数由C04的32降到8、C05的32降到16，不把片数比例当成耗时比例。
+后续仍以完整72角色L1判断，不能只采这段或把前段端点差相加。
+
+冻结hc_cooperative_v1首次CPU解析因完整/尾块的`squared`变量Tensor有效
+shape类型不一致失败，保留compile_hc_cooperative_C04_v1/result.json。
+v2统一在row_sum前设置有效行并fillpad零；完整M8无padding，所有有效值及
+归约顺序相同。这是原型类型表达修正，没有修改共享SDK或提交上游问题。
+CPU模拟器首次3个尾行用例因load的offset/shape参数顺序写反失败，修正测试
+适配后11项全部通过：九种T的随机BF16可表示输入及跨度指数、所有有效输出/
+原inv容量尾的位级比较、scratch未写区哨兵、T1..1024全部真实wait表达式的
+写者覆盖及独占512B槽、无关模块不变。该NumPy执行不是A3浮点精度证据。
+
+C04/C05完整CPU后端编译均通过。实际PTO IR审计确认四个stage4展开FP32
+store保留动态有效行，RMS片只以1×8读写；32项combine以step2展开，第二个
+add承接第一个结果并写回同一物理accumulator，+0及后续乘法/rsqrt链保持。
+输入发布、消费获取及业务cache维护都存在。root/return ABI与orchestration
+同当前版本，AIC Mat475136/Acc131072/Left和Right各65536，AIV Vec180224，
+均通过资源边界。审计脚本最初对stage4展开位点数和零常量文本格式的假设
+不正确，按实际IR修正后通过，没有为通过审计修改内核。
+
+证据为hc_cooperative_v2_C04_codegen.json、hc_cooperative_v2_C05_codegen.json。
+通过task-submit提交同卡/同SDK完整十窗及严格检查：
+
+- C04/device8：task_20261023_121507_140089517903。
+- C05/device0：task_20261023_121508_14009351506。
+
+本轮只读检查主检出最新46c8d9cec的MPMD分块记录：局部Score/Attention缩短
+而完整L1回退的证据继续约束设计，不将其它会话的暂停指令或候选当作本会话
+的新目标/采用结果。cannbot知识索引仍缺失，复用已读所有权/排空约束；没有
+全库扫描或重建。正式四项保留机制及原八档比值0.985336943775587保持，
+hc_cooperative尚无设备收益结论，goal仍active，不push。
