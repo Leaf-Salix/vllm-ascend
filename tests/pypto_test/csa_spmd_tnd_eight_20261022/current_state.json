@@ -44,24 +44,7 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {
-    "C05_attention_overlap_v1": {
-      "task_id": "task_20261023_082544_83204314999",
-      "case": "C05",
-      "device": 0,
-      "source": "runs/attention_overlap_v1",
-      "output": "runs/h131072_b24_s6_attention_overlap_v1",
-      "status": "running"
-    },
-    "C04_attention_overlap_v1": {
-      "task_id": "task_20261023_082745_88724516982",
-      "case": "C04",
-      "device": 8,
-      "source": "runs/attention_overlap_v1",
-      "output": "runs/h131072_b16_s6_attention_overlap_v1",
-      "status": "submitted"
-    }
-  },
+  "pending_tasks": {},
   "next_steps": [
     "Inspect whether the Attention softmax/score-input schedule can overlap scattered KV gathering with proven disjoint UB lifetimes; deduplicate prior prefetch and row-loop experiments first",
     "Use the measured low-contiguity/low-ordered-reuse result to avoid whole-page loads and query-group KV-residency assumptions",
@@ -229,6 +212,24 @@
       ],
       "evidence": "plan_gather_valid_v1_results.json",
       "reason": "Strict checks pass; observed complete-L1 medians do not improve either retained priority case"
+    },
+    {
+      "candidate": "attention_overlap_v1",
+      "cases": [
+        "C04",
+        "C05"
+      ],
+      "evidence": "attention_overlap_v1_results.json",
+      "reason": "Strict checks pass; complete L1 is 3.35% / 2.66% slower than retained implementations"
+    },
+    {
+      "candidate": "attention_valid_overlap_v1",
+      "cases": [
+        "C04",
+        "C05"
+      ],
+      "evidence": "attention_valid_overlap_v1_results.json",
+      "reason": "Strict checks and runtime proof witness pass; complete L1 is 3.59% / 1.91% slower than retained implementations"
     }
   ],
   "promising_candidates": [],
@@ -342,12 +343,26 @@
     "attention_overlap_v1": {
       "source": "attention_overlap_v1.json",
       "adopted": false,
-      "device_execution": false,
-      "status": "C04_C05_full_L1_submitted",
+      "device_execution": true,
+      "status": "rejected_complete_L1_phase_diagnosis_complete",
       "C05_codegen": "attention_overlap_v1_C05_codegen.json",
       "cpu_checks": 20,
       "full_codegen_passed": true,
-      "C04_codegen": "attention_overlap_v1_C04_codegen.json"
+      "C04_codegen": "attention_overlap_v1_C04_codegen.json",
+      "measurement": "attention_overlap_v1_results.json",
+      "diagnostic": "attention_overlap_v1_C05_phase_comparison.json"
+    },
+    "attention_valid_overlap_v1": {
+      "source": "attention_valid_overlap_v1.json",
+      "adopted": false,
+      "device_execution": true,
+      "status": "rejected_complete_L1_with_runtime_proof_witness",
+      "C05_codegen": "attention_valid_overlap_v1_C05_codegen.json",
+      "cpu_checks": 30,
+      "full_codegen_passed": true,
+      "C04_codegen": "attention_valid_overlap_v1_C04_codegen.json",
+      "measurement": "attention_valid_overlap_v1_results.json",
+      "runtime_proof": "attention_valid_overlap_v1_proof_readback.json"
     }
   },
   "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
@@ -418,12 +433,10 @@
     }
   ],
   "pending_observation": {
-    "observed_at": "2026-10-23T07:17:55.241155+08:00",
     "own_pending_tasks": 0,
     "tasks": {
-      "task_20261023_062321_209509211525": "completed (exit=0)",
-      "task_20261023_064228_255495026812": "completed (exit=0)",
-      "task_20261023_064346_258855815134": "completed (exit=0)"
+      "task_20261023_091309_221636318785": "completed (exit=0)",
+      "task_20261023_091308_221552610679": "completed (exit=0)"
     }
   },
   "prepared_uniform_state": "uniform_meta_state_v1.json",
@@ -448,7 +461,8 @@
     "actual_kv_access": "retained_C05_kv_access.json",
     "mgather_overlap": "mgather_overlap_codegen_evidence.json",
     "structural_priorities": "structural_priorities.json",
-    "attention_prefetch_status": "C05 codegen/resources/ABI pass; intended overlap absent; no NPU submission"
+    "attention_prefetch_status": "C05 codegen/resources/ABI pass; intended overlap absent; no NPU submission",
+    "physical_plan_capacity_coverage": "physical_plan_capacity_coverage.json"
   },
   "parked_candidates": [
     {
@@ -465,7 +479,8 @@
     "C05_current_pipe": "current_C05_pipe_sdk_v2.json",
     "joint_prefix_v2": "joint_prefix_v2_phase_comparison.json",
     "C05_retained_phase": "retained_C05_phase_sdk_v1.json",
-    "query_local_v5_C05": "query_local_v5_C05_phase_comparison.json"
+    "query_local_v5_C05": "query_local_v5_C05_phase_comparison.json",
+    "attention_overlap_v1_C05": "attention_overlap_v1_C05_phase_comparison.json"
   },
   "same_sdk_reused_other_references": "same_sdk_reused_other_references.json",
   "same_sdk_reference_coverage": {
@@ -487,5 +502,5 @@
   "current_implementation": "merged_schedule_v1",
   "earlier_stage_commit": "3a0f423c6",
   "production_commit": "32a1426d9",
-  "latest_stage": "structural_priorities_reviewed_and_attention_prefetch_rejected_at_codegen_gate"
+  "latest_stage": "two_overlap_candidates_rejected_with_runtime_evidence_C02_capacity_gap_identified"
 }

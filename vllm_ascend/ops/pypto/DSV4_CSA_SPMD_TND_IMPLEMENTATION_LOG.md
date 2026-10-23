@@ -4976,3 +4976,71 @@ full→partial→empty→full缓冲复用，逐bit搬运及外部哨兵通过。
 CCEC进程仍活跃，并非等待超时或kernel失败。任务清单为
 `attention_overlap_v1_tasks.json`，结果审查脚本为`analyze_attention_overlap.py`。
 本条为CPU阶段交接，尚无性能采用结论；生产、原基线和三项保留机制不变，未push。
+
+#### 两种Attention顺序的完整结果与阶段归因
+
+early-Vector两任务均completed/exit0。C04十窗中位789.24μs，相对已采用
+763.65μs慢3.351%；C05为1029.72μs，相对1003.02μs慢2.662%。六次检查
+覆盖reference/candidate的eager、graph和post-L1，输出、TopK/score、cache/state
+逐bit与保护区均通过；20窗重新从全72角色原始L1首尾计算，实测CPP与CPU
+审计产物一致。完整证据`attention_overlap_v1_results.json`，不采用、不扩档。
+
+C05诊断task_20261023_083537_109702310267 completed/exit0，三窗及正确性
+检查通过，插桩前CPP与该实测候选一致。相对已采用实现的诊断，ScoreVector
+结束点557.60→552.24μs，Plan596.48→590.80，AttentionVector813.50→838.68，
+OUT984.80→1009.82。较晚的完成位置主要在Attention段出现并传到输出。
+这些是插桩前沿比较，不是纯算术时间或正式回退的精确分摊；尚不能区分
+Scalar发射成本、DMA吞吐及Cube供数延迟各占多少。见
+`attention_overlap_v1_C05_phase.json`与`attention_overlap_v1_C05_phase_comparison.json`。
+
+随后用`two_half_dma_then_vector.pto`验证反向发射顺序：两个32行纯DMA/store
+循环后再发独立Vector，仍保留MTE3→MTE2复用保护，独立区无需等待最后GM
+写完；同址负对照保留MTE3→V等待。该CPU证据不含任何硬件耗时。
+
+`attention_valid_overlap_v1`组合原已验证的整128行有效性证明与上述纯DMA路径，
+从merged_schedule_v1出发，不继承early-Vector数学发射顺序。当前proof、当前块
+及上一Score块都有效时才省掉行内判断/补零分支；先前取Score/bias、发DMA，
+大T仍先通知KV再做softmax，失败证明保留原完整fallback。证明生产者与旧
+plan_gather_valid_v1的文件逐字相同，旧候选单独无收益不被改记为正向。
+两档完整CPU/ABI/资源及实际同步门禁通过，AIV Vec仍180224B；30项CPU检查
+包括旧20项和新10项，新增实际proof入口、4096组带证明开关的事件模型、原
+数学/fallback与有效行双半块复用。未把小型PTO探针直接当作完整算子证明。
+
+第二版两任务同样completed/exit0：C05 task_20261023_085022_152372822517，
+C04 task_20261023_085318_164981112344。C04十窗中位791.03μs，较已采用慢
+3.585%；C05为1022.15μs，慢1.907%。完整严格检查及20个原始72角色窗口均
+通过，实际CPP匹配，见`attention_valid_overlap_v1_results.json`。整体候选不采用；
+不继续扩性能档或做仅用于采用的服务验证。
+
+正式性能壳没有导出private proof列，因此另准备不改kernel的单次读回壳
+`kv_proof_harness_v1`，读取mask7..10及物理indices，逐块比较证明，并记录当前/
+上一块有效条件下的快速分支资格。这是补足运行路径证据，不重采L1、不新增
+数学正确性声明，也不是直接指令计数。C05 task_20261023_091308_221552610679、
+C04 task_20261023_091309_221636318785已提交；本条写入时尚未收取读回。
+
+#### 重新核对八档的真实能力覆盖
+
+`physical_plan_capacity_coverage.json`按冻结描述符与当前实际谓词复算：
+只有C04/C05/C06/C07启用且满足物理plan条件。C02虽然PLAN_PHYSICAL_ROWS为真，
+但compressed_table为[16,2050]，超过PHYSICAL_PLAN_COLUMNS=2048，整档会回退
+到原逻辑indices/逐行查页路径；不是2080/4096已经受支持。C01/C03/C08的policy
+本来关闭。这是能力边界证据，没有把它换算成性能收益。
+
+下一步优先隔离评估足以覆盖C02的页表容量档，并保持现有2048列档的生成物。
+如果使用2080列，只是覆盖实际2050列并满足对齐的候选设计；完整UB分配、
+物理地址精确性、无效页/因果保护、动态状态与完整L1仍需实际验证。不能将
+Native页表截断到2048列，也不能为提速忽略尾部新token所在页。
+
+同步排重：当前Score源码已包含QK(current)/WS(previous)错拍、拆分QK早FIX与
+下一Key预取；这些不能再当新优化。旧静态容量v28已经测过B16/B28约0.4%/1.0%
+小幅变化，缺少新机制不原样重测。后续核间调度仍先核算共享资源、驻留和
+启动/排空成本，不能用最早query就绪时间代替完整链路收益。原八档10%目标
+继续active，生产三项保留机制及1.001235%综合降低保持，未push。
+
+运行路径补证已收齐：两读回任务均completed/exit0，C04 proof均为1、384/384个
+压缩块满足完整快速分支条件；C05为576/576。proof逐块等于实际物理indices的
+全有效判断，物理模式容量条件成立。源码/SDK/case及完整生成CPP与各自严格
+十窗口测量一致，见`attention_valid_overlap_v1_proof_readback.json`。这是设备
+产生的条件见证，不是指令计数；没有增加性能样本或重报数学验收。两种顺序
+的整体验证均不支持采用，当前自有CPU/NPU任务全部终态。C02容量扩展仍是
+下一步待实现/验证项，未将它预记为优化收益。

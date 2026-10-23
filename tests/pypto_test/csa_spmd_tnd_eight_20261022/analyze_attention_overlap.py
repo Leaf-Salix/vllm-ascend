@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Validate complete raw L1 windows and source identity before judging overlap."""
 
+import argparse
 import json
 import math
 import statistics
@@ -11,10 +12,16 @@ from measurement_provenance import require_same_sdk
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--candidate", choices=("attention_overlap_v1", "attention_valid_overlap_v1"), default="attention_overlap_v1"
+    )
+    args = parser.parse_args()
     here = Path(__file__).resolve().parent
-    source = json.loads((here / "attention_overlap_v1.json").read_text())
+    stem = args.candidate.removesuffix("_v1")
+    source = json.loads((here / f"{args.candidate}.json").read_text())
     retained = json.loads((here / "retained_merged_schedule.json").read_text())
-    tasks = json.loads((here / "attention_overlap_v1_tasks.json").read_text())
+    tasks = json.loads((here / f"{args.candidate}_tasks.json").read_text())
     cases = {}
     for case, name in (("C04", "h131072_b16_s6"), ("C05", "h131072_b24_s6")):
         run = here / tasks[case]["output"]
@@ -40,7 +47,7 @@ def main():
             samples.append(span)
             raw_windows.append(window["raw"])
         assert len(samples) >= 10 and samples == data["statistics_us"]["candidate"]["samples"]
-        cpu = here / f"runs/compile_attention_overlap_{case}_v1/kernel/ptoas/dynamic_csa_full.cpp"
+        cpu = here / f"runs/compile_{stem}_{case}_v1/kernel/ptoas/dynamic_csa_full.cpp"
         matching = [
             str(p)
             for p in (run / "build_output").glob("decode_csa_spmd_*/ptoas/dynamic_csa_full.cpp")
@@ -65,14 +72,14 @@ def main():
             measured_cpp_matches_cpu_gate=matching,
         )
     report = dict(
-        candidate="attention_overlap_v1",
+        candidate=args.candidate,
         adopted=False,
         cases=cases,
         any_priority_case_improved=any(row["ratio_to_retained"] < 1 for row in cases.values()),
         retained_geometric_mean_ratio_unchanged=retained["equal_weight_geometric_mean_ratio"],
         limitations="Observed complete-L1 comparison; CPU overlap potential does not measure actual overlap duration",
     )
-    with (here / "attention_overlap_v1_results.json").open("x") as stream:
+    with (here / f"{args.candidate}_results.json").open("x") as stream:
         stream.write(json.dumps(report, indent=2) + "\n")
     print(
         json.dumps(

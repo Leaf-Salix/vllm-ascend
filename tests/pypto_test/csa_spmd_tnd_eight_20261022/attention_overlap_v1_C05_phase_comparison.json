@@ -1,0 +1,62 @@
+{
+  "performance_eligible": false,
+  "case": "C05",
+  "candidate": "attention_overlap_v1",
+  "source_reports": [
+    "retained_C05_phase_sdk_v1.json",
+    "attention_overlap_v1_C05_phase.json"
+  ],
+  "phases": {
+    "QUERY": {
+      "retained_latest_end_us": 287.94,
+      "candidate_latest_end_us": 284.0,
+      "delta_us": -3.9399999999999977
+    },
+    "SCORE_CUBE": {
+      "retained_latest_end_us": 548.54,
+      "candidate_latest_end_us": 543.28,
+      "delta_us": -5.259999999999991
+    },
+    "SCORE_VECTOR": {
+      "retained_latest_end_us": 557.6,
+      "candidate_latest_end_us": 552.24,
+      "delta_us": -5.360000000000014
+    },
+    "TOPK": {
+      "retained_latest_end_us": 580.32,
+      "candidate_latest_end_us": 575.46,
+      "delta_us": -4.860000000000014
+    },
+    "ATTN_PLAN": {
+      "retained_latest_end_us": 596.48,
+      "candidate_latest_end_us": 590.8,
+      "delta_us": -5.680000000000064
+    },
+    "ATTN_CUBE": {
+      "retained_latest_end_us": 808.12,
+      "candidate_latest_end_us": 834.72,
+      "delta_us": 26.600000000000023
+    },
+    "ATTN_VECTOR": {
+      "retained_latest_end_us": 813.5,
+      "candidate_latest_end_us": 838.68,
+      "delta_us": 25.17999999999995
+    },
+    "OB": {
+      "retained_latest_end_us": 953.6,
+      "candidate_latest_end_us": 979.98,
+      "delta_us": 26.379999999999995
+    },
+    "OUT": {
+      "retained_latest_end_us": 984.8,
+      "candidate_latest_end_us": 1009.82,
+      "delta_us": 25.020000000000095
+    }
+  },
+  "interpretation": "The later Attention frontier appears despite an earlier Score frontier and persists to OUT; this supports locating the regression in the Attention segment",
+  "limitations": [
+    "Different diagnostic executions and instrumentation perturb scheduling",
+    "Frontier deltas are not exclusive compute durations or a quantified decomposition of the formal L1 regression",
+    "This does not isolate whether Scalar issue cost, DMA throughput or Cube supply latency dominates"
+  ]
+}

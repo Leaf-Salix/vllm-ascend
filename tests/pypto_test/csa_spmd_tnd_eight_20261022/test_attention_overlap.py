@@ -79,7 +79,10 @@ def compiled_projection(path, name):
     projected.body = ast.parse("trace = []").body + body + ast.parse("return trace").body
     module = ast.fix_missing_locations(ast.Module(body=[projected], type_ignores=[]))
     constants = {}
-    for node in ast.parse(path.read_text()).body:
+    constant_nodes = (
+        ast.parse(path.read_text()).body + ast.parse((path.parent / "attention_plan_stages.py").read_text()).body
+    )
+    for node in constant_nodes:
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):
             constants.update({target.id: node.value.value for target in node.targets if isinstance(target, ast.Name)})
     namespace = dict(
@@ -184,9 +187,9 @@ def test_original_function_and_cube_remain_identical():
         assert ast.dump(function(BASE, name)) == ast.dump(function(SOURCE, name))
 
 
-def test_fast_softmax_and_fallback_are_original_math():
+def assert_fast_math_and_fallback(source, function_name):
     original = function(BASE, "attention_qk_pv_vector_lane_stage")
-    candidate = function(SOURCE, "attention_qk_pv_vector_overlap_stage")
+    candidate = function(source, function_name)
     outer_old = next(n for n in original.body if isinstance(n, ast.For))
     outer_new = next(n for n in candidate.body if isinstance(n, ast.For))
     branch = next(n for n in outer_new.body if isinstance(n, ast.If) and ast.unparse(n.test) == "overlap_ready != 0")
@@ -208,6 +211,10 @@ def test_fast_softmax_and_fallback_are_original_math():
             name = node.targets[0].id
             if name in ("qk_scores_half", "qk_bias", "qk_masked", "qk_mi", "qk_exp", "qk_li", "qk_probability"):
                 assert ast.dump(node.value) == assignments[name]
+
+
+def test_fast_softmax_and_fallback_are_original_math():
+    assert_fast_math_and_fallback(SOURCE, "attention_qk_pv_vector_overlap_stage")
 
 
 class ExecuteCarriedLoops(ast.NodeTransformer):

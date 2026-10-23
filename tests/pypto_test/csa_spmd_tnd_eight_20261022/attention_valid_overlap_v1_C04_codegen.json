@@ -1,0 +1,69 @@
+{
+  "candidate": "attention_valid_overlap_v1",
+  "case_id": "C04",
+  "full_codegen_passed": true,
+  "root_and_return_abi_unchanged": true,
+  "resources": {
+    "cube_schedule": {
+      "mat": 475136,
+      "acc": 131072,
+      "vec": 16384,
+      "left": 65536,
+      "right": 65536
+    },
+    "vector_schedule": {
+      "vec": 180224
+    }
+  },
+  "held_regions": {
+    "dma_kv_state_inline1224__ssa_v0": [
+      81920,
+      114688
+    ],
+    "physical_rows_inline1162__ssa_v0": [
+      147968,
+      148224
+    ],
+    "qk_scores_half_inline1159__ssa_v0": [
+      131072,
+      147456
+    ],
+    "qk_probability_inline1193__ssa_v0": [
+      114688,
+      122880
+    ],
+    "qk_scores_half_inline1227__ssa_v0": [
+      131072,
+      147456
+    ],
+    "qk_probability_inline1272__ssa_v0": [
+      114688,
+      122880
+    ],
+    "physical_rows_inline1249__ssa_v0": [
+      37632,
+      37888
+    ]
+  },
+  "intended_overlap_path_emitted": true,
+  "operation_order": "Pure DMA and size-dependent KV notification first; independent softmax later",
+  "scalar_index_readiness_preserved": true,
+  "first_vector_line": 80022,
+  "last_vector_line": 80068,
+  "first_row_dma_line": 79971,
+  "cpp": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/compile_attention_valid_overlap_C04_v1/kernel/ptoas/dynamic_csa_full.cpp",
+  "cpp_sha256": "c986ae1b731c10520a64ac99be664fd9321fd7c562706790aa88506e359f81ca",
+  "excerpt": "  TLOAD(v10700, v10708);\n  ;\n  v10709 = (int64_t) ((uint64_t) v12829 + (uint64_t) v342);\n  v12829 = v10709;\n  goto label1287;\nlabel1289:\n  set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);\n  // pto: %4211, %4212, %4220, %4222, %4221\n  v10710 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v10656 + (uint64_t) v10695) * (uint64_t) v351) + (uint64_t) v10550) + (uint64_t) ((int64_t) (uint64_t) v12828 * (uint64_t) v346));\n  // pto: %4223\n  v10711 = v10710 < v359 ? v359 : v10710;\n  // pto: %kv_ring__ssa_v0_pview\n  v10712 = PTOAS__GLOBAL_TENSOR_DATA(v689);\n  // pto: %kv_ring__ssa_v0_pview\n  // pto: %kv_ring__ssa_v0_pview\n  // pto: %kv_ring__ssa_v0_pview\n  v10715 = pto::Shape<1, 1, 1, 32, 512>();\n  // pto: %kv_ring__ssa_v0_pview\n  v10716 = pto::Stride<16384, 16384, 16384, 512, 1>();\n  // pto: %kv_ring__ssa_v0_pview\n  v10717 = GlobalTensor<bfloat16_t, pto::Shape<1, 1, 1, 32, 512>, pto::Stride<16384, 16384, 16384, 512, 1>, pto::Layout::ND>(v10712 + (v10713 + v10711 * v10714), v10715, v10716);\n  wait_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);\n  pipe_barrier(PIPE_MTE3);\n  TSTORE(v10717, v10605);\n  set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID3);\n  ;\n  v10718 = (int64_t) ((uint64_t) v12828 + (uint64_t) v342);\n  v12828 = v10718;\n  goto label1285;\nlabel1290:\n  wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID3);\n  set_flag(PIPE_S, PIPE_MTE2, EVENT_ID2);\n  // pto: %4224\n  v10719 = false;\n  v10719 = v133 >= v462;\n  if (v10719) {\n    goto label1291;\n  } else {\n    goto label1292;\n  }\nlabel1291:\n  v10720 = getFFTSMsg(FFTS_MODE_VAL, v357);\n  ffts_cross_core_sync(PIPE_MTE3, v10720);\n  goto label1292;\nlabel1292:\n  // pto: %t__tmp_v770\n  v10721 = Tile<TileType::Vec, float, 32, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v346, v351);\n  // pto: %t__tmp_v770\n  v10722 = (uint64_t) v205;\n  TASSIGN(v10721, v10722);\n  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);\n  TMULS(v10721, v10674, v463);\n  // pto: %qk_masked_inline1182__ssa_v0\n  v10723 = Tile<TileType::Vec, float, 32, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v346, v351);\n  // pto: %qk_masked_inline1182__ssa_v0\n  v10724 = (uint64_t) v205;\n  TASSIGN(v10723, v10724);\n  pipe_barrier(PIPE_V);\n  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID1);\n  TCOLEXPANDADD(v10723, v10721, v10684);\n  // pto: %qk_mi_inline1214__ssa_v0\n  v10725 = Tile<TileType::Vec, float, 32, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v346, v342);\n  // pto: %qk_mi_inline1214__ssa_v0\n  v10726 = (uint64_t) v210;\n  TASSIGN(v10725, v10726);\n  pipe_barrier(PIPE_V);\n  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID6);\n  TROWMAX(v10725, v10723, v10672);\n  // pto: %t__tmp_v771\n  v10727 = Tile<TileType::Vec, float, 32, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v346, v351);\n  // pto: %t__tmp_v771\n  v10728 = (uint64_t) v205;\n  TASSIGN(v10727, v10728);\n  pipe_barrier(PIPE_V);\n  TROWEXPANDSUB(v10727, v10723, v10725);\n  // pto: %qk_exp_inline1217__ssa_v0\n  v10729 = Tile<TileType::Vec, float, 32, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v346, v351);\n  // pto: %qk_exp_inline1217__ssa_v0\n  v10730 = (uint64_t) v205;\n  TASSIGN(v10729, v10730);\n  pipe_barrier(PIPE_V);\n  TEXP(v10729, v10727);\n  // pto: %qk_li_inline1164__ssa_v0\n  v10731 = Tile<TileType::Vec, float, 32, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v346, v342);\n  // pto: %qk_li_inline1164__ssa_v0\n  v10732 = (uint64_t) v330;\n  TASSIGN(v10731, v10732);\n  pipe_barrier(PIPE_V);\n  TROWSUM(v10731, v10729, v10672);\n  // pto: %qk_probability_inline1193__ssa_v0\n  v10733 = Tile<TileType::Vec, bfloat16_t, 32, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v346, v351);\n  // pto: %qk_probability_inline1193__ssa_v0\n  v10734 = (uint64_t) v209;\n  TASSIGN(v10733, v10734);\n  pipe_barrier(PIPE_V);\n  v10735 = RoundMode::CAST_RINT;\n  v10736 = SaturationMode::ON;\n  TCVT(v10733, v10729, v10735, v10736);",
+  "isa_review": {
+    "pin": "327cd5869f3a7c4d2c6a1b945b2aed06e7665c5d",
+    "float_reductions": "TRowMax/TRowSum select TRowReduceOps for FP32; the V-to-S scalar reduction helpers are integer-only",
+    "selected_vector_headers": "TRowReduceOps, TUnaryOp, TRowExpandBinOp, TColExpandBinOp and TCvt contain no set/wait cross-pipe completion fences"
+  },
+  "device_execution": false,
+  "performance_eligible": false,
+  "limitations": [
+    "This establishes an emitted overlap path, not measured overlap duration or whole-chain speedup",
+    "The second 32-row chunk still waits for the first ring store before reusing its buffer",
+    "The source-event DAG does not validate hardware queue capacity, DMA completion or cache behavior"
+  ]
+}
