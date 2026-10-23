@@ -420,13 +420,15 @@ def test_tnd_service_gate_rejects_unsupported_native_calls(fault):
 
 
 @pytest.mark.parametrize("variant", ["spmd_tnd", "mpmd_tnd"])
-def test_custom_op_routes_mixed_tnd_and_reuses_prepared_workspace(monkeypatch, variant):
+@pytest.mark.parametrize("shared_workspace", [False, True])
+def test_custom_op_routes_mixed_tnd_and_reuses_prepared_workspace(monkeypatch, variant, shared_workspace):
     """真实custom-op Python边界接入新service；CPU桩只替代设备提交。"""
     import importlib
 
     from vllm_ascend import memcache_comm_fence
     from vllm_ascend.attention import utils as attention_utils
     from vllm_ascend.ops import dsa, dsv4_csa
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.workspace import TNDWorkspacePool
 
     package = "deepseek_v4_flash_csa_spmd_tnd" if variant == "spmd_tnd" else "deepseek_v4_flash_csa_tnd"
     service = importlib.import_module(f"vllm_ascend.ops.pypto.{package}.service")
@@ -449,11 +451,14 @@ def test_custom_op_routes_mixed_tnd_and_reuses_prepared_workspace(monkeypatch, v
     runtime._hadamard = hadamard
     runtime._outputs = {}
     runtime._bindings = {}
+    runtime._workspace_pool = TNDWorkspacePool() if shared_workspace else None
     runtime.submissions = 0
     runtime.last_binding = None
 
     class Prepared:
         def __init__(self, native, **kwargs):
+            expected = runtime._workspace_pool.allocate if shared_workspace else None
+            assert kwargs["allocator"] == expected
             self.native = native
             self.rebinds = 0
             prepared_calls.append(self)

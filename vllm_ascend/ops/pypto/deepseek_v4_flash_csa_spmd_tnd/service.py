@@ -69,7 +69,7 @@ class CSAServiceRuntime(AttentionServiceBase):
     def _prepare_binding(native, **options):
         return PreparedDynamicCSA(native, **options)
 
-    def __init__(self, attention, operators, max_num_seqs, layer=None):
+    def __init__(self, attention, operators, max_num_seqs, layer=None, *, workspace_pool=None):
         # operators参数保留模型准备钩子的统一调用约定；本实现不注册多task算子。
         if operators is not None:
             raise ValueError("TND CSA直接提交，不接受旧BSH CSAOperators")
@@ -87,6 +87,7 @@ class CSAServiceRuntime(AttentionServiceBase):
         self._hadamard = None
         self._outputs = {}
         self._bindings = {}
+        self._workspace_pool = workspace_pool
         self.submissions = 0
         self.empty_calls = 0
         self.last_binding = None
@@ -346,6 +347,7 @@ class CSAServiceRuntime(AttentionServiceBase):
                 max_query_tokens=MAX_QUERY_TOKENS,
                 max_seq_len=maximum,
                 policy=policy,
+                allocator=None if self._workspace_pool is None else self._workspace_pool.allocate,
             )
         else:
             self._bindings[key].rebind(native)

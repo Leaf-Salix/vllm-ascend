@@ -23091,3 +23091,26 @@ graph的输出、TopK、cache/state逐bit和保护区，当前仍排队。后续
 `task_20261023_192605_27404711194`与SPMD
 `task_20261023_192605_27405926637`均加入启动前PASS闸门：单卡未通过则立即退出，
 不启动整模型。修复尚未完成设备验收，不宣称PTO通过，也未开始B24。
+
+### 735.98 TND跨层临时工作区复用的单卡门槛通过（2026-10-23）
+
+任务`task_20261023_190556_147460128643`正常exit=0。冻结v04源码、公共工具链、
+CANN9.2，在同一卡构造128K/B16的layer2/S1、layer2/S6、layer4/S6三个场景，
+分别为SPMD与MPMD建立独占和共享的PreparedDynamicCSA。两个S6绑定的
+pair_arena地址相同，SPMD三个signal地址独立，避免“实际上没复用”的假通过。
+
+共享路径的三次调用之间不插设备同步；逐层调用后统一同步取证，再捕获包含
+三次调用的图并重放。两种实现的eager和graph均与独占参考逐bit一致，项目为
+输出、Top-K索引、SWA/压缩cache、Compressor状态、Indexer key/scale和状态。
+所有cache/state保护区与只读metadata检查通过。信号与ffts仍由各绑定独占。
+证据为`csa_tnd_model_validation_20261023/workspace_validation.json`。
+
+生产实现只增加模型实例内的临时缓冲池和服务分配器传递；不改kernel、数学、
+Native cache布局或MPMD调度。只在无微批并发时共享；DBO/ubatching继续独占。
+按name/shape/dtype/device保存分配，不替换已有地址，图与各容量生命周期保持。
+独立单层PreparedDynamicCSA默认仍独占。服务custom-op的SPMD/MPMD×独占/共享
+四个CPU检查已通过，lint和差异空白检查通过。
+
+本次三个场景实际共享scratch约148.83MB；21层整模型的节省量仍以之前CPU容量
+估算为准，不能将其称为实测峰值。v05两个B16整模型任务已满足启动前单卡
+PASS条件，继续排队；整模型输出对照及B24目标仍未完成。

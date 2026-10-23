@@ -36,3 +36,16 @@
 
 `check.py` 检查真实路由和功能完成，不代表Native/PTO输出一致。
 各次实验的任务号、结果及对照结论写回主 `DSV4_FLASH_CSA_VALIDATION_LOG.md`。
+
+## 当前证据
+
+- `native_b16_summary.json`：Native 16卡B16功能通过，无抢占，平均接受3.80650；
+  32个简单答案通过，跨DP及旧Native输出token差异均为0。
+- `workspace_validation.json`：两种TND的临时工作区复用单卡验证通过。
+  128K/B16的S1/S6及两层交替，eager和graph的输出、Top-K、cache/state逐bit一致，保护区通过。
+- `workspace_pool_estimate.json`：CPU meta容量估算，不是模型设备峰值。
+- `jobs.json`：两种PTO B16整模型任务及其前置验证路径。整模型和B24尚待完成。
+
+有工作区修复的冻结包使用`prepare.py <实验名> --revision 99268437c --workspace-fix`；
+启动`run.sh`时第六个参数提供单卡`result.json`。该结果必须包含两种实现的PASS，
+否则启动器直接退出。该门槛不替代后续整模型正确性检查。

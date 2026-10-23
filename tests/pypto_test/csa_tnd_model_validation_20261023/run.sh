@@ -7,6 +7,7 @@ output=$(realpath -m "${2:?输出目录}")
 variant=${3:?native或spmd_tnd或mpmd_tnd}
 batch=${4:-16}
 budget=${5:-0.92}
+single_card_gate=${6:-}
 if [[ "$variant" != native && "$variant" != spmd_tnd && "$variant" != mpmd_tnd ]]; then exit 2; fi
 if [[ "$batch" != 16 && "$batch" != 24 ]]; then exit 2; fi
 record=$(dirname "$source_tree")/manifest.json
@@ -17,12 +18,19 @@ source "$repo/tests/pypto_test/results/csa_native_template_20260929/env.sh"
 source "$repo/tests/pypto_test/csa_shared_toolchain/env.sh"
 bank="$workspace/csa-repro-20261021-clean/kv-repro/mixed128k_fixed"
 mkdir "$output"
-python - "$record" "$CSA_SHARED_TOOLCHAIN_MANIFEST" "$bank" "$output" "$variant" "$batch" "$budget" <<'PY'
+python - "$record" "$CSA_SHARED_TOOLCHAIN_MANIFEST" "$bank" "$output" "$variant" "$batch" "$budget" "$single_card_gate" <<'PY'
 import json, pathlib, sys
-record, shared, bank, output, variant, batch, budget = sys.argv[1:]
+record, shared, bank, output, variant, batch, budget, single_card_gate = sys.argv[1:]
 data = json.load(open(record))
 assert data['toolchain'] == json.load(open(shared)), '公共SDK变化，请重新冻结'
 assert data['toolchain']['status'] == 'validated'
+if data.get('source_overlays') and variant != 'native':
+    assert single_card_gate, '工作区修复必须先通过单卡验证'
+    gate = json.load(open(single_card_gate))
+    assert gate['status'] == 'PASS', '单卡验证尚未通过，禁止启动整模型'
+    assert set(gate['variants']) == {'deepseek_v4_flash_csa_spmd_tnd', 'deepseek_v4_flash_csa_tnd'}
+    assert all(row['status'] == 'PASS' and row['guard_status'] == 'PASS' for row in gate['variants'].values())
+    data['single_card_gate'] = single_card_gate
 plan = json.load(open(pathlib.Path(bank) / 'plan.json'))
 assert plan['mixed_requests'] and len(plan['cases']) >= int(batch)
 data.update(variant=variant, batch=int(batch), gpu_memory_utilization=float(budget), bank=bank,

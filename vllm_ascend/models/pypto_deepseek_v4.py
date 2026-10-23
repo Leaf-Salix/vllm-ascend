@@ -135,13 +135,21 @@ def prepare_csa_model(model):
 
     init_pto_runtime()
     operators = CSAOperators.register() if CSAOperators is not None else None
-    max_num_seqs = get_current_vllm_config().scheduler_config.max_num_seqs
+    config = get_current_vllm_config()
+    max_num_seqs = config.scheduler_config.max_num_seqs
+    runtime_options = {}
+    if selected_variant() in ("spmd_tnd", "mpmd_tnd") and not config.parallel_config.use_ubatching:
+        from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.workspace import TNDWorkspacePool
+
+        # 作用域限制在本模型顺序执行的CSA层；不与Native/MoE工作区或其他模型共享。
+        model._pto_csa_workspace_pool = TNDWorkspacePool()
+        runtime_options["workspace_pool"] = model._pto_csa_workspace_pool
     count = 0
     for layer in model.model.layers:
         attention = layer.self_attn
         if attention.compress_ratio == 4:
             attention.dsa_attn._pto_csa_runtime = CSAServiceRuntime(
-                attention, operators, max_num_seqs, layer
+                attention, operators, max_num_seqs, layer, **runtime_options
             )
             count += 1
     if not count:

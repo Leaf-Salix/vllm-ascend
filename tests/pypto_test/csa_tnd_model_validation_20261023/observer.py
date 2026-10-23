@@ -38,12 +38,17 @@ class TNDObserver(OfflineCSAObserver):
 
         result = super().offline_end_observation()
         rows = []
+        unique_storage = {}
         for index, layer in enumerate(self.model_runner.get_model().model.layers):
             runtime = getattr(layer.self_attn.dsa_attn, "_pto_csa_runtime", None)
             if runtime is None:
                 continue
             before_submits, before_graph = self._tnd_before[index]
             graph = dict(getattr(runtime, "_validation_graph_counts", {}))
+            for binding in runtime._bindings.values():
+                for value in binding.allocations.values():
+                    storage = value.untyped_storage()
+                    unique_storage[(value.device, storage.data_ptr())] = storage.nbytes()
             rows.append(
                 {
                     "layer": index,
@@ -64,6 +69,7 @@ class TNDObserver(OfflineCSAObserver):
                 }
             )
         result["tnd_bindings"] = rows
+        result["tnd_physical_workspace_bytes"] = sum(unique_storage.values())
         result["memory"] = {
             "allocated": torch.npu.memory_allocated(),
             "reserved": torch.npu.memory_reserved(),

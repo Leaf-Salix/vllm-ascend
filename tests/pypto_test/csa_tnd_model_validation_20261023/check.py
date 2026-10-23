@@ -62,6 +62,7 @@ def check(root):
                 "rank": rank,
                 "full_s6_graph_forwards": observation["model_forward_counts"][key],
                 "memory": observation["memory"],
+                "physical_workspace_bytes": observation.get("tnd_physical_workspace_bytes"),
                 "all_csa_graph_replay_proven": bool(package)
                 and all(r["decode_graph_checks"]["allowed"] > 0 for r in observation["tnd_bindings"]),
                 "workspace_bytes": sum(
