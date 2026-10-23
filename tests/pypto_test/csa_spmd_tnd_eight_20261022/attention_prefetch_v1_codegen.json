@@ -1,0 +1,83 @@
+{
+  "candidate": "attention_prefetch_v1",
+  "case_id": "C05",
+  "full_codegen_passed": true,
+  "root_and_return_abi_unchanged": true,
+  "resources": {
+    "cube_schedule": {
+      "mat": 475136,
+      "acc": 131072,
+      "left": 65536,
+      "right": 65536
+    },
+    "vector_schedule": {
+      "vec": 186112
+    }
+  },
+  "limits": {
+    "vec": 188416,
+    "mat": 524288,
+    "acc": 131072,
+    "left": 65536,
+    "right": 65536
+  },
+  "disjoint_held_regions": {
+    "dma_kv_state_inline1201": [
+      86272,
+      119040
+    ],
+    "pf_scores_inline1203": [
+      32768,
+      49152
+    ],
+    "pf_bias_inline1209": [
+      120064,
+      120576
+    ]
+  },
+  "score_and_bias_loads_precede_row_dma": true,
+  "explicit_physical_row_dma_emitted": true,
+  "intended_kv_dma_vector_overlap_gate_passed": false,
+  "reason": [
+    "Each 32-row DMA chunk unconditionally sets and waits MTE2->V before testing whether zero fill is needed",
+    "The half-loop exit waits MTE3->V after the GM ring store, before the first softmax operation",
+    "Earlier Score loads and disjoint buffers do not remove these control-flow completion waits"
+  ],
+  "evidence_cpp": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/compile_attention_prefetch_C05_v1/kernel/ptoas/dynamic_csa_full.cpp",
+  "cpp_sha256": "9376ce0eb90f6cf585c3e155126334287576567bd6e784c9ed57e1c12e7a0b0b",
+  "line_anchors": {
+    "79154": "TLOAD(v10716, v10725);",
+    "79176": "TLOAD(v10726, v10736);",
+    "79352": "TLOAD(v10770, v10778);",
+    "79367": "set_flag(PIPE_MTE2, PIPE_V, EVENT_ID4);",
+    "79369": "wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID4);",
+    "79373": "if (v10781) {",
+    "79437": "TSTORE(v10796, v1493);",
+    "79438": "set_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);",
+    "79445": "wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);",
+    "80566": "TMULS(v11130, v11126, v465);"
+  },
+  "excerpts": [
+    {
+      "first_line": 79350,
+      "text": "  // pto: %main_cache__ssa_v14_pview\n  v10778 = GlobalTensor<bfloat16_t, pto::Shape<1, 1, 1, 1, 512>, pto::Stride<512, 512, 512, 512, 1>, pto::Layout::ND>(v10773 + (v10774 + v10772 * v10775), v10776, v10777);\n  TLOAD(v10770, v10778);\n  goto label1300;\nlabel1300:\n  // pto: %needs_zero_inline1158\n  // pto: %needs_zero_inline1158\n  ;\n  v10779 = (int64_t) ((uint64_t) v12825 + (uint64_t) v343);\n  // pto: %needs_zero_inline1158\n  ;\n  v10780 = v10768 ? v12826 : v361;\n  v12825 = v10779;\n  v12826 = v10780;\n  goto label1297;\nlabel1301:\n  set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);\n  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID4);\n  // pto: %4265, %4266\n  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID4);\n  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);\n  v10781 = false;\n  v10781 = (int64_t) v12826 != v360;\n  if (v10781) {\n    goto label1302;\n  } else {\n    goto label1308;\n  }"
+    },
+    {
+      "first_line": 79432,
+      "text": "  // pto: %kv_ring__ssa_v0_pview\n  v10796 = GlobalTensor<bfloat16_t, pto::Shape<1, 1, 1, 32, 512>, pto::Stride<16384, 16384, 16384, 512, 1>, pto::Layout::ND>(v10791 + (v10792 + v10790 * v10793), v10794, v10795);\n  wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);\n  wait_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);\n  pipe_barrier(PIPE_MTE3);\n  TSTORE(v10796, v1493);\n  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);\n  set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID2);\n  ;\n  v10797 = (int64_t) ((uint64_t) v12824 + (uint64_t) v343);\n  v12824 = v10797;\n  goto label1295;\nlabel1309:\n  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);\n  wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID2);\n  set_flag(PIPE_S, PIPE_MTE2, EVENT_ID3);\n  set_flag(PIPE_S, PIPE_MTE2, EVENT_ID2);\n  goto label1384;"
+    },
+    {
+      "first_line": 80545,
+      "text": "  // pto: %qk_reduce_tmp_inline1166__ssa_v0\n  v11124 = Tile<TileType::Vec, float, 32, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v347, v352);\n  // pto: %qk_reduce_tmp_inline1166__ssa_v0\n  v11125 = (uint64_t) v209;\n  TASSIGN(v11124, v11125);\n  // pto: %qk_scores_half_inline1235__ssa_v0\n  v11126 = Tile<TileType::Vec, float, 32, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v347, v352);\n  // pto: %qk_scores_half_inline1235__ssa_v0\n  v11127 = (uint64_t) v217;\n  TASSIGN(v11126, v11127);\n  // pto: %qk_bias_inline1194__ssa_v0\n  v11128 = Tile<TileType::Vec, float, 1, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v343, v352);\n  // pto: %qk_bias_inline1194__ssa_v0\n  v11129 = (uint64_t) v331;\n  TASSIGN(v11128, v11129);\n  // pto: %t__tmp_v811\n  v11130 = Tile<TileType::Vec, float, 32, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v347, v352);\n  // pto: %t__tmp_v811\n  v11131 = (uint64_t) v205;\n  TASSIGN(v11130, v11131);\n  pipe_barrier(PIPE_V);\n  TMULS(v11130, v11126, v465);\n  // pto: %qk_masked_inline1277__ssa_v0\n  v11132 = Tile<TileType::Vec, float, 32, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v347, v352);\n  // pto: %qk_masked_inline1277__ssa_v0\n  v11133 = (uint64_t) v205;\n  TASSIGN(v11132, v11133);\n  pipe_barrier(PIPE_V);\n  TCOLEXPANDADD(v11132, v11130, v11128);"
+    }
+  ],
+  "decision": "Reject this frozen candidate at its declared compile-time mechanism gate; do not submit it to NPU",
+  "adopted": false,
+  "device_execution": false,
+  "performance_eligible": false,
+  "limitations": [
+    "No device precision, liveness or performance test was run for this candidate",
+    "This result rejects this emitted schedule, not all possible Attention overlap implementations",
+    "It does not establish that dependencies can safely be deleted; any replacement needs its own alias and reuse proof"
+  ]
+}
