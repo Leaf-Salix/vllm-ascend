@@ -49,20 +49,13 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {
-    "task_20261023_114005_400243722917": {
-      "case": "C01",
-      "candidate": "hc_direct_tail_v2",
-      "mode": "complete_L1_candidate",
-      "performance_eligible": true
-    }
-  },
+  "pending_tasks": {},
   "next_steps": [
     "Preserve four retained mechanisms and the original eight-case denominator; 10% goal remains active",
-    "For C04/C05 prioritize changes that reduce full-chain resource service cost; do not repeat rejected DMA/Vector reorderings",
-    "Budget B24 complete-leaf/query readiness against remaining Score resource use before implementing coarse interleaving",
-    "Inspect small-batch critical-path evidence before query/head partitioning; account for duplicated KV traffic and changed packed-row ownership",
-    "Use explicit capacity/path-coverage audits to find fallback costs; do not blindly enable small-T physical plans previously weak or negative",
+    "Reduce measured full-chain service work or exploit demonstrated resource complementarity; no more simple DMA/Vector reorderings",
+    "Do not implement whole-leaf-round Attention insertion on existing owners: optimistic serialized-resource model already increases C05 waiting",
+    "Do not repeat negative head partitioning or direct HC tail-copy removal without a new mechanism",
+    "Retain exact arithmetic, device metadata, cache/state and all 72-role complete-L1 gates",
     "No push without a new explicit request"
   ],
   "knowledge_query": {
@@ -98,7 +91,7 @@
     "capacity_state_observer": 3,
     "capacity_production_contracts": 164
   },
-  "updated_at": "2026-10-23T11:41:51.760704+08:00",
+  "updated_at": "2026-10-23T11:58:59+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -253,6 +246,12 @@
       "case_id": "C01",
       "evidence": "head_partition2_v1_C01_result.json",
       "reason": "Exact full-chain checks pass, but complete L1 median regresses 2.87414 percent"
+    },
+    {
+      "candidate": "hc_direct_tail_v2",
+      "case": "C01",
+      "evidence": "hc_direct_tail_v2_C01_result.json",
+      "reason": "Strict complete chain passes; full L1 361.33 vs 358.02 us, +0.924529%, not adopted"
     }
   ],
   "promising_candidates": [
@@ -434,7 +433,8 @@
       "cpu_checks": 6,
       "full_codegen_passed": true,
       "codegen": "hc_direct_tail_v2_C01_codegen.json",
-      "status": "complete_L1_task_submitted"
+      "status": "rejected_complete_L1",
+      "measurement": "hc_direct_tail_v2_C01_result.json"
     }
   },
   "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
@@ -544,7 +544,9 @@
     },
     "C01_head_partition": "More active clusters alone regressed; keep exact full-L1 evidence and do not scan another partition degree without a new mechanism",
     "C01_current_phase": "retained_C01_phase_sdk_v1.json",
-    "C01_frontend_transfer_candidate": "hc_direct_tail_v2.json"
+    "C01_frontend_transfer_candidate": "hc_direct_tail_v2 rejected after strict complete L1",
+    "coarse_resource_model": "coarse_interleaving_resource_model.json",
+    "coarse_resource_decision": "Do not implement mandatory whole-leaf-round Attention insertion on existing owners; assess real pipe complementarity or reduced service work first"
   },
   "parked_candidates": [
     {
@@ -563,7 +565,8 @@
     "C05_retained_phase": "retained_C05_phase_sdk_v1.json",
     "query_local_v5_C05": "query_local_v5_C05_phase_comparison.json",
     "attention_overlap_v1_C05": "attention_overlap_v1_C05_phase_comparison.json",
-    "C01_retained_phase": "retained_C01_phase_sdk_v1.json"
+    "C01_retained_phase": "retained_C01_phase_sdk_v1.json",
+    "coarse_interleaving": "coarse_interleaving_resource_model.json"
   },
   "same_sdk_reused_other_references": "same_sdk_reused_other_references.json",
   "same_sdk_reference_coverage": {
@@ -584,7 +587,7 @@
   "current_sdk_C08_reference": "baseline_current_sdk_C08.json",
   "current_implementation": "physical_capacity_production_v1",
   "earlier_stage_commit": "3a0f423c6",
-  "latest_stage": "head_partition_rejected_hc_direct_tail_full_L1_pending",
+  "latest_stage": "hc_direct_tail_rejected_coarse_interleaving_resource_screen_complete",
   "retained_results": "retained_physical_capacity.json",
   "production_source_manifest": "physical_capacity_production_v1.json",
   "prior_production_commit": "32a1426d9",
