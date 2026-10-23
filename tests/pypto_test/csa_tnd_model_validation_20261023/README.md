@@ -83,7 +83,7 @@ Native、MPMD均已通过每卡33个有效24×S6 step与零抢占；SPMD在收�
 
 用户明确：MPMD与SPMD的纯临时工作区都由Simpler在执行中申请和管理；
 Python不分配scratch、普通Top-K或信号，也不使用模型级外部共享池。
-当前实现位于已冻结的`experiments/v25_internal_model/source`，正式算子目录尚未迁移。
+已通过单卡的实现已同步到正式算子目录；16卡继续使用已冻结的`experiments/v25_internal_model/source`。
 两种普通入口只接收55个外部Tensor；诊断入口额外接收Top-K输出供校验。
 MPMD保留AICPU多task调度，不新增软同步。SPMD信号每调用由设备任务清零，
 其初始化和依赖包含在调用和图重放中。
@@ -126,3 +126,8 @@ Native正确性参考沿用`v02_native_b16`和`v12_native_b24`。新增
   公共d44925c1已修复；`mixed_param_extent_repro_20261024.py`和`trace_internal_scale_symbol.py`。
 
 详细中文过程持续追加主`DSV4_FLASH_CSA_VALIDATION_LOG.md`。
+
+MPMD内部工作区版16卡B16已通过，证据`internal_mpmd_b16_summary.json`：
+256请求共49152输出token，每卡33个真实满批S6 step，零抢占，21层外部scratch均0。
+与旧外部工作区版MPMD的全部token和DSpark事件一致。SPMD B16仍在运行，
+三方完整对照和B24整模型尚未完成。

@@ -10,6 +10,7 @@ import ast
 import copy
 import importlib
 import importlib.util
+import inspect
 import json
 import os
 import statistics
@@ -362,12 +363,22 @@ def main():
                     guards[side, name] = storage, padding
                     return storage[padding:-padding].view(shape)
 
-                entries[side] = importlib.import_module(package + ".binding").PreparedDynamicCSA(
+                prepared = importlib.import_module(package + ".binding").PreparedDynamicCSA
+                allocator_options = (
+                    {"allocator": allocate} if "allocator" in inspect.signature(prepared).parameters else {}
+                )
+                entries[side] = prepared(
                     native,
                     max_query_tokens=max_query_tokens,
                     max_seq_len=max(case["seq_lens"]),
-                    allocator=allocate,
+                    **allocator_options,
                 )
+                report.setdefault("workspace_checks", {})[side] = {
+                    "storage": "external_guarded" if allocator_options else "simpler_internal",
+                    "external_scratch_guard_count": len(entries[side].allocations),
+                    "topk": "explicit_diagnostic_outputs",
+                    "scope": "Native输入/cache保护区始终检查；内部scratch不冒充已做外部哨兵检查",
+                }
             report["policies"] = {name: entry.policy.constexprs() for name, entry in entries.items()}
             report["descriptors"] = {
                 name: {k: {"shape": list(v.shape), "dtype": str(v.dtype)} for k, v in entry.buffers.items()}

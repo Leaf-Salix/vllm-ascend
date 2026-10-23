@@ -22,16 +22,12 @@ def csa_layer_forward(layer, positions, hidden_states, residual, llama_4_scaling
     positions explicit in the custom-op ABI, including during torch.compile.
     """
     attn_out = torch.empty_like(hidden_states)
-    torch.ops.vllm.dsv4_csa_forward(
-        hidden_states, positions, attn_out, layer.self_attn.dsa_attn.prefix
-    )
+    torch.ops.vllm.dsv4_csa_forward(hidden_states, positions, attn_out, layer.self_attn.dsa_attn.prefix)
     hidden_states = attn_out
 
     # FFN 半边：与 release 的 DeepseekV4DecoderLayer.forward 后半段逐行一致。
     residual = hidden_states.clone()
-    hidden_states, post, comb = layer.hc_pre(
-        hidden_states, layer.hc_ffn_fn, layer.hc_ffn_scale, layer.hc_ffn_base
-    )
+    hidden_states, post, comb = layer.hc_pre(hidden_states, layer.hc_ffn_fn, layer.hc_ffn_scale, layer.hc_ffn_base)
     hidden_states = layer.post_attention_layernorm(hidden_states)
     hidden_states = layer.mlp(hidden_states)
     hidden_states = layer.hc_post(hidden_states, residual, post, comb)
@@ -130,35 +126,35 @@ def prepare_csa_model(model):
         reduction = importlib.import_module(f"{package}.qkv_proj_rope")
         logger.info(
             "PTO_CSA_REDUCTION atomic_add=%d qr_split_k=%d kv_split_k=%d",
-            ATOMIC_ADD, reduction.QR_OK, reduction.KV_OK,
+            ATOMIC_ADD,
+            reduction.QR_OK,
+            reduction.KV_OK,
         )
 
     init_pto_runtime()
     operators = CSAOperators.register() if CSAOperators is not None else None
     config = get_current_vllm_config()
     max_num_seqs = config.scheduler_config.max_num_seqs
-    runtime_options = {}
-    if selected_variant() in ("spmd_tnd", "mpmd_tnd") and not config.parallel_config.use_ubatching:
-        from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.workspace import TNDWorkspacePool
-
-        # 作用域限制在本模型顺序执行的CSA层；不与Native/MoE工作区或其他模型共享。
-        model._pto_csa_workspace_pool = TNDWorkspacePool()
-        runtime_options["workspace_pool"] = model._pto_csa_workspace_pool
     count = 0
     for layer in model.model.layers:
         attention = layer.self_attn
         if attention.compress_ratio == 4:
-            attention.dsa_attn._pto_csa_runtime = CSAServiceRuntime(
-                attention, operators, max_num_seqs, layer, **runtime_options
-            )
+            attention.dsa_attn._pto_csa_runtime = CSAServiceRuntime(attention, operators, max_num_seqs, layer)
             count += 1
     if not count:
         raise ValueError("No target C4 attention layers found for PTO CSA")
-    logger.info("PTO_CSA_LAYOUT variant=%s effective_mode=%d root_layouts=%s nz_packed=%s",
-                selected_variant(), effective_mode, layouts,
-                [name for name, layout in layouts.items() if layout == "NZ"])
-    logger.info("Prepared PTO CSA (%s variant) for %d target C4 layers; "
-                "prefill and unsupported decode batches use Native", selected_variant(), count)
+    logger.info(
+        "PTO_CSA_LAYOUT variant=%s effective_mode=%d root_layouts=%s nz_packed=%s",
+        selected_variant(),
+        effective_mode,
+        layouts,
+        [name for name, layout in layouts.items() if layout == "NZ"],
+    )
+    logger.info(
+        "Prepared PTO CSA (%s variant) for %d target C4 layers; prefill and unsupported decode batches use Native",
+        selected_variant(),
+        count,
+    )
 
 
 class PyptoCSADeepseekV4ForCausalLM(AscendDeepseekV4ForCausalLM):

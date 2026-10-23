@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """DeepSeek V4 Flash CSA的完整源级动态单SPMD入口与ABI合同。
 
+普通入口在调用内创建全部临时Tensor；_debug入口仅额外接收Top-K观察输出。
+两者沿用同一直接编排与数学helper，CPU合同检查防止数学和调度意外分叉。
+
 整体思路与阅读顺序
-    decode_csa_spmd只创建一次24组SPMD；_csa_core_group把AIC和双AIV角色
+    decode_csa_spmd先清零内部信号，再创建一次24组业务SPMD；_csa_core_group把AIC和双AIV角色
     装进同一个MIX任务。两种角色在设备同时推进，GM phase通知连接跨组依赖，
     组内FFTS READY/ACK驱动Score与Attention的环槽流水。先读runtime_abi.py
     和两份*_schedule.py，再读对应*_stages.py数学。不读历史IR、不在运行时
-    调用tests生成器，不创建额外meta或适配task。
+    调用tests生成器，不创建额外meta或布局适配task；信号清零属于本次调用。
 
 动态输入与分档
     hidden是x[T,16384]的BF16视图，最终output同形状。T是Native整档容量，
@@ -22,7 +25,7 @@
     PLAN_PHYSICAL_ROWS在已有T>=64前置几何区间，将内部压缩indices改存
     本轮校验后的INT32物理行，删除采集端重复的Q/L和页表查询。几何准备、
     plan和采集共用开关及device容量谓词；不支持时一起回到逻辑索引。
-    外部Top-K、工作区容量、softmax数学和通知顺序保持，不能混用两种表示。
+    Top-K结果、工作区容量、softmax数学和通知顺序保持，不能混用两种表示。
     单核可消费自己所需行，不必等待其它行完成。关闭路径保留作同轮消融。
     OUTPUT_GROUP_PIPELINE选择输出阶段的通知粒度：开启后O_A/量化各有8个
     模型输出组完成槽，保留原全局任务owner和动态行循环，不增加kernel。
@@ -30,8 +33,8 @@
     当前接通的是Cube Score路径；<2048压缩候选的原Vector路径尚待接入。
     初始完整组合使用Native NZ2布局；ND/NZ单阶段通过不代表本入口全部布局通过。
 
-外部工作区与无损视图（捕获前按shape/stride绑定，禁止Host读取device值）
-    所有暂存由调用层预分配，参数签名保持pl.dynamic。HC的P16=pad16(T)，
+内部工作区与无损视图（禁止Host读取device值）
+    所有暂存由编排层pl.create_tensor交给Simpler申请。HC的P16=pad16(T)，
     PARTIAL=4*P16，P8=pad8(T)；QR与QPROJ_ROWS至少pad128(T)，KV_ROWS至少
     pad16(T)。q_heads必须和q_flat同一GM、恰好64*T行。hc_base/hc_base_2d同址。
     两套压缩pool至少覆盖T行，投影分别pad64(T)/pad16(T)，compact/RoPE/slots
@@ -43,7 +46,7 @@
     编排内部建立，避免作为独立外部参数触发部分重叠别名检查；不复制数据。业务
     写回发生后先发布、读方等待后才用别名，不能单凭Python对象别名假设可见。
     group_offsets至少pad16(pad16(B+1)+4*T)+48+4*T个INT32；
-    SCALE_PAGE_COALESCING启用时尾部另加2*B项，关闭时保留原容量；
+    尾部统一预留2*B项，是否使用仍由SCALE_PAGE_COALESCING决定；
     LEAF_SCALE_LAYOUT仍保留这块尾区容量，但不读写META证明。
     依次为前缀/组描述符/scale页writer链表头/合法关闭行地址/连续页布局；
     最后每请求两项(first_page,direction)由META唯一writer覆盖后发布，
@@ -57,9 +60,9 @@
     只读别名外不得互相覆盖；hidden/post/comb保留到HCpost完成。
 
 同步生命周期与当前验证边界
-    signal为独立、首次清零的INT32 Tensor，至少PHASE_COUNT*72*128项；
-    每核每调用begin一次，阶段含义和参与集合不能跨工作区复用时改变。只能
-    单图/单流顺序使用，失败或INT32代际将溢出时在捕获外重新初始化。
+    signal为调用内部独立INT32 Tensor，容量由PHASE_COUNT、CORES和槽步长决定；
+    每次调用均通过设备任务清零，再由依赖启动业务SPMD。图重放包含同样的
+    初始化，不保留跨调用的旧信号代际。普通Top-K也在内部，诊断入口才接收输出。
     ffts[256]用于PyPTO源码接口；底层地址初始化沿用Simpler运行时，不能
     把它当作普通GM phase信号的存储。公共metadata与HC/QKV重叠，TopK后
     的有效块计划仍在层内执行。性能计时须包含这些工作及内部等待。
@@ -71,6 +74,7 @@ import pypto.language as pl
 
 from .attention_plan_stages import PHYSICAL_PLAN_COLUMNS
 from .cube_schedule import cube_schedule
+from .phase_sync import SIGNAL_SLOT_WORDS
 from .qkv_stages import BF16_WEIGHT_LAYOUT
 from .query_projection_stages import QUANT_WEIGHT_LAYOUT
 from .runtime_abi import (
@@ -79,6 +83,7 @@ from .runtime_abi import (
     COEFF_COLS,
     COEFF_ROWS,
     COMPRESSED_COLS,
+    CORES,
     GROUP_OFFSET_ROWS,
     GROUPS,
     HEAD_RING_ROWS,
@@ -124,10 +129,12 @@ from .runtime_abi import (
     PACK_ROWS,
     PAIR_ROWS,
     PARTIAL,
+    PHASE_COUNT,
     QPROJ_ROWS,
     QR_ROWS,
     QUERY_HEAD_ROWS,
     SCORE_ROWS,
+    VECTORS,
     WEIGHTS_PARTIAL_ROWS,
     WEIGHTS_ROWS,
     WORDS,
@@ -687,8 +694,18 @@ def _csa_core_group(
     )
 
 
+@pl.jit.incore
+def _clear_internal_signal(
+    area: pl.Out[pl.Tensor[[48, (PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS)], pl.INT32]],
+):
+    core = pl.tile.get_block_idx()
+    zero = pl.tile.full([1, (PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS)], dtype=pl.INT32, value=0)
+    pl.store(zero, [core, 0], area)
+    return area
+
+
 @pl.jit
-def decode_csa_spmd(
+def decode_csa_spmd_debug(
     x: pl.Tensor[[T, 16384], pl.BF16],
     hc_fn: pl.Tensor[[24, 16384], pl.FP32],
     hc_scale: pl.Tensor[[3], pl.FP32],
@@ -697,42 +714,16 @@ def decode_csa_spmd(
     norm_w: pl.Tensor[[4096], pl.BF16],
     wq_a: pl.Tensor[[1024, 4096], pl.BF16, BF16_WEIGHT_LAYOUT],
     gamma_cq: pl.Tensor[[1024], pl.BF16],
-    x_fp32: pl.InOut[pl.Tensor[[T, 16384], pl.FP32]],
-    inv: pl.InOut[pl.Tensor[[P16, 1], pl.FP32]],
-    widen_tail: pl.InOut[pl.Tensor[[8, 16384], pl.FP32]],
-    partials: pl.InOut[pl.Tensor[[PARTIAL, 32], pl.FP32]],
-    raw: pl.InOut[pl.Tensor[[P16, 32], pl.FP32]],
-    pre: pl.InOut[pl.Tensor[[P16, 8], pl.FP32]],
-    post: pl.InOut[pl.Tensor[[T, 4], pl.FP32]],
-    post_tail: pl.InOut[pl.Tensor[[8, 8], pl.FP32]],
-    comb: pl.InOut[pl.Tensor[[T, 16], pl.FP32]],
-    comb_tail: pl.InOut[pl.Tensor[[8, 32], pl.FP32]],
-    mixed: pl.InOut[pl.Tensor[[P8, 4096], pl.BF16]],
-    normed: pl.InOut[pl.Tensor[[T, 4096], pl.BF16]],
-    norm_tail: pl.InOut[pl.Tensor[[8, 4096], pl.BF16]],
-    qa: pl.InOut[pl.Tensor[[P16, 1024], pl.FP32]],
-    qr: pl.InOut[pl.Tensor[[T, 1024], pl.INT8]],
-    qr_scale: pl.InOut[pl.Tensor[[T, 1], pl.FP32]],
-    qr_matmul: pl.InOut[pl.Tensor[[QR_ROWS, 1024], pl.INT8]],
-    qr_scale_pad: pl.InOut[pl.Tensor[[P8, 1], pl.FP32]],
     wq_b: pl.Tensor[[1024, 32768], pl.INT8, QUANT_WEIGHT_LAYOUT],
     wq_b_scale: pl.Tensor[[32768], pl.FP32],
     rope_cos: pl.Tensor[[T, 64], pl.FP32],
     rope_sin: pl.Tensor[[T, 64], pl.FP32],
-    rope_signed: pl.InOut[pl.Tensor[[T, 64], pl.FP32]],
-    rope_swap: pl.InOut[pl.Tensor[[T, 64], pl.INT32]],
-    q_proj: pl.InOut[pl.Tensor[[QPROJ_ROWS, 32768], pl.INT32]],
-    q_flat: pl.InOut[pl.Tensor[[T, 32768], pl.BF16]],
     wkv: pl.Tensor[[4096, 512], pl.BF16],
     gamma_ckv: pl.Tensor[[512], pl.BF16],
-    kv_fp32: pl.InOut[pl.Tensor[[KV_ROWS, 512], pl.FP32]],
-    kv: pl.InOut[pl.Tensor[[T, 512], pl.BF16]],
     native_slots: pl.Tensor[[T, 2], pl.INT32],
     cache_rows: pl.InOut[pl.Tensor[[CACHE_ROWS, 512], pl.BF16]],
     main_wkv: pl.Tensor[[1024, 4096], pl.BF16],
     main_wgate: pl.Tensor[[1024, 4096], pl.BF16],
-    main_value: pl.InOut[pl.Tensor[[MPROJ, 1024], pl.FP32]],
-    main_score: pl.InOut[pl.Tensor[[MPROJ, 1024], pl.FP32]],
     main_state: pl.InOut[pl.Tensor[[MSTATE_PAGES, MSTATE_ELEMS], pl.FP32]],
     main_state_table: pl.Tensor[[B, MTABLE_COLS], pl.INT32],
     main_ape: pl.Tensor[[4, 1024], pl.FP32],
@@ -740,85 +731,38 @@ def decode_csa_spmd(
     main_bounds: pl.Tensor[[MQ], pl.INT32],
     main_lengths: pl.Tensor[[B], pl.INT32],
     main_state_slots: pl.Tensor[[T, 2], pl.INT32],
-    main_pooled: pl.InOut[pl.Tensor[[MPOOL, 512], pl.FP32]],
     main_gamma: pl.Tensor[[512], pl.BF16],
     main_cos: pl.Tensor[[MC, 64], pl.FP32],
     main_sin: pl.Tensor[[MC, 64], pl.FP32],
-    main_offsets: pl.InOut[pl.Tensor[[B], pl.INT32]],
-    main_count: pl.InOut[pl.Tensor[[1], pl.INT32]],
     main_slots: pl.Tensor[[MSLOTS, 2], pl.INT32],
-    main_normed: pl.InOut[pl.Tensor[[MNORM, 512], pl.FP32]],
-    main_debug: pl.InOut[pl.Tensor[[T, 512], pl.FP32]],
     main_cache: pl.InOut[pl.Tensor[[MCACHE_ROWS, 512], pl.BF16]],
     idx_wkv: pl.Tensor[[256, 4096], pl.BF16],
     idx_wgate: pl.Tensor[[256, 4096], pl.BF16],
-    idx_value: pl.InOut[pl.Tensor[[IPROJ, 256], pl.FP32]],
-    idx_score: pl.InOut[pl.Tensor[[IPROJ, 256], pl.FP32]],
     idx_state: pl.InOut[pl.Tensor[[ISTATE_PAGES, ISTATE_ELEMS], pl.FP32]],
     idx_state_table: pl.Tensor[[B, ITABLE_COLS], pl.INT32],
     idx_ape: pl.Tensor[[4, 256], pl.FP32],
     idx_bounds: pl.Tensor[[IQ], pl.INT32],
     idx_lengths: pl.Tensor[[B], pl.INT32],
     idx_state_slots: pl.Tensor[[T, 2], pl.INT32],
-    idx_pooled: pl.InOut[pl.Tensor[[IPOOL, 128], pl.FP32]],
     idx_gamma: pl.Tensor[[128], pl.BF16],
     idx_cos: pl.Tensor[[IC, 64], pl.FP32],
     idx_sin: pl.Tensor[[IC, 64], pl.FP32],
-    idx_offsets: pl.InOut[pl.Tensor[[B], pl.INT32]],
-    idx_count: pl.InOut[pl.Tensor[[1], pl.INT32]],
     idx_slots: pl.Tensor[[ISLOTS, 2], pl.INT32],
-    idx_normed: pl.InOut[pl.Tensor[[ICPAD, 128], pl.BF16]],
     hadamard: pl.Tensor[[128, 128], pl.BF16],
-    idx_had: pl.InOut[pl.Tensor[[ICPAD, 128], pl.FP32]],
-    idx_scales: pl.InOut[pl.Tensor[[ISCALES, 1], pl.FP32]],
-    idx_debug: pl.InOut[pl.Tensor[[T, 128], pl.FP32]],
     idx_cache: pl.InOut[pl.Tensor[[ICACHE_PAGES, ICACHE_BYTES], pl.INT8]],
-    q_heads: pl.Tensor[[QUERY_HEAD_ROWS, 512], pl.BF16],
     original_table: pl.Tensor[[B, ORIGINAL_COLS], pl.INT32],
     compressed_table: pl.Tensor[[B, COMPRESSED_COLS], pl.INT32],
     indexer_table: pl.Tensor[[B, INDEXER_COLS], pl.INT32],
     idx_wq_b: pl.Tensor[[1024, 8192], pl.INT8],
     idx_wq_b_scale: pl.Tensor[[8192], pl.FP32],
-    idx_query_acc: pl.InOut[pl.Tensor[[IDX_PROJ_ROWS, 8192], pl.INT32]],
-    idx_query_rope: pl.InOut[pl.Tensor[[IDX_ROPE_ROWS, 8192], pl.BF16]],
-    idx_query_rope_heads: pl.Tensor[[IDX_ROPE_HEAD_ROWS, 128], pl.BF16],
-    idx_query_had: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]],
-    idx_query_i8: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.INT8]],
-    idx_query_scale: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 1], pl.FP32]],
-    idx_query_scale_heads: pl.Tensor[[IDX_SCALE_T_ROWS, 64], pl.FP32],
     weights_proj: pl.Tensor[[4096, 64], pl.BF16],
-    weights_partial: pl.InOut[pl.Tensor[[WEIGHTS_PARTIAL_ROWS, 64], pl.FP32]],
-    head_weights: pl.InOut[pl.Tensor[[WEIGHTS_ROWS, 64], pl.FP32]],
-    group_offsets: pl.InOut[pl.Tensor[[GROUP_OFFSET_ROWS], pl.INT32]],
-    group_plan: pl.InOut[pl.Tensor[[8], pl.INT32]],
-    coefficients: pl.InOut[pl.Tensor[[COEFF_ROWS, COEFF_COLS], pl.FP16]],
-    indexer_transfer: pl.InOut[pl.Tensor[[INDEX_TRANSFER_ROWS, INDEX_TRANSFER_COLS], pl.FP32]],
-    score_arena: pl.InOut[pl.Tensor[[SCORE_ROWS, 8192], pl.FP32]],
-    pair_arena: pl.InOut[pl.Tensor[[PAIR_ROWS, 1024], pl.FP32]],
     topk_scores: pl.InOut[pl.Tensor[[T, 512], pl.FP32]],
     topk_indices: pl.InOut[pl.Tensor[[T, 512], pl.INT32]],
-    attention_indices: pl.InOut[pl.Tensor[[ATTN_PLAN_ROWS, 512], pl.INT32]],
-    attention_bias: pl.InOut[pl.Tensor[[ATTN_PLAN_ROWS, 640], pl.FP32]],
-    attention_mask: pl.InOut[pl.Tensor[[ATTN_PLAN_ROWS, 16], pl.INT32]],
-    inverse_sin: pl.InOut[pl.Tensor[[T, 64], pl.FP32]],
     attn_sink: pl.Tensor[[64, 1], pl.FP32],
-    kv_ring: pl.InOut[pl.Tensor[[KV_RING_ROWS, 512], pl.BF16]],
-    score_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 128], pl.FP32]],
-    probability_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 128], pl.BF16]],
-    pv_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 512], pl.FP32]],
-    mi_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]],
-    li_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]],
-    packed: pl.InOut[pl.Tensor[[PACK_ROWS, 4096], pl.BF16]],
-    ffts: pl.Tensor[[256], pl.INT64],
     wo_a: pl.Tensor[[8, 4096, 1024], pl.BF16, BF16_WEIGHT_LAYOUT],
-    o_r: pl.InOut[pl.Tensor[[O_MM_ROWS, 8192], pl.FP32]],
-    o_quant: pl.InOut[pl.Tensor[[O_MM_ROWS, 8192], pl.INT8]],
-    o_scales: pl.InOut[pl.Tensor[[8, O_SCALE_ROWS], pl.FP32]],
     wo_b: pl.Tensor[[8192, 4096], pl.INT8, QUANT_WEIGHT_LAYOUT],
-    o_partials: pl.InOut[pl.Tensor[[O_MM_ROWS, 32768], pl.INT32]],
     wo_b_scale: pl.Tensor[[4096], pl.FP32],
     output: pl.InOut[pl.Tensor[[T, 16384], pl.BF16]],
-    signal: pl.InOut[pl.Tensor[[WORDS], pl.INT32]],
     QUERY_GROUP: pl.constexpr,
     QK_PANEL: pl.constexpr,
     SCORE_TILE: pl.constexpr,
@@ -851,23 +795,102 @@ def decode_csa_spmd(
     SCORE_GROUP_ORDER: pl.constexpr = False,
     PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
 ):
-    # Native cache只作为一个根入参传入。两份Key是编排内的零拷贝描述符，
-    # 避免把“可写cache+部分重叠只读视图”当作独立外部入参触发Torch别名拒绝。
-    # 这里只读取Tensor shape并建立GM view，没有Host取device值、复制cache或额外task。
+    t = pl.tensor.dim(x, 0)
+    b = pl.tensor.dim(idx_lengths, 0)
+    p8 = (t + 7) // 8 * 8
+    p16 = (t + 15) // 16 * 16
+    p64 = (t + 63) // 64 * 64
+    p128 = (t + 127) // 128 * 128
+    group = QUERY_GROUP
+    mm = pl.max(p128, (t + OB_ROWS - 1) // OB_ROWS * OB_ROWS)
+    x_fp32 = pl.create_tensor([t, 16384], dtype=pl.FP32)
+    inv = pl.create_tensor([p16, 1], dtype=pl.FP32)
+    widen_tail = pl.create_tensor([8, 16384], dtype=pl.FP32)
+    partials = pl.create_tensor([p16 * 4, 32], dtype=pl.FP32)
+    raw = pl.create_tensor([p16, 32], dtype=pl.FP32)
+    pre = pl.create_tensor([p16, 8], dtype=pl.FP32)
+    post = pl.create_tensor([t, 4], dtype=pl.FP32)
+    post_tail = pl.create_tensor([8, 8], dtype=pl.FP32)
+    comb = pl.create_tensor([t, 16], dtype=pl.FP32)
+    comb_tail = pl.create_tensor([8, 32], dtype=pl.FP32)
+    mixed = pl.create_tensor([p8, 4096], dtype=pl.BF16)
+    normed = pl.create_tensor([t, 4096], dtype=pl.BF16)
+    norm_tail = pl.create_tensor([8, 4096], dtype=pl.BF16)
+    qa = pl.create_tensor([p16, 1024], dtype=pl.FP32)
+    qr = pl.create_tensor([t, 1024], dtype=pl.INT8)
+    qr_scale = pl.create_tensor([t, 1], dtype=pl.FP32)
+    qr_matmul = pl.create_tensor([p128, 1024], dtype=pl.INT8)
+    qr_scale_pad = pl.create_tensor([p8, 1], dtype=pl.FP32)
+    rope_signed = pl.create_tensor([t, 64], dtype=pl.FP32)
+    rope_swap = pl.create_tensor([t, 64], dtype=pl.INT32)
+    q_proj = pl.create_tensor([p128, 32768], dtype=pl.INT32)
+    q_flat = pl.create_tensor([t, 32768], dtype=pl.BF16)
+    kv_fp32 = pl.create_tensor([p16, 512], dtype=pl.FP32)
+    kv = pl.create_tensor([t, 512], dtype=pl.BF16)
+    main_value = pl.create_tensor([p64, 1024], dtype=pl.FP32)
+    main_score = pl.create_tensor([p64, 1024], dtype=pl.FP32)
+    main_pooled = pl.create_tensor([t, 512], dtype=pl.FP32)
+    main_offsets = pl.create_tensor([b], dtype=pl.INT32)
+    main_count = pl.create_tensor([1], dtype=pl.INT32)
+    main_normed = pl.create_tensor([t, 512], dtype=pl.FP32)
+    main_debug = pl.create_tensor([t, 512], dtype=pl.FP32)
+    idx_value = pl.create_tensor([p16, 256], dtype=pl.FP32)
+    idx_score = pl.create_tensor([p16, 256], dtype=pl.FP32)
+    idx_pooled = pl.create_tensor([t, 128], dtype=pl.FP32)
+    idx_offsets = pl.create_tensor([b], dtype=pl.INT32)
+    idx_count = pl.create_tensor([1], dtype=pl.INT32)
+    idx_normed = pl.create_tensor([p16, 128], dtype=pl.BF16)
+    idx_had = pl.create_tensor([p16, 128], dtype=pl.FP32)
+    idx_scales = pl.create_tensor([p16, 1], dtype=pl.FP32)
+    idx_debug = pl.create_tensor([t, 128], dtype=pl.FP32)
+    idx_query_acc = pl.create_tensor([p64, 8192], dtype=pl.INT32)
+    idx_query_rope = pl.create_tensor([p16, 8192], dtype=pl.BF16)
+    idx_query_had = pl.create_tensor([t * 64, 128], dtype=pl.FP32)
+    idx_query_i8 = pl.create_tensor([t * 64, 128], dtype=pl.INT8)
+    idx_query_scale = pl.create_tensor([t * 64, 1], dtype=pl.FP32)
+    weights_partial = pl.create_tensor([p16 * 4, 64], dtype=pl.FP32)
+    head_weights = pl.create_tensor([p16, 64], dtype=pl.FP32)
+    group_offsets = pl.create_tensor(
+        [((b + 1 + 16 - 1) // 16 * 16 + 4 * t + 16 - 1) // 16 * 16 + 48 + 4 * t + 2 * b], dtype=pl.INT32
+    )
+    group_plan = pl.create_tensor([8], dtype=pl.INT32)
+    coefficients = pl.create_tensor([t * 16, group * 64], dtype=pl.FP16)
+    indexer_transfer = pl.create_tensor([24 * 2 * group, SCORE_TILE], dtype=pl.FP32)
+    score_arena = pl.create_tensor([24 * 2 * group, 8192], dtype=pl.FP32)
+    pair_arena = pl.create_tensor([t * 64, 1024], dtype=pl.FP32)
+    attention_indices = pl.create_tensor([p8, 512], dtype=pl.INT32)
+    attention_bias = pl.create_tensor([p8, 640], dtype=pl.FP32)
+    attention_mask = pl.create_tensor([p8, 16], dtype=pl.INT32)
+    inverse_sin = pl.create_tensor([t, 64], dtype=pl.FP32)
+    kv_ring = pl.create_tensor([24 * 3 * 128, 512], dtype=pl.BF16)
+    score_ring = pl.create_tensor([24 * 3 * 64, 128], dtype=pl.FP32)
+    probability_ring = pl.create_tensor([24 * 3 * 64, 128], dtype=pl.BF16)
+    pv_ring = pl.create_tensor([24 * 3 * 64, 512], dtype=pl.FP32)
+    mi_ring = pl.create_tensor([24 * 3 * 64, 1], dtype=pl.FP32)
+    li_ring = pl.create_tensor([24 * 3 * 64, 1], dtype=pl.FP32)
+    packed = pl.create_tensor([8 * p128, 4096], dtype=pl.BF16)
+    ffts = pl.create_tensor([256], dtype=pl.INT64)
+    o_r = pl.create_tensor([mm, 8192], dtype=pl.FP32)
+    o_quant = pl.create_tensor([mm, 8192], dtype=pl.INT8)
+    o_scales = pl.create_tensor([8, p128], dtype=pl.FP32)
+    o_partials = pl.create_tensor([mm, 32768], dtype=pl.INT32)
+    signal = pl.create_tensor([PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS], dtype=pl.INT32)
+    q_heads = pl.reshape(q_flat, [t * 64, 512])
+    rope_rows = pl.tensor.dim(idx_query_rope, 0)
+    idx_query_rope_heads = pl.reshape(idx_query_rope, [rope_rows * 64, 128])
+    idx_query_scale_heads = pl.reshape(idx_query_scale, [t, 64])
+    signal_matrix = pl.reshape(signal, [48, (PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS)])
+    with pl.spmd(48, sync_start=True):
+        signal_matrix = _clear_internal_signal(signal_matrix)
+    signal = pl.reshape(signal_matrix, [PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS])
     pages = pl.tensor.dim(idx_cache, 0)
     page_bytes = pl.tensor.dim(idx_cache, 1)
     cache_flat = pl.reshape(idx_cache, [pages * page_bytes])
-    # 两个视图均只包含完整128字节行；它们重叠但只读。cache写入仍走原始页布局。
-    # 切片先命名再reshape，让JIT沿张量维度表达式传递类型；不创建额外GM allocation。
-    prefix = cache_flat[0 : (pages * page_bytes // 128) * 128]
-    shifted = cache_flat[64 : 64 + ((pages * page_bytes - 64) // 128) * 128]
+    prefix = cache_flat[0 : pages * page_bytes // 128 * 128]
+    shifted = cache_flat[64 : 64 + (pages * page_bytes - 64) // 128 * 128]
     idx_key0 = pl.reshape(prefix, [pages * page_bytes // 128, 128])
     idx_key64 = pl.reshape(shifted, [(pages * page_bytes - 64) // 128, 128])
-    # 所有数学/设备metadata/跨核等待均在这一次SPMD内；不再创建前置meta任务。
-    # sync_start只约束本次MIX核组准入，不代表各核硬件同周期起跑。
     with pl.spmd(GROUPS, sync_start=True):
-        # 本scope只派发预定义MIX；权重缓存属性在实际cube_schedule函数声明，
-        # 不能在此使用只适用于inline核体的set_cache_policy。
         (
             x_fp32,
             inv,
@@ -1111,82 +1134,437 @@ def decode_csa_spmd(
             SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
             PLAN_TABLE_COLUMNS=PLAN_TABLE_COLUMNS,
         )
-    return (
-        x_fp32,
-        inv,
-        widen_tail,
-        partials,
-        raw,
-        pre,
-        post,
-        post_tail,
-        comb,
-        comb_tail,
-        mixed,
-        normed,
-        norm_tail,
-        qa,
-        qr,
-        qr_scale,
-        qr_matmul,
-        qr_scale_pad,
-        rope_signed,
-        rope_swap,
-        q_proj,
-        q_flat,
-        kv_fp32,
-        kv,
-        cache_rows,
-        main_value,
-        main_score,
-        main_state,
-        main_pooled,
-        main_offsets,
-        main_count,
-        main_normed,
-        main_debug,
-        main_cache,
-        idx_value,
-        idx_score,
-        idx_state,
-        idx_pooled,
-        idx_offsets,
-        idx_count,
-        idx_normed,
-        idx_had,
-        idx_scales,
-        idx_debug,
-        idx_cache,
-        idx_query_acc,
-        idx_query_rope,
-        idx_query_had,
-        idx_query_i8,
-        idx_query_scale,
-        weights_partial,
-        head_weights,
-        group_offsets,
-        group_plan,
-        coefficients,
-        indexer_transfer,
-        score_arena,
-        pair_arena,
-        topk_scores,
-        topk_indices,
-        attention_indices,
-        attention_bias,
-        attention_mask,
-        inverse_sin,
-        kv_ring,
-        score_ring,
-        probability_ring,
-        pv_ring,
-        mi_ring,
-        li_ring,
-        packed,
-        o_r,
-        o_quant,
-        o_scales,
-        o_partials,
-        output,
-        signal,
+    return (cache_rows, main_state, main_cache, idx_state, idx_cache, topk_scores, topk_indices, output)
+
+
+@pl.jit
+def decode_csa_spmd(
+    x: pl.Tensor[[T, 16384], pl.BF16],
+    hc_fn: pl.Tensor[[24, 16384], pl.FP32],
+    hc_scale: pl.Tensor[[3], pl.FP32],
+    hc_base: pl.Tensor[[24], pl.FP32],
+    hc_base_2d: pl.Tensor[[1, 24], pl.FP32],
+    norm_w: pl.Tensor[[4096], pl.BF16],
+    wq_a: pl.Tensor[[1024, 4096], pl.BF16, BF16_WEIGHT_LAYOUT],
+    gamma_cq: pl.Tensor[[1024], pl.BF16],
+    wq_b: pl.Tensor[[1024, 32768], pl.INT8, QUANT_WEIGHT_LAYOUT],
+    wq_b_scale: pl.Tensor[[32768], pl.FP32],
+    rope_cos: pl.Tensor[[T, 64], pl.FP32],
+    rope_sin: pl.Tensor[[T, 64], pl.FP32],
+    wkv: pl.Tensor[[4096, 512], pl.BF16],
+    gamma_ckv: pl.Tensor[[512], pl.BF16],
+    native_slots: pl.Tensor[[T, 2], pl.INT32],
+    cache_rows: pl.InOut[pl.Tensor[[CACHE_ROWS, 512], pl.BF16]],
+    main_wkv: pl.Tensor[[1024, 4096], pl.BF16],
+    main_wgate: pl.Tensor[[1024, 4096], pl.BF16],
+    main_state: pl.InOut[pl.Tensor[[MSTATE_PAGES, MSTATE_ELEMS], pl.FP32]],
+    main_state_table: pl.Tensor[[B, MTABLE_COLS], pl.INT32],
+    main_ape: pl.Tensor[[4, 1024], pl.FP32],
+    positions: pl.Tensor[[T], pl.INT64],
+    main_bounds: pl.Tensor[[MQ], pl.INT32],
+    main_lengths: pl.Tensor[[B], pl.INT32],
+    main_state_slots: pl.Tensor[[T, 2], pl.INT32],
+    main_gamma: pl.Tensor[[512], pl.BF16],
+    main_cos: pl.Tensor[[MC, 64], pl.FP32],
+    main_sin: pl.Tensor[[MC, 64], pl.FP32],
+    main_slots: pl.Tensor[[MSLOTS, 2], pl.INT32],
+    main_cache: pl.InOut[pl.Tensor[[MCACHE_ROWS, 512], pl.BF16]],
+    idx_wkv: pl.Tensor[[256, 4096], pl.BF16],
+    idx_wgate: pl.Tensor[[256, 4096], pl.BF16],
+    idx_state: pl.InOut[pl.Tensor[[ISTATE_PAGES, ISTATE_ELEMS], pl.FP32]],
+    idx_state_table: pl.Tensor[[B, ITABLE_COLS], pl.INT32],
+    idx_ape: pl.Tensor[[4, 256], pl.FP32],
+    idx_bounds: pl.Tensor[[IQ], pl.INT32],
+    idx_lengths: pl.Tensor[[B], pl.INT32],
+    idx_state_slots: pl.Tensor[[T, 2], pl.INT32],
+    idx_gamma: pl.Tensor[[128], pl.BF16],
+    idx_cos: pl.Tensor[[IC, 64], pl.FP32],
+    idx_sin: pl.Tensor[[IC, 64], pl.FP32],
+    idx_slots: pl.Tensor[[ISLOTS, 2], pl.INT32],
+    hadamard: pl.Tensor[[128, 128], pl.BF16],
+    idx_cache: pl.InOut[pl.Tensor[[ICACHE_PAGES, ICACHE_BYTES], pl.INT8]],
+    original_table: pl.Tensor[[B, ORIGINAL_COLS], pl.INT32],
+    compressed_table: pl.Tensor[[B, COMPRESSED_COLS], pl.INT32],
+    indexer_table: pl.Tensor[[B, INDEXER_COLS], pl.INT32],
+    idx_wq_b: pl.Tensor[[1024, 8192], pl.INT8],
+    idx_wq_b_scale: pl.Tensor[[8192], pl.FP32],
+    weights_proj: pl.Tensor[[4096, 64], pl.BF16],
+    attn_sink: pl.Tensor[[64, 1], pl.FP32],
+    wo_a: pl.Tensor[[8, 4096, 1024], pl.BF16, BF16_WEIGHT_LAYOUT],
+    wo_b: pl.Tensor[[8192, 4096], pl.INT8, QUANT_WEIGHT_LAYOUT],
+    wo_b_scale: pl.Tensor[[4096], pl.FP32],
+    output: pl.InOut[pl.Tensor[[T, 16384], pl.BF16]],
+    QUERY_GROUP: pl.constexpr,
+    QK_PANEL: pl.constexpr,
+    SCORE_TILE: pl.constexpr,
+    PREFETCH: pl.constexpr,
+    TO_L0: pl.constexpr,
+    BALANCED: pl.constexpr,
+    ROOTS: pl.constexpr,
+    OA_COLS: pl.constexpr,
+    OA_ROWS: pl.constexpr,
+    OB_ROWS: pl.constexpr,
+    OUTPUT_GROUP_PIPELINE: pl.constexpr,
+    HC_ROW_DEPENDENCIES: pl.constexpr,
+    ATTENTION_QUERY_METADATA: pl.constexpr,
+    HC_CONSUMER_REDUCE: pl.constexpr,
+    QA_M16_PARALLEL: pl.constexpr = False,
+    COOPERATIVE_PREFIX: pl.constexpr = False,
+    EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
+    LOCAL_ATTENTION_STATS: pl.constexpr = False,
+    SCALE_PAGE_COALESCING: pl.constexpr = False,
+    LEAF_SCALE_LAYOUT: pl.constexpr = False,
+    PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+    SPLIT_SCORE_ROWS: pl.constexpr = False,
+    OUTPUT_WORK_BALANCE: pl.constexpr = False,
+    SHORT_HALF_SCORE_UB: pl.constexpr = False,
+    SHORT_TOPK_PREFIX: pl.constexpr = False,
+    QB_WIDE_N: pl.constexpr = False,
+    PREFIX_BRANCH_GROUPS: pl.constexpr = 4,
+    JOINT_BF16_PREFIX: pl.constexpr = False,
+    PREFIX_PROJECTION_ROWS: pl.constexpr = 128,
+    SCORE_GROUP_ORDER: pl.constexpr = False,
+    PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
+):
+    t = pl.tensor.dim(x, 0)
+    topk_indices = pl.create_tensor([t, 512], dtype=pl.INT32)
+    topk_scores = pl.create_tensor([t, 512], dtype=pl.FP32)
+    b = pl.tensor.dim(idx_lengths, 0)
+    p8 = (t + 7) // 8 * 8
+    p16 = (t + 15) // 16 * 16
+    p64 = (t + 63) // 64 * 64
+    p128 = (t + 127) // 128 * 128
+    group = QUERY_GROUP
+    mm = pl.max(p128, (t + OB_ROWS - 1) // OB_ROWS * OB_ROWS)
+    x_fp32 = pl.create_tensor([t, 16384], dtype=pl.FP32)
+    inv = pl.create_tensor([p16, 1], dtype=pl.FP32)
+    widen_tail = pl.create_tensor([8, 16384], dtype=pl.FP32)
+    partials = pl.create_tensor([p16 * 4, 32], dtype=pl.FP32)
+    raw = pl.create_tensor([p16, 32], dtype=pl.FP32)
+    pre = pl.create_tensor([p16, 8], dtype=pl.FP32)
+    post = pl.create_tensor([t, 4], dtype=pl.FP32)
+    post_tail = pl.create_tensor([8, 8], dtype=pl.FP32)
+    comb = pl.create_tensor([t, 16], dtype=pl.FP32)
+    comb_tail = pl.create_tensor([8, 32], dtype=pl.FP32)
+    mixed = pl.create_tensor([p8, 4096], dtype=pl.BF16)
+    normed = pl.create_tensor([t, 4096], dtype=pl.BF16)
+    norm_tail = pl.create_tensor([8, 4096], dtype=pl.BF16)
+    qa = pl.create_tensor([p16, 1024], dtype=pl.FP32)
+    qr = pl.create_tensor([t, 1024], dtype=pl.INT8)
+    qr_scale = pl.create_tensor([t, 1], dtype=pl.FP32)
+    qr_matmul = pl.create_tensor([p128, 1024], dtype=pl.INT8)
+    qr_scale_pad = pl.create_tensor([p8, 1], dtype=pl.FP32)
+    rope_signed = pl.create_tensor([t, 64], dtype=pl.FP32)
+    rope_swap = pl.create_tensor([t, 64], dtype=pl.INT32)
+    q_proj = pl.create_tensor([p128, 32768], dtype=pl.INT32)
+    q_flat = pl.create_tensor([t, 32768], dtype=pl.BF16)
+    kv_fp32 = pl.create_tensor([p16, 512], dtype=pl.FP32)
+    kv = pl.create_tensor([t, 512], dtype=pl.BF16)
+    main_value = pl.create_tensor([p64, 1024], dtype=pl.FP32)
+    main_score = pl.create_tensor([p64, 1024], dtype=pl.FP32)
+    main_pooled = pl.create_tensor([t, 512], dtype=pl.FP32)
+    main_offsets = pl.create_tensor([b], dtype=pl.INT32)
+    main_count = pl.create_tensor([1], dtype=pl.INT32)
+    main_normed = pl.create_tensor([t, 512], dtype=pl.FP32)
+    main_debug = pl.create_tensor([t, 512], dtype=pl.FP32)
+    idx_value = pl.create_tensor([p16, 256], dtype=pl.FP32)
+    idx_score = pl.create_tensor([p16, 256], dtype=pl.FP32)
+    idx_pooled = pl.create_tensor([t, 128], dtype=pl.FP32)
+    idx_offsets = pl.create_tensor([b], dtype=pl.INT32)
+    idx_count = pl.create_tensor([1], dtype=pl.INT32)
+    idx_normed = pl.create_tensor([p16, 128], dtype=pl.BF16)
+    idx_had = pl.create_tensor([p16, 128], dtype=pl.FP32)
+    idx_scales = pl.create_tensor([p16, 1], dtype=pl.FP32)
+    idx_debug = pl.create_tensor([t, 128], dtype=pl.FP32)
+    idx_query_acc = pl.create_tensor([p64, 8192], dtype=pl.INT32)
+    idx_query_rope = pl.create_tensor([p16, 8192], dtype=pl.BF16)
+    idx_query_had = pl.create_tensor([t * 64, 128], dtype=pl.FP32)
+    idx_query_i8 = pl.create_tensor([t * 64, 128], dtype=pl.INT8)
+    idx_query_scale = pl.create_tensor([t * 64, 1], dtype=pl.FP32)
+    weights_partial = pl.create_tensor([p16 * 4, 64], dtype=pl.FP32)
+    head_weights = pl.create_tensor([p16, 64], dtype=pl.FP32)
+    group_offsets = pl.create_tensor(
+        [((b + 1 + 16 - 1) // 16 * 16 + 4 * t + 16 - 1) // 16 * 16 + 48 + 4 * t + 2 * b], dtype=pl.INT32
     )
+    group_plan = pl.create_tensor([8], dtype=pl.INT32)
+    coefficients = pl.create_tensor([t * 16, group * 64], dtype=pl.FP16)
+    indexer_transfer = pl.create_tensor([24 * 2 * group, SCORE_TILE], dtype=pl.FP32)
+    score_arena = pl.create_tensor([24 * 2 * group, 8192], dtype=pl.FP32)
+    pair_arena = pl.create_tensor([t * 64, 1024], dtype=pl.FP32)
+    attention_indices = pl.create_tensor([p8, 512], dtype=pl.INT32)
+    attention_bias = pl.create_tensor([p8, 640], dtype=pl.FP32)
+    attention_mask = pl.create_tensor([p8, 16], dtype=pl.INT32)
+    inverse_sin = pl.create_tensor([t, 64], dtype=pl.FP32)
+    kv_ring = pl.create_tensor([24 * 3 * 128, 512], dtype=pl.BF16)
+    score_ring = pl.create_tensor([24 * 3 * 64, 128], dtype=pl.FP32)
+    probability_ring = pl.create_tensor([24 * 3 * 64, 128], dtype=pl.BF16)
+    pv_ring = pl.create_tensor([24 * 3 * 64, 512], dtype=pl.FP32)
+    mi_ring = pl.create_tensor([24 * 3 * 64, 1], dtype=pl.FP32)
+    li_ring = pl.create_tensor([24 * 3 * 64, 1], dtype=pl.FP32)
+    packed = pl.create_tensor([8 * p128, 4096], dtype=pl.BF16)
+    ffts = pl.create_tensor([256], dtype=pl.INT64)
+    o_r = pl.create_tensor([mm, 8192], dtype=pl.FP32)
+    o_quant = pl.create_tensor([mm, 8192], dtype=pl.INT8)
+    o_scales = pl.create_tensor([8, p128], dtype=pl.FP32)
+    o_partials = pl.create_tensor([mm, 32768], dtype=pl.INT32)
+    signal = pl.create_tensor([PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS], dtype=pl.INT32)
+    q_heads = pl.reshape(q_flat, [t * 64, 512])
+    rope_rows = pl.tensor.dim(idx_query_rope, 0)
+    idx_query_rope_heads = pl.reshape(idx_query_rope, [rope_rows * 64, 128])
+    idx_query_scale_heads = pl.reshape(idx_query_scale, [t, 64])
+    signal_matrix = pl.reshape(signal, [48, (PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS)])
+    with pl.spmd(48, sync_start=True):
+        signal_matrix = _clear_internal_signal(signal_matrix)
+    signal = pl.reshape(signal_matrix, [PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS])
+    pages = pl.tensor.dim(idx_cache, 0)
+    page_bytes = pl.tensor.dim(idx_cache, 1)
+    cache_flat = pl.reshape(idx_cache, [pages * page_bytes])
+    prefix = cache_flat[0 : pages * page_bytes // 128 * 128]
+    shifted = cache_flat[64 : 64 + (pages * page_bytes - 64) // 128 * 128]
+    idx_key0 = pl.reshape(prefix, [pages * page_bytes // 128, 128])
+    idx_key64 = pl.reshape(shifted, [(pages * page_bytes - 64) // 128, 128])
+    with pl.spmd(GROUPS, sync_start=True):
+        (
+            x_fp32,
+            inv,
+            widen_tail,
+            partials,
+            raw,
+            pre,
+            post,
+            post_tail,
+            comb,
+            comb_tail,
+            mixed,
+            normed,
+            norm_tail,
+            qa,
+            qr,
+            qr_scale,
+            qr_matmul,
+            qr_scale_pad,
+            rope_signed,
+            rope_swap,
+            q_proj,
+            q_flat,
+            kv_fp32,
+            kv,
+            cache_rows,
+            main_value,
+            main_score,
+            main_state,
+            main_pooled,
+            main_offsets,
+            main_count,
+            main_normed,
+            main_debug,
+            main_cache,
+            idx_value,
+            idx_score,
+            idx_state,
+            idx_pooled,
+            idx_offsets,
+            idx_count,
+            idx_normed,
+            idx_had,
+            idx_scales,
+            idx_debug,
+            idx_cache,
+            idx_query_acc,
+            idx_query_rope,
+            idx_query_had,
+            idx_query_i8,
+            idx_query_scale,
+            weights_partial,
+            head_weights,
+            group_offsets,
+            group_plan,
+            coefficients,
+            indexer_transfer,
+            score_arena,
+            pair_arena,
+            topk_scores,
+            topk_indices,
+            attention_indices,
+            attention_bias,
+            attention_mask,
+            inverse_sin,
+            kv_ring,
+            score_ring,
+            probability_ring,
+            pv_ring,
+            mi_ring,
+            li_ring,
+            packed,
+            o_r,
+            o_quant,
+            o_scales,
+            o_partials,
+            output,
+            signal,
+        ) = _csa_core_group(
+            x,
+            hc_fn,
+            hc_scale,
+            hc_base,
+            hc_base_2d,
+            norm_w,
+            wq_a,
+            gamma_cq,
+            x_fp32,
+            inv,
+            widen_tail,
+            partials,
+            raw,
+            pre,
+            post,
+            post_tail,
+            comb,
+            comb_tail,
+            mixed,
+            normed,
+            norm_tail,
+            qa,
+            qr,
+            qr_scale,
+            qr_matmul,
+            qr_scale_pad,
+            wq_b,
+            wq_b_scale,
+            rope_cos,
+            rope_sin,
+            rope_signed,
+            rope_swap,
+            q_proj,
+            q_flat,
+            wkv,
+            gamma_ckv,
+            kv_fp32,
+            kv,
+            native_slots,
+            cache_rows,
+            main_wkv,
+            main_wgate,
+            main_value,
+            main_score,
+            main_state,
+            main_state_table,
+            main_ape,
+            positions,
+            main_bounds,
+            main_lengths,
+            main_state_slots,
+            main_pooled,
+            main_gamma,
+            main_cos,
+            main_sin,
+            main_offsets,
+            main_count,
+            main_slots,
+            main_normed,
+            main_debug,
+            main_cache,
+            idx_wkv,
+            idx_wgate,
+            idx_value,
+            idx_score,
+            idx_state,
+            idx_state_table,
+            idx_ape,
+            idx_bounds,
+            idx_lengths,
+            idx_state_slots,
+            idx_pooled,
+            idx_gamma,
+            idx_cos,
+            idx_sin,
+            idx_offsets,
+            idx_count,
+            idx_slots,
+            idx_normed,
+            hadamard,
+            idx_had,
+            idx_scales,
+            idx_debug,
+            idx_cache,
+            q_heads,
+            original_table,
+            compressed_table,
+            indexer_table,
+            idx_wq_b,
+            idx_wq_b_scale,
+            idx_query_acc,
+            idx_query_rope,
+            idx_query_rope_heads,
+            idx_query_had,
+            idx_query_i8,
+            idx_query_scale,
+            idx_query_scale_heads,
+            weights_proj,
+            weights_partial,
+            head_weights,
+            group_offsets,
+            group_plan,
+            coefficients,
+            idx_key0,
+            idx_key64,
+            indexer_transfer,
+            score_arena,
+            pair_arena,
+            topk_scores,
+            topk_indices,
+            attention_indices,
+            attention_bias,
+            attention_mask,
+            inverse_sin,
+            attn_sink,
+            kv_ring,
+            score_ring,
+            probability_ring,
+            pv_ring,
+            mi_ring,
+            li_ring,
+            packed,
+            ffts,
+            wo_a,
+            o_r,
+            o_quant,
+            o_scales,
+            wo_b,
+            o_partials,
+            wo_b_scale,
+            output,
+            signal,
+            QUERY_GROUP,
+            QK_PANEL,
+            SCORE_TILE,
+            PREFETCH,
+            TO_L0,
+            BALANCED,
+            ROOTS,
+            OA_COLS,
+            OA_ROWS,
+            OB_ROWS,
+            OUTPUT_GROUP_PIPELINE,
+            HC_ROW_DEPENDENCIES,
+            ATTENTION_QUERY_METADATA,
+            HC_CONSUMER_REDUCE,
+            QA_M16_PARALLEL,
+            COOPERATIVE_PREFIX,
+            EARLY_ATTENTION_GEOMETRY,
+            LOCAL_ATTENTION_STATS,
+            SCALE_PAGE_COALESCING,
+            LEAF_SCALE_LAYOUT,
+            PLAN_PHYSICAL_ROWS,
+            SPLIT_SCORE_ROWS,
+            OUTPUT_WORK_BALANCE,
+            SHORT_HALF_SCORE_UB,
+            SHORT_TOPK_PREFIX,
+            QB_WIDE_N,
+            PREFIX_BRANCH_GROUPS,
+            JOINT_BF16_PREFIX,
+            PREFIX_PROJECTION_ROWS,
+            SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
+            PLAN_TABLE_COLUMNS=PLAN_TABLE_COLUMNS,
+        )
+    return (cache_rows, main_state, main_cache, idx_state, idx_cache, output)

@@ -3,7 +3,7 @@
 
 只检查描述符并建立同存储的 view。Q/L 的内容、每个请求的范围和 C4 输出数
 继续由设备端解释；本层不回读设备元数据、不按 T/B 构造请求、不创建 B×6
-中间输入。权重和 Top-K/output 工作区由服务持有并在捕获前准备。
+中间输入。权重及正式output由Native提供；Top-K仅为可选诊断输出。
 
 五个 cache group 保留各自的 Native 页表、slots 和 state，主/Indexer 的
 紧凑 metadata 也分别绑定。后续 binding 对完整根参数和工作区再作 ABI 校验。
@@ -43,8 +43,8 @@ def bind_native_inputs(
     layer_name: str,
     compact_metadata: Mapping,
     output: torch.Tensor,
-    topk: torch.Tensor,
-    topk_scores: torch.Tensor,
+    topk: torch.Tensor | None = None,
+    topk_scores: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """绑定一个 Native decode 调用；不分配业务 Tensor，也不消费 metadata 值。"""
     if hidden.ndim != 3 or hidden.shape[1:] != (4, 4096):
@@ -56,11 +56,16 @@ def bind_native_inputs(
         raise ValueError("TND CSA要求Native INT64 positions覆盖token容量")
     if output.shape != hidden.shape or output.dtype != hidden.dtype or not output.is_contiguous():
         raise ValueError("TND CSA输出须与hidden描述符一致")
-    if topk.shape != (tokens, 512) or topk.dtype != torch.int32:
-        raise ValueError("TND CSA Top-K要求INT32[T_capacity,512]")
-    if topk_scores.shape != (tokens, 512) or topk_scores.dtype != torch.float32:
-        raise ValueError("TND CSA scores要求FP32[T_capacity,512]")
-    if any(value.device != hidden.device for value in (positions, output, topk, topk_scores)):
+    if (topk is None) != (topk_scores is None):
+        raise ValueError("诊断Top-K索引与分数必须同时提供")
+    outputs = [positions, output]
+    if topk is not None:
+        if topk.shape != (tokens, 512) or topk.dtype != torch.int32:
+            raise ValueError("诊断Top-K要求INT32[T_capacity,512]")
+        if topk_scores.shape != (tokens, 512) or topk_scores.dtype != torch.float32:
+            raise ValueError("诊断scores要求FP32[T_capacity,512]")
+        outputs.extend((topk, topk_scores))
+    if any(value.device != hidden.device for value in outputs):
         raise ValueError("TND CSA根输入输出须处于同一设备")
 
     req = {name: item[0].decode for name, item in groups.items()}
@@ -89,9 +94,9 @@ def bind_native_inputs(
         idx_query_start_loc=req["indexer"].query_start_loc,
         compress_state=physical_pages(views["state"][0]),
         inner_compress_state=physical_pages(views["indexer_state"][0]),
-        idx_topk=topk,
-        idx_topk_scores=topk_scores,
     )
+    if topk is not None:
+        native.update(idx_topk=topk, idx_topk_scores=topk_scores)
     for name, prefix in (
         ("swa", "ori"),
         ("compressed", "cmp"),

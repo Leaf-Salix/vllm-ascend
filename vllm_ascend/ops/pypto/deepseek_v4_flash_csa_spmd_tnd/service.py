@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TND单SPMD服务：Native描述符判定、按容量准备和复用工作区、直接提交。
+"""TND单SPMD服务：Native描述符判定、按描述符准备绑定、调用内申请工作区、直接提交。
 
 沿用Native的cache connector生命周期及同一步跨层compact metadata复用。
 与旧多task入口分开，绝不从token数反算请求数。已有Host字段只用于支持范围
 和策略选择，逐请求计算仍读device Q/L。首版短历史范围见service_config。
 
-准备对象按根Tensor描述符和策略缓存，warmup完成分配；capture可替换同描述符
-的输入/输出地址，保留工作区与信号代际。图重放不会经过Python判定，因此
+准备对象按根Tensor描述符和策略缓存，不持有外部工作区；capture可替换同描述符
+的输入/输出地址。临时Tensor及信号的初始化和生命周期均在PTO调用内部。图重放不会经过Python判定，因此
 服务路由集成还必须验证捕获的请求容量、策略和metadata地址合同。
 """
 
@@ -69,7 +69,7 @@ class CSAServiceRuntime(AttentionServiceBase):
     def _prepare_binding(native, **options):
         return PreparedDynamicCSA(native, **options)
 
-    def __init__(self, attention, operators, max_num_seqs, layer=None, *, workspace_pool=None):
+    def __init__(self, attention, operators, max_num_seqs, layer=None):
         # operators参数保留模型准备钩子的统一调用约定；本实现不注册多task算子。
         if operators is not None:
             raise ValueError("TND CSA直接提交，不接受旧BSH CSAOperators")
@@ -85,9 +85,7 @@ class CSAServiceRuntime(AttentionServiceBase):
         }
         self.batch_capacity = max_num_seqs
         self._hadamard = None
-        self._outputs = {}
         self._bindings = {}
-        self._workspace_pool = workspace_pool
         self.submissions = 0
         self.empty_calls = 0
         self.last_binding = None
@@ -307,15 +305,6 @@ class CSAServiceRuntime(AttentionServiceBase):
             "indexer_state": (metadata["indexer_state"], (indexer_state,)),
         }
         tokens = hidden.shape[0]
-        output_key = (tokens, hidden.device)
-        if output_key not in self._outputs:
-            if capturing:
-                raise RuntimeError("TND CSA须在捕获前准备当前token容量的Top-K工作区")
-            self._outputs[output_key] = (
-                torch.empty((tokens, 512), dtype=torch.int32, device=hidden.device),
-                torch.empty((tokens, 512), dtype=torch.float32, device=hidden.device),
-            )
-        topk, scores = self._outputs[output_key]
         native = bind_native_inputs(
             self.weights,
             hidden,
@@ -324,8 +313,6 @@ class CSAServiceRuntime(AttentionServiceBase):
             layer_name=self.layer_name,
             compact_metadata=compact,
             output=output,
-            topk=topk,
-            topk_scores=scores,
         )
         requests = native["kv_seq_lens"].numel()
         maximum = metadata["indexer"].decode.max_seq_lens
@@ -347,7 +334,6 @@ class CSAServiceRuntime(AttentionServiceBase):
                 max_query_tokens=MAX_QUERY_TOKENS,
                 max_seq_len=maximum,
                 policy=policy,
-                allocator=None if self._workspace_pool is None else self._workspace_pool.allocate,
             )
         else:
             self._bindings[key].rebind(native)

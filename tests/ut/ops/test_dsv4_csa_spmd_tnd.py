@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """TND服务入参的CPU合同检查；不把描述符通过当作设备数学通过。"""
 
+import ast
+import importlib
+from pathlib import Path
 from types import SimpleNamespace as NS
 
 import pytest
@@ -10,6 +13,39 @@ from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.native_adapter import 
 from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.policy import select_policy
 from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.service import CSAServiceRuntime
 from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.service_config import supported_descriptor
+
+
+@pytest.mark.parametrize(
+    "package,symbol",
+    [("deepseek_v4_flash_csa_tnd", "decode_csa_tnd"), ("deepseek_v4_flash_csa_spmd_tnd", "decode_csa_spmd")],
+)
+def test_internal_normal_and_diagnostic_entries_share_math_and_schedule(package, symbol):
+    """诊断入口只改变Top-K的可观察性，不能另带一套数学或调度实现。"""
+    module = importlib.import_module(f"vllm_ascend.ops.pypto.{package}")
+    tree = ast.parse(Path(module.__file__).with_name("entry.py").read_text())
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    topk = {"topk_indices", "topk_scores"}
+
+    def comparable_body(function):
+        body = []
+        for node in function.body:
+            if (
+                isinstance(node, ast.Assign)
+                and isinstance(node.value, ast.Call)
+                and ast.unparse(node.value.func) == "pl.create_tensor"
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id in topk
+            ):
+                continue
+            if isinstance(node, ast.Return):
+                assert isinstance(node.value, ast.Tuple)
+                values = [value for value in node.value.elts if not isinstance(value, ast.Name) or value.id not in topk]
+                node = ast.Return(value=ast.Tuple(elts=values, ctx=ast.Load()))
+            body.append(node)
+        return ast.dump(ast.Module(body=body, type_ignores=[]))
+
+    assert comparable_body(functions[symbol]) == comparable_body(functions[symbol + "_debug"])
 
 
 @pytest.mark.parametrize(
@@ -420,15 +456,13 @@ def test_tnd_service_gate_rejects_unsupported_native_calls(fault):
 
 
 @pytest.mark.parametrize("variant", ["spmd_tnd", "mpmd_tnd"])
-@pytest.mark.parametrize("shared_workspace", [False, True])
-def test_custom_op_routes_mixed_tnd_and_reuses_prepared_workspace(monkeypatch, variant, shared_workspace):
+def test_custom_op_routes_mixed_tnd_and_reuses_prepared_binding(monkeypatch, variant):
     """真实custom-op Python边界接入新service；CPU桩只替代设备提交。"""
     import importlib
 
     from vllm_ascend import memcache_comm_fence
     from vllm_ascend.attention import utils as attention_utils
     from vllm_ascend.ops import dsa, dsv4_csa
-    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.workspace import TNDWorkspacePool
 
     package = "deepseek_v4_flash_csa_spmd_tnd" if variant == "spmd_tnd" else "deepseek_v4_flash_csa_tnd"
     service = importlib.import_module(f"vllm_ascend.ops.pypto.{package}.service")
@@ -449,16 +483,14 @@ def test_custom_op_routes_mixed_tnd_and_reuses_prepared_workspace(monkeypatch, v
     runtime.wrapper = wrapper
     runtime.weights = {}
     runtime._hadamard = hadamard
-    runtime._outputs = {}
     runtime._bindings = {}
-    runtime._workspace_pool = TNDWorkspacePool() if shared_workspace else None
     runtime.submissions = 0
     runtime.last_binding = None
 
     class Prepared:
         def __init__(self, native, **kwargs):
-            expected = runtime._workspace_pool.allocate if shared_workspace else None
-            assert kwargs["allocator"] == expected
+            assert "allocator" not in kwargs
+            assert "idx_topk" not in native and "idx_topk_scores" not in native
             self.native = native
             self.rebinds = 0
             prepared_calls.append(self)
@@ -490,7 +522,7 @@ def test_custom_op_routes_mixed_tnd_and_reuses_prepared_workspace(monkeypatch, v
     monkeypatch.setattr(memcache_comm_fence, "record_attention_compute_start", lambda: events.append("start"))
     monkeypatch.setattr(dsv4_csa, "_native_attention_half", lambda *args: events.append("native"))
     dsv4_csa.dsv4_csa_forward(case["hidden"], case["positions"], case["output"], "layer")
-    # capture的output地址可能不同；描述符相同时沿用工作区。
+    # capture的output地址可能不同；描述符相同时沿用绑定，scratch在调用内部申请。
     second_output = torch.empty_like(case["output"])
     monkeypatch.setattr(torch.npu, "is_current_stream_capturing", lambda: True)
     dsv4_csa.dsv4_csa_forward(case["hidden"], case["positions"], second_output, "layer")
