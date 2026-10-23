@@ -44,8 +44,11 @@ class PreparedDynamicCSA:
         self.requests = b = native["kv_seq_lens"].numel()
         if hidden.shape != (t, 4, 4096) or hidden.dtype != torch.bfloat16 or not hidden.is_contiguous():
             raise ValueError("要求Native BF16连续hidden[T,4,4096]")
+        if native["cmp_block_table"].ndim != 2:
+            raise ValueError("cmp_block_table须为二维Tensor")
         self.policy = policy or select_policy(
-            tokens=t, requests=b, max_query_tokens=max_query_tokens, max_seq_len=max_seq_len
+            tokens=t, requests=b, max_query_tokens=max_query_tokens, max_seq_len=max_seq_len,
+            compressed_table_columns=native["cmp_block_table"].shape[1],
         )
         device = hidden.device
         self.buffers: dict[str, torch.Tensor] = {}

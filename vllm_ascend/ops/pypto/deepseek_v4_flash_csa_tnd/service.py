@@ -19,9 +19,8 @@ class CSAServiceRuntime(TNDServiceRuntime):
 
     @staticmethod
     def _select_policy(*, compressed_table_columns=None, **descriptors):
-        # The shared service supplies this SPMD-only UB capacity descriptor.
-        # MPMD keeps its existing task resource policy and kernel arguments.
-        return select_policy(**descriptors)
+        # 复用服务已有页表形状描述符，不读取设备Q/L或页表内容。
+        return select_policy(compressed_table_columns=compressed_table_columns, **descriptors)
 
     @staticmethod
     def _prepare_binding(native, **options):

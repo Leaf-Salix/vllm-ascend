@@ -10,6 +10,7 @@ Q/L、slots、页表和 compact metadata 保持 Native 原存储。核内数学�
 import pypto.language as pl
 
 from .attention_plan_stages import (
+    PHYSICAL_PLAN_COLUMNS,
     attention_geometry_prepare_stage,
     attention_inverse_rope_sign_stage,
     attention_slot_plan_stage,
@@ -386,6 +387,7 @@ def sparse_attn_vector(
     ATTENTION_QUERY_METADATA: pl.constexpr,
     LOCAL_ATTENTION_STATS: pl.constexpr,
     PLAN_PHYSICAL_ROWS: pl.constexpr,
+    PLAN_TABLE_COLUMNS: pl.constexpr,
 ):
     pl.func_attr({"split_aiv": True})
     pl.system.set_ffts(ffts)
@@ -418,6 +420,7 @@ def sparse_attn_vector(
         ATTENTION_QUERY_METADATA,
         LOCAL_ATTENTION_STATS,
         PLAN_PHYSICAL_ROWS,
+        PLAN_TABLE_COLUMNS,
     )
     return (kv_ring, probability_ring, mi_ring, li_ring, packed)
 
@@ -449,6 +452,7 @@ def sparse_attn_group(
     ATTENTION_QUERY_METADATA: pl.constexpr,
     LOCAL_ATTENTION_STATS: pl.constexpr,
     PLAN_PHYSICAL_ROWS: pl.constexpr,
+    PLAN_TABLE_COLUMNS: pl.constexpr,
 ):
     with pl.cluster(name_hint="sparse_attn"):
         (score_ring, pv_ring) = sparse_attn_cube(
@@ -479,6 +483,7 @@ def sparse_attn_group(
             ATTENTION_QUERY_METADATA,
             LOCAL_ATTENTION_STATS,
             PLAN_PHYSICAL_ROWS,
+            PLAN_TABLE_COLUMNS,
         )
     return (score_ring, pv_ring, kv_ring, probability_ring, mi_ring, li_ring, packed)
 
@@ -780,6 +785,7 @@ def decode_csa_tnd(
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
     SCALE_PAGE_COALESCING: pl.constexpr = False,
     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+    PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
     SPLIT_SCORE_ROWS: pl.constexpr = False,
     LIMIT_EMPTY_WORKERS: pl.constexpr = False,
     BSH_PROJECTION_ORDER: pl.constexpr = False,
@@ -913,6 +919,7 @@ def decode_csa_tnd(
                 pl.tile.get_block_idx(),
                 VECTORS,
                 PLAN_PHYSICAL_ROWS,
+                PLAN_TABLE_COLUMNS,
             )
     with pl.spmd(qa_workers, name_hint="qproj_a", allow_early_resolve=True, sync_start=False) as qa_tid:
         qa = q_a_stage(normed, wq_a, qa, pl.tile.get_block_idx(), GROUPS, QA_M16_PARALLEL)
@@ -1288,6 +1295,7 @@ def decode_csa_tnd(
             ATTENTION_QUERY_METADATA,
             EARLY_ATTENTION_GEOMETRY,
             PLAN_PHYSICAL_ROWS,
+            PLAN_TABLE_COLUMNS,
         )
     with pl.spmd(GROUPS, name_hint="sparse_attention", allow_early_resolve=True, sync_start=True) as attn_tid:
         (score_ring, pv_ring, kv_ring, probability_ring, mi_ring, li_ring, packed) = sparse_attn_group(
@@ -1316,6 +1324,7 @@ def decode_csa_tnd(
             ATTENTION_QUERY_METADATA,
             LOCAL_ATTENTION_STATS,
             PLAN_PHYSICAL_ROWS,
+            PLAN_TABLE_COLUMNS,
         )
     (o_r, o_quant, o_scales, o_partials, output) = output_tasks(
         packed,

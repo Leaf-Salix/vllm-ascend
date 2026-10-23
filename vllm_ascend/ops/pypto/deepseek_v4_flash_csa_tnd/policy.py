@@ -7,6 +7,9 @@
 单 SPMD 的常驻核分工、phase 等待和 O_A/O_B 同核互补策略不直接沿用；
 多 task 的顺序、并发与依赖由 entry.py 表达。以下核内策略在新多 task
 路径中的正确性和完整 L1 收益仍以本轮设备证据为准。
+
+后续采用SPMD已验证的输出矩形和2048/2080物理页表容量分档；容量选择只读
+已分配Tensor形状，真实页号和有效长度仍由device检查，不构造Host请求计划。
 """
 
 from dataclasses import dataclass
@@ -46,6 +49,7 @@ class CSAMPMDPolicy:
     split_score_rows: bool = False
     limit_empty_workers: bool = False
     bsh_projection_order: bool = False
+    plan_table_columns: int = 2048
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -65,14 +69,21 @@ class CSAMPMDPolicy:
             "LOCAL_ATTENTION_STATS": self.local_attention_stats,
             "SCALE_PAGE_COALESCING": self.scale_page_coalescing,
             "PLAN_PHYSICAL_ROWS": self.plan_physical_rows,
+            "PLAN_TABLE_COLUMNS": self.plan_table_columns,
             "SPLIT_SCORE_ROWS": self.split_score_rows,
             "LIMIT_EMPTY_WORKERS": self.limit_empty_workers,
             "BSH_PROJECTION_ORDER": self.bsh_projection_order,
         }
 
 
-def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_len: int) -> CSAMPMDPolicy:
+def select_policy(
+    *, tokens: int, requests: int, max_query_tokens: int, max_seq_len: int,
+    compressed_table_columns: int | None = None,
+) -> CSAMPMDPolicy:
     """仅依据已有Host描述符选策略；实际分组/叶数由AICPU规划，寻址在设备消费端完成。"""
+    if compressed_table_columns is not None:
+        if type(compressed_table_columns) is not int or compressed_table_columns <= 0:
+            raise ValueError("compressed_table_columns须为已分配页表的正整数列数")
     values = (tokens, requests, max_query_tokens, max_seq_len)
     if any(type(v) is not int or v <= 0 for v in values):
         raise ValueError("tokens/requests/max_query_tokens/max_seq_len须为已有的正整数描述符")
@@ -116,7 +127,7 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         prefetch=1 if long_history or short_key_prefetch else 0,
         balanced=(long_history and group == 6) or single_request_leaves,
         roots=1 if (long_history and group == 6) or single_request_leaves else 2,
-        # 已提交SPMD的M160/N192+N64；只按已有token容量选核内tile，实际寻址仍在设备。
+        # 已验证M160/N192+N64输出矩形；实际query和有效行仍由device决定。
         oa_cols=192 if 128 < tokens <= 160 else 128 if tokens <= 96 else 256,
         ob_rows=ob_rows,
         # 首版沿用冻结参考的核内 QA tile 选择；MPMD 收益另行验证。
@@ -140,6 +151,14 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         # 此处只选策略；容量合法性和全部地址仍由device元数据决定，三阶段
         # 共享同一谓词，不能仅开启生产者或消费者。区间实测与限制见优化日志。
         plan_physical_rows=tokens >= EARLY_GEOMETRY_MIN_TOKENS,
+        # 只依据已有Tensor形状；超过2080仍走原逻辑地址回退，不截断页表。
+        plan_table_columns=(
+            2080
+            if tokens >= EARLY_GEOMETRY_MIN_TOKENS
+            and compressed_table_columns is not None
+            and 2048 < compressed_table_columns <= 2080
+            else 2048
+        ),
         # 小T保持原Score，中大T使用早FIX与单次WS写回。分界沿已有M16
         # 前段资源区间；依据完整实测取舍，不把回退唯一归因于QA或假定最优。
         # 实际有效query/长度/页表仍在device读取，不按B4/B8等测试点枚举。

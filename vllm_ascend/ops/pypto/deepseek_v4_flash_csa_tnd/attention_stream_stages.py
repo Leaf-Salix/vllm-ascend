@@ -84,6 +84,7 @@ from ..deepseek_v4_flash_csa.config import FLASH as M
 from .attention_plan_stages import (
     COMPRESSED_COLUMNS_DYN,
     ORIGINAL_COLUMNS_DYN,
+    PHYSICAL_PLAN_COLUMNS,
     PLAN_CAP_DYN,
     QUERY_BOUNDS_DYN,
     REQUESTS_DYN,
@@ -245,12 +246,14 @@ def attention_qk_pv_vector_lane_stage(
     CACHE_QUERY_METADATA: pl.constexpr = False,
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+    PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
 ):
     """双AIV各32头/64候选；同一mask和事件次序保证与AIC配对。"""
     t_dim = pl.tensor.dim(position_ids, 0)
     physical_mode = physical_plan_supported(
         pl.tensor.dim(cmp_block_table, 1), pl.tensor.dim(cmp_kv_flat, 0) // BLOCK_SIZE,
         PLAN_PHYSICAL_ROWS,
+        PLAN_TABLE_COLUMNS,
     )
     qk_core = core_id
     qk_aiv = lane_id

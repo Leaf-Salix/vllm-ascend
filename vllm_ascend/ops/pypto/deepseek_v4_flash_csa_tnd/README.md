@@ -24,6 +24,12 @@ compact行数和query组数减少空worker。数学helper共用、任务仍由AI
 后者未优于历史v22同档1171.125μs，不把局部收益描述为所有口径都改善。
 详细门禁和原始样本见实验目录`scheduling_v32_v34_qualified.json`。
 
+物理Attention页表已支持2048/2080两个UB容量：已有压缩页表列数在2049～2080时
+选2080，几何、plan及Attention共用该容量及device有效性判断；更宽页表保留逻辑
+索引回退。C02真实页表为2050列，此前因容量回退的重复寻址得以消除。该档两批
+二十窗完整L1中位1032.31μs、含AICPU三十窗1091.00μs，同址10+4状态逐bit通过。
+合并两项后的核函数、编排和kernel ABI已与分别实测版本核对，不包含query分块。
+
 ## 任务与数据
 
 - HC的widen/RMS、linear、reduce、gates、mix/norm、Sinkhorn独立。

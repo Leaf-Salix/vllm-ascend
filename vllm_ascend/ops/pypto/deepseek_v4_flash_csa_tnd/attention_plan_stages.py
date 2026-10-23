@@ -9,7 +9,7 @@
 """动态 CSA Attention 的候选计划与逆 RoPE 正负号准备。
 
 整体范围与阅读顺序
-    当前物理行候选在C<=2048、0<物理页数<=2**24时复用indices发布INT32
+    当前物理行候选在C<=PLAN_TABLE_COLUMNS、0<物理页数<=2**24时复用indices发布INT32
     物理行；PLAN_PHYSICAL_ROWS由policy沿已有T>=64前置几何区间选择，
     三阶段用同一capacity谓词，关闭或能力外保留原逻辑表示。预置几何仍
     校验Q/L/位置但不重复做全页证明；真正选中的页在本plan逐项Vector检查。
@@ -104,7 +104,7 @@ NEG_INF = -1.0e20
 PAGE_CHECK_TILE = 1024
 # FP32可精确表达此范围内的页号和长度；超出时走原INT32/INDEX逐候选检查。
 EXACT_FP32_INT = 16777216
-PHYSICAL_PLAN_COLUMNS = 2048  # 单query页表UB上界；实际列数仍取device描述符。
+PHYSICAL_PLAN_COLUMNS = 2048  # 默认单query页表UB容量；实际列数仍取device描述符。
 # 最终indices产生前的短期行前缀；阶段37发布后，这五项不再是metadata。
 EARLY_QUERY_OWNER_COL = 0
 EARLY_QUERY_BEGIN_COL = 1
@@ -118,6 +118,7 @@ def physical_plan_supported(
     columns: pl.Scalar[pl.INDEX],
     physical_pages: pl.Scalar[pl.INDEX],
     ENABLED: pl.constexpr,
+    PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
 ):
     """生产消费共用的表示判定，不按历史长度或batch猜indices含义。
 
@@ -127,7 +128,7 @@ def physical_plan_supported(
     """
     supported = pl.cast(0, pl.INT32)
     if ENABLED:
-        if columns > 0 and columns <= PHYSICAL_PLAN_COLUMNS and physical_pages > 0 and physical_pages <= EXACT_FP32_INT:
+        if columns > 0 and columns <= PLAN_TABLE_COLUMNS and physical_pages > 0 and physical_pages <= EXACT_FP32_INT:
             supported = pl.cast(1, pl.INT32)
     return supported
 
@@ -185,6 +186,7 @@ def attention_geometry_prepare_stage(
     worker: pl.Scalar[pl.INDEX],
     WORKERS: pl.constexpr,
     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+    PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
 ):
     """准备只读metadata，与投影重叠；不读Top-K或cache payload。
 
@@ -197,7 +199,9 @@ def attention_geometry_prepare_stage(
     """
     tokens = pl.tensor.dim(positions, 0)
     # 三个阶段共用容量谓词；表示不靠Host猜测或逐query私自切换。
-    physical_mode = physical_plan_supported(pl.tensor.dim(compressed_table, 1), compressed_pages, PLAN_PHYSICAL_ROWS)
+    physical_mode = physical_plan_supported(
+        pl.tensor.dim(compressed_table, 1), compressed_pages, PLAN_PHYSICAL_ROWS, PLAN_TABLE_COLUMNS
+    )
     for first in pl.range(worker * ROWS, tokens, WORKERS * ROWS):
         rows = pl.min(ROWS, tokens - first)
         # 一行32B对齐；UB Scalar写由编译器接入MTE3依赖，不产生GM DCache脏副本。
@@ -259,11 +263,14 @@ def attention_slot_plan_stage(
     CACHE_QUERY_METADATA: pl.constexpr = False,
     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+    PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
 ):
     """每个八行块独占 indices/bias/mask 行；只访问合法 owner 的 Native 页表。"""
     tokens = pl.tensor.dim(positions, 0)
     # 三个阶段共用容量谓词；表示不靠Host猜测或逐query私自切换。
-    physical_mode = physical_plan_supported(pl.tensor.dim(compressed_table, 1), compressed_pages, PLAN_PHYSICAL_ROWS)
+    physical_mode = physical_plan_supported(
+        pl.tensor.dim(compressed_table, 1), compressed_pages, PLAN_PHYSICAL_ROWS, PLAN_TABLE_COLUMNS
+    )
     # 固定8是向量tile，不是请求长度。一个tile可跨请求，逐行用Q/L判断owner。
     for first in pl.range(worker_id * ROWS, tokens, WORKERS * ROWS):
         rows = pl.min(ROWS, tokens - first)
@@ -356,7 +363,7 @@ def attention_slot_plan_stage(
                     p_table = pl.load(
                         compressed_table,
                         [request, 0],
-                        [1, PHYSICAL_PLAN_COLUMNS],
+                        [1, PLAN_TABLE_COLUMNS],
                         valid_shape=[1, p_column_count],
                         target_memory=pl.MemorySpace.Vec,
                     )
