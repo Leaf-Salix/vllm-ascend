@@ -23513,3 +23513,25 @@ SPMD三列全文，保留每侧原始192个token、版本来源和完整128K输�
 回答冒充另一侧。CPU以已有B16结果验证比较及导出成功，共16个完整输入、三侧
 全部回答；该测试输出在runs/three_way_export_cpu，属于导出逻辑检查，不能当作
 新内部工作区模型结果或放入正式download冒充新数据。
+
+
+### 735.110 两种内部工作区服务单卡全通过，进入16卡B16验证（2026-10-24）
+
+任务task_20261024_031432_271551524352已exit=0，卡释放。实际服务绑定下，
+MPMD和SPMD在128K/B16/S1/layer2、B16/S6/layer2、B24/S6/layer4均通过。
+诊断入口output、Top-K索引/分数、SWA/compressed/indexer cache以及两个state
+与各自旧外部实现逐bit一致；普通入口Top-K完全内部申请，连续三调用捕获后
+两次graph replay的output/cache/state逐bit一致；保护区、输出有限值、外部诊断
+哨兵保持均通过。证据`internal_service_validation.json`；实际heap为
+[16,256,16,16]MiB、window4096。该结论不等于16卡或Native浮点精度通过。
+
+公共csa-shared-20261024-group-dims统一标记validated，源码/二进制未再修改。
+其验收范围为已记录编译器定向回归和两种TND单卡。原validating时期的原始结果
+保留当时状态，不篡改为历史上已正式发布。
+
+模型使用`experiments/v25_internal_model/source`，算子与已通过的v24相同，
+只更新观测和报告脚本。B16 MPMD任务task_20261024_034554_36644472287已启动，
+SPMD任务task_20261024_034603_366976914195排队。两侧预算0.92、HCCL1800，
+HCA为Native、EPLB关闭、static/SK关闭、确定性配置与Native参考保持一致。
+结果分别在runs/v25_mpmd_b16、runs/v25_spmd_b16；B24整模型尚未提交，须等
+B16完整功能及三方输出对照。正式算子目录仍保留旧实现，待模型收口后移植。

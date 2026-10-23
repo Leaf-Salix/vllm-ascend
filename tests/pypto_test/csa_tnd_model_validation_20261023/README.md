@@ -37,7 +37,7 @@
 `check.py` 检查真实路由和功能完成，不代表Native/PTO输出一致。
 各次实验的任务号、结果及对照结论写回主 `DSV4_FLASH_CSA_VALIDATION_LOG.md`。
 
-## 当前证据
+## 旧外部工作区实现的历史证据
 
 - `native_b16_summary.json`：Native 16卡B16功能通过，无抢占，平均接受3.80650；
   32个简单答案通过，跨DP及旧Native输出token差异均为0。
@@ -79,55 +79,50 @@ Native、MPMD均已通过每卡33个有效24×S6 step与零抢占；SPMD在收�
 新的检查同时要求Worker实际HCCL配置匹配，并记录已有Host metadata中的
 有效请求数、有效token数；图padding到144行本身不能作为24×S6通过证据。
 
-## 最新约束与进行中的改造
+## 当前内部工作区版本
 
-用户明确沿用既有精度口径，完整披露复杂问题差异。完整问答已导出到
-`/data/pyptouser/qinchuanyu/pto-eager/downloads/CSA_TND_128K_B16_B24_QA_20261023/`，
-含左右对照HTML、Markdown、原始输出token、24个包含128K背景的完整输入。
-回答为本次实际生成的全部192token，不是无限长度的完整解题结果。
+用户明确：MPMD与SPMD的纯临时工作区都由Simpler在执行中申请和管理；
+Python不分配scratch、普通Top-K或信号，也不使用模型级外部共享池。
+当前实现位于已冻结的`experiments/v25_internal_model/source`，正式算子目录尚未迁移。
+两种普通入口只接收55个外部Tensor；诊断入口额外接收Top-K输出供校验。
+MPMD保留AICPU多task调度，不新增软同步。SPMD信号每调用由设备任务清零，
+其初始化和依赖包含在调用和图重放中。
 
-用户同时明确：MPMD与SPMD的纯临时工作区都必须在执行中由Simpler内部申请
-和管理，不能在Python中外部分配，也不以外部共享池作为最终方案。
-现有B16和B24 MPMD证据属于旧外部工作区实现；生产路径尚未完成该项迁移。
+`internal_service_validation.json`是实际PreparedDynamicCSA单卡证据：
+128K/B16/S1/layer2、B16/S6/layer2、B24/S6/layer4两种TND全部通过；
+诊断输出、Top-K索引与分数、cache/state与各自旧实现逐bit一致，普通入口两次
+图重放与保护区通过，外部诊断输出哨兵保持不变。任务
+`task_20261024_031432_271551524352`已exit=0。有效容量配置为
+`heap_mb=[16,256,16,16] MiB`、`task_window=4096`。
+此前把大heap配到ring0的判断已撤回：AICPU executor有外层scope，实际内部
+Tensor位于ring1；首次失败日志与全部过程保留在主验证日志，不作为通过证据。
 
-私有原型推进到v21，普通入口内部创建MPMD71个、SPMD72个临时Tensor（含Top-K）。
-诊断入口只额外接受测试需要观察的Top-K输出；旧外部实现仅作数值参考。
-SPMD内部信号有设备清零任务，初始化依赖及全部开销属于这次调用；不能隐藏为
-捕获前一次性外部分配。数学任务主体沿用冻结源，MPMD不引入软同步。
-v14在JIT动态reshape metadata推导失败，未运行内部版本。纯CPU最小复现
-`jit_shape_repro_20261024.py`区分tuple形状支持与动态局部尺寸变量两类问题。
-前者main已有[#2880](https://github.com/hw-native-sys/pypto/pull/2880)修复；
-后者已在[#3033追加中文复现](https://github.com/hw-native-sys/pypto/issues/3033#issuecomment-6369484280)。
-v17的8项CPU特化通过后，完整编译暴露内联动态尺寸问题；官方[#2937](https://github.com/hw-native-sys/pypto/pull/2937)
-对应部分已移植到公共候选`cda77ec0`。公共清单仍为`validating`，不能视为设备验收通过。
+公共工具链`csa-shared-20261024-group-dims`已完成相关验证并标记validated。
+PyPTO为`d44925c1`；Simpler、PTOAS、CANN仍用公共清单与环境的固定版本。
+SDK验证通过不代表模型验证已通过。当前16卡B16任务：
 
-v21保留原有直接编排，只给scale page commit增加显式incore类型边界；根返回值
-仅保留外部cache/state和输出，不把内部scratch作为kernel输出。MPMD普通/诊断入口
-各在T16/B16、T144/B24完成实际kernel ABI编译，共4项通过，日志为
-`runs/internal_kernel_v21_{debug,normal}.log`。单卡任务为
-`task_20261024_023856_172582927933`，设备终态以`jobs.json`及对应`result.json`为准。
+- MPMD：`task_20261024_034554_36644472287`，结果`runs/v25_mpmd_b16`。
+- SPMD：`task_20261024_034603_366976914195`，结果`runs/v25_spmd_b16`。
 
-另外两类已确认的PyPTO编译问题均用中文提交：
+实际状态以队列和`jobs.json`为准。两侧共用预算0.92、HCCL1800、相同源码/SDK/heap。
+B16完整功能与输出对照完成后才提交16卡B24。新模型检查要求21层CSA实际接入、
+真实B×S6、192token完整输出、无抢占，并要求所有层外部scratch字节数为0。
 
-- [#3137](https://github.com/hw-native-sys/pypto/issues/3137)：复合尺寸内部Tensor在自动SPMD切分时不能恢复原维度；
-  显式incore参数边界可通过，复现`compound_extent_repro_20261024.py`。
-- [#3138](https://github.com/hw-native-sys/pypto/issues/3138)：Group ABI规范化更换参数尺寸，遗漏局部Tensor类型中的旧尺寸。
-  `mixed_param_extent_repro_20261024.py`在同一版本下cluster失败、分开派发通过；
-  `trace_internal_scale_symbol.py`记录完整SPMD在ExpandMixedKernel前后的实际类型变化。
+Native正确性参考沿用`v02_native_b16`和`v12_native_b24`。新增
+`compare.py --reuse-native-reference`明确披露只作用于PTO的SDK/heap差异；
+权重、KV、问题、推理参数和实际Worker配置仍严格检查，不用于跨版本性能比较。
+简单问题须逐token一致；复杂问题差异完整呈现。`export_qa.py --comparisons`
+可分别导出Native、MPMD、SPMD全文及原始token，不把一侧回答替代另一侧。
+旧外部工作区问答位于`downloads/CSA_TND_128K_B16_B24_QA_20261023/`，
+它是历史结果，不能当作当前内部工作区版的整模型验收。
 
-独立编译成功仍不等于内部内存生命周期、数值或graph replay正确。
-`build_internal_service.py`只生成私有服务接入副本；生产目录尚未迁移。
+编译问题与复现：
 
+- [#3033](https://github.com/hw-native-sys/pypto/issues/3033#issuecomment-6369484280)：动态reshape metadata缺失；
+  使用描述符读取绕过，代码`jit_shape_repro_20261024.py`。
+- [#3137](https://github.com/hw-native-sys/pypto/issues/3137)：自动SPMD包装不能反推复合尺寸；
+  MPMD使用显式incore边界，SPMD避免局部尺寸别名；`compound_extent_repro_20261024.py`。
+- [#3138](https://github.com/hw-native-sys/pypto/issues/3138)：Group成员动态类型重绑定遗漏，
+  公共d44925c1已修复；`mixed_param_extent_repro_20261024.py`和`trace_internal_scale_symbol.py`。
 
-当前公共候选为`d44925c1`，已修复#3138并通过178项相关CPU回归，仍为validating。
-私有v24服务版本已去掉Python scratch/Top-K缓存及模型池，group_offsets统一
-预留每请求2个INT32尾槽，数学开关保持原样。SPMD T144/B24完整kernel编译通过；
-单卡实际服务绑定任务`task_20261024_030756_251976919366`使用四ring
-`[256,16,16,16] MiB`、window4096，检查两种TND、三个容量场景、Top-K分数及图重放。
-当前设备结论以`jobs.json`和`runs/internal_service_v24/result.json`为准；
-不把旧v21的MPMD原型PASS当作这版两种服务都PASS。
-
-首次v24服务单卡因heap大容量误配ring0而退出；设备日志明确实际内部申请在ring1。
-该配置推断已撤回。修正任务`task_20261024_031432_271551524352`使用同一冻结源码、
-同一SDK，仅把heap改为`[16,256,16,16] MiB`。不能将首次任务残留的RUNNING
-或其旧外部参考计算当作内部服务通过。
+详细中文过程持续追加主`DSV4_FLASH_CSA_VALIDATION_LOG.md`。

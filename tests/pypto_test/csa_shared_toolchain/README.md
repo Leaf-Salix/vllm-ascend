@@ -6,13 +6,16 @@
 无需安装 vLLM、vLLM-Ascend 或编译 Native 自定义算子。
 
 CSA-SPMD、CSA-SPMD-TND、CSA-MPMD-TND共用本目录的`manifest.json`。
-当前选择`csa-shared-20261024-group-dims`，状态为`validating`。
-PyPTO当前提交`d44925c1`在官方#2937相关移植`cda77ec0`之上，修复了
+当前选择`csa-shared-20261024-group-dims`，状态为`validated`。
+PyPTO提交`d44925c1`在官方#2937相关移植`cda77ec0`之上，修复了
 [#3138](https://github.com/hw-native-sys/pypto/issues/3138)的Group成员动态类型绑定。
-独立构建与178项相关CPU回归通过；前一候选的MPMD内部工作区单卡已通过，
-当前候选的完整SPMD编译及服务绑定单卡仍在验证，不能标作正式通过。
-Simpler、PTOAS和CANN保持原版本。
-证据见[`internal_toolchain_upgrade.json`](../csa_tnd_model_validation_20261023/internal_toolchain_upgrade.json)。
+独立构建、178项相关CPU回归，以及两种TND实际服务绑定的单卡检查通过：
+128K/B16/S1、B16/S6、B24/S6的输出、Top-K索引/分数、cache/state逐bit一致，
+连续调用graph replay和保护区通过，使用heap `[16,256,16,16] MiB`、window4096。
+这证明工具链与上述单卡路径可用，不代表16卡整模型或性能验收。
+Simpler、PTOAS和CANN保持原版本。证据见
+[`internal_toolchain_upgrade.json`](../csa_tnd_model_validation_20261023/internal_toolchain_upgrade.json)及
+[`internal_service_validation.json`](../csa_tnd_model_validation_20261023/internal_service_validation.json)。
 
 上一版`csa-shared-20261022-logical-codegen`保留为已验证历史：完成独立构建、
 113项编排回归和大容量CSA CPU编译，128K/B24/S6及混长B16的单卡数值、状态和图验证通过。PyPTO仅增加官方#3000的

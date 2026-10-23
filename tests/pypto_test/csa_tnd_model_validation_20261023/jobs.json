@@ -299,7 +299,7 @@
     "v24_ring1": {
       "source": "experiments/v24_internal_service_capacity/source",
       "task": "task_20261024_031432_271551524352",
-      "state": "running",
+      "state": "completed_exit_0",
       "output": "runs/internal_service_v24_ring1",
       "ring_config": {
         "heap_mb": [
@@ -311,7 +311,36 @@
         "task_window": 4096
       },
       "service_binding": true,
-      "change": "仅修正runtime外层scope后的heap目标ring；源码和SDK保持与v24完全一致"
+      "change": "仅修正runtime外层scope后的heap目标ring；源码和SDK保持与v24完全一致",
+      "result": "internal_service_validation.json",
+      "npu_validated": true
     }
+  },
+  "internal_model_b16": {
+    "source": "experiments/v25_internal_model/source",
+    "single_card_gate": "internal_service_validation.json",
+    "ring_config": {
+      "heap_mb": [
+        16,
+        256,
+        16,
+        16
+      ],
+      "task_window": 4096
+    },
+    "budget": 0.92,
+    "hccl_buffer_mb": 1800,
+    "native_reference": "runs/v02_native_b16",
+    "mpmd_tnd": {
+      "task": "task_20261024_034554_36644472287",
+      "state": "running",
+      "output": "runs/v25_mpmd_b16"
+    },
+    "spmd_tnd": {
+      "task": "task_20261024_034603_366976914195",
+      "state": "pending",
+      "output": "runs/v25_spmd_b16"
+    },
+    "b24_gate": "先完成B16两侧16卡功能及正确性对照，再提交B24"
   }
 }
