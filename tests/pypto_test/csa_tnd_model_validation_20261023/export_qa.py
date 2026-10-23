@@ -23,30 +23,57 @@ def fenced(text):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--comparisons", type=Path, nargs="+", help="导出指定完整对照报告中的Native、MPMD、SPMD三侧")
     args = parser.parse_args()
     here = Path(__file__).resolve().parent
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     inputs = output / "完整模型输入"
     inputs.mkdir(exist_ok=True)
-    bank = Path(read(here / "runs/v02_native_b16/configuration.json")["bank"])
+    if args.comparisons:
+        labels = {"native": "Native", "mpmd_tnd": "TND-MPMD", "spmd_tnd": "TND-SPMD"}
+        scenes = []
+        for path in args.comparisons:
+            comparison = read(path)
+            roots = {
+                label: Path(comparison["configuration_provenance"][mode]["results"]) for mode, label in labels.items()
+            }
+            note = "本页独立展示Native、TND-MPMD和TND-SPMD的实际回答，不以某一侧回答代替另一侧。"
+            if comparison.get("native_reference_reused"):
+                note += "Native沿用历史正确性参考，版本信息保存在对照报告中；这里不作性能比较。"
+            scenes.append((comparison["batch"], roots, note))
+    else:
+        scenes = [
+            (
+                batch,
+                {"Native": here / "runs" / native, "TND-MPMD": here / "runs" / mpmd},
+                "本档TND-SPMD与TND-MPMD全部输出token及接受事件一致，PTO列展示MPMD原文。"
+                if batch == 16
+                else "此历史实验的SPMD在收尾时OOM，尚无完整结果；只展示已完成的Native与MPMD。",
+            )
+            for batch, native, mpmd in ((16, "v02_native_b16", "v09_mpmd_b16"), (24, "v12_native_b24", "v12_mpmd_b24"))
+        ]
+    bank = Path(read(scenes[0][1]["Native"] / "configuration.json")["bank"])
     plan = read(bank / "plan.json")
     cases = {row["key"]: row for row in plan["cases"]}
     questions = {row["key"]: row for row in read(bank.parent / "mixed128k_questions.json")["cases"]}
     tokenizer = Tokenizer.from_file(str(Path(plan["model"]) / "tokenizer.json"))
-    manifest = {"output_limit_tokens": 192, "cases": {}, "batches": {}}
+    manifest = {
+        "output_limit_tokens": 192,
+        "comparison_reports": [str(path.resolve()) for path in args.comparisons or []],
+        "cases": {},
+        "batches": {},
+    }
     css = """
 body{font-family:system-ui,sans-serif;margin:24px;color:#18212d;background:#f7f8fb}
 main{max-width:1600px;margin:auto}
 section{background:white;padding:22px;margin:20px 0;border:1px solid #dce1eb;border-radius:8px}
-.answers{display:grid;grid-template-columns:1fr 1fr;gap:24px}.answers>div{min-width:0}
+.answers{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:24px}.answers>div{min-width:0}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65;font-family:inherit;background:#f5f7fa;padding:16px}
 nav{line-height:2.2}nav a{margin-right:16px}.note{padding:14px;background:#fff4d6}small{color:#536078}
 @media(max-width:850px){.answers{grid-template-columns:1fr}}
 """
-    scenes = ((16, "v02_native_b16", "v09_mpmd_b16"), (24, "v12_native_b24", "v12_mpmd_b24"))
-    for number, (batch, native_name, mpmd_name) in enumerate(scenes, 1):
-        roots = {"Native": here / "runs" / native_name, "TND-MPMD": here / "runs" / mpmd_name}
+    for number, (batch, roots, spmd_note) in enumerate(scenes, 1):
         data = {}
         for mode, root in roots.items():
             assert read(root / "functional_check.json")["status"] == "PASS"
@@ -57,12 +84,7 @@ nav{line-height:2.2}nav a{margin-right:16px}.note{padding:14px;background:#fff4d
                 assert [(r["key"], r["output_token_ids"]) for r in other] == [
                     (r["key"], r["output_token_ids"]) for r in data[mode]
                 ]
-        spmd_note = (
-            "本档TND-SPMD与TND-MPMD全部输出token及接受事件一致，故PTO列统一展示MPMD原文。"
-            if batch == 16
-            else "本档SPMD在收尾时OOM，尚无完整结果；本页只展示已完成的Native与MPMD。"
-        )
-        title = f"128K / B{batch}：Native与TND-MPMD完整问题及原始回答"
+        title = f"128K / B{batch}：{' / '.join(roots)}完整问题及原始回答"
         note = (
             "每条回答为本次实际记录的全部192个token，没有摘录或补写。"
             "生成上限为192token，可能在句子、代码或答案中途结束。"
@@ -75,6 +97,7 @@ nav{line-height:2.2}nav a{margin-right:16px}.note{padding:14px;background:#fff4d
             assert data["TND-MPMD"][index]["key"] == key
             answers = {}
             for mode in roots:
+                assert data[mode][index]["key"] == key
                 token_ids = data[mode][index]["output_token_ids"]
                 assert len(token_ids) == 192
                 answers[mode] = {
@@ -93,7 +116,13 @@ nav{line-height:2.2}nav a{margin-right:16px}.note{padding:14px;background:#fff4d
                 }
             input_file = manifest["cases"][key]["input_file"]
             differences = sum(a != b for a, b in zip(answers["Native"]["token_ids"], answers["TND-MPMD"]["token_ids"]))
-            heading = f"Q{key[-2:]} · {kind} · 不同位置token数 {differences}/192"
+            by_mode = {
+                mode: sum(a != b for a, b in zip(answers["Native"]["token_ids"], answer["token_ids"]))
+                for mode, answer in answers.items()
+                if mode != "Native"
+            }
+            difference_text = "，".join(f"{mode} {count}/192" for mode, count in by_mode.items())
+            heading = f"Q{key[-2:]} · {kind} · 与Native不同位置token数：{difference_text}"
             nav.append(f'<a href="#{key}">Q{key[-2:]}</a>')
             body = "".join(
                 f"<div><h3>{mode}</h3><pre>{html.escape(value['text'])}</pre></div>" for mode, value in answers.items()
@@ -113,9 +142,11 @@ nav{line-height:2.2}nav a{margin-right:16px}.note{padding:14px;background:#fff4d
                     "kind": kind,
                     "answers": answers,
                     "positional_token_mismatches": differences,
+                    "positional_token_mismatches_vs_native": by_mode,
                 }
             )
-        stem = f"{number:02d}_128K_B{batch}_Native_vs_TND_MPMD_完整问答"
+        implementations = "Native_vs_TND_MPMD_SPMD" if "TND-SPMD" in roots else "Native_vs_TND_MPMD"
+        stem = f"{number:02d}_128K_B{batch}_{implementations}_完整问答"
         (output / (stem + ".md")).write_text("\n".join(md) + "\n")
         page = f'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>{title}</title><style>{css}</style>'
         page += f'<main><h1>{title}</h1><p class="note">{note}</p><p>{spmd_note}</p>'
@@ -130,14 +161,14 @@ nav{line-height:2.2}nav a{margin-right:16px}.note{padding:14px;background:#fff4d
     (output / "90_问题与原始输出token.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     (output / "00_阅读说明.md").write_text(
         "# CSA TND真实问答对照\n\n优先打开01、02的HTML，左右对照Native和PTO。Markdown提供同样的全文。\n\n"
-        "- B16共16个不同问题；B24共24个不同问题。各档16个DP副本输出相同，已合并重复副本。\n"
+        "- 各档问题与实现见文件名。16个DP副本逐token相同时才合并重复副本；不同问题和实现仍独立展示。\n"
         "- 问题后缀与本次已生成回答均完整保留；每条回答生成上限192token，所以可能没有答完，并非导出时截取。\n"
-        "- `完整模型输入/`另存全部24个实际prompt，包含128K背景和问题，保留特殊token文本表示。\n"
-        "- B16的SPMD与MPMD输出全部相同；B24 SPMD本次失败，未伪造或补写其回答。\n"
+        "- `完整模型输入/`另存全部实际prompt，包含128K背景和问题，保留特殊token文本表示。\n"
+        "- 各实现是否完成、是否复用历史Native参考，均在对应页面说明；不伪造或补写回答。\n"
         "- JSON保留输出token、原文及源结果路径；不包含权重或KV缓存。\n"
     )
     print(output)
-    print(f"已导出2档对照、{len(manifest['cases'])}个完整输入；所有回答均保留192个原始token。")
+    print(f"已导出{len(scenes)}档对照、{len(manifest['cases'])}个完整输入；所有回答均保留192个原始token。")
 
 
 if __name__ == "__main__":

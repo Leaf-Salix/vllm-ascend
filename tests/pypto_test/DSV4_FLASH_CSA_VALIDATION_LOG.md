@@ -23488,3 +23488,28 @@ capacity=16777216、requested=22456320 bytes。证据位于
 这是大heap分配到错误ring的测试配置错误，不是输出/状态比较失败；SPMD还未执行。
 原结构化结果已补终态，不能保留RUNNING让后续误判。相同冻结源码改为
 [16,256,16,16]重新排队，不修改SDK或数学实现，也不采用二分容量试探。
+
+
+### 735.109 内部服务单卡继续验证，准备真实模型与三方全文对照（2026-10-24）
+
+修正ring层级的任务task_20261024_031432_271551524352仍在运行。
+结构化中间结果已记录MPMD实际PreparedDynamicCSA的PASS：三个场景的诊断
+output、Top-K索引/分数、cache/state逐bit一致，普通入口graph replay及保护区通过。
+SPMD已执行诊断入口并开始普通入口编译；尚不能将整个任务标为PASS。
+模型快照`experiments/v25_internal_model/source`从同一冻结v24复制，
+只更新验证脚本，未改变算子；等待两种实现单卡完整PASS后才提交16卡B16。
+
+真实模型对照将复用已有Native正确性参考：B16使用v02_native_b16（预算0.92、
+HCCL1800），B24使用v12_native_b24（预算0.935、HCCL768）。固定权重、KV、
+实际问题、CANN9.2、确定性、图配置及输出长度保持一致。本轮PTO代码与SDK变动
+不用于Native执行，不因只作用于PTO的工具链/heap改动重跑Native。
+`compare.py --reuse-native-reference`显式披露该口径；两种PTO仍必须同SDK/heap，
+所有实际推理配置和源码基础提交仍严格对齐，并核对参考的全部attention层确为Native。
+这只是正确性对照，不能用于跨版本性能收益计算。简单问题还要求逐token一致，
+不能只因detokenize文本一致就通过。复杂问题继续全文披露，不把差异隐藏为PASS。
+
+问答导出新增`--comparisons`，读取明确的对照结果路径并分别展示Native、MPMD、
+SPMD三列全文，保留每侧原始192个token、版本来源和完整128K输入；不复用某一侧
+回答冒充另一侧。CPU以已有B16结果验证比较及导出成功，共16个完整输入、三侧
+全部回答；该测试输出在runs/three_way_export_cpu，属于导出逻辑检查，不能当作
+新内部工作区模型结果或放入正式download冒充新数据。

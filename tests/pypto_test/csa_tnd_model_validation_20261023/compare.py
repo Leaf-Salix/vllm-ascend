@@ -20,16 +20,25 @@ def main():
     parser.add_argument("spmd", type=Path)
     parser.add_argument("mpmd", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--reuse-native-reference",
+        action="store_true",
+        help="仅正确性对照：允许复用不执行PyPTO的Native历史输出，显式记录PTO工具链/heap差异",
+    )
     args = parser.parse_args()
     roots = {"native": args.native, "spmd_tnd": args.spmd, "mpmd_tnd": args.mpmd}
     configs = {mode: read(root / "configuration.json") for mode, root in roots.items()}
     reference = configs["native"]
-    for config in configs.values():
-        assert config.get("pto_ring_config") == reference.get("pto_ring_config"), "运行时容量配置必须记录并对齐"
+    pto_reference = configs["spmd_tnd"]
+    assert configs["mpmd_tnd"]["toolchain"] == pto_reference["toolchain"], "两种PTO必须使用同一SDK"
+    assert configs["mpmd_tnd"].get("pto_ring_config") == pto_reference.get("pto_ring_config"), "两种PTO的heap必须一致"
+    for mode, config in configs.items():
+        if not args.reuse_native_reference:
+            assert config.get("pto_ring_config") == reference.get("pto_ring_config"), "运行时容量配置必须记录并对齐"
+            assert config["toolchain"] == reference["toolchain"], "工具链必须一致"
         assert config.get("hccl_buffer_mb", 1800) == reference.get("hccl_buffer_mb", 1800)
         for key in (
             "source_commit",
-            "toolchain",
             "bank",
             "batch",
             "decode_tokens",
@@ -43,6 +52,9 @@ def main():
             "EPLB",
             "static_kernel",
             "superkernel",
+            "cann",
+            "graph_mode",
+            "deterministic_level",
         ):
             assert config[key] == reference[key], (key, config[key], reference[key])
     bank = Path(reference["bank"])
@@ -56,6 +68,12 @@ def main():
         data[mode], stats[mode] = [], []
         for rank in range(16):
             data[mode].append(read(root / f"rank{rank}.mixed.json"))
+            if mode == "native" and args.reuse_native_reference:
+                assert all(
+                    layer["implementation"] == "native"
+                    for group in data[mode][-1]["attention_implementations"]
+                    for layer in group
+                ), "复用的Native参考不能包含PTO执行"
             events = [json.loads(line) for line in (root / f"request_stats_rank{rank}.jsonl").read_text().splitlines()]
             stats[mode].append({e["key"]: e["events"] for e in events})
         simple, replicas = [], []
@@ -134,7 +152,21 @@ def main():
         }
     report = {
         "batch": reference["batch"],
-        "scope": "同源码/工具链/问题/KV/配置，完整256或384请求",
+        "scope": (
+            "复用Native历史正确性参考；两种PTO同SDK，问题/KV/推理配置一致；不用于跨版本性能比较"
+            if args.reuse_native_reference
+            else "同源码/工具链/问题/KV/配置，完整256或384请求"
+        ),
+        "native_reference_reused": args.reuse_native_reference,
+        "configuration_provenance": {
+            mode: {
+                "results": str(root.resolve()),
+                "source_commit": configs[mode]["source_commit"],
+                "toolchain": configs[mode]["toolchain"],
+                "pto_ring_config": configs[mode].get("pto_ring_config"),
+            }
+            for mode, root in roots.items()
+        },
         "modes": modes,
         "pairs": pairs,
     }
@@ -161,6 +193,10 @@ def main():
         )
     )
     assert all(r["simple_answer_status"] == "PASS" for r in modes.values())
+    assert all(
+        pair["by_kind"]["easy_repeat"]["matched_requests"] == pair["by_kind"]["easy_repeat"]["requests"]
+        for pair in pairs.values()
+    ), "简单问题必须逐token一致，不能只比较解码后的文本"
 
 
 if __name__ == "__main__":
