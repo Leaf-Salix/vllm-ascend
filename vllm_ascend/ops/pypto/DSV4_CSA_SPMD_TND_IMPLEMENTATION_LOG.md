@@ -5722,3 +5722,32 @@ AIC已等待全部量化实际写者，若QUANT发布同时覆盖系数，可在
   指定的B16 Indexer/Attention核内流水，优先有生成物机制依据且不同于
   已有负例的路径。正式五项保留优化、八档几何平均0.984349891857及
   0.90目标均保持；goal仍active，所有本轮任务已终态，无push。
+
+
+### 2026-10-23：保留N64双QK Acc，调整半组QK/WS发射次序
+
+- 上一goal轮为progress：取得当前B16的完整供数负例，生产五项保留优化和
+  原八档10%目标不变。当前仅B16、Indexer/Attention核内流水，无悬挂旧任务。
+- 在用户指定recipes源码之外，继续只读核对本地CANN ops-transformer
+  `28f4035406a1aea65a8d65c6eb527a85ab84e624`的arch22 QLI与SFA实现；
+  入口及README确认A2/A3路径。它是参考实现，不是当前测量SDK或最新
+  Native性能分母。QLI的ProcessQk/ProcessWs交错及独立资源事件提供比较
+  依据，没有复制其不同分组和归约数学。
+- 新`score_half_interleave_v1`只移动原N64完整G6分支的一条WS0赋值：
+  `QK0/FIX0 → QK1/FIX1 → WS0 → WS1`改成
+  `QK0/FIX0 → WS0 → QK1/FIX1 → WS1`。旧N128单Acc已测负例采用类似
+  顺序遮蔽破坏性Acc复用，那个宽面板/单Acc方案本轮不重测。
+- 本轮继续保留两份独立48KiB QK Acc及4KiB WS Acc、两K192加权归约
+  的先后顺序、N64面板、Key预取、所有FIFO/页guard和写回。<=3 live
+  分支及全部Vector源码逐字保持，未增加GM数据量、workspace或根参数。
+- 两项源码DAG/其他模块检查通过；完整CPU编译通过。实际PTO共64个
+  完整分支MMA：首面板QK0/QK1、15组交错和末尾WS0/WS1，所有PTO操作
+  数量与原版本相同。Acc区间[0,49152)、[49152,98304)、[98304,102400)
+  不重叠；全部内存仍在实际限制内，AIV Vec180224B。
+- 第一版审计把AIV包装文件当成仅含Vector函数而错误要求全文相同；
+  该文件同时包含两种arch guard helper。已修正为核对实际AIV函数及
+  后续wrapper逐字相同、共同前缀相同，orchestration和kernel ABI也相同，
+  没有为修审计改算子源码。证据`score_half_interleave_v1_codegen.json`。
+- B16设备8唯一任务`task_20261023_173612_10939417938`已提交。按原规范保留
+  严格6组检查和10个完整72角色L1窗口，以历史同卡同SDK保留版763.65us
+  判收益；当前未采用、未扩其它档位、未push。
