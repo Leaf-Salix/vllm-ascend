@@ -1,0 +1,69 @@
+{
+  "candidate": "attention_pv_prefetch_v2",
+  "case": "C04",
+  "full_codegen_passed": true,
+  "cce_binary_compile_attempted": false,
+  "device_execution": false,
+  "performance_measured": false,
+  "root_abi_unchanged": true,
+  "orchestration_exact": true,
+  "cube_generated_function_exact": true,
+  "resources": {
+    "cube_schedule": {
+      "mat": 475136,
+      "acc": 131072,
+      "vec": 16384,
+      "left": 65536,
+      "right": 65536
+    },
+    "vector_schedule": {
+      "vec": 180224
+    }
+  },
+  "limits": {
+    "vec": 188416,
+    "mat": 524288,
+    "acc": 131072,
+    "left": 65536,
+    "right": 65536
+  },
+  "cpp": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/compile_attention_pv_prefetch_C04_v2/kernel/ptoas/dynamic_csa_full.cpp",
+  "cpp_sha256": "498c1e841f5ef14a760931e86b1a5dddc5f84212d52186deab5bbf6df38c71bf",
+  "line_anchors": {
+    "80652": "TLOAD(v10958, v10967);",
+    "80856": "pipe_barrier(PIPE_ALL);",
+    "80857": "TLOAD(v11014, v11023);",
+    "80878": "pipe_barrier(PIPE_ALL);",
+    "80879": "TLOAD(v11024, v11033);",
+    "80886": "wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);",
+    "80887": "TMULS(v11034, v11014, v463);",
+    "80903": "TROWMAX(v11038, v11036, v11012);"
+  },
+  "excerpts": [
+    {
+      "first_line": 80645,
+      "text": "  // pto: %pv_ring__ssa_v0_pview\n  // pto: %pv_ring__ssa_v0_pview\n  v10965 = pto::Shape<1, 1, 1, 32, 256>();\n  // pto: %pv_ring__ssa_v0_pview\n  v10966 = pto::Stride<16384, 16384, 16384, 512, 1>();\n  // pto: %pv_ring__ssa_v0_pview\n  v10967 = GlobalTensor<float, pto::Shape<1, 1, 1, 32, 256>, pto::Stride<16384, 16384, 16384, 512, 1>, pto::Layout::ND>(v10962 + (v10963 + v10961 * v10964), v10965, v10966);\n  TLOAD(v10958, v10967);\n  goto label1349;\nlabel1348:\n  // pto: %pv_left_hold_inline1141__ssa_v0_mv\n  v10968 = Tile<TileType::Vec, float, 32, 256, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v345, v342);"
+    },
+    {
+      "first_line": 80849,
+      "text": "  // pto: %score_ring__ssa_v0_pview\n  // pto: %score_ring__ssa_v0_pview\n  v11021 = pto::Shape<1, 1, 1, 32, 128>();\n  // pto: %score_ring__ssa_v0_pview\n  v11022 = pto::Stride<4096, 4096, 4096, 128, 1>();\n  // pto: %score_ring__ssa_v0_pview\n  v11023 = GlobalTensor<float, pto::Shape<1, 1, 1, 32, 128>, pto::Stride<4096, 4096, 4096, 128, 1>, pto::Layout::ND>(v11018 + (v11019 + v11017 * v11020), v11021, v11022);\n  pipe_barrier(PIPE_ALL);\n  TLOAD(v11014, v11023);\n  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);\n  // pto: %qk_bias_inline1227__ssa_v0\n  v11024 = Tile<TileType::Vec, float, 1, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v341, v350);"
+    },
+    {
+      "first_line": 80874,
+      "text": "  // pto: %attention_bias__ssa_v1_pview\n  v11032 = pto::Stride<640, 640, 640, 640, 1>();\n  // pto: %attention_bias__ssa_v1_pview\n  v11033 = GlobalTensor<float, pto::Shape<1, 1, 1, 1, 128>, pto::Stride<640, 640, 640, 640, 1>, pto::Layout::ND>(v11028 + (v11029 + v11026 * v11030 + v11027), v11031, v11032);\n  pipe_barrier(PIPE_ALL);\n  TLOAD(v11024, v11033);\n  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID4);\n  // pto: %t__tmp_v798\n  v11034 = Tile<TileType::Vec, float, 32, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v345, v350);\n  // pto: %t__tmp_v798\n  v11035 = (uint64_t) v205;\n  TASSIGN(v11034, v11035);\n  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);\n  TMULS(v11034, v11014, v463);\n  // pto: %qk_masked_inline1228__ssa_v0\n  v11036 = Tile<TileType::Vec, float, 32, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v345, v350);\n  // pto: %qk_masked_inline1228__ssa_v0\n  v11037 = (uint64_t) v205;\n  TASSIGN(v11036, v11037);\n  pipe_barrier(PIPE_V);\n  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID4);\n  TCOLEXPANDADD(v11036, v11034, v11024);"
+    }
+  ],
+  "intended_PV_DMA_softmax_overlap": false,
+  "reason": [
+    "On the active softmax path PIPE_ALL precedes the Score load, after the earlier PV load",
+    "The bias load also follows PIPE_ALL; the first softmax TMULS is later than both barriers",
+    "This emitted schedule drains the prefetch before softmax and fails its stated overlap mechanism"
+  ],
+  "decision": "Do not submit this frozen candidate to NPU; no performance result is claimed",
+  "adopted": false,
+  "limitations": [
+    "Phase-level event checks do not replace asynchronous fence or hardware correctness validation",
+    "This rejects the emitted schedule, not every possible PV prefetch design",
+    "No fences were removed, no SDK was changed, and no new design was started after the stop request"
+  ]
+}

@@ -6054,3 +6054,31 @@ AIC已等待全部量化实际写者，若QUANT发布同时覆盖系数，可在
   没有重复提交或共享SDK修改。编译规避方案和24组独立数值证据
   继续留在中文#3132，不能将可编译/数值可用当成性能已改善。
   本阶段本地提交，不push。
+
+
+### 2026-10-23：Attention PV预取未过资源/重叠门禁，本轮结束后按用户要求暂停
+
+- 上一轮GEMV列池完整负例已归档。本轮只检查AIV提前搬入旧PV，
+  保留Cube、原FP32乘/加/归约顺序、KV/Score/Prob通知和三槽协议。
+  参考CANN recipes的队列生命周期与A3 SFA的PV输入buffer；Native
+  源码有明确MTE2/V等待，不能据此声称已存在本候选的跨softmax重叠。
+- 源AST在恢复移动的wait/load并移除预取块后，与整份原模块一致。
+  阶段级模型检查1092种mask模式、4368张图、691800个节点；空核、
+  大/小T通知次序、跨query和三槽复用通过，两个故意移错/删掉等待的
+  反例被检出。该模型不替代异步局部fence、机器码和NPU验证。
+- v1同时预取两半64KiB，CPU规划Vec202240B > 原188416B上限，
+  未上卡。v2仅预取左半32KiB，右半保留原读点；完整PyPTO/PTOAS
+  codegen通过，AIV Vec峰值180224B，Cube生成函数/ABI/orchestration
+  与保留版一致，未改SDK或放宽上限。
+- v2实际CPP：80652行PV TLOAD；80856行PIPE_ALL后才在80857行
+  读Score，80878行又有PIPE_ALL，80887行才开始softmax TMULS。
+  因而相关路径上的PV预取已在softmax开始前排空，没有实现目标重叠。
+  `audit_attention_pv_prefetch.py`与`attention_pv_prefetch_v2_codegen.json`
+  保存固定产物行锚、原文及资源证据；本候选在该门禁停止，没有继续
+  CCE二进制或NPU计时，不宣称其精度/性能已通过，也未删除任何屏障。
+- 用户明确要求“本轮优化之后停下”。当前两版已收尾，全部CPU句柄
+  已终结，本轮没有NPU任务；未实现Score先加载或全有效快速路径等
+  新方向。归档并本地提交后暂停goal，不push。
+- 生产仍为output_rectangle_production_v1，八档原分母和等权比值
+  0.9843498918572288均不变；10%目标未达成。汇总证据为
+  `attention_pv_prefetch_round_review.json`，后续须用户明确恢复后推进。
