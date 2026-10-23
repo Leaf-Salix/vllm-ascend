@@ -1,0 +1,3522 @@
+{
+  "passed": true,
+  "device_execution": false,
+  "cases": [
+    {
+      "case": "h262144_b16_s6",
+      "reference": "v34",
+      "reference_build": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v34_pair_h262144_b16_s6/build_output/decode_csa_tnd_qs41ngrz",
+      "cpu_build": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/cpu_v36_h262144_b16_s6/build_output/decode_csa_tnd_0u6s0e7e",
+      "derived_from_actual_prepass_ir": true,
+      "abi_equal": true,
+      "lowered_params_equal": true,
+      "kernel_abi": {
+        "schema": 1,
+        "simpler_revision": "57e499238fd4ee3548947ad860be456aaeeb16b5",
+        "argument_abi": "ChipStorageTaskArgs",
+        "tensor_layout": "positive_element_strides",
+        "scalar_storage": "little_endian_zero_extended_u64",
+        "platform": "a2a3",
+        "runtime": "tensormap_and_ringbuffer",
+        "params": [
+          {
+            "name": "x",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              -1,
+              16384
+            ],
+            "kind": "tensor",
+            "tensor_index": 0,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "hc_fn",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              24,
+              16384
+            ],
+            "kind": "tensor",
+            "tensor_index": 1,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "hc_scale",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              3
+            ],
+            "kind": "tensor",
+            "tensor_index": 2,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "hc_base",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              24
+            ],
+            "kind": "tensor",
+            "tensor_index": 3,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "hc_base_2d",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              1,
+              24
+            ],
+            "kind": "tensor",
+            "tensor_index": 4,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "norm_w",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 5,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "wq_a",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              1024,
+              4096
+            ],
+            "layout": "NZ",
+            "kind": "tensor",
+            "tensor_index": 6,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "gamma_cq",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 7,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "x_fp32",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              16384
+            ],
+            "kind": "tensor",
+            "tensor_index": 8,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "inv",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 9,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "widen_tail",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              8,
+              16384
+            ],
+            "kind": "tensor",
+            "tensor_index": 10,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "partials",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              32
+            ],
+            "kind": "tensor",
+            "tensor_index": 11,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "raw",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              32
+            ],
+            "kind": "tensor",
+            "tensor_index": 12,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "pre",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              8
+            ],
+            "kind": "tensor",
+            "tensor_index": 13,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "post",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              4
+            ],
+            "kind": "tensor",
+            "tensor_index": 14,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "post_tail",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              8,
+              8
+            ],
+            "kind": "tensor",
+            "tensor_index": 15,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "comb",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              16
+            ],
+            "kind": "tensor",
+            "tensor_index": 16,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "comb_tail",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              8,
+              32
+            ],
+            "kind": "tensor",
+            "tensor_index": 17,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "mixed",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 18,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "normed",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 19,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "norm_tail",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              8,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 20,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "qa",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 21,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "qr",
+            "dtype": "int8",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 22,
+            "dtype_tag": 4,
+            "direction_tag": 3
+          },
+          {
+            "name": "qr_scale",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 23,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "qr_matmul",
+            "dtype": "int8",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 24,
+            "dtype_tag": 4,
+            "direction_tag": 3
+          },
+          {
+            "name": "qr_scale_pad",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 25,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "wq_b",
+            "dtype": "int8",
+            "direction": "In",
+            "shape": [
+              1024,
+              32768
+            ],
+            "layout": "NZ",
+            "kind": "tensor",
+            "tensor_index": 26,
+            "dtype_tag": 4,
+            "direction_tag": 1
+          },
+          {
+            "name": "wq_b_scale",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              32768
+            ],
+            "kind": "tensor",
+            "tensor_index": 27,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "rope_cos",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 28,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "rope_sin",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 29,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "rope_signed",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 30,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "rope_swap",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 31,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "q_proj",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              32768
+            ],
+            "kind": "tensor",
+            "tensor_index": 32,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "q_flat",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              32768
+            ],
+            "kind": "tensor",
+            "tensor_index": 33,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "wkv",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              4096,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 34,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "gamma_ckv",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 35,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "kv_fp32",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 36,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "kv",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 37,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "native_slots",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              2
+            ],
+            "kind": "tensor",
+            "tensor_index": 38,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "cache_rows",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 39,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_wkv",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              1024,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 40,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_wgate",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              1024,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 41,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_value",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 42,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_score",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 43,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_state",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 44,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_state_table",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 45,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_ape",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              4,
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 46,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "positions",
+            "dtype": "int64",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 47,
+            "dtype_tag": 7,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_bounds",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 48,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_lengths",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 49,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_state_slots",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              2
+            ],
+            "kind": "tensor",
+            "tensor_index": 50,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_pooled",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 51,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_gamma",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 52,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_cos",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 53,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_sin",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 54,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_offsets",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 55,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_count",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 56,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_slots",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              2
+            ],
+            "kind": "tensor",
+            "tensor_index": 57,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_normed",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 58,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_debug",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 59,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_cache",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 60,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_wkv",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              256,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 61,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_wgate",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              256,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 62,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_value",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              256
+            ],
+            "kind": "tensor",
+            "tensor_index": 63,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_score",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              256
+            ],
+            "kind": "tensor",
+            "tensor_index": 64,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_state",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 65,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_state_table",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 66,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_ape",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              4,
+              256
+            ],
+            "kind": "tensor",
+            "tensor_index": 67,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_bounds",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 68,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_lengths",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 69,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_state_slots",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              2
+            ],
+            "kind": "tensor",
+            "tensor_index": 70,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_pooled",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 71,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_gamma",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 72,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_cos",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 73,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_sin",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 74,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_offsets",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 75,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_count",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 76,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_slots",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              2
+            ],
+            "kind": "tensor",
+            "tensor_index": 77,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_normed",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 78,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "hadamard",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              128,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 79,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_had",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 80,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_scales",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 81,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_debug",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 82,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_cache",
+            "dtype": "int8",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 83,
+            "dtype_tag": 4,
+            "direction_tag": 3
+          },
+          {
+            "name": "q_heads",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 84,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "original_table",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 85,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "compressed_table",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 86,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "indexer_table",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 87,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_wq_b",
+            "dtype": "int8",
+            "direction": "In",
+            "shape": [
+              1024,
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 88,
+            "dtype_tag": 4,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_wq_b_scale",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 89,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_query_acc",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 90,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_query_rope",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 91,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_query_rope_heads",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 92,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_query_had",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 93,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_query_i8",
+            "dtype": "int8",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 94,
+            "dtype_tag": 4,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_query_scale",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 95,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_query_scale_heads",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 96,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "weights_proj",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              4096,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 97,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "weights_partial",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 98,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "head_weights",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 99,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "group_offsets",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 100,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "group_plan",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              8
+            ],
+            "kind": "tensor",
+            "tensor_index": 101,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "coefficients",
+            "dtype": "fp16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 102,
+            "dtype_tag": 1,
+            "direction_tag": 3
+          },
+          {
+            "name": "indexer_transfer",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 103,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "score_arena",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 104,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "pair_arena",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 105,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "topk_scores",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 106,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "topk_indices",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 107,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "attention_indices",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 108,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "attention_bias",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              640
+            ],
+            "kind": "tensor",
+            "tensor_index": 109,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "attention_mask",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              16
+            ],
+            "kind": "tensor",
+            "tensor_index": 110,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "inverse_sin",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 111,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "attn_sink",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              64,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 112,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "kv_ring",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 113,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "score_ring",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 114,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "probability_ring",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 115,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "pv_ring",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 116,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "mi_ring",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 117,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "li_ring",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 118,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "packed",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 119,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "ffts",
+            "dtype": "int64",
+            "direction": "In",
+            "shape": [
+              256
+            ],
+            "kind": "tensor",
+            "tensor_index": 120,
+            "dtype_tag": 7,
+            "direction_tag": 1
+          },
+          {
+            "name": "wo_a",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              8,
+              4096,
+              1024
+            ],
+            "layout": "NZ",
+            "kind": "tensor",
+            "tensor_index": 121,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "o_r",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 122,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "o_quant",
+            "dtype": "int8",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 123,
+            "dtype_tag": 4,
+            "direction_tag": 3
+          },
+          {
+            "name": "o_scales",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              8,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 124,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "wo_b",
+            "dtype": "int8",
+            "direction": "In",
+            "shape": [
+              8192,
+              4096
+            ],
+            "layout": "NZ",
+            "kind": "tensor",
+            "tensor_index": 125,
+            "dtype_tag": 4,
+            "direction_tag": 1
+          },
+          {
+            "name": "o_partials",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              32768
+            ],
+            "kind": "tensor",
+            "tensor_index": 126,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "wo_b_scale",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 127,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "output",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              16384
+            ],
+            "kind": "tensor",
+            "tensor_index": 128,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          }
+        ],
+        "return_aliases": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          30,
+          31,
+          32,
+          33,
+          36,
+          37,
+          39,
+          42,
+          43,
+          44,
+          51,
+          55,
+          56,
+          58,
+          59,
+          60,
+          63,
+          64,
+          65,
+          71,
+          75,
+          76,
+          78,
+          80,
+          81,
+          82,
+          83,
+          90,
+          91,
+          93,
+          94,
+          95,
+          98,
+          99,
+          100,
+          101,
+          102,
+          103,
+          104,
+          105,
+          106,
+          107,
+          108,
+          109,
+          110,
+          111,
+          113,
+          114,
+          115,
+          116,
+          117,
+          118,
+          119,
+          122,
+          123,
+          124,
+          126,
+          128
+        ]
+      }
+    },
+    {
+      "case": "h131072_b24_s6",
+      "reference": "v32",
+      "reference_build": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v32_pair_h131072_b24_s6/build_output/decode_csa_tnd_78o76u3e",
+      "cpu_build": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/cpu_v36_h131072_b24_s6/build_output/decode_csa_tnd_3qrcg0iv",
+      "derived_from_actual_prepass_ir": true,
+      "abi_equal": true,
+      "lowered_params_equal": true,
+      "kernel_abi": {
+        "schema": 1,
+        "simpler_revision": "57e499238fd4ee3548947ad860be456aaeeb16b5",
+        "argument_abi": "ChipStorageTaskArgs",
+        "tensor_layout": "positive_element_strides",
+        "scalar_storage": "little_endian_zero_extended_u64",
+        "platform": "a2a3",
+        "runtime": "tensormap_and_ringbuffer",
+        "params": [
+          {
+            "name": "x",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              -1,
+              16384
+            ],
+            "kind": "tensor",
+            "tensor_index": 0,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "hc_fn",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              24,
+              16384
+            ],
+            "kind": "tensor",
+            "tensor_index": 1,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "hc_scale",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              3
+            ],
+            "kind": "tensor",
+            "tensor_index": 2,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "hc_base",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              24
+            ],
+            "kind": "tensor",
+            "tensor_index": 3,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "hc_base_2d",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              1,
+              24
+            ],
+            "kind": "tensor",
+            "tensor_index": 4,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "norm_w",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 5,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "wq_a",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              1024,
+              4096
+            ],
+            "layout": "NZ",
+            "kind": "tensor",
+            "tensor_index": 6,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "gamma_cq",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 7,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "x_fp32",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              16384
+            ],
+            "kind": "tensor",
+            "tensor_index": 8,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "inv",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 9,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "widen_tail",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              8,
+              16384
+            ],
+            "kind": "tensor",
+            "tensor_index": 10,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "partials",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              32
+            ],
+            "kind": "tensor",
+            "tensor_index": 11,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "raw",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              32
+            ],
+            "kind": "tensor",
+            "tensor_index": 12,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "pre",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              8
+            ],
+            "kind": "tensor",
+            "tensor_index": 13,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "post",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              4
+            ],
+            "kind": "tensor",
+            "tensor_index": 14,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "post_tail",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              8,
+              8
+            ],
+            "kind": "tensor",
+            "tensor_index": 15,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "comb",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              16
+            ],
+            "kind": "tensor",
+            "tensor_index": 16,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "comb_tail",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              8,
+              32
+            ],
+            "kind": "tensor",
+            "tensor_index": 17,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "mixed",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 18,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "normed",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 19,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "norm_tail",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              8,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 20,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "qa",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 21,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "qr",
+            "dtype": "int8",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 22,
+            "dtype_tag": 4,
+            "direction_tag": 3
+          },
+          {
+            "name": "qr_scale",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 23,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "qr_matmul",
+            "dtype": "int8",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 24,
+            "dtype_tag": 4,
+            "direction_tag": 3
+          },
+          {
+            "name": "qr_scale_pad",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 25,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "wq_b",
+            "dtype": "int8",
+            "direction": "In",
+            "shape": [
+              1024,
+              32768
+            ],
+            "layout": "NZ",
+            "kind": "tensor",
+            "tensor_index": 26,
+            "dtype_tag": 4,
+            "direction_tag": 1
+          },
+          {
+            "name": "wq_b_scale",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              32768
+            ],
+            "kind": "tensor",
+            "tensor_index": 27,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "rope_cos",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 28,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "rope_sin",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 29,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "rope_signed",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 30,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "rope_swap",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 31,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "q_proj",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              32768
+            ],
+            "kind": "tensor",
+            "tensor_index": 32,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "q_flat",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              32768
+            ],
+            "kind": "tensor",
+            "tensor_index": 33,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "wkv",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              4096,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 34,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "gamma_ckv",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 35,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "kv_fp32",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 36,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "kv",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 37,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "native_slots",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              2
+            ],
+            "kind": "tensor",
+            "tensor_index": 38,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "cache_rows",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 39,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_wkv",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              1024,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 40,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_wgate",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              1024,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 41,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_value",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 42,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_score",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 43,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_state",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 44,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_state_table",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 45,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_ape",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              4,
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 46,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "positions",
+            "dtype": "int64",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 47,
+            "dtype_tag": 7,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_bounds",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 48,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_lengths",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 49,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_state_slots",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              2
+            ],
+            "kind": "tensor",
+            "tensor_index": 50,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_pooled",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 51,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_gamma",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 52,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_cos",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 53,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_sin",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 54,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_offsets",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 55,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_count",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 56,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_slots",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              2
+            ],
+            "kind": "tensor",
+            "tensor_index": 57,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "main_normed",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 58,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_debug",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 59,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "main_cache",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 60,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_wkv",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              256,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 61,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_wgate",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              256,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 62,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_value",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              256
+            ],
+            "kind": "tensor",
+            "tensor_index": 63,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_score",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              256
+            ],
+            "kind": "tensor",
+            "tensor_index": 64,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_state",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 65,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_state_table",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 66,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_ape",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              4,
+              256
+            ],
+            "kind": "tensor",
+            "tensor_index": 67,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_bounds",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 68,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_lengths",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 69,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_state_slots",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              2
+            ],
+            "kind": "tensor",
+            "tensor_index": 70,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_pooled",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 71,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_gamma",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 72,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_cos",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 73,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_sin",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 74,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_offsets",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 75,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_count",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 76,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_slots",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              2
+            ],
+            "kind": "tensor",
+            "tensor_index": 77,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_normed",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 78,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "hadamard",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              128,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 79,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_had",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 80,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_scales",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 81,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_debug",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 82,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_cache",
+            "dtype": "int8",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 83,
+            "dtype_tag": 4,
+            "direction_tag": 3
+          },
+          {
+            "name": "q_heads",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 84,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "original_table",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 85,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "compressed_table",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 86,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "indexer_table",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 87,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_wq_b",
+            "dtype": "int8",
+            "direction": "In",
+            "shape": [
+              1024,
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 88,
+            "dtype_tag": 4,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_wq_b_scale",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 89,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_query_acc",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 90,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_query_rope",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 91,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_query_rope_heads",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 92,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_query_had",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 93,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_query_i8",
+            "dtype": "int8",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 94,
+            "dtype_tag": 4,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_query_scale",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 95,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_query_scale_heads",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 96,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "weights_proj",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              4096,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 97,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "weights_partial",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 98,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "head_weights",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 99,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "group_offsets",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 100,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "group_plan",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              8
+            ],
+            "kind": "tensor",
+            "tensor_index": 101,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "coefficients",
+            "dtype": "fp16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 102,
+            "dtype_tag": 1,
+            "direction_tag": 3
+          },
+          {
+            "name": "indexer_transfer",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 103,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "score_arena",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 104,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "pair_arena",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 105,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "topk_scores",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 106,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "topk_indices",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 107,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "attention_indices",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 108,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "attention_bias",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              640
+            ],
+            "kind": "tensor",
+            "tensor_index": 109,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "attention_mask",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              16
+            ],
+            "kind": "tensor",
+            "tensor_index": 110,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "inverse_sin",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 111,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "attn_sink",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              64,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 112,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "kv_ring",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 113,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "score_ring",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 114,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "probability_ring",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 115,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "pv_ring",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 116,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "mi_ring",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 117,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "li_ring",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              1
+            ],
+            "kind": "tensor",
+            "tensor_index": 118,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "packed",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 119,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "ffts",
+            "dtype": "int64",
+            "direction": "In",
+            "shape": [
+              256
+            ],
+            "kind": "tensor",
+            "tensor_index": 120,
+            "dtype_tag": 7,
+            "direction_tag": 1
+          },
+          {
+            "name": "wo_a",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              8,
+              4096,
+              1024
+            ],
+            "layout": "NZ",
+            "kind": "tensor",
+            "tensor_index": 121,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "o_r",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 122,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "o_quant",
+            "dtype": "int8",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 123,
+            "dtype_tag": 4,
+            "direction_tag": 3
+          },
+          {
+            "name": "o_scales",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              8,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 124,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "wo_b",
+            "dtype": "int8",
+            "direction": "In",
+            "shape": [
+              8192,
+              4096
+            ],
+            "layout": "NZ",
+            "kind": "tensor",
+            "tensor_index": 125,
+            "dtype_tag": 4,
+            "direction_tag": 1
+          },
+          {
+            "name": "o_partials",
+            "dtype": "int32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              32768
+            ],
+            "kind": "tensor",
+            "tensor_index": 126,
+            "dtype_tag": 2,
+            "direction_tag": 3
+          },
+          {
+            "name": "wo_b_scale",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 127,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "output",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              16384
+            ],
+            "kind": "tensor",
+            "tensor_index": 128,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          }
+        ],
+        "return_aliases": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          30,
+          31,
+          32,
+          33,
+          36,
+          37,
+          39,
+          42,
+          43,
+          44,
+          51,
+          55,
+          56,
+          58,
+          59,
+          60,
+          63,
+          64,
+          65,
+          71,
+          75,
+          76,
+          78,
+          80,
+          81,
+          82,
+          83,
+          90,
+          91,
+          93,
+          94,
+          95,
+          98,
+          99,
+          100,
+          101,
+          102,
+          103,
+          104,
+          105,
+          106,
+          107,
+          108,
+          109,
+          110,
+          111,
+          113,
+          114,
+          115,
+          116,
+          117,
+          118,
+          119,
+          122,
+          123,
+          124,
+          126,
+          128
+        ]
+      }
+    }
+  ]
+}

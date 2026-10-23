@@ -1,0 +1,58 @@
+{
+  "candidate": {
+    "source_head": "0d96e36b01959df6b2d85dc2e7859798192d9252",
+    "candidate_includes_worktree_changes": true,
+    "reference_commit": "84751e34cb1f27eff9e4d3fdf03f8495982f1cdf",
+    "shared_toolchain": {
+      "release": "csa-shared-20261022-logical-codegen",
+      "status": "validated",
+      "sessions": [
+        "CSA-SPMD",
+        "CSA-SPMD-TND",
+        "CSA-MPMD-TND"
+      ],
+      "pypto": {
+        "source": ".worktrees/pypto-csa-shared-20261022",
+        "commit": "26e94e05627eb47710dcc214bae1774b8829df8a"
+      },
+      "ptoas": {
+        "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+        "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+        "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+      },
+      "simpler": {
+        "source": ".worktrees/simpler-csa-core-args-256-20261016",
+        "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+      },
+      "evidence": "../csa_mpmd_aicpu_20261022/upstream_logical_refresh/manifest.json",
+      "published_for_validation_at": "2026-10-22T18:00:10+08:00",
+      "validated_at": "2026-10-22T18:14:28+08:00"
+    },
+    "windows_per_side": 10,
+    "change": "Only disable sync_start on two 12-MIX chunk scopes; coefficient and plan early-resolve remain disabled, real dependencies and per-block hardware synchronization unchanged.",
+    "candidate": "aicpu_v35_ready_chunk_dispatch",
+    "parent_candidate": "aicpu_v33_attention_ready_cohorts",
+    "production_head": "b758e96956c4730a784d079206c22eb1f88c8de4",
+    "frozen": true,
+    "parent_snapshot_metadata": {
+      "scope": "用户要求当前轮收尾后停止；只做此已修改候选必要设备验收，不开启新优化",
+      "experiment": "aicpu_v30_query_chunk_pipeline",
+      "control": "aicpu_v26_uniform_score_geometry",
+      "cpu_receipt": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/cpu_v30c_h131072_b24_s6/result.json",
+      "closure_fixes": [
+        "main_compressor_tasks中normed/main_offsets声明为只读，避免Out参数数量偶合导致返回dtype错配",
+        "manual parallel内不重绑定原位写Tensor，消除虚假loop-carried别名，真实依赖由TaskId保留"
+      ]
+    },
+    "experiment": "aicpu_v35_ready_chunk_dispatch",
+    "control": "aicpu_v33_attention_ready_cohorts",
+    "scope": "C05 ready MIX chunk dispatch linked ablation, not production",
+    "cpu_receipt": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/cpu_v35_h131072_b24_s6/result.json"
+  },
+  "patch_against_v33": "--- v33/entry.py\n+++ v35/entry.py\n@@ -1341,7 +1341,7 @@\n                     12,\n                     name_hint=\"indexer_score_query_chunk\",\n                     allow_early_resolve=True,\n-                    sync_start=True,\n+                    sync_start=False,\n                     deps=[coefficient_tid, idx_cache_tid],\n                 ) as score_tid:\n                     index_score_topk_group(\n@@ -1431,7 +1431,7 @@\n                     12,\n                     name_hint=\"sparse_attention_query_chunk\",\n                     allow_early_resolve=True,\n-                    sync_start=True,\n+                    sync_start=False,\n                     deps=[\n                         plan_tid,\n                         attention_input_dependencies[0],\n",
+  "device_job": "task_20261023_164918_34696201689",
+  "command": "bash /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/experiments/aicpu_v35_ready_chunk_dispatch/launch.sh /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/experiments/aicpu_v35_ready_chunk_dispatch /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v35_pair_h131072_b24_s6 h131072_b24_s6 --cases /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_performance_20261022_aicpu/cases.json --control-mpmd /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/experiments/aicpu_v33_attention_ready_cohorts/operator --mpmd-only",
+  "result": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v35_pair_h131072_b24_s6/result.json",
+  "cpu_result": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/cpu_v35_h131072_b24_s6/result.json",
+  "cpu_passed": true
+}

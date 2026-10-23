@@ -50,7 +50,7 @@
     "cpu_receipt": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/cpu_v33_h131072_b24_s6/result.json"
   },
   "patch_against_v31": "--- v31/entry.py\n+++ v33/entry.py\n@@ -1403,7 +1403,7 @@\n                 with pl.spmd(\n                     pl.min((query_end - query_begin + 7) // 8, 24),\n                     name_hint=\"csa_attention_plan_query_chunk\",\n-                    allow_early_resolve=True,\n+                    allow_early_resolve=False,\n                     sync_start=True,\n                     deps=[topk_tid],\n                 ) as plan_tid:\n",
-  "device_job": null,
+  "device_job": "task_20261023_163503_28208456707",
   "cpu_validation": {
     "result": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/cpu_v33_h131072_b24_s6/result.json",
     "stage": "cpu_backend_compiled",
@@ -77,5 +77,8 @@
       "BSH_PROJECTION_ORDER": false
     },
     "device_execution": false
-  }
+  },
+  "command": "bash /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/experiments/aicpu_v33_attention_ready_cohorts/launch.sh /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/experiments/aicpu_v33_attention_ready_cohorts /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v33_pair_h131072_b24_s6 h131072_b24_s6 --cases /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_performance_20261022_aicpu/cases.json --control-mpmd /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_mpmd_aicpu_20261022/experiments/aicpu_v31_score_ready_cohorts/operator --mpmd-only",
+  "result": "tests/pypto_test/csa_mpmd_aicpu_20261022/runs/aicpu_v33_pair_h131072_b24_s6/result.json",
+  "submission_basis": "v31 both sides bitwise passed; Score collision 6/10->0/10 but Attention 5/10 persists"
 }

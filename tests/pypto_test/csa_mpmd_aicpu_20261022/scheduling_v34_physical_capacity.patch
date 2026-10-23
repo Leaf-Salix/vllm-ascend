@@ -1,0 +1,248 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/attention_plan_stages.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/attention_plan_stages.py
+@@ -9,7 +9,7 @@
+ """动态 CSA Attention 的候选计划与逆 RoPE 正负号准备。
+ 
+ 整体范围与阅读顺序
+-    当前物理行候选在C<=2048、0<物理页数<=2**24时复用indices发布INT32
++    当前物理行候选在C<=PLAN_TABLE_COLUMNS、0<物理页数<=2**24时复用indices发布INT32
+     物理行；PLAN_PHYSICAL_ROWS由policy沿已有T>=64前置几何区间选择，
+     三阶段用同一capacity谓词，关闭或能力外保留原逻辑表示。预置几何仍
+     校验Q/L/位置但不重复做全页证明；真正选中的页在本plan逐项Vector检查。
+@@ -118,6 +118,7 @@
+     columns: pl.Scalar[pl.INDEX],
+     physical_pages: pl.Scalar[pl.INDEX],
+     ENABLED: pl.constexpr,
++    PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
+ ):
+     """生产消费共用的表示判定，不按历史长度或batch猜indices含义。
+ 
+@@ -127,7 +128,7 @@
+     """
+     supported = pl.cast(0, pl.INT32)
+     if ENABLED:
+-        if columns > 0 and columns <= PHYSICAL_PLAN_COLUMNS and physical_pages > 0 and physical_pages <= EXACT_FP32_INT:
++        if columns > 0 and columns <= PLAN_TABLE_COLUMNS and physical_pages > 0 and physical_pages <= EXACT_FP32_INT:
+             supported = pl.cast(1, pl.INT32)
+     return supported
+ 
+@@ -185,6 +186,7 @@
+     worker: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
++    PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
+ ):
+     """准备只读metadata，与投影重叠；不读Top-K或cache payload。
+ 
+@@ -197,7 +199,9 @@
+     """
+     tokens = pl.tensor.dim(positions, 0)
+     # 三个阶段共用容量谓词；表示不靠Host猜测或逐query私自切换。
+-    physical_mode = physical_plan_supported(pl.tensor.dim(compressed_table, 1), compressed_pages, PLAN_PHYSICAL_ROWS)
++    physical_mode = physical_plan_supported(
++        pl.tensor.dim(compressed_table, 1), compressed_pages, PLAN_PHYSICAL_ROWS, PLAN_TABLE_COLUMNS
++    )
+     for first in pl.range(worker * ROWS, tokens, WORKERS * ROWS):
+         rows = pl.min(ROWS, tokens - first)
+         # 一行32B对齐；UB Scalar写由编译器接入MTE3依赖，不产生GM DCache脏副本。
+@@ -259,11 +263,14 @@
+     CACHE_QUERY_METADATA: pl.constexpr = False,
+     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
+     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
++    PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
+ ):
+     """每个八行块独占 indices/bias/mask 行；只访问合法 owner 的 Native 页表。"""
+     tokens = pl.tensor.dim(positions, 0)
+     # 三个阶段共用容量谓词；表示不靠Host猜测或逐query私自切换。
+-    physical_mode = physical_plan_supported(pl.tensor.dim(compressed_table, 1), compressed_pages, PLAN_PHYSICAL_ROWS)
++    physical_mode = physical_plan_supported(
++        pl.tensor.dim(compressed_table, 1), compressed_pages, PLAN_PHYSICAL_ROWS, PLAN_TABLE_COLUMNS
++    )
+     # 固定8是向量tile，不是请求长度。一个tile可跨请求，逐行用Q/L判断owner。
+     for first in pl.range(worker_id * ROWS, tokens, WORKERS * ROWS):
+         rows = pl.min(ROWS, tokens - first)
+@@ -356,7 +363,7 @@
+                     p_table = pl.load(
+                         compressed_table,
+                         [request, 0],
+-                        [1, PHYSICAL_PLAN_COLUMNS],
++                        [1, PLAN_TABLE_COLUMNS],
+                         valid_shape=[1, p_column_count],
+                         target_memory=pl.MemorySpace.Vec,
+                     )
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/attention_stream_stages.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/attention_stream_stages.py
+@@ -84,6 +84,7 @@
+ from .attention_plan_stages import (
+     COMPRESSED_COLUMNS_DYN,
+     ORIGINAL_COLUMNS_DYN,
++    PHYSICAL_PLAN_COLUMNS,
+     PLAN_CAP_DYN,
+     QUERY_BOUNDS_DYN,
+     REQUESTS_DYN,
+@@ -245,12 +246,14 @@
+     CACHE_QUERY_METADATA: pl.constexpr = False,
+     LOCAL_ATTENTION_STATS: pl.constexpr = False,
+     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
++    PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
+ ):
+     """双AIV各32头/64候选；同一mask和事件次序保证与AIC配对。"""
+     t_dim = pl.tensor.dim(position_ids, 0)
+     physical_mode = physical_plan_supported(
+         pl.tensor.dim(cmp_block_table, 1), pl.tensor.dim(cmp_kv_flat, 0) // BLOCK_SIZE,
+         PLAN_PHYSICAL_ROWS,
++        PLAN_TABLE_COLUMNS,
+     )
+     qk_core = core_id
+     qk_aiv = lane_id
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/entry.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/entry.py
+@@ -10,6 +10,7 @@
+ import pypto.language as pl
+ 
+ from .attention_plan_stages import (
++    PHYSICAL_PLAN_COLUMNS,
+     attention_geometry_prepare_stage,
+     attention_inverse_rope_sign_stage,
+     attention_slot_plan_stage,
+@@ -386,6 +387,7 @@
+     ATTENTION_QUERY_METADATA: pl.constexpr,
+     LOCAL_ATTENTION_STATS: pl.constexpr,
+     PLAN_PHYSICAL_ROWS: pl.constexpr,
++    PLAN_TABLE_COLUMNS: pl.constexpr,
+ ):
+     pl.func_attr({"split_aiv": True})
+     pl.system.set_ffts(ffts)
+@@ -418,6 +420,7 @@
+         ATTENTION_QUERY_METADATA,
+         LOCAL_ATTENTION_STATS,
+         PLAN_PHYSICAL_ROWS,
++        PLAN_TABLE_COLUMNS,
+     )
+     return (kv_ring, probability_ring, mi_ring, li_ring, packed)
+ 
+@@ -449,6 +452,7 @@
+     ATTENTION_QUERY_METADATA: pl.constexpr,
+     LOCAL_ATTENTION_STATS: pl.constexpr,
+     PLAN_PHYSICAL_ROWS: pl.constexpr,
++    PLAN_TABLE_COLUMNS: pl.constexpr,
+ ):
+     with pl.cluster(name_hint="sparse_attn"):
+         (score_ring, pv_ring) = sparse_attn_cube(
+@@ -479,6 +483,7 @@
+             ATTENTION_QUERY_METADATA,
+             LOCAL_ATTENTION_STATS,
+             PLAN_PHYSICAL_ROWS,
++            PLAN_TABLE_COLUMNS,
+         )
+     return (score_ring, pv_ring, kv_ring, probability_ring, mi_ring, li_ring, packed)
+ 
+@@ -780,6 +785,7 @@
+     LOCAL_ATTENTION_STATS: pl.constexpr = False,
+     SCALE_PAGE_COALESCING: pl.constexpr = False,
+     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
++    PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
+     SPLIT_SCORE_ROWS: pl.constexpr = False,
+     LIMIT_EMPTY_WORKERS: pl.constexpr = False,
+     BSH_PROJECTION_ORDER: pl.constexpr = False,
+@@ -913,6 +919,7 @@
+                 pl.tile.get_block_idx(),
+                 VECTORS,
+                 PLAN_PHYSICAL_ROWS,
++                PLAN_TABLE_COLUMNS,
+             )
+     with pl.spmd(qa_workers, name_hint="qproj_a", allow_early_resolve=True, sync_start=False) as qa_tid:
+         qa = q_a_stage(normed, wq_a, qa, pl.tile.get_block_idx(), GROUPS, QA_M16_PARALLEL)
+@@ -1288,6 +1295,7 @@
+             ATTENTION_QUERY_METADATA,
+             EARLY_ATTENTION_GEOMETRY,
+             PLAN_PHYSICAL_ROWS,
++            PLAN_TABLE_COLUMNS,
+         )
+     with pl.spmd(GROUPS, name_hint="sparse_attention", allow_early_resolve=True, sync_start=True) as attn_tid:
+         (score_ring, pv_ring, kv_ring, probability_ring, mi_ring, li_ring, packed) = sparse_attn_group(
+@@ -1316,6 +1324,7 @@
+             ATTENTION_QUERY_METADATA,
+             LOCAL_ATTENTION_STATS,
+             PLAN_PHYSICAL_ROWS,
++            PLAN_TABLE_COLUMNS,
+         )
+     (o_r, o_quant, o_scales, o_partials, output) = output_tasks(
+         packed,
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/policy.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/policy.py
+@@ -46,6 +46,7 @@
+     split_score_rows: bool = False
+     limit_empty_workers: bool = False
+     bsh_projection_order: bool = False
++    plan_table_columns: int = 2048
+ 
+     def constexprs(self) -> dict[str, int | bool]:
+         return {
+@@ -65,14 +66,21 @@
+             "LOCAL_ATTENTION_STATS": self.local_attention_stats,
+             "SCALE_PAGE_COALESCING": self.scale_page_coalescing,
+             "PLAN_PHYSICAL_ROWS": self.plan_physical_rows,
++            "PLAN_TABLE_COLUMNS": self.plan_table_columns,
+             "SPLIT_SCORE_ROWS": self.split_score_rows,
+             "LIMIT_EMPTY_WORKERS": self.limit_empty_workers,
+             "BSH_PROJECTION_ORDER": self.bsh_projection_order,
+         }
+ 
+ 
+-def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_len: int) -> CSAMPMDPolicy:
++def select_policy(
++    *, tokens: int, requests: int, max_query_tokens: int, max_seq_len: int,
++    compressed_table_columns: int | None = None,
++) -> CSAMPMDPolicy:
+     """仅依据已有Host描述符选策略；实际分组/叶数由AICPU规划，寻址在设备消费端完成。"""
++    if compressed_table_columns is not None:
++        if type(compressed_table_columns) is not int or compressed_table_columns <= 0:
++            raise ValueError("compressed_table_columns须为已分配页表的正整数列数")
+     values = (tokens, requests, max_query_tokens, max_seq_len)
+     if any(type(v) is not int or v <= 0 for v in values):
+         raise ValueError("tokens/requests/max_query_tokens/max_seq_len须为已有的正整数描述符")
+@@ -139,6 +147,14 @@
+         # 此处只选策略；容量合法性和全部地址仍由device元数据决定，三阶段
+         # 共享同一谓词，不能仅开启生产者或消费者。区间实测与限制见优化日志。
+         plan_physical_rows=tokens >= EARLY_GEOMETRY_MIN_TOKENS,
++        # 只依据已有Tensor形状；超过2080仍走原逻辑地址回退，不截断页表。
++        plan_table_columns=(
++            2080
++            if tokens >= EARLY_GEOMETRY_MIN_TOKENS
++            and compressed_table_columns is not None
++            and 2048 < compressed_table_columns <= 2080
++            else 2048
++        ),
+         # 小T保持原Score，中大T使用早FIX与单次WS写回。分界沿已有M16
+         # 前段资源区间；依据完整实测取舍，不把回退唯一归因于QA或假定最优。
+         # 实际有效query/长度/页表仍在device读取，不按B4/B8等测试点枚举。
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/binding.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/binding.py
+@@ -44,8 +44,11 @@
+         self.requests = b = native["kv_seq_lens"].numel()
+         if hidden.shape != (t, 4, 4096) or hidden.dtype != torch.bfloat16 or not hidden.is_contiguous():
+             raise ValueError("要求Native BF16连续hidden[T,4,4096]")
++        if native["cmp_block_table"].ndim != 2:
++            raise ValueError("cmp_block_table须为二维Tensor")
+         self.policy = policy or select_policy(
+-            tokens=t, requests=b, max_query_tokens=max_query_tokens, max_seq_len=max_seq_len
++            tokens=t, requests=b, max_query_tokens=max_query_tokens, max_seq_len=max_seq_len,
++            compressed_table_columns=native["cmp_block_table"].shape[1],
+         )
+         device = hidden.device
+         self.buffers: dict[str, torch.Tensor] = {}
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/service.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/service.py
+@@ -19,9 +19,8 @@
+ 
+     @staticmethod
+     def _select_policy(*, compressed_table_columns=None, **descriptors):
+-        # The shared service supplies this SPMD-only UB capacity descriptor.
+-        # MPMD keeps its existing task resource policy and kernel arguments.
+-        return select_policy(**descriptors)
++        # 复用服务已有页表形状描述符，不读取设备Q/L或页表内容。
++        return select_policy(compressed_table_columns=compressed_table_columns, **descriptors)
+ 
+     @staticmethod
+     def _prepare_binding(native, **options):
