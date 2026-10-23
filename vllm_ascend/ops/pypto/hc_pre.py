@@ -395,11 +395,14 @@ def _hc_pre_variant(
                     # 投影先分段求和，再乘每个 token 的 rstd，完成 RMS 归一化的作用。
                     c_parts_load = pl.load(parts_2d, [0, t0 * MIX_PAD], [LINEAR_OK, T_TILE * MIX_PAD], valid_shape=[LINEAR_OK, valid_rows * MIX_PAD], target_memory=pl.MemorySpace.Vec)
                     c_parts = pl.set_validshape(pl.fillpad(c_parts_load, pad_value=pl.PadValue.zero), LINEAR_OK, T_TILE * MIX_PAD)
-                    c_total = pl.reshape(pl.col_sum(c_parts), [T_TILE, MIX_PAD])
+                    # 显式 scratch 选择二分归约，由编译器分配 UB；只改变跨 K 段加法顺序。
+                    c_parts_tmp = pl.create_tile([LINEAR_OK, T_TILE * MIX_PAD], dtype=pl.FP32)
+                    c_total = pl.reshape(pl.col_sum(c_parts, c_parts_tmp), [T_TILE, MIX_PAD])
                     c_sq_load = pl.load(rms_2d, [0, t0], [RMS_OK, T_TILE], valid_shape=[RMS_OK, valid_rows], target_memory=pl.MemorySpace.Vec)
                     c_sq = pl.set_validshape(pl.fillpad(c_sq_load, pad_value=pl.PadValue.zero), RMS_OK, T_TILE)
+                    c_sq_tmp = pl.create_tile([RMS_OK, T_TILE], dtype=pl.FP32)
                     c_rms_tmp = pl.create_tile([1, T_TILE], dtype=pl.FP32)
-                    c_inv = pl.reshape(pl.tile.rsqrt(pl.add(pl.mul(pl.col_sum(c_sq), HC_DIM_INV), NORM_EPS), c_rms_tmp), [T_TILE, 1])
+                    c_inv = pl.reshape(pl.tile.rsqrt(pl.add(pl.mul(pl.col_sum(c_sq, c_sq_tmp), HC_DIM_INV), NORM_EPS), c_rms_tmp), [T_TILE, 1])
                     comb_inv = c_inv
                     # 投影列8～23对应每个 token 的4×4 comb logit，使用第三个 scale。
                     raw = pl.add(pl.slice(c_total, [T_TILE, 16], [0, HC_MULT * 2]), 0.0)
@@ -653,11 +656,14 @@ def _hc_pre_variant(
                     # 有少量重复归约，但不等待另一角色传中间结果，可并行推进。
                     m_parts_load = pl.load(parts_2d, [0, t0 * MIX_PAD], [LINEAR_OK, T_TILE * MIX_PAD], valid_shape=[LINEAR_OK, valid_rows * MIX_PAD], target_memory=pl.MemorySpace.Vec)
                     m_parts = pl.set_validshape(pl.fillpad(m_parts_load, pad_value=pl.PadValue.zero), LINEAR_OK, T_TILE * MIX_PAD)
-                    m_total = pl.reshape(pl.col_sum(m_parts), [T_TILE, MIX_PAD])
+                    # 显式 scratch 选择二分归约，由编译器分配 UB；只改变跨 K 段加法顺序。
+                    m_parts_tmp = pl.create_tile([LINEAR_OK, T_TILE * MIX_PAD], dtype=pl.FP32)
+                    m_total = pl.reshape(pl.col_sum(m_parts, m_parts_tmp), [T_TILE, MIX_PAD])
                     m_sq_load = pl.load(rms_2d, [0, t0], [RMS_OK, T_TILE], valid_shape=[RMS_OK, valid_rows], target_memory=pl.MemorySpace.Vec)
                     m_sq = pl.set_validshape(pl.fillpad(m_sq_load, pad_value=pl.PadValue.zero), RMS_OK, T_TILE)
+                    m_sq_tmp = pl.create_tile([RMS_OK, T_TILE], dtype=pl.FP32)
                     m_rms_tmp = pl.create_tile([1, T_TILE], dtype=pl.FP32)
-                    m_inv = pl.reshape(pl.tile.rsqrt(pl.add(pl.mul(pl.col_sum(m_sq), HC_DIM_INV), NORM_EPS), m_rms_tmp), [T_TILE, 1])
+                    m_inv = pl.reshape(pl.tile.rsqrt(pl.add(pl.mul(pl.col_sum(m_sq, m_sq_tmp), HC_DIM_INV), NORM_EPS), m_rms_tmp), [T_TILE, 1])
                     # pre/post 共用八列归一化、偏置和 sigmoid，保留各自 scale。
                     # gate_scale_ids 为 [0,0,0,0,1,1,1,1]：前4列用 hc_scale[0]，
                     # 后4列用 hc_scale[1]；hc_scale[2] 留给 Sinkhorn 的 comb。
