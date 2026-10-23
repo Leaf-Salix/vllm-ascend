@@ -127,7 +127,14 @@ Native正确性参考沿用`v02_native_b16`和`v12_native_b24`。新增
 
 详细中文过程持续追加主`DSV4_FLASH_CSA_VALIDATION_LOG.md`。
 
-MPMD内部工作区版16卡B16已通过，证据`internal_mpmd_b16_summary.json`：
-256请求共49152输出token，每卡33个真实满批S6 step，零抢占，21层外部scratch均0。
-与旧外部工作区版MPMD的全部token和DSpark事件一致。SPMD B16仍在运行，
-三方完整对照和B24整模型尚未完成。
+两种内部工作区版16卡B16均已通过，证据`internal_mpmd_b16_summary.json`、
+`internal_spmd_b16_summary.json`及`internal_b16_comparison.json`。
+每侧256请求共49152输出token，每卡33个真实满批S6 step，零抢占，21层外部scratch均0。
+两种PTO全部token及DSpark事件一致，也分别与各自旧外部版本一致。
+对Native，32个简单请求全部逐token一致；复杂问题保留既有差异，完整问答在
+`downloads/CSA_TND_INTERNAL_QA_20261024/`，当前含B16三方全文和完整模型输入。
+
+B16门槛通过后才提交B24，沿用预算0.935、HCCL768及已验证ring配置：
+MPMD任务`task_20261024_041057_60730724515`，SPMD任务`task_20261024_041106_6128009168`。
+输出位于`runs/v25_mpmd_b24`、`runs/v25_spmd_b24`；实际状态以队列为准。
+B24尚未完成三方对照，目标仍未整体完成。

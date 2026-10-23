@@ -23561,3 +23561,27 @@ MPMD 16卡B16任务task_20261024_034554_36644472287已exit=0。
 
 SPMD B16任务task_20261024_034603_366976914195已接续运行，三方完整对照尚待
 它完成；B24整模型仍未提交。正式目录改动不会影响这些已冻结任务的源码。
+
+
+### 735.112 两种TND均通过16卡B16，按既定精度口径进入B24（2026-10-24）
+
+SPMD B16任务task_20261024_034603_366976914195已exit=0。
+与MPMD一样，256请求×192token完整生成；每卡33个真实满批S6 step、零抢占，
+21层CSA外部scratch均0。证据`internal_spmd_b16_summary.json`及对应
+`runs/v25_spmd_b16/functional_check.json`。对各自旧外部版本，两个新实现的
+全部16卡token及DSpark接受事件都完全一致。
+
+三方对照`internal_b16_comparison.json`已通过：MPMD与SPMD全部49152token
+及全部256请求的DSpark事件一致。对Native，两种PTO均为64/256请求完整token
+一致，其中32个简单请求全部逐token一致，复杂请求仍有既有差异；不同位置token
+共22416/49152，不能说整模型与Native完全相同。Native平均接受草稿token数
+3.806501548，两种PTO均3.795665635，0..5均覆盖。全部回答见配套.texts.md及
+`downloads/CSA_TND_INTERNAL_QA_20261024/`中的三方HTML/Markdown/原始token。
+当前download只含已完成的B16，B24完成后再加入；生成上限192token，未补写回答。
+Native为固定历史正确性参考，SDK/heap差异已明确披露，不作跨版本性能比较。
+
+B16达到用户已明确接受的口径：正常decode、简单token一致、完整披露复杂差异。
+随后才提交B24：MPMD task_20261024_041057_60730724515，SPMD
+ task_20261024_041106_6128009168。沿用此前B24的预算0.935、HCCL768，
+两侧ring均[16,256,16,16]MiB、window4096，仍要求每卡真实24×S6和零外部scratch。
+正式算子代码已在a37d29fa4提交；B24两侧结果尚待运行，目标仍未完成。
