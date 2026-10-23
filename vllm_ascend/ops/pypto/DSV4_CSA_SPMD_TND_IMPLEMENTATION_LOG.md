@@ -5071,3 +5071,27 @@ L1窗口中位933.34μs，对同设备、同SDK已合格历史969.17μs降低3.6
 后续将容量按实际compressed block-table描述符选成2048/2080两档，统一
 传给生产者和消费者，并核对旧档生成物、真实服务图签名及状态/非法页保护。
 保留原三项机制和固定分母；共享SDK未变、未push，goal继续active。
+
+### 2026-10-23：容量分档完成八档代码等价，进入C02状态与服务检查
+
+冻结physical_capacity_tier_v1，policy新增PLAN_TABLE_COLUMNS constexpr，
+从实际已分配cmp_block_table.shape[1]选择2048/2080，不读回Q/L数据。
+binding与service graph signature使用同一描述符；前置geometry、最终plan
+和Attention消费统一接收容量。八档仅C02选择2080，其他七档仍为2048。
+现有136项合同测试在隔离候选运行，加29项容量/传递检查，共165项通过。
+新状态观察器的3项CPU检查也通过，覆盖历史页选择、非法页恢复和dummy。
+
+八档完整CPU编译通过。C02全部四份CPP和kernel ABI与已实测2080原型一致，
+其他七档与已保留实现一致；仅剔除`// pto:`源位置注释，无表达式归一化。
+C06使用已实测C06产物作为比较对象。证据physical_capacity_tier_v1_codegen.json。
+构建检查脚本初版误假定C06有独立merged CPU目录，修正为已归档的真实产物；
+隔离UT首次收集缺少测试source_loader路径，修正本地导入后165项通过。
+这两项均为测试工具路径问题，未修改共享SDK或冻结候选。
+
+通过task-submit在device9提交state任务task_20261023_101533_4702752956，
+service任务task_20261023_101534_47081128521。状态检查保留原16场景/4连续步，
+新增负压缩页、恢复、越界压缩页、恢复。只修改第一query已选中的历史压缩页，
+不破坏本轮写slot；独立整数oracle校验physical indices和压缩块mask。
+服务检查保留真实custom-op、ACLGraphWrapper、空调用和Native回退合同，
+将原C04专用leaf策略断言改为C02实际2080容量断言。两项均不采性能。
+当前生产仍是merged_schedule_v1，未预记新收益、未push。

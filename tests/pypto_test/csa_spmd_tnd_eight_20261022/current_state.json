@@ -1,6 +1,6 @@
 {
   "goal_status": "active",
-  "objective": "参考cannbot-knowledge ops做TND-SPMD核内优化及核间调度优化，按新八档规范在现有基础上降低10%耗时",
+  "objective": "\u53c2\u8003cannbot-knowledge ops\u505aTND-SPMD\u6838\u5185\u4f18\u5316\u53ca\u6838\u95f4\u8c03\u5ea6\u4f18\u5316\uff0c\u6309\u65b0\u516b\u6863\u89c4\u8303\u5728\u73b0\u6709\u57fa\u7840\u4e0a\u964d\u4f4e10%\u8017\u65f6",
   "metric": {
     "kind": "equal_weight_geomean_candidate_over_frozen",
     "case_count": 8,
@@ -44,12 +44,27 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {},
+  "pending_tasks": {
+    "task_20261023_101533_4702752956": {
+      "case": "C02",
+      "candidate": "physical_capacity_tier_v1",
+      "mode": "state",
+      "performance_eligible": false,
+      "status": "pending"
+    },
+    "task_20261023_101534_47081128521": {
+      "case": "C02",
+      "candidate": "physical_capacity_tier_v1",
+      "mode": "service",
+      "performance_eligible": false,
+      "status": "pending"
+    }
+  },
   "next_steps": [
-    "Inspect whether the Attention softmax/score-input schedule can overlap scattered KV gathering with proven disjoint UB lifetimes; deduplicate prior prefetch and row-loop experiments first",
-    "Use the measured low-contiguity/low-ordered-reuse result to avoid whole-page loads and query-group KV-residency assumptions",
-    "Track PTOAS #1674 and PyPTO #3116 for supported pipeline/cache capabilities; do not mutate the shared SDK while sessions/jobs use it",
-    "Preserve all three retained mechanisms and the original eight-case denominator; the 0.90 goal remains unachieved; no push"
+    "Complete C02 capacity tier state and service validation; integrate only after all gates pass",
+    "Retain the original seven case kernels and the measured C02 2080-column kernel by exact code equivalence",
+    "Prioritize reduced data movement and complete critical-path service cost; previous Attention overlap experiments were rejected",
+    "Preserve the original eight-case denominator and no-push constraint; 0.90 goal remains unachieved"
   ],
   "knowledge_query": {
     "status": "index_missing",
@@ -81,7 +96,7 @@
     "kv_access_analysis": 4,
     "plan_gather_valid": 27
   },
-  "updated_at": "2026-10-23T07:17:55.241155+08:00",
+  "updated_at": "2026-10-23T10:17:02.841716+08:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -381,6 +396,15 @@
       "codegen": "physical_capacity_2080_v1_C02_codegen.json",
       "status": "positive_C02_pilot_tier_and_state_validation_required",
       "measurement": "physical_capacity_2080_v1_C02_result.json"
+    },
+    "physical_capacity_tier_v1": {
+      "source": "physical_capacity_tier_v1.json",
+      "adopted": false,
+      "cpu_checks": 165,
+      "state_observer_preflight_checks": 3,
+      "codegen": "physical_capacity_tier_v1_codegen.json",
+      "all_eight_compiled_cpp_and_abi_equal": true,
+      "status": "state_and_service_tasks_submitted"
     }
   },
   "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
@@ -520,5 +544,5 @@
   "current_implementation": "merged_schedule_v1",
   "earlier_stage_commit": "3a0f423c6",
   "production_commit": "32a1426d9",
-  "latest_stage": "C02_capacity_pilot_positive_integration_pending"
+  "latest_stage": "capacity_tier_codegen_pass_state_service_pending"
 }
