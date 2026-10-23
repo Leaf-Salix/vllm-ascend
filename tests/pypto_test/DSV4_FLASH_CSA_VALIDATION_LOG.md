@@ -23008,3 +23008,43 @@ legacy_performance_inventory_20261023.json。
 本轮两设备任务均已终态，生产保持2121ff775/650fd94aa已采用的输出矩形与容量
 策略，没有回滚之前的有效工作，没有修改其它session的HCA文件。记录详细中文
 Signed-off-by提交后停止，不push；Goal保持paused，原10%性能目标未完成。
+
+### 735.96 恢复TND整模型功能验证：先128K/B16/S6，再B24（2026-10-23）
+
+用户清除旧性能目标后建立新目标：TND-MPMD与TND-SPMD都接入vLLM-Ascend，
+先验证128K/B16/S6正常decode且结果与Native基本一致，再做B24。用户明确这是
+此前“要求复现”中断工作的续作。故本轮恢复16卡真实模型功能验证；不继续
+旧八档性能优化，也不修改已完成的PyTorch单卡复现手册。
+
+恢复到的历史证据位于工作区`csa-repro-20261021-clean/kv-repro`：
+`decode-native_clean2`已完成16×16请求、每请求192token，平均接受3.80650155；
+`decode-spmd_clean2`首个S6 decode申请210MiB时OOM，MPMD随后未执行。
+旧`model_v60_mpmd_tnd_8k_b16`也在申请210MiB处OOM。它们均使用0.95预算和
+静态编译；报错来自编译图执行，不能仅凭210MiB断言是CSA某一工作区。
+Native生成的40个混合问题KV及原审计仍完整，直接只读使用，不重做prefill或hash。
+
+本轮入口为`csa_tnd_model_validation_20261023/`。冻结框架/算子HEAD
+`99268437c`，只纳入本轮明确的测试改动，不包含另一会话未提交的HCA改动。
+SDK保持公共`csa-shared-20261022-logical-codegen/validated`，CANN9.2.0-beta.2。
+复用已安装Native依赖，不重建SDK或整仓。Native/SPMD/MPMD共用TP1、DP=EP16、
+NZ2、Native HCA、level1+HCCL确定性、event mode1、EPLB关闭。图模式仍为
+npugraph_ex+FULL_DECODE_ONLY，通过新增`--no-static-kernel`显式关闭静态编译，
+不加入SuperKernel。默认历史性能脚本仍保留原静态编译行为。
+
+最小单卡预检查`task_20261023_184150_20130312516`已通过：Native
+AddRMSNormBias对CPU参考正确、两种TND入口依赖图解析通过、三个SDK真实路径与
+公共清单一致。首次冻结遗漏生成的`_build_info.py`已修正并记录失败任务；
+不是算子问题，不需要重新编译。图/静态开关四种CPU组合和本轮Python lint通过。
+
+按现有B16/B24描述符在CPU meta上实例化当前绑定对象，只统计显式工作区：
+B16单层SPMD为136,934,248B、MPMD为134,722,280B，21层单一容量分别约
+2.678/2.635GiB；B24分别约4.129/4.086GiB。此估计不含权重、KV、runtime arena
+及额外容量/策略的绑定，不能当成设备峰值。证据为`workspace_estimate.json`。
+因此B16首轮三侧统一0.92预算给真实decode留余量，仍要求真实B16/S6、无抢占。
+
+已排16卡任务：Native `task_20261023_184325_26426522274`，
+MPMD `task_20261023_184537_37845812143`，
+SPMD `task_20261023_184538_37863528133`。本节提交时尚在排队，不能报告通过。
+PTO观测另记生成期实际提交和图合同allowed/rejected计数，避免把FULL标签
+冒充图重放。功能门槛、全部token/逐请求DSpark事件、简单题答案三类分别检查。
+B16结论完整前不启动B24。详细入口、冻结差异、预检查和任务号见该目录。

@@ -28,7 +28,7 @@ def decode_additional_config(args):
     return {
         "ascend_compilation_config": {
             "enable_npugraph_ex": graph,
-            "enable_static_kernel": graph,
+            "enable_static_kernel": graph and args.static_kernel,
             "fuse_norm_quant": True,
             **({} if not args.capture_sizes else {"align_decode_capture_sizes": False}),
         },
@@ -1096,6 +1096,8 @@ def launch(args):
                    "--graph-mode", args.graph_mode]
             if args.recompute_scheduler:
                 cmd.append("--recompute-scheduler")
+            if not args.static_kernel:
+                cmd.append("--no-static-kernel")
             if args.save_extended_bank:
                 cmd += ["--save-extended-bank", str(args.save_extended_bank.resolve())]
             if args.mixed_requests:
@@ -1203,6 +1205,9 @@ def main():
     parser.add_argument("--kernel-config", type=Path, help="swimlane-export用于命名任务的JIT kernel_config.py")
     parser.add_argument("--graph-mode", choices=["full_decode_only", "eager"], default="full_decode_only",
                         help="D侧执行模式；上线口径为FULL_DECODE_ONLY，eager仅用于定位问题")
+    parser.add_argument("--static-kernel", action=argparse.BooleanOptionalAction, default=True,
+                        help="图模式下是否编译静态kernel；功能复现可用--no-static-kernel，"
+                             "保持npugraph_ex与FULL_DECODE_ONLY，Native/PTO必须一致")
     parser.add_argument("--recompute-scheduler", action="store_true",
                         help="开启recompute_scheduler_enable；DP>1下PTO图模式需要它才能跳过DP padding")
     parser.add_argument("--rank-batches", type=int, nargs="+",
