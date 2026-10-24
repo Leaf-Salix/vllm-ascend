@@ -33,6 +33,8 @@ def main():
     parser.add_argument("--token-capacity", type=int)
     parser.add_argument("--request-capacity", type=int)
     parser.add_argument("--windows", type=int, default=0)
+    parser.add_argument("--performance-spec", action="store_true",
+                        help="20261024八档三列规范：真实服务直接调用，仅采候选L1与含AICPU跨度")
     parser.add_argument("--native-only", action="store_true", help="只采 Native 直接调用外部 profiling，不使用图")
     parser.add_argument("--profile", action="store_true", help="通过功能检查后采两侧直接调用外部 profiling")
     parser.add_argument("--profile-service", action="store_true",
@@ -55,6 +57,8 @@ def main():
     parser.add_argument("--service-probe", action="store_true", help="真实custom op服务接管与KV钩子验证；不测性能")
     parser.add_argument("--device", type=int)
     args = parser.parse_args()
+    if args.performance_spec and (args.windows < 10 or not args.control_source or not args.diagnostic_perf):
+        raise ValueError("规范计时要求至少10窗、冻结控制组和保留原有数值差异的显式标记")
     if args.control_source and args.compare_legacy:
         raise ValueError("控制组只能选冻结 TND 或旧 HCA 中的一种")
     if args.profile_service and (not (args.profile or args.host_profile) or args.native_only):
@@ -601,6 +605,19 @@ def main():
             report["diagnostic_performance_only"] = bool(diagnostic_allowed and not report["passed"])
             if not report["passed"] and not diagnostic_allowed:
                 raise AssertionError("输出、cache/state、重复直接调用或写保护检查失败，见 result.json")
+            if args.performance_spec:
+                from hca_performance_20261024.measure import measure
+
+                configs = list(set((args.output / "build").glob("*/kernel_config.py")) - previous_configs)
+                if len(configs) != 1:
+                    raise RuntimeError("规范计时需要唯一候选整层kernel_config")
+                report["performance_spec"] = measure(
+                    package=PACKAGE, layer=layer, call=call, config=config, fixture=fixture,
+                    output=output, baseline=eager, restore=restore, collect=collect,
+                    output_dir=args.output, kernel_config=configs[0], samples=args.windows,
+                )
+                save("completed")
+                return
             if args.windows:
                 from csa_mpmd_tnd_20261021.run_case import export_l1
 

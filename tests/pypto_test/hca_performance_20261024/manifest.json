@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-24",
+  "status": "measured",
+  "spec": "vllm_ascend/ops/pypto/CSA_PERFORMANCE_TEST_SPEC.md",
+  "source_head": "c2785df7222a22f9b4277b39e903e8e2b84d95d3",
+  "operator": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/performance_spec_20261024/operator",
+  "control_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_mpmd_20261022/experiments/attention_pair_control_v1/operator",
+  "shared_toolchain": {
+    "release": "csa-shared-20261024-group-dims",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-shared-group-dims-20261024",
+      "commit": "d44925c17d9ff7d7fa8e5067e41c4b4f80bf3063"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_tnd_model_validation_20261023/internal_toolchain_upgrade.json",
+    "published_for_validation_at": "2026-10-24T02:59:40+08:00",
+    "validated_at": "2026-10-24T03:45:54+08:00"
+  },
+  "native": {
+    "aclgraph": true,
+    "static_kernel_compile": true,
+    "super_kernel_optimize": true,
+    "NZ": 2,
+    "samples": 30,
+    "attempts": "C04 v1补static_kernel字段，v2长编译文件名打包失败，v3短目录完成；其余七档直接v3"
+  },
+  "pto": {
+    "aclgraph": false,
+    "samples_per_metric": 10,
+    "scope": "完整PTO根调用：所有device活动（含AICPU）与全部L1 incore首尾；服务前导另存诊断"
+  },
+  "equation": "100*(native-hca_mpmd_l1)/hca_mpmd_l1",
+  "columns": [
+    "Native",
+    "HCA-MPMD-AICPU",
+    "HCA-MPMD-L1"
+  ],
+  "historical_reuse": "旧PTO为10月22日SDK且最新候选仅5/7窗；Native仅1档图基线且共享框架已有更新。本轮补测八档。",
+  "limitations": [
+    "HCA无Indexer，不测TopK/score",
+    "保留原Native cache/state严格阈值差异；候选须对冻结正式实现output/cache/state逐bit一致且Native输出容差通过",
+    "本次仅测试；不恢复性能优化，不push"
+  ],
+  "validation": "VALIDATION.json",
+  "task_count": 19
+}

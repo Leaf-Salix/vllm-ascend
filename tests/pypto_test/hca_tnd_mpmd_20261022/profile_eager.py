@@ -57,7 +57,7 @@ def extract_windows(trace_path, prefix, count):
             "trace": str(trace_path)}
 
 
-def profile_call(run, reset, *, output_dir, side, samples=10):
+def profile_call(run, reset, *, output_dir, side, samples=10, validate=None):
     import torch
     import torch_npu
 
@@ -68,6 +68,7 @@ def profile_call(run, reset, *, output_dir, side, samples=10):
         run()
         torch.npu.synchronize()
     prefix = "HCA_EAGER/" + side
+    checks = []
     with torch_npu.profiler.profile(
         activities=[torch_npu.profiler.ProfilerActivity.CPU, torch_npu.profiler.ProfilerActivity.NPU],
         schedule=torch_npu.profiler.schedule(wait=0, warmup=0, active=1, repeat=1),
@@ -82,10 +83,14 @@ def profile_call(run, reset, *, output_dir, side, samples=10):
             with torch.profiler.record_function(f"{prefix}/{index}"):
                 run()
                 torch.npu.synchronize()
+            if validate is not None:
+                checks.append(validate())
         trace.step()
     paths = list(output_dir.glob("*/ASCEND_PROFILER_OUTPUT/trace_view.json"))
     if len(paths) != 1:
         raise RuntimeError(f"要求唯一 PyTorch trace，得到 {paths}")
     result = extract_windows(paths[0], prefix, samples)
+    if validate is not None:
+        result["window_checks"] = checks
     (output_dir / "summary.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     return result

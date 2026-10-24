@@ -807,3 +807,52 @@ clean各0次，unused和真实使用的反例各1次。已提交[PyPTO #3136](ht
 收口详情：`tests/pypto_test/hca_tnd_mpmd_20261022/ATTENTION_DIRECT_KV.md`；
 任务清单、全部样本、CPU失败与本地大产物路径/大小已汇入`ATTENTION_NEXT_RESULTS.json`。
 当前没有本轮在途设备任务。保存正式基线、所有候选和负结果后暂停；未push，目标未完成。
+
+## 2026-10-24：按CSA性能规范完成HCA八档三列复测（不恢复优化）
+
+用户要求按 `CSA_PERFORMANCE_TEST_SPEC.md` 测Native、HCA-MPMD-AICPU、HCA-MPMD-L1，
+并明确：禁止ACLGraph仅针对PTO；Native须启用静态编译、SuperKernel、NZ、ACLGraph。
+本轮生产HCA仍为37bbd0f3c的K128/K512及Q_B/O_B区间策略，未修改算子、数学或SDK。
+公共工具链使用validated的csa-shared-20261024-group-dims。
+
+八档为128K/B1、256K/B16、128K/B8/B16/B24/B28、8K/B32和128K/B16混长T56。
+前七档S6，混长保持规范的16请求固定列表，不补成B×6。正式第4层（index=3）
+W8A8/NZ2，seed1024，同一Native TND fixture、页映射与状态起点。
+Native每档30窗，PTO两种边界各10窗，完整样本取中位数，不剔除慢窗。
+
+Native实际检查静态编译返回成功、已安装静态包、SuperKernel优化成功、
+四张主投影权重格式29、多stream和单一捕获图。PTO使用直接调用；先验证真实
+服务接管、按步compact metadata与KV钩子，再采原始PyTorch trace和L1。
+服务trace初始外框包含9～14ms的前导/派发间隙，经与CSA完整算子计时边界核对，
+正式AICPU列按唯一PTO根op和外框结束前设备同步划分活动，保留全部PTO stream、
+DMA、Event、AICPU/AICore；原服务跨度另外完整保留，不以删慢样本制造收益。
+根op之前唯一Native compact producer已完成的条件在80个窗口中全部核实。
+L1为PTO所有incore首尾，不累加task。两列取自同一实现/fixture/服务调用，
+采集器分开运行；未移动PTO内部Q/L、slot或有效块推导。
+
+| 场景 | Native μs | MPMD含AICPU μs | MPMD L1 μs | (Native−L1)/L1 |
+|---|---:|---:|---:|---:|
+| 128K/B1/S6 | 241.50 | 465.62 | 223.92 | 7.85% |
+| 256K/B16/S6 | 747.25 | 947.50 | 649.43 | 15.06% |
+| 128K/B8/S6 | 398.62 | 681.25 | 371.53 | 7.29% |
+| 128K/B16/S6 | 590.00 | 812.50 | 543.49 | 8.56% |
+| 128K/B24/S6 | 767.62 | 1017.88 | 671.76 | 14.27% |
+| 128K/B28/S6 | 817.38 | 1009.38 | 737.82 | 10.78% |
+| 8K/B32/S6 | 641.62 | 980.38 | 612.83 | 4.70% |
+| 128K/B16/混长T56 | 456.50 | 734.00 | 451.01 | 1.22% |
+
+八档Native输出沿用atol/rtol=0.01均通过，PTO输出/cache/state对冻结正式实现
+逐bit相同；每个PTO性能窗口执行后在计时外复核状态与保护区。原有Native
+cache/state严格1e-5差异继续单列，不能宣布全精度或整模型token验收通过。
+该比例比较Native外部设备跨度与PTO L1，不是端到端吞吐提升，也未达到原30%目标。
+
+共19个任务：1个CPU完整后端编译，8个PTO采集，8个成功Native采集，2个Native启动失败。
+第一次历史脚本缺static_kernel字段，在新测试入口显式补True；第二次CANN把
+长绝对目录编码进shape_info文件名，超过NAME_MAX，仅改用私有短编译工作目录后完成，
+未关闭任何优化，也未改共享CANN载荷。失败报告与日志保留。
+
+结果、完整样本、任务号、版本、状态差异及大文件路径/大小见
+`tests/pypto_test/hca_performance_20261024/`。`validate.py`从原始Native CSV和
+PTO L1重新计算八档跨度，核对两侧fixture、环境、样本数、中位数和百分比通过，
+该核对没有再次执行设备。大trace、静态包、编译产物和权重不提交，不做hash扫描。
+本轮只提交详细中文测试记录，不push；原优化目标保持暂停。

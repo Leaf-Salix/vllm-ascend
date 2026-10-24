@@ -1,0 +1,42 @@
+{
+  "status": "FAIL",
+  "side": "native",
+  "batch": 16,
+  "history": 131072,
+  "query_tokens": 6,
+  "tokens": 96,
+  "layer_index": 3,
+  "seed": 1024,
+  "device": 0,
+  "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1",
+  "cwd": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_performance_20261024/runs/native_C04_v1",
+  "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+  "scope": "Native HC_pre + input RMSNorm + HCA attention + HCpost；无 MoE/EP16/整模型验收",
+  "fixture_origin": "正式第4层权重；固定seed合成hidden及历史KV，不是真实服务激活",
+  "cann": "/data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2",
+  "opp": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_performance_20261024/runs/native_C04_v1/private_opp/opp",
+  "custom_opp": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/.cache/csa/csa-native-ops-install/vendors/custom_transformer",
+  "backend_options": {
+    "force_eager": false,
+    "inplace_pass": true,
+    "clone_input": false,
+    "clone_output": false,
+    "static_kernel_compile": true,
+    "super_kernel_optimize": true
+  },
+  "torch_compile_options": {
+    "dynamic": false,
+    "fullgraph": true
+  },
+  "compile_entry": "torch.compile(backend=npugraph_ex)",
+  "compilation_scope": {
+    "vllm_ascend_fx_passes": false,
+    "note": "直接使用 npugraph_ex passes；不假设 EngineArgs 自动执行 vLLM FX passes"
+  },
+  "versions": {
+    "torch": "2.10.0",
+    "torch-npu": "2.10.0.post2",
+    "vllm": "0.25.1+empty"
+  },
+  "error": "AttributeError(\"'types.SimpleNamespace' object has no attribute 'static_kernel'\")"
+}
