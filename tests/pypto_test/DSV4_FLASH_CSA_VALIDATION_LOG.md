@@ -23688,3 +23688,46 @@ task_20261024_121244_120622929591（exit=130）；它尚无完成结论，不能
 自身失败。两个设备任务均终态，16卡尚未启动。已向用户提出保留各档图到测试结束、
 或先独立复现图池生命周期两个方向，等待讨论后再继续。证据为
 graph_replay_v26_summary.json、graph_replay_v26_failure.log及相应runs原始结果。
+
+
+### 735.116 按真实模型保留各档图，继续原场景单卡验证（2026-10-24）
+
+用户选择“按真实模型保留各档图，继续单卡验证”。本轮只修改单卡脚本的对象
+生命周期：retained_graphs持有每档ACLGraphWrapper、场景输入/输出/metadata和
+服务binding到整个测试结束，最后等待设备完成；生产算子和模型捕获候选不变，
+公共SDK不变。没有把C08改成S6，也没有改变任何正式场景或容差。
+
+冻结v27_graph_lifetime以15b64665a为基础，harness包含上述生命周期调整。
+MPMD任务task_20261024_130628_251959525438，SPMD任务
+task_20261024_130637_252428915901，分别输出runs/graph_replay_v27_mpmd、
+runs/graph_replay_v27_spmd。两任务均只用单卡、正式第4层、NZ2及公共工具链。
+先核对C04/C08真实图复用及原失败是否消失，再收口B24和最后单请求图档；
+任务完成前不报告整组通过，也不启动16卡。当前新脚本Ruff与格式检查通过。
+
+
+### 735.117 两种TND真实服务单卡图重放全部通过（2026-10-24）
+
+v27的MPMD与SPMD任务均已完成exit=0，每种15次、合计30次重放检查通过。
+指定场景为128K/B16/S6/T96（C04）及固定混长T56（C08，原始容量56）；
+另覆盖128K/B24/S6/T144和最后单请求S6/T6图档。每个大档覆盖满批、尾7请求、
+最后1请求padding、返回满批，混长场景额外反转query长度顺序且总T仍为56。
+图内输出/cache/state与独立eager TND参考逐bit一致，Top-K/score诊断一致，
+全部保护区通过，外部PTO scratch为0，实际ACLGraphWrapper重放无Python重新提交。
+这里的bit对齐对象是相同TND算术的eager参考，不是Native算术路径。
+
+仅增加各档图及输入/输出/metadata/binding保留时间后，原第二档capture_begin
+的图池use_count断言消失，两侧全部4档成功。生产候选、SDK、场景和容差未变；
+此对照支持原阻塞来自测试脚本图生命周期，不应据此报告为PyPTO算子缺陷。
+门禁汇总graph_replay_service_validation.json保留场景、每步容量、逐bit对照项、
+保护结果、工具链和两条exit=0任务证据；原始详细结果保留在各自runs目录。
+
+准备真实模型验证前，compare.py增加显式Native历史源码审计入口：两种PTO仍须
+同基础源码/SDK/heap；Native版本不同必须提供两端精确commit及Native实际路径未变
+的审计，仍逐项检查CANN、权重/KV、推理配置及Native扩展来源。审计见
+ graph_replay_native_reference_audit.json。仅审计纯Native参考，不宣称PTO模型中
+Native HCA的图执行不变，不作跨版本性能比较。用旧B16完整结果检查报告器兼容性
+通过，故意传入错误PTO版本的审计被拒绝；未新增NPU测试。
+
+本阶段仅单卡通过，16卡满批/尾批/padding的实际21层replay以及输出对照仍待执行。
+改动的两个Python文件Ruff、格式及git diff --check通过。完整format.sh此前因环境
+缺少pre-commit未能执行，不声称全仓格式检查通过。

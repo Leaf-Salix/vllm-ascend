@@ -1,0 +1,45 @@
+{
+  "status": "PASS",
+  "scope": "仅审计纯Native参考模型的固定配置，不宣称PTO模型中的Native HCA图路径未变；不是性能对照",
+  "native_source_commit": "99268437c90132bcd0b1dec1007ecf615c80f4bd",
+  "pto_source_commit": "15b64665acafe64e3a851cba29a6fd78378d06e7",
+  "native_path_unchanged": true,
+  "changed_paths": [
+    "vllm_ascend/compilation/acl_graph.py",
+    "vllm_ascend/models/pypto_deepseek_v4.py",
+    "vllm_ascend/ops/dsa.py",
+    "vllm_ascend/ops/pypto/CSA_SPMD_NUMERICAL_DIFFERENCES.md",
+    "vllm_ascend/ops/pypto/CSA_SPMD_NUMERICAL_RECOMMENDATIONS.md",
+    "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
+    "vllm_ascend/ops/pypto/HCA_TND_MPMD_OPTIMIZATION_LOG.md",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/binding.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/entry.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/graph_contract.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/native_adapter.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/service.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/binding.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd/entry.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_hca_tnd/attention.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_hca_tnd/entry.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_hca_tnd/native_adapter.py",
+    "vllm_ascend/ops/pypto/hc_pre.py",
+    "vllm_ascend/worker/model_runner_v1.py"
+  ],
+  "conditional_native_files": {
+    "vllm_ascend/compilation/acl_graph.py": "新增内容只在csa_tnd_contracts拒绝PTO图时执行；纯Native模型没有这些合同。",
+    "vllm_ascend/ops/dsa.py": "新增容量视图只在pto_csa_tnd_padded_redispatch=True时启用；该标记只由TND图回退设置。",
+    "vllm_ascend/worker/model_runner_v1.py": "新增捕获长度/positions只在模型有_pto_csa_tnd_capture_sequence_length属性时采用；该属性仅由TND prepare_csa_model设置。"
+  },
+  "other_changes": "PTO专用模型、算子、文档；Native DeepSeekV4 hc_pre直接调用_C_ascend.npu_hc_pre_v2，不调用改动的ops/pypto/hc_pre.py。",
+  "unchanged_native_sources": [
+    "csrc/",
+    "vllm_ascend/models/deepseek_v4.py",
+    "vllm_ascend/attention/dsa_v1.py"
+  ],
+  "comparison_requirements": "两种PTO同源码/SDK/heap；Native扩展路径、CANN、权重、KV、问题、TP/DP/EP、NZ、确定性、HCCL、图模式、预算和192token仍严格检查。",
+  "reporter_cpu_validation": {
+    "historical_comparison": "PASS",
+    "wrong_source_epoch_rejected": true,
+    "evidence": "runs/compare_source_guard_cpu"
+  }
+}

@@ -25,20 +25,34 @@ def main():
         action="store_true",
         help="仅正确性对照：允许复用不执行PyPTO的Native历史输出，显式记录PTO工具链/heap差异",
     )
+    parser.add_argument(
+        "--native-source-audit",
+        type=Path,
+        help="Native参考与PTO基础提交不同时，必须提供明确版本及Native路径未变的审计记录",
+    )
     args = parser.parse_args()
     roots = {"native": args.native, "spmd_tnd": args.spmd, "mpmd_tnd": args.mpmd}
     configs = {mode: read(root / "configuration.json") for mode, root in roots.items()}
     reference = configs["native"]
     pto_reference = configs["spmd_tnd"]
+    assert configs["mpmd_tnd"]["source_commit"] == pto_reference["source_commit"], "两种PTO必须同一基础源码"
+    source_audit = read(args.native_source_audit) if args.native_source_audit else None
+    if source_audit is not None:
+        assert args.reuse_native_reference
+        assert source_audit["status"] == "PASS" and source_audit["native_path_unchanged"] is True
+        assert source_audit["native_source_commit"] == reference["source_commit"]
+        assert source_audit["pto_source_commit"] == pto_reference["source_commit"]
     assert configs["mpmd_tnd"]["toolchain"] == pto_reference["toolchain"], "两种PTO必须使用同一SDK"
     assert configs["mpmd_tnd"].get("pto_ring_config") == pto_reference.get("pto_ring_config"), "两种PTO的heap必须一致"
     for mode, config in configs.items():
+        if config["source_commit"] != reference["source_commit"]:
+            assert source_audit is not None, "源码版本不同，须先审核Native实际路径，不能只凭历史结果复用"
+            assert config["native_extension"] == reference["native_extension"], "Native扩展来源必须一致"
         if not args.reuse_native_reference:
             assert config.get("pto_ring_config") == reference.get("pto_ring_config"), "运行时容量配置必须记录并对齐"
             assert config["toolchain"] == reference["toolchain"], "工具链必须一致"
         assert config.get("hccl_buffer_mb", 1800) == reference.get("hccl_buffer_mb", 1800)
         for key in (
-            "source_commit",
             "bank",
             "batch",
             "decode_tokens",
@@ -158,6 +172,7 @@ def main():
             else "同源码/工具链/问题/KV/配置，完整256或384请求"
         ),
         "native_reference_reused": args.reuse_native_reference,
+        "native_source_audit": source_audit,
         "configuration_provenance": {
             mode: {
                 "results": str(root.resolve()),

@@ -117,6 +117,10 @@ def main():
             assert shell_model._pto_csa_tnd_capture_sequence_length == config.model_config.max_model_len
             runtime = layer.self_attn.dsa_attn._pto_csa_runtime
             binding = importlib.import_module(f"vllm_ascend.ops.pypto.{package}.binding").PreparedDynamicCSA
+            # Match model lifetime: all bucket graphs sharing the global pool
+            # remain alive, together with their inputs and outputs, until exit.
+            retained_graphs = {}
+            report["graph_lifetime"] = "各档图及其输入/输出/metadata/binding保留至测试结束"
             for name, queries in (("C04", [6] * 16), ("C08", MIXED_QUERY_LENGTHS), ("C05", [6] * 24), ("tail_B1", [6])):
                 capacity, requests = sum(queries), len(queries)
                 base = make_fixture(
@@ -133,6 +137,8 @@ def main():
                     return target
 
                 graph = ACLGraphWrapper(forward, config, CUDAGraphMode.FULL)
+                retained_graphs[name] = dict(graph=graph, scene=base, output=output, topk=topk, scores=scores)
+                report["retained_graph_cases"] = list(retained_graphs)
                 targets = {}
                 for group_name, group in base["groups"].items():
                     req = base["metadata"][group["prefix"]].decode
@@ -228,6 +234,7 @@ def main():
                 assert contracts and all(c.signature is not None for c in contracts.values())
                 captured_submissions = runtime.submissions
                 captured = runtime.last_binding
+                retained_graphs[name]["binding"] = captured
                 assert not captured.allocations
 
                 # Keep the original case immutable; derived steps exercise the same graph.
@@ -327,6 +334,7 @@ def main():
                     save(name + ":" + step_name + ":PASS")
                     del scene, native, control, expected, expected_topk, expected_scores, debug, diagnostic
                 del graph, base, targets, captured, output, topk, scores
+            torch.npu.synchronize()
             report["variants"][package].update(status="PASS", guard_status="PASS")
             report["status"] = "PASS"
             save("complete")

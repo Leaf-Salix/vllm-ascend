@@ -463,5 +463,27 @@
     "model_gate": "两种实现单卡全部通过后才启动16卡B16/B24；新模型检查必须证明满批、尾批、padding真实replay，无Python重提交",
     "summary": "graph_replay_v26_summary.json",
     "decision": "等待用户讨论图池生命周期处理；不启动16卡"
+  },
+  "graph_replay_single_card_v27": {
+    "source": "experiments/v27_graph_lifetime/source",
+    "source_commit": "15b64665a",
+    "only_change": "单卡脚本保留各档ACLGraphWrapper及输入/输出/metadata/binding至测试结束；生产候选和场景不变",
+    "mpmd_tnd": {
+      "task": "task_20261024_130628_251959525438",
+      "output": "runs/graph_replay_v27_mpmd",
+      "state": "completed",
+      "exit_code": 0,
+      "status": "PASS"
+    },
+    "spmd_tnd": {
+      "task": "task_20261024_130637_252428915901",
+      "output": "runs/graph_replay_v27_spmd",
+      "state": "completed",
+      "exit_code": 0,
+      "status": "PASS"
+    },
+    "user_decision": "按真实模型保留各档图，继续单卡验证",
+    "model_gate": "两种TND的指定场景及B24/尾批/小图均通过，允许进入16卡；整模型尚未验证",
+    "summary": "graph_replay_service_validation.json"
   }
 }
