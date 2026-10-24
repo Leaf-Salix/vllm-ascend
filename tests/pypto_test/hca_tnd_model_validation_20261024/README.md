@@ -6,6 +6,13 @@
 
 ## 当前进度
 
+2026-10-24后续精度诊断已记录于[HCA_NUMERICAL_DIFFERENCES.md](HCA_NUMERICAL_DIFFERENCES.md)。
+用户明确：**以decode答案是否满足题意验收，不强制与Native逐bit或逐token一致**。
+已定位Q/KV融合省略五处Native BF16舍入边界；恢复边界仅是隔离诊断候选，未采用。
+正式算子继续保留FP32融合。已有192token答案的客观核对见[ANSWER_AUDIT.md](ANSWER_AUDIT.md)，
+两侧都存在明确错误及未完成答案，不能把Native token一致率解释为答案正确率。
+本轮任务均已结束，不继续为逐项对齐追加整模型测试；完整答案质量尚未验收，未扩B24。
+
 单卡v04已通过，任务 `task_20261024_132445_31180867686`，exit=0。
 6类场景：128K/B16/S6、混长T56、B24/S6、B16/S1、B16/S5、B1/S6。
 共29个真实ACLGraphWrapper重放步骤，覆盖131071/131073/131199历史、C128关闭边界、
@@ -21,12 +28,13 @@
 全部51个真实长历史FULL step的20层HCA都replay，未发生Python重新派发。
 另有1步正常S1 eager提交，及34步等待其他DP时的短dummy图，不能把dummy算进业务吞吐。
 
-**停在精度讨论点，未提交B24。** 对Native：64/256请求完整token一致，简单请求32/32一致；
-复杂请求192/256存在差异。q08/q12/q14从第0个输出token就有分歧，尚未定位到数学或接入原因。
+**B16初轮观察，未提交B24。** 对Native：64/256请求完整token一致，简单请求32/32一致；
+复杂请求192/256存在差异。q08/q12/q14从第0个输出token就有分歧；后续诊断已确认
+首个HCA层输入相同、S1 eager阶段即有数值差异，QKV的舍入边界为已证实来源之一。
 HCA各DP rank输出完全相同；平均接受草稿数3.753067，Native参考3.806502，DSpark事件并不全相同。
-不能仅凭功能和图重放通过，或单层0.01输出容差通过，宣称整模型精度已对齐。
-详细输出见 `B16_COMPARISON.md/json`；按用户“有疑惑先停下来讨论”要求停止新设备测试。
-建议先以首token分歧的请求定位logits及HCA链路，再决定后续B24与精度口径。
+不能仅凭功能和图重放通过，或单层0.01输出容差通过，宣称整模型答案质量已通过。
+详细输出见 `B16_COMPARISON.md/json`。初轮曾停下讨论，之后按用户“先查精度问题”
+完成首token与QKV诊断；最新验收口径见本节开头，历史数值保留不改写为正确率。
 
 当前适配仍在冻结候选和 `MODEL_ADAPTER.patch`，正式模型入口尚未切换。
 
@@ -67,7 +75,8 @@ HCCL_DETERMINISTIC=true、AIV展开、event_work_mode=1、EPLB关闭。
 `check_model.py`要求20层HCA实际为TND、21层CSA保持Native、满批真实B×S6、
 完整192token、零抢占；FULL请求的20层必须实际replay，不能以FULL标签或捕获期
 命中冒充。`compare_model.py`逐请求比较Native token、首处分歧、全文和DSpark事件；
-不会自动把CSA另一会话接受的复杂问题差异当作HCA精度通过。
+不会自动把CSA另一会话接受的复杂问题差异当作HCA答案质量通过。
+token与接受事件的比较仅作诊断；后续答案验收须使用题意真值并区分输出截断。
 
 命令、任务号和阶段状态见 `jobs.json`、`STATUS.json`，小型结果/日志在 `evidence/`。
 大快照、二进制、模型权重及原始cache保留本地，提交路径和版本记录。

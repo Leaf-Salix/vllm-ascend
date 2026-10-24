@@ -1,0 +1,117 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/qkv_proj_rope.py
+@@ -546,6 +546,8 @@
+             qr_input_ub = pl.load(
+                 qr_fp32, [tg, 0], [T_TILE, Q_LORA], target_memory=pl.MemorySpace.Vec
+             )
++            # 恢复Native可见的BF16结果，再以FP32执行后续融合计算。
++            qr_input_ub = pl.cast(pl.cast(qr_input_ub, pl.BF16, mode="rint"), pl.FP32)
+             qr_sq_sum = pl.tile.full([1, T_TILE], dtype=pl.FP32, value=0.0)
+             qr_amax_g = pl.tile.full([1, T_TILE], dtype=pl.FP32, value=0.0)
+             for qr_rms_col0 in pl.pipeline(0, Q_LORA, Q_LORA_TILE, stage=2):
+@@ -1026,6 +1028,8 @@
+                     kv_sq_lanes = pl.full([KV_RMS_T_TILE, KV_TILE], dtype=pl.FP32, value=0.0)
+                     for kv_sq_col0 in pl.pipeline(0, HEAD_DIM, KV_TILE, stage=2):
+                         kv_chunk = kv_fp32[tg : tg + KV_RMS_T_TILE, kv_sq_col0 : kv_sq_col0 + KV_TILE]
++                        # 恢复Native可见的BF16结果，再以FP32执行后续融合计算。
++                        kv_chunk = pl.cast(pl.cast(kv_chunk, pl.BF16, mode="rint"), pl.FP32)
+                         kv_sq = pl.mul(kv_chunk, kv_chunk)
+                         kv_sq_lanes = pl.add(kv_sq_lanes, kv_sq)
+                     kv_sq_sum = pl.reshape(pl.row_sum(kv_sq_lanes), [1, KV_RMS_T_TILE])
+@@ -1035,6 +1039,8 @@
+ 
+                     for n0 in pl.pipeline(0, NOPE_DIM, KV_TILE, stage=2):
+                         kv_chunk = kv_fp32[tg : tg + KV_RMS_T_TILE, n0 : n0 + KV_TILE]
++                        # 恢复Native可见的BF16结果，再以FP32执行后续融合计算。
++                        kv_chunk = pl.cast(pl.cast(kv_chunk, pl.BF16, mode="rint"), pl.FP32)
+                         gamma_kv_cast = pl.cast(gamma_ckv[n0 : n0 + KV_TILE], target_type=pl.FP32)
+                         gamma_kv_chunk = pl.reshape(gamma_kv_cast, [1, KV_TILE])
+                         kv_normed = pl.col_expand_mul(pl.row_expand_mul(kv_chunk, kv_inv_rms_t), gamma_kv_chunk)
+@@ -1044,7 +1050,11 @@
+                     gamma_rope_cast = pl.cast(gamma_ckv[NOPE_DIM : NOPE_DIM + ROPE_DIM], target_type=pl.FP32)
+                     gamma_rope = pl.reshape(gamma_rope_cast, [1, ROPE_DIM])
+                     kv_rope_chunk = kv_fp32[tg : tg + KV_RMS_T_TILE, NOPE_DIM : NOPE_DIM + ROPE_DIM]
++                    # 恢复Native可见的BF16结果，再以FP32执行后续融合计算。
++                    kv_rope_chunk = pl.cast(pl.cast(kv_rope_chunk, pl.BF16, mode="rint"), pl.FP32)
+                     kv_rope_norm_chunk = pl.col_expand_mul(pl.row_expand_mul(kv_rope_chunk, kv_inv_rms_t), gamma_rope)
++                    # 恢复Native可见的BF16结果，再以FP32执行后续融合计算。
++                    kv_rope_norm_chunk = pl.cast(pl.cast(kv_rope_norm_chunk, pl.BF16, mode="rint"), pl.FP32)
+                     kv_cos_il_full = rope_cos_il[out_tg : out_tg + KV_RMS_T_TILE, :]
+                     kv_sin_signed_full = rope_sin_signed[out_tg : out_tg + KV_RMS_T_TILE, :]
+                     kv_swap_idx_full = rope_swap_idx[out_tg : out_tg + KV_RMS_T_TILE, :]
+@@ -1068,6 +1078,8 @@
+                             valid_shape=[valid_rows, KV_TILE],
+                             target_memory=pl.MemorySpace.Vec,
+                         )
++                        # 恢复Native可见的BF16结果，再以FP32执行后续融合计算。
++                        kv_chunk_tail = pl.cast(pl.cast(kv_chunk_tail, pl.BF16, mode="rint"), pl.FP32)
+                         kv_sq_tail = pl.mul(kv_chunk_tail, kv_chunk_tail)
+                         kv_sq_lanes_tail = pl.add(kv_sq_lanes_tail, kv_sq_tail)
+                     kv_sq_sum_tail = pl.reshape(pl.row_sum(kv_sq_lanes_tail, kv_reduce_tmp), [1, KV_RMS_T_TILE])
+@@ -1085,6 +1097,8 @@
+                             valid_shape=[valid_rows, KV_TILE],
+                             target_memory=pl.MemorySpace.Vec,
+                         )
++                        # 恢复Native可见的BF16结果，再以FP32执行后续融合计算。
++                        kv_chunk_tail = pl.cast(pl.cast(kv_chunk_tail, pl.BF16, mode="rint"), pl.FP32)
+                         gamma_kv_input_tail = pl.load(
+                             gamma_ckv,
+                             [n0_tail],
+@@ -1116,10 +1130,14 @@
+                         valid_shape=[valid_rows, ROPE_DIM],
+                         target_memory=pl.MemorySpace.Vec,
+                     )
++                    # 恢复Native可见的BF16结果，再以FP32执行后续融合计算。
++                    kv_rope_chunk_tail = pl.cast(pl.cast(kv_rope_chunk_tail, pl.BF16, mode="rint"), pl.FP32)
+                     kv_rope_norm_tail = pl.col_expand_mul(
+                         pl.row_expand_mul(kv_rope_chunk_tail, kv_inv_rms_t_tail),
+                         gamma_rope_tail,
+                     )
++                    # 恢复Native可见的BF16结果，再以FP32执行后续融合计算。
++                    kv_rope_norm_tail = pl.cast(pl.cast(kv_rope_norm_tail, pl.BF16, mode="rint"), pl.FP32)
+                     kv_cos_il_tail = pl.load(
+                         rope_cos_il,
+                         [out_tg, 0],
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_hca/q_projection_streamed.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_hca/q_projection_streamed.py
+@@ -104,6 +104,8 @@
+                     q_head_acc_fp32 = pl.cast(q_head_acc, target_type=pl.FP32, mode="none")
+                     q_head_row_scaled = pl.row_expand_mul(q_head_acc_fp32, qr_scale_dq_t)
+                     q_head_dq = pl.col_expand_mul(q_head_row_scaled, q_head_scale)
++                    # 恢复Native可见的BF16结果，再以FP32执行后续融合计算。
++                    q_head_dq = pl.cast(pl.cast(q_head_dq, pl.BF16, mode="rint"), pl.FP32)
+                     q_head_sq = pl.mul(q_head_dq, q_head_dq)
+                     q_head_sq_row = pl.row_sum(q_head_sq)
+                     q_head_sq_sum = pl.reshape(q_head_sq_row, [1, Q_ROPE_T_TILE])
+@@ -118,6 +120,8 @@
+ 
+                     q_rope_chunk_raw = q_head_dq[:, NOPE_DIM:HEAD_DIM]
+                     q_rope_chunk = pl.row_expand_mul(q_rope_chunk_raw, q_head_inv_rms_t)
++                    # 恢复Native可见的BF16结果，再以FP32执行后续融合计算。
++                    q_rope_chunk = pl.cast(pl.cast(q_rope_chunk, pl.BF16, mode="rint"), pl.FP32)
+                     q_rope_swapped = pl.gather(q_rope_chunk, index=q_swap_flat_idx)
+                     q_rope_base = pl.mul(q_rope_chunk, q_cos_il)
+                     q_rope_delta = pl.mul(q_rope_swapped, q_sin_signed)
+@@ -197,6 +201,8 @@
+                     q_head_acc_fp32_tail = pl.cast(q_head_acc_tail, target_type=pl.FP32, mode="none")
+                     q_head_row_scaled_tail = pl.row_expand_mul(q_head_acc_fp32_tail, qr_scale_dq_tail)
+                     q_head_dq_tail = pl.col_expand_mul(q_head_row_scaled_tail, q_head_scale_tail)
++                    # 恢复Native可见的BF16结果，再以FP32执行后续融合计算。
++                    q_head_dq_tail = pl.cast(pl.cast(q_head_dq_tail, pl.BF16, mode="rint"), pl.FP32)
+ 
+                     q_head_sq_tail = pl.mul(q_head_dq_tail, q_head_dq_tail)
+                     q_head_sq_sum_tail = pl.row_sum(q_head_sq_tail, q_head_reduce_tmp)
+@@ -211,9 +217,13 @@
+ 
+                     q_rope_chunk_raw_tail = q_head_dq_tail[:, NOPE_DIM:HEAD_DIM]
+                     q_rope_chunk_tail = pl.row_expand_mul(q_rope_chunk_raw_tail, q_head_inv_rms_tail)
++                    # 恢复Native可见的BF16结果，再以FP32执行后续融合计算。
++                    q_rope_chunk_tail = pl.cast(pl.cast(q_rope_chunk_tail, pl.BF16, mode="rint"), pl.FP32)
+                     q_rope_swapped_tail = pl.tile.gather(q_rope_chunk_tail, q_swap_idx_tail, q_gather_tmp)
+                     # RoPE inputs contain only the live rows of this tail.
+                     q_rope_chunk_tail = pl.set_validshape(q_rope_chunk_tail, valid_tail_rows, ROPE_DIM)
++                    # 恢复Native可见的BF16结果，再以FP32执行后续融合计算。
++                    q_rope_chunk_tail = pl.cast(pl.cast(q_rope_chunk_tail, pl.BF16, mode="rint"), pl.FP32)
+                     q_rope_swapped_tail = pl.set_validshape(q_rope_swapped_tail, valid_tail_rows, ROPE_DIM)
+                     q_rope_base_tail = pl.mul(q_rope_chunk_tail, q_cos_il_tail)
+                     q_rope_delta_tail = pl.mul(q_rope_swapped_tail, q_sin_signed_tail)

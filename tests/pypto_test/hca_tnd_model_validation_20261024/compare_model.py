@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""对照Native与HCA整模型输出和DSpark事件；报告差异，不自动放宽token验收。"""
+"""对照Native与HCA输出及DSpark事件；相似性统计不替代题意正确性验收。
+
+用户确认不强制逐token一致；本脚本只保留可追溯的差异数据，答案质量另行评分。
+"""
 import argparse
 import json
 from pathlib import Path
