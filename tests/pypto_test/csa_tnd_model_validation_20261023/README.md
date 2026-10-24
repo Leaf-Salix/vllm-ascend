@@ -1,167 +1,139 @@
-# CSA TND 真实模型功能验证续作
+# CSA TND 真实模型功能与图重放验证
 
-本轮接续 `csa-repro-20261021-clean/kv-repro` 中断的真实模型验证，
-先完成 128K/B16/S6 的 Native、TND-SPMD、TND-MPMD 三侧对照，再验证 B24。
-不改变已完成的 PyTorch 单卡复现手册，也不重复生成已审计的历史 KV。
+本目录记录当前 TND-MPMD 与 TND-SPMD 接入真实模型的验证。
+PyTorch 单卡复现手册保持原有范围，不把本目录的 16 卡流程加入该手册。
 
-## 当前结论（2026-10-24，内部工作区版）
+## 当前结论（2026-10-24，v27 图重放修复）
 
-两种TND均完成16卡128K/B16和B24真实decode：每卡33个真实满批S6 step，
-每请求192输出token，零抢占，21层CSA均实际提交PTO，Python侧临时工作区均为0。
-MPMD/SPMD的全部输出token与DSpark接受事件相同；简单问题与Native逐token一致，
-复杂问题仍有差异。这里的功能通过沿用用户已明确接受的精度口径，不代表Native/PTO浮点bit一致。
+两种 TND 均通过 16 卡 128K/B16、B24 的满批、尾批和 padding 模型图重放，
+实际 21 层 CSA 在这些长历史 FULL 步骤中全部重放，未发生 Python 重新提交。
+两种实现各自与 v25 eager 参考的全部输出 token、DSpark 接受事件相同；
+MPMD 与 SPMD 之间也完全相同。零抢占，PTO 外部临时工作区为 0。
 
-| 档位 | 每侧请求数 | Native平均接受草稿数 | MPMD | SPMD | PTO相对Native完整token一致请求 | 其中简单请求 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 128K/B16 | 256 | 3.80650 | 3.79567 | 3.79567 | 64/256 | 32/32 |
-| 128K/B24 | 384 | 3.62189 | 3.73754 | 3.73754 | 144/384 | 64/64 |
+下表是**每卡、每种实现**的真实模型步骤数；16 个 rank 的计数相同。
 
-**模型级图重放未通过。** 四次新模型运行均由原有图合同拒绝replay后，经eager
-重新派发实际PTO完成decode；所有层graph allowed计数均为0。这与旧外部工作区版
-行为相同，不是此次内存改动新增的回退。算子单卡graph replay已经通过，但不能替代
-模型级graph replay。原始记录保留不改写，集中证据见`graph_execution_audit.json`。
-本轮没有性能验收结论。捕获期短历史与TND入口最低8192长度要求冲突是源码线索，
-尚未采集拒绝原因来确认；后续修图需独立处理，不能直接放开保护条件。
+| 档位 | 满批 S6 | 尾批 | 其中大图 padding | 其中单请求 6 行小图 | 真实 FULL 重放总步数 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 128K/B16 | 33 | 15 | 15 | 0 | 48 |
+| 128K/B24 | 33 | 24 | 20 | 4 | 57 |
 
-完整三方问答：工作区`downloads/CSA_TND_INTERNAL_QA_20261024/`，
-01为B16、02为B24，HTML和Markdown均完整展示三个实现的实际192token回答。
-24个含128K背景的真实输入另存`完整模型输入/`，原始token及来源保存在JSON。
-结构化对照见`internal_b16_comparison.json`和`internal_b24_comparison.json`；
-`production_source_audit.json`确认正式代码与设备运行冻结包一致。
+尾批包含 padding 和单请求小图，两列不能再与尾批重复相加。
+每请求完整生成 192 token，B16 每侧 256 请求/49152 token，B24 每侧 384 请求/73728 token。
+每 rank 首个 S1 步由框架选择 NONE，执行一次 eager；短历史空闲补齐调用
+`max_seq_len=6` 仍在不支持范围内。这些调用单独记录，不计入真实长历史 FULL 的通过结论。
+本轮没有采集性能，不从这些功能任务推导性能收益。
 
-## 固定口径
+集中证据：[graph_replay_model_validation.json](graph_replay_model_validation.json)。
+它保存四个任务的 exit=0、逐 rank 21 层图检查、真实请求数、重提交计数、显存及配置来源。
 
-- 真实权重 `/data/model/DeepSeek-V4-Flash-0731-w8a8`，TP1、DP=EP16，DSpark 出5验6。
-- CANN 9.2.0-beta.2；PyPTO/PTOAS/Simpler 从公共清单绑定，框架和算子按提交冻结。
-- 只切换 CSA；20 层 HCA 始终 Native。NZ mode=2，EPLB 关闭。
-- 保留 `npugraph_ex`、`FULL_DECODE_ONLY`，关闭静态编译，不加入 SuperKernel。
-- 确定性 level=1、HCCL_DETERMINISTIC=true、AIV 展开模式、event_work_mode=1 三侧一致。
-- 同一批混合问题、每请求192输出token；固定历史实际长度131104..131346，来自128K公共前缀加问题后缀。
-- 首轮 B16 显存预算三侧均0.92。真实S6满档、无抢占是功能门槛，不能缩小实际并发来绕过OOM。
-- 功能检查与精度对照分开：功能检查要求实际21层CSA路由、完整token和DSpark事件；
-  精度对照报告逐请求token、首处分歧、DSpark接受长度分布和简单问题答案，不宣称浮点bit一致。
+## 单卡指定场景
 
-## 历史中断点
+使用实际 custom-op 与 ACLGraphWrapper，先通过单卡，再开始 16 卡。
 
-旧 `decode-native_clean2` 已生成256请求×192token，平均接受3.80650。
-旧 `decode-spmd_clean2` 在首个S6 decode申请210 MiB时OOM，MPMD随后未执行。
-另一次8K MPMD尝试也在相同申请量处OOM。两次都使用0.95显存预算及静态编译。
-这些是诊断线索，不能当作当前版本的结果或与本轮直接计算性能收益。
+- **128K/B16/S6/T96（C04）**：16 个请求，本轮各 6 token，共 96 token。
+- **128K/B16/固定混长 T56（C08）**：query 长度和请求顺序固定为
+  `[1,2,3,4,5,6,6,5,4,3,2,1,1,3,4,6]`，输入容量也为 56，不改成 96。
+  “混长”指 query 长度，历史均为 131072。
+- 另测 128K/B24/S6/T144、最后单请求 T6，以及各大档的尾批、padding、恢复满批；
+  混长场景额外覆盖顺序反转。派生功能场景不替换性能规范中的原始场景。
 
-历史 KV：`/data/pyptouser/qinchuanyu/pto-eager/csa-repro-20261021-clean/kv-repro/mixed128k_fixed`。
-只读使用前16/24个不同问题；完整40问题及生成、审计证据仍在原目录。
+每种实现 15 次、共 30 次真实图重放检查通过。输出/cache/state 与独立 eager TND
+参考逐 bit 一致，显式诊断入口的 Top-K/score 一致，保护区通过，PTO 外部 scratch 为 0。
+这里的 bit 对齐对象是相同 TND 算术的 eager 参考，不是 Native 算术。
+证据：[graph_replay_service_validation.json](graph_replay_service_validation.json)。
 
-## 执行
+## Native 对照与完整问答
 
-`prepare.py <实验名>` 冻结 HEAD、当前测试入口和公共SDK清单，
-不会带入其他会话未提交的算子修改；不复制SDK、权重或KV。
-用 `preflight.sh <冻结源码> <结果JSON>` 先排单卡核对Native依赖和两种TND依赖图。
-然后通过 `task-submit` 为 `run.sh <冻结源码> <输出目录> <native|spmd_tnd|mpmd_tnd> <16|24> <预算>` 分配16卡。
-每次使用新输出目录。B16三侧及输出对照通过后，才能开始B24。
+| 档位 | Native 平均接受草稿数 | MPMD | SPMD | PTO 与 Native 完整 token 一致请求 | 简单请求一致 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 128K/B16 | 3.80650 | 3.79567 | 3.79567 | 64/256 | 32/32 |
+| 128K/B24 | 3.62189 | 3.73754 | 3.73754 | 144/384 | 64/64 |
 
-`check.py` 检查真实路由和功能完成，不代表Native/PTO输出一致。
-各次实验的任务号、结果及对照结论写回主 `DSV4_FLASH_CSA_VALIDATION_LOG.md`。
+复杂问题仍有差异：B16 的位置 token 差异为 22416/49152，B24 为 39136/73728；
+接受事件完全一致分别为 32/256、80/384 请求。差异与 v25 eager 阶段相同，
+不能据此声称 Native/PTO 浮点 bit 一致或复杂问题输出一致。
 
-## 旧外部工作区实现的历史证据
+完整对照见 [B16](graph_replay_b16_comparison.json)、[B24](graph_replay_b24_comparison.json)，
+对应 `.texts.md` 保留三侧的完整问题后缀和全部已生成回答。
+工作区下载目录：`downloads/CSA_TND_GRAPH_REPLAY_QA_20261024/`。
+01 为 B16、02 为 B24，HTML/Markdown 独立展示 Native、MPMD、SPMD；
+`完整模型输入/` 保留 24 个不同的完整 128K 输入，JSON 保留原始输出 token 和来源。
+192 token 是实际生成上限，回答可能未结束；导出不截取、不补写。
+仅在已经证明 16 个 DP 副本逐 token 相同时才去重。
 
-- `native_b16_summary.json`：Native 16卡B16功能通过，无抢占，平均接受3.80650；
-  32个简单答案通过，跨DP及旧Native输出token差异均为0。
-- `workspace_validation.json`：两种TND的临时工作区复用单卡验证通过。
-  128K/B16的S1/S6及两层交替，eager和graph的输出、Top-K、cache/state逐bit一致，保护区通过。
-- `workspace_pool_estimate.json`：CPU meta容量估算，不是模型设备峰值。
-- `redispatch_failures.json`：v05两种PTO在收尾阶段触发的Native query/Q前缀容量不一致。
-- `redispatch_validation.json`：修复后SWA/HCA/CSA的单卡Native容量图参考对照通过。
-- `jobs.json`：B16三侧旧外部工作区实现已完成，B24 Native/MPMD完成、SPMD收尾OOM；
-  以及后续内部工作区原型的编译、设备任务和失败归因。旧实现结果不能代替新实现验收。
+Native 沿用 `v02_native_b16`、`v12_native_b24` 的历史正确性参考，
+经过 [源码审计](graph_replay_native_reference_audit.json) 确认其实际 Native 路径未变，
+同时严格核对 CANN、权重、KV、问题、推理配置及 Native 扩展来源。
+该复用仅用于正确性，不用于跨版本性能比较。
 
-有工作区修复的冻结包使用`prepare.py <实验名> --revision 99268437c --workspace-fix`；
-图回退修复再加`--redispatch-fix`。
-启动`run.sh`时第六个参数提供单卡`result.json`。该结果必须包含两种实现的PASS，
-否则启动器直接退出。该门槛不替代后续整模型正确性检查。
+## 修复内容与内存边界
 
-## 当前运行时的容量依据
+旧 v25 模型 dummy capture 的短历史使 TND 服务不满足最低 8192 长度要求，
+捕获 Native 后，真实 decode 被图合同拒绝，再 eager 重派发 PTO。
+旧结果的 FULL 标签不能证明重放，旧审计保留在 `graph_execution_audit.json`。
 
-`runtime_capacity_estimate.json` 是对当前已构建 Simpler 的 CPU 合同查询，
-不分配 NPU 显存。默认 device scratch 声明容量为3.076 GiB；
-`heap_mb=[256,128,256,32]、task_window=4096`时为1.191 GiB。
-当前256参数的TaskPayload使默认任务窗口更大，不能沿用旧版1.343 GiB估算。
-此CPU结果只用于选配置；当前TND每ring16MiB的设备验证证据另见`b24_workspace_validation.json`。
+本次只给 TND 模型登记合法的捕获历史长度，dummy 长度和 positions 同时匹配；
+真实调度以及 Native/BSH 默认路径保持原样。继续使用 Native compressor_metadata，
+将图内请求和输出容量固定，由 device Q/L/start_pos 决定有效行。
+失活请求通过图内 device L 将传给 Native 生产者的 start_pos 映射为 -1；
+不原地修改原 metadata，不新增 D2H 或 Host 逐请求计划。
+图合同保留 Q/L、页表、KV 根地址与策略检查，对 slots/RoPE 使用初始化容量视图。
 
-单卡入口支持`workspace_probe.sh <源码> <输出> --batch 24
---ring-heap-mb 256 128 256 32 --ring-task-window 4096`。
-对应整模型入口在单卡结果路径之后加
-`--ring-heap-mb 256,128,256,32 --ring-task-window 4096`，
-会核对单卡结果的batch与ring配置。B24设备测试仍须等B16输出对照通过后再提交。
+普通 TND 入口仍只接收 55 个外部 Tensor；scratch、普通 Top-K 和 SPMD 信号均由
+Simpler 内部管理。MPMD 保留 AICPU 多 task 调度，不增加软同步。
+单卡脚本按真实模型保留所有图档及输入/binding，解决测试脚本的第二档图池生命周期断言；
+该断言的原始证据保留在 `graph_replay_v26_summary.json`，不能误报成 PyPTO 算子缺陷。
 
-B16完整对照见`b16_comparison.json`及`b16_comparison.texts.md`。
-两种PTO全部输出token和接受事件一致；对Native简单问题全部一致，复杂问题仍有差异。
-B24已通过每ring16MiB、window4096的单卡验证；
-整模型当前三侧统一`--hccl-buffer-mb 768`、预算0.935。旧v11的父进程512被旧启动器覆盖成1800，不能用于验收。
+显存比较是**同一 TND-MPMD 16 卡 128K/B24**的 v25 eager 与 v27 graph，
+两侧早已采用内部工作区；在每请求生成完 192 token、模型尚未销毁时测量 rank0：
 
-当前B24 Native任务为`task_20261023_220617_238843122886`，冻结v12。
-Native、MPMD均已通过每卡33个有效24×S6 step与零抢占；SPMD在收尾OOM，尚未通过。
-旧v11三项任务已退出或取消，原因见`b24_v11_configuration_failure.json`。
-新的检查同时要求Worker实际HCCL配置匹配，并记录已有Host metadata中的
-有效请求数、有效token数；图padding到144行本身不能作为24×S6通过证据。
+| 指标 | v25 eager | v27 graph |
+| --- | ---: | ---: |
+| 空闲显存 MiB | 260.27 | 2292.88 |
+| PyTorch allocated MiB | 57609.25 | 55342.25 |
+| PyTorch reserved MiB | 58292 | 56258 |
+| 每层 binding 数 | 15 | 3 |
+| Python 侧 PTO 临时工作区字节 | 0 | 0 |
 
-## 当前内部工作区版本
+相关配置相同，空闲增加 2032.61 MiB。尚未逐张量归因，不能把全部变化独立归因于
+只开启 replay，也不外推其他档位或更长生成。
+原始字节数及两侧来源见 [显存对照](graph_replay_mpmd_b24_memory_comparison.json)。
 
-用户明确：MPMD与SPMD的纯临时工作区都由Simpler在执行中申请和管理；
-Python不分配scratch、普通Top-K或信号，也不使用模型级外部共享池。
-已通过单卡的实现已同步到正式算子目录；16卡继续使用已冻结的`experiments/v25_internal_model/source`。
-两种普通入口只接收55个外部Tensor；诊断入口额外接收Top-K输出供校验。
-MPMD保留AICPU多task调度，不新增软同步。SPMD信号每调用由设备任务清零，
-其初始化和依赖包含在调用和图重放中。
+## 固定配置与版本
 
-`internal_service_validation.json`是实际PreparedDynamicCSA单卡证据：
-128K/B16/S1/layer2、B16/S6/layer2、B24/S6/layer4两种TND全部通过；
-诊断输出、Top-K索引与分数、cache/state与各自旧实现逐bit一致，普通入口两次
-图重放与保护区通过，外部诊断输出哨兵保持不变。任务
-`task_20261024_031432_271551524352`已exit=0。有效容量配置为
-`heap_mb=[16,256,16,16] MiB`、`task_window=4096`。
-此前把大heap配到ring0的判断已撤回：AICPU executor有外层scope，实际内部
-Tensor位于ring1；首次失败日志与全部过程保留在主验证日志，不作为通过证据。
+- 权重 `/data/model/DeepSeek-V4-Flash-0731-w8a8`；TP1、DP=EP16，DSpark 出 5 验 6。
+- 21 层 PTO CSA、20 层 Native HCA；NZ2，EPLB 关闭。
+- CANN 9.2.0-beta.2，npugraph_ex、FULL_DECODE_ONLY；static kernel 与 superkernel 关闭。
+- 确定性 level=1，HCCL_DETERMINISTIC=true，AIV，event_work_mode=1。
+- B16：显存预算 0.92，HCCL1800；B24：预算 0.935，HCCL768。
+- 两种实现均为 `heap_mb=[16,256,16,16] MiB`、`task_window=4096`。
+- 公共工具链 `csa-shared-20261024-group-dims`：PyPTO `d44925c1`、
+  PTOAS `914863ed`、Simpler `57e49923`；源码与构建从公共 manifest 绑定。
+- 冻结源码 `experiments/v27_graph_lifetime/source`，基础提交 `15b64665a`，
+  四个生产文件 overlay 与该提交相同；单卡脚本额外保留图生命周期。
+  正式运行时代码已核对与测试版本一致，不做重复逐文件 hash 扫描。
+- 只读使用本地 `csa-repro-20261021-clean/kv-repro/mixed128k_fixed` 的前 16/24 个问题。
+  历史实际长度 131104..131346，来自 128K 背景加问题后缀。
 
-公共工具链`csa-shared-20261024-group-dims`已完成相关验证并标记validated。
-PyPTO为`d44925c1`；Simpler、PTOAS、CANN仍用公共清单与环境的固定版本。
-SDK验证通过不代表模型验证已通过。以下16卡B16任务现均已exit=0：
+## 本地验证入口与证据
 
-- MPMD：`task_20261024_034554_36644472287`，结果`runs/v25_mpmd_b16`。
-- SPMD：`task_20261024_034603_366976914195`，结果`runs/v25_spmd_b16`。
+先 source 工作区 `env-dsv4-0251rc1.sh`，再 source 公共工具链 `env.sh`。
+`prepare.py <实验名> --graph-replay-fix` 冻结框架、指定运行时文件、测试入口及 SDK 清单；
+不复制 SDK、权重或 KV。测试期间不修改冻结包或在原位重建公共 SDK。
 
-两侧共用预算0.92、HCCL1800、相同源码/SDK/heap。
-B16完整功能与输出对照完成后才提交16卡B24。新模型检查要求21层CSA实际接入、
-真实B×S6、192token完整输出、无抢占，并要求所有层外部scratch字节数为0。
+单卡经 task-submit 调用 `model_graph_probe.sh <冻结源码> <输出目录> <mpmd_tnd|spmd_tnd>`。
+两种实现全部通过的合并证据作为 `run.sh` 第六个参数，才能进入 16 卡。
+完整已执行命令和任务号在 `jobs.json` 的 `graph_replay_model_v27`；
+`run.sh` 检查源码/SDK、门禁、batch/ring 后运行真实模型，随后执行严格 `check.py`。
+先 B16 两侧及输出对照，通过后再 B24；每次使用新输出目录。
 
-Native正确性参考沿用`v02_native_b16`和`v12_native_b24`。新增
-`compare.py --reuse-native-reference`明确披露只作用于PTO的SDK/heap差异；
-权重、KV、问题、推理参数和实际Worker配置仍严格检查，不用于跨版本性能比较。
-简单问题须逐token一致；复杂问题差异完整呈现。`export_qa.py --comparisons`
-可分别导出Native、MPMD、SPMD全文及原始token，不把一侧回答替代另一侧。
-旧外部工作区问答位于`downloads/CSA_TND_128K_B16_B24_QA_20261023/`，
-它是历史结果，不能当作当前内部工作区版的整模型验收。
+`compare.py --reuse-native-reference --native-source-audit <审计JSON>` 生成三方对照，
+错误版本审计会被拒绝。`export_qa.py --comparisons <B16报告> <B24报告>` 导出全文。
+单卡输出、Native 精度、整模型图重放分别报告，不相互替代。
+详细中文过程见主 `DSV4_FLASH_CSA_VALIDATION_LOG.md` 的 735.115 起各节。
 
-编译问题与复现：
-
-- [#3033](https://github.com/hw-native-sys/pypto/issues/3033#issuecomment-6369484280)：动态reshape metadata缺失；
-  使用描述符读取绕过，代码`jit_shape_repro_20261024.py`。
-- [#3137](https://github.com/hw-native-sys/pypto/issues/3137)：自动SPMD包装不能反推复合尺寸；
-  MPMD使用显式incore边界，SPMD避免局部尺寸别名；`compound_extent_repro_20261024.py`。
-- [#3138](https://github.com/hw-native-sys/pypto/issues/3138)：Group成员动态类型重绑定遗漏，
-  公共d44925c1已修复；`mixed_param_extent_repro_20261024.py`和`trace_internal_scale_symbol.py`。
-
-详细中文过程持续追加主`DSV4_FLASH_CSA_VALIDATION_LOG.md`。
-
-两种内部工作区版16卡B16均已通过，证据`internal_mpmd_b16_summary.json`、
-`internal_spmd_b16_summary.json`及`internal_b16_comparison.json`。
-每侧256请求共49152输出token，每卡33个真实满批S6 step，零抢占，21层外部scratch均0。
-两种PTO全部token及DSpark事件一致，也分别与各自旧外部版本一致。
-对Native，32个简单请求全部逐token一致；复杂问题保留既有差异，完整问答在
-`downloads/CSA_TND_INTERNAL_QA_20261024/`，现含B16/B24三方全文和完整模型输入。
-
-B16门槛通过后才提交B24，沿用预算0.935、HCCL768及已验证ring配置：
-MPMD任务`task_20261024_041057_60730724515`，SPMD任务`task_20261024_041106_6128009168`。
-输出位于`runs/v25_mpmd_b24`、`runs/v25_spmd_b24`，两任务均exit=0。
-B24三方对照及完整问答已完成，SPMD不再发生旧外部工作区版的收尾OOM。
-rank0收尾空闲显存MPMD为260.27MiB、SPMD为283.69MiB，这是本次实测值，
-不代表更长生成或其他batch也已验证。功能完成范围及模型图重放限制见本页首节。
+旧外部工作区和 v25 eager 的结果保留原始记录，不能当作本次 graph 结果：
+`b16_comparison.json`、`internal_b16_comparison.json`、`internal_b24_comparison.json`、
+`graph_execution_audit.json`、`production_source_audit.json` 及相应任务目录均为历史证据。
+相关 PyPTO 编译问题的复现和状态见 `../CSA_THREE_SESSIONS_ISSUE_STATUS.md`；
+本次 replay 修复没有新增 SDK 修改。

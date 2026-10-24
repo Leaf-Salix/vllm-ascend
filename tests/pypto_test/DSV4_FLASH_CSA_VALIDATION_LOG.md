@@ -23782,3 +23782,64 @@ Native平均接受3.806501547987616。差异与原eager阶段相同，未因图�
 B16通过后，按既有配置提交16卡B24：预算0.935、HCCL768，SDK、源码、ring均与
 B16一致。两条任务和冻结命令写入jobs.json的graph_replay_model_v27；B24尚未通过，
 本轮不提前标完成。后续仅需这两组B24及最终问答导出，不新增性能采集。
+
+
+### 735.121 MPMD的16卡B24满批、尾批及单请求小图均通过（2026-10-24）
+
+任务task_20261024_135702_28395219529完成exit=0。每rank33次真实24×S6，
+另24次尾批，其中20次使用144行图padding、4次最后单请求使用6行小图；合计57次
+真实长历史FULL调用的全部21层CSA均图重放，无Python重新提交。零抢占、零外部
+PTO scratch，384请求×192token共73728个token完整输出。rank0图捕获显存0.77GiB。
+
+与v25_mpmd_b24全部输出token差异0，384请求DSpark事件均一致，平均接受
+3.7375381485249237。证据graph_replay_mpmd_b24_eager_comparison.json和相应
+functional_check.json。最后单请求小图在真实模型也有实际重放证据，不仅是单卡模拟。
+SPMD任务task_20261024_135702_283996710已接续运行，是本轮最后一组设备验证。
+
+
+### 735.122 B24 SPMD通过，本轮满批/尾批/padding模型图修复完成（2026-10-24）
+
+最后一条任务task_20261024_135702_283996710已exit=0，设备已释放。
+SPMD每rank与MPMD相同：33次满24×S6，24次尾批，其中20次大图padding、4次最后
+单请求小图，57次真实长历史FULL调用的21层CSA全部重放且无Python重新提交。
+384请求×192token完整输出，无抢占、PTO外部scratch为0。与v25_spmd_b24的73728个
+输出token及384请求DSpark事件完全相同，见graph_replay_spmd_b24_eager_comparison.json。
+
+B24完整三侧报告graph_replay_b24_comparison.json：MPMD/SPMD的全部token与接受
+事件一致，平均接受均3.7375381485249237；Native为3.6218905472636815。
+对Native完整token一致144/384请求，含64/64简单请求；复杂问题仍有39136/73728处
+位置token差异，接受事件完全一致80/384请求。差异与原eager版本相同，没有以
+通过图重放掩盖Native/PTO精度差异。Native参考复用严格依据已记录的源码和配置审计。
+
+总验收graph_replay_model_validation.json汇合四条16卡任务，逐rank保留真实有效
+请求范围、满批/尾批/padding/小图次数、21层allowed/rejected、Python重提交及显存。
+首个S1的NONE/eager和L=6空闲补齐调用单独统计；旧FULL标签审计原件不改写。
+生产vllm_ascend/csrc与冻结15b64665a的差异仅另一会话的HCA日志，无运行时代码差异；
+v27列出的4个生产overlay也与该提交相同。没有重复逐文件hash或追加设备测试。
+本轮新增的两条单卡任务及四条16卡任务均已exit=0；单卡30次重放包含原始
+128K/B16/S6/T96与固定混长T56，C08容量没有改成96。
+
+用户追问的显存比较已单独存为graph_replay_mpmd_b24_memory_comparison.json：
+比较双方都是内部工作区TND-MPMD、16卡128K/B24、Native HCA，相关配置相同。
+v25 eager与v27 graph在每请求192token结束、模型未销毁时的rank0空闲分别为
+260.27/2292.88MiB，增加2032.61MiB；allocated为57609.25/55342.25MiB，reserved
+为58292/56258MiB。每层binding为15/3组，外部PTO scratch均0。尚未逐张量归因，
+不能把全部变化独立归因于只开启replay，更不能称为Native与PTO的显存对比。
+
+新问答下载目录：工作区downloads/CSA_TND_GRAPH_REPLAY_QA_20261024/。
+01/02为B16/B24的Native、MPMD、SPMD三方HTML和Markdown全文；24个完整128K
+输入另存，90为原始192token与来源，91/92为逐请求精度，93为模型重放，94为上述
+显存比较。导出再次确认DP副本逐token相同后才去重，不截断已记录回答，不补写
+超过192token上限的内容。旧eager下载保留为历史，README已重写当前结论，移除
+过时的未通过描述和外部工作区操作指引，历史以证据文件及主日志保留。
+
+导出程序仅增加明确的graph验收范围说明，Ruff与格式检查通过；新下载的场景数、
+完整输入链接、三侧原始token长度核对通过。沿用已完成172项CPU合同检查，不重复
+执行无关测试；本轮未采性能，也没有新修改PyPTO/PTOAS/Simpler。
+
+
+提交前格式边界：暂存区完整git diff --check对自动导出的B24模型原文报告提示行尾
+空格和末尾空行，其中包含模型生成的Markdown硬换行、未结束代码行及导出分隔。
+为保留实际回答，不修改原文以消除这些告警；排除该生成报告后，其余暂存改动检查
+通过。前述普通git diff --check不等同于新加入原文文件也无whitespace告警；本次明确
+保留这一边界，不声称全仓格式检查通过。它不影响已完成的设备功能和token对照。

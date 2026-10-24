@@ -50,6 +50,15 @@ def main():
                 if label != "Native"
             ):
                 note += "本次TND整模型结果未通过模型级图重放验收；算子单卡图重放通过不能代替这一项。"
+            elif all(
+                read(root / "configuration.json").get("require_tnd_graph_replay", False)
+                for label, root in roots.items()
+                if label != "Native"
+            ):
+                note += (
+                    "本次两种TND的真实长历史FULL decode已通过满批、尾批及padding的21层图重放检查，"
+                    "且这些步骤无Python重新提交。首个S1步及短历史空闲补齐调用单独记录，不计入此结论。"
+                )
             scenes.append((comparison["batch"], roots, note))
     else:
         scenes = [
