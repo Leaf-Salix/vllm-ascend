@@ -78,3 +78,30 @@ class PyptoCSAHCADeepseekV4ForCausalLM(PyptoCSADeepseekV4ForCausalLM):
         # CSA 初始化一次公共运行时；HCA 随后只注册算子并绑定各层。
         super().process_weights_after_loading()
         prepare_hca_model(self)
+
+
+class PyptoHCATNDDeepseekV4ForCausalLM(PyptoHCADeepseekV4ForCausalLM):
+    """显式HCA TND模型；仅C128使用新MPMD，C4/SWA/FFN保持Native。"""
+    def process_weights_after_loading(self):
+        from pypto import passes
+        from pypto.runtime import CompileOptions
+        from vllm.config import get_current_vllm_config
+        from vllm_ascend.ops.pypto.deepseek_v4_flash_hca_tnd.native_adapter import HCAOperators
+        from vllm_ascend.ops.pypto.deepseek_v4_flash_hca_tnd.graph_service import HCATNDGraphServiceRuntime
+
+        init_pto_runtime()
+        config = get_current_vllm_config()
+        operators = HCAOperators.register(config=CompileOptions(platform="a2a3", memory_planner=passes.MemoryPlanner.PYPTO))
+        count = 0
+        for layer in self.model.layers:
+            if layer.self_attn.compress_ratio == 128:
+                layer.self_attn.dsa_attn._pto_hca_runtime = HCATNDGraphServiceRuntime(
+                    layer.self_attn, operators, config.scheduler_config.max_num_seqs, layer,
+                    config.scheduler_config.max_num_batched_tokens,
+                )
+                count += 1
+        if not count:
+            raise ValueError("模型中未找到C128 HCA层")
+        # 捕获时使用服务的历史容量，避免在短dummy上冻结K128后真实长历史只能回退。
+        self._pto_hca_tnd_capture_sequence_length = config.model_config.max_model_len
+        logger.info("PTO_HCA_MULTITASK_TND layers=%d package=deepseek_v4_flash_hca_tnd", count)

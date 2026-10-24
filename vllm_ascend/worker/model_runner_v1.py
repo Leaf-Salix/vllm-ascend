@@ -132,7 +132,7 @@ from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.service_config import (
     is_tnd_csa_model,
     tnd_graph_lengths_supported,
 )
-from vllm_ascend.ops.pypto.deepseek_v4_flash_hca.service_config import is_hca_model
+from vllm_ascend.ops.pypto.deepseek_v4_flash_hca.service_config import is_hca_model, is_tnd_hca_model
 from vllm_ascend.ops.rotary_embedding import set_cos_and_sin, update_cos_sin
 from vllm_ascend.patch.worker.patch_draft_quarot import patch_load_weights
 from vllm_ascend.quantization.utils import enable_fa_quant
@@ -2751,7 +2751,7 @@ class NPUModelRunner(GPUModelRunner):
                 if not can_replay_csa_graph(
                     num_tokens=csa_actual_tokens, num_reqs=num_reqs,
                     uniform_decode=uniform_decode, padded_tokens=descriptor.num_tokens,
-                    single_spmd_tnd=is_tnd_csa_model(self.vllm_config),
+                    single_spmd_tnd=(is_tnd_csa_model(self.vllm_config) or is_tnd_hca_model(self.vllm_config)),
                 ):
                     return CUDAGraphMode.NONE, BatchDescriptor(num_tokens)
             return mode, descriptor
@@ -3267,6 +3267,8 @@ class NPUModelRunner(GPUModelRunner):
                 tnd_capture_length = None
                 if not is_profile and uniform_decode and (force_attention or is_graph_capturing):
                     tnd_capture_length = getattr(self.get_model(), "_pto_csa_tnd_capture_sequence_length", None)
+                    if tnd_capture_length is None:
+                        tnd_capture_length = getattr(self.get_model(), "_pto_hca_tnd_capture_sequence_length", None)
                 if tnd_capture_length is not None and profile_seq_lens is None:
                     seq_lens = tnd_capture_length
 

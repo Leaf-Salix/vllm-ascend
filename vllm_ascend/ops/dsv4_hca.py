@@ -21,6 +21,12 @@ def dsv4_hca_forward(hidden: torch.Tensor, positions: torch.Tensor, output: torc
     context = get_forward_context()
     wrapper = context.no_compile_layers[layer_name]
     runtime = getattr(wrapper, "_pto_hca_runtime", None)
+    record_route = getattr(type(runtime), "record_graph_route", None)
+    if record_route is not None:
+        record_route(runtime, context, hidden, positions)
+    empty_call = getattr(type(runtime), "handle_empty_call", None)
+    if empty_call is not None and empty_call(runtime, context, hidden, positions, output):
+        return
     if runtime is None or not runtime.eligible(context, hidden, positions):
         native_attention_half(wrapper, hidden, positions, output)
         return

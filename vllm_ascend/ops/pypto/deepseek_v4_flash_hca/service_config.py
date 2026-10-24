@@ -7,7 +7,7 @@ MODEL_ARCHITECTURE = "PyptoHCADeepseekV4ForCausalLM"
 
 
 def is_hca_model(config):
-    return any(name in (MODEL_ARCHITECTURE, "PyptoCSAHCADeepseekV4ForCausalLM")
+    return any(name in (MODEL_ARCHITECTURE, "PyptoCSAHCADeepseekV4ForCausalLM", "PyptoHCATNDDeepseekV4ForCausalLM")
                for name in getattr(config.model_config.hf_config, "architectures", ()))
 
 
@@ -17,3 +17,7 @@ def validate_configuration(config):
     _validate_configuration(config)
     if envs.VLLM_ASCEND_PTO_CSA_ATOMIC_ADD != 0:
         raise ValueError("HCA 首版使用固定归约，请设置 VLLM_ASCEND_PTO_CSA_ATOMIC_ADD=0")
+
+
+def is_tnd_hca_model(config):
+    return "PyptoHCATNDDeepseekV4ForCausalLM" in getattr(config.model_config.hf_config, "architectures", ())
