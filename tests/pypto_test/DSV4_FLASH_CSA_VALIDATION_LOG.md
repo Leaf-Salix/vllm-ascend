@@ -23731,3 +23731,54 @@ Native HCA的图执行不变，不作跨版本性能比较。用旧B16完整结�
 本阶段仅单卡通过，16卡满批/尾批/padding的实际21层replay以及输出对照仍待执行。
 改动的两个Python文件Ruff、格式及git diff --check通过。完整format.sh此前因环境
 缺少pre-commit未能执行，不声称全仓格式检查通过。
+
+
+### 735.118 单卡通过后启动16卡B16模型图验收（2026-10-24）
+
+单卡证据与生命周期修正已提交4c918d6e2（详细中文、Signed-off-by），尚未推送。
+继续使用已验证的冻结v27源码（基础15b64665a）；没有改动执行中的源码或SDK。
+MPMD任务task_20261024_133045_33547276060已获得16卡开始运行，SPMD任务
+ task_20261024_133045_335476815011在队列等待。输出分别为runs/v27_graph_mpmd_b16
+和runs/v27_graph_spmd_b16。沿用B16预算0.92、HCCL1800、ring[16,256,16,16]MiB、
+window4096、Native HCA、NZ2、确定性1，关闭EPLB/static kernel/superkernel。
+
+运行器以两种TND全部通过的graph_replay_service_validation.json为启动门禁，
+模型检查要求每rank满批、尾批和padding都实际放行全部21层CSA图且没有Python
+重新提交，并检查真实16×S6、零抢占及零外部PTO工作区。通过后再比较192token
+输出及DSpark事件，再进入B24。本节记录启动状态，不能当作模型验收通过。
+
+
+### 735.119 MPMD的16卡B16真实模型图重放通过（2026-10-24）
+
+MPMD任务task_20261024_133045_33547276060完成exit=0。全部16rank均为33次
+满16×S6、15次尾批/padding，48次真实长历史FULL调用全部21层CSA都放行图重放，
+无Python重新提交。尾批覆盖2/3/5/6/7/8/10/12/14/15个请求，不拿图容量冒充
+实际请求数。256请求×192token完整输出，零抢占，外部PTO scratch仍为0。
+实际模型图捕获完成，两档共占0.67GiB（rank0记录），没有原图池断言。
+
+对照此前v25_mpmd_b16：49152个输出token差异0，256请求的DSpark接受事件全部
+一致，平均接受3.7956656346749225。证据graph_replay_mpmd_b16_eager_comparison.json
+及runs/v27_graph_mpmd_b16/functional_check.json。图重放修复没有引入新的输出差异。
+
+边界披露：每rank第一步16个请求各1token按调度请求NONE执行一次PTO eager；
+另33次无真实长历史的空闲/补齐调用max_seq_len=6仍走既有不支持分支。它们未冒充
+真实graph验收，不能把首层rejected=33误读成真实48步重放失败；每CSA层allowed=48。
+SPMD的B16任务已接续运行，B24尚未提交，本轮整体目标仍未完成。
+
+
+### 735.120 两种TND的B16模型重放与完整输出对照均通过（2026-10-24）
+
+SPMD任务task_20261024_133045_335476815011完成exit=0，与MPMD相同：每rank
+33次满批、15次尾批/padding共48次真实长历史FULL调用，21层全部图重放、无Python
+重提交，零外部scratch与零抢占。与v25_spmd_b16的49152个token和256请求接受事件
+均一致，见graph_replay_spmd_b16_eager_comparison.json。
+
+三侧完整报告graph_replay_b16_comparison.json：两种PTO之间256请求的全部token
+与DSpark事件一致，平均接受3.7956656346749225。对Native，64/256请求完整token
+一致，含32/32简单请求；复杂问题的位置差异22416/49152，事件完全一致32/256。
+Native平均接受3.806501547987616。差异与原eager阶段相同，未因图修复扩大，不能
+宣称复杂问题与Native一致。Native复用依据精确版本审计，不用于性能对照。
+
+B16通过后，按既有配置提交16卡B24：预算0.935、HCCL768，SDK、源码、ring均与
+B16一致。两条任务和冻结命令写入jobs.json的graph_replay_model_v27；B24尚未通过，
+本轮不提前标完成。后续仅需这两组B24及最终问答导出，不新增性能采集。
