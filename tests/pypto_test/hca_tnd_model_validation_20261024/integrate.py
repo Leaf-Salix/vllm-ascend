@@ -7,13 +7,28 @@ HERE = Path(__file__).resolve().parent
 
 
 def integrate(root):
+    # 正式接入提交后，新的冻结包可能已经包含完整入口，不能重复注册或追加类。
+    # 老基础提交仍沿用下面的最小迁移；半套接入或不同版本的服务必须显式复核。
+    name = "PyptoHCATNDDeepseekV4ForCausalLM"
+    if name in (root / "vllm_ascend/models/__init__.py").read_text():
+        required = {
+            "vllm_ascend/models/pypto_deepseek_v4_hca.py": "class " + name + "(",
+            "vllm_ascend/ops/pypto/deepseek_v4_flash_hca/service_config.py": "def is_tnd_hca_model(",
+            "vllm_ascend/ops/dsv4_hca.py": "record_graph_route",
+            "vllm_ascend/worker/model_runner_v1.py": "_pto_hca_tnd_capture_sequence_length",
+        }
+        for path, marker in required.items():
+            assert marker in (root / path).read_text(), ("HCA正式接入不完整", path)
+        service = root / "vllm_ascend/ops/pypto/deepseek_v4_flash_hca_tnd/graph_service.py"
+        assert service.read_text() == (HERE / "candidates/graph_service.py").read_text(), "HCA服务版本变化，须重新审核"
+        return
+
     def replace(path, old, new):
         file = root / path
         text = file.read_text()
         assert text.count(old) == 1, (path, old)
         file.write_text(text.replace(old, new))
 
-    name = "PyptoHCATNDDeepseekV4ForCausalLM"
     replace("vllm_ascend/models/__init__.py", "def register_model():\n",
             'def register_model():\n    ModelRegistry.register_model(\n'
             f'        "{name}", "vllm_ascend.models.pypto_deepseek_v4_hca:{name}",\n    )\n')

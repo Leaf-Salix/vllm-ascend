@@ -949,3 +949,53 @@ QKV_BOUNDARY_COMPARISON.json、FIRST_TOKEN_ANALYSIS.json、ANSWER_AUDIT.md/json�
 precision_evidence/保留全部小证据；候选改动另存QKV_BF16_BOUNDARIES.patch。
 大Tensor、冻结源码和编译产物本地保留并记录路径/大小，不hash、不提交权重或bin。
 本轮到记录收口，不为Native逐项对齐追加整模型测试，未扩B24，详细中文本地commit，不push。
+
+## 2026-10-24：完成HCA正式模型接入与B24功能，正常EOS/2048答案对照停在质量讨论点
+
+用户再次要求参考CSA-MPMD-TND完成完整vllm-ascend接入，有疑惑停下来讨论。
+只读核对该会话与v27记录，沿用其满批/尾批/padding的真实图重放检查方法；
+保留本会话已通过的6类29步单卡门禁和B16完整模型结果，没有重复执行。
+
+新增B24任务task_20261024_151031_276989322516，exit=0：384请求、73728token、
+零抢占；每rank33步满批S6、17步尾批，其中15步padding和2步单请求6行小图。
+全部50个真实长历史FULL步骤的20层HCA实际重放，无Python重提交；首轮S1 eager
+和短dummy另列。B16相应为33步满批、18步尾批、15步padding、3步小图，共51步。
+两档各自16rank输出一致。Native B24历史参考与已审计B16 Native为同源码、
+同实际数学路径，核对相同权重/KV/问题/配置后仅用于正确性对照，不比较性能。
+B24与Native112/384完整token一致、简单前缀64/64一致；接受草稿均值3.79153767。
+这些相似性数据不是答案正确率。rank0模型退出前空闲显存B16/B24为3291.75/2284.45MiB。
+
+已将已验证的6个接入文件迁入正式目录：新PyptoHCATNDDeepseekV4ForCausalLM注册、
+20个C128层的运行时绑定、HCA custom-op图合同/空调用处理、TND配置识别、runner
+捕获范围与分档判定，以及deepseek_v4_flash_hca_tnd/graph_service.py。
+与冻结v04源文本逐一相同，不做hash扫描；审计见PRODUCTION_BINDING_AUDIT.json。
+旧架构不被隐式切换，正式算子数学仍FP32，未采用之前的BF16舍入对齐候选。
+其他会话正在编辑的offline_pd/run.py等文件保持不动；测试继续用隔离快照。
+
+用户明确批准增加同批B16的完整答案验证：正常EOS、最多2048token，Native/HCA各一版。
+v07只改SamplingParams.ignore_eos=False及结束原因/完整文本记录；max_model_len相应为
+133426，算子、权重、PD bank、DSpark、TP1/DP/EP16、NZ2、FULL_DECODE_ONLY等保持。
+仍为静态编译/SuperKernel关闭的功能/质量任务，不采性能，不以吞吐日志计算收益。
+
+- Native task_20261024_151736_304873916770：exit=0，256请求，297520输出token。
+- HCA task_20261024_151736_304886014592：exit=0，256请求，386304输出token。
+- 两侧零抢占，16个DP副本各自完全相同；HCA真实长历史FULL步骤继续通过20层重放检查。
+- 16个独立问题：Native正常结束11、到上限5；HCA正常结束7、到上限9。
+
+题意核对不执行模型生成的代码，按明确规则计算Python推演、状态机、账本和重复句子
+真值，分别记录完整数值、已出现的错误、无法完整解析和未答完。两侧本批均没有
+核验通过的完整正确答案：q02正确首行[1,9,5,24]，Native/HCA均给错；要求重复80/81次，
+Native实际85/83次，HCA82/82次。已结束不等于答对，原192token简单前缀一致不代表
+完整答案通过。不能将模型/题目/离线KV条件下的共同失败直接归因于HCA数值实现。
+判分脚本适配了原始状态机回答多一列分支解释的形式，避免把最后一列错读成t或S；
+格式差异与数值错误分开，未完成/解析不足不自动计为正确或明确数值错误。
+
+用户随后要求按CSA方式生成对比文件。下载目录为工作区
+downloads/HCA_TND_MODEL_INTEGRATION_20261024，03为本次2048token两列HTML/Markdown，
+01/02保留B16/B24的192token功能问答；91 JSON含完整原始token、文本、结束原因及来源。
+16个实际128K输入单独TXT，已验证32份回答全文/token长度和输入链接，未截取或补写。
+目录另打包为同名zip，均仅留本地；小报告、脚本、任务日志和结果入Git，大权重/KV/编译
+产物不提交、不hash。详细记录MODEL_INTEGRATION.md、QUALITY_EOS2048.md/json。
+
+当前功能接入通过，答案质量仍未验收通过。按用户要求停在讨论点，不自动更改数学、
+扩大生成长度或更换题目。三项本轮新设备任务均终态，无在途任务；详细中文本地commit，不push。

@@ -1,0 +1,34 @@
+--- a/tests/pypto_test/low_acceptance_20261001/mixed.py
++++ b/tests/pypto_test/low_acceptance_20261001/mixed.py
+@@ -35,7 +35,7 @@
+         for case in chunk:
+             tokens = json.loads((args.bank / case['tokens']).read_text())
+             prompts.append({'prompt_token_ids': tokens[:-1] if args.save_extended_bank else tokens})
+-            params.append(SamplingParams(temperature=0, max_tokens=args.decode_tokens, ignore_eos=True,
++            params.append(SamplingParams(temperature=0, max_tokens=args.decode_tokens, ignore_eos=False,
+                                          extra_args={'kv_transfer_params': {'offline_key': case['key']}}))
+         llm.collective_rpc('offline_begin_observation')
+         outputs = generate_aligned_batch(llm, prompts, params)
+@@ -46,7 +46,10 @@
+         for case, output in zip(chunk, outputs):
+             records.append({'key': case['key'], 'kind': case['question_kind'],
+                             'request_id': output.request_id,
+-                            'output_token_ids': list(output.outputs[0].token_ids)})
++                            'output_token_ids': list(output.outputs[0].token_ids),
++                            'output_text': output.outputs[0].text,
++                            'finish_reason': output.outputs[0].finish_reason,
++                            'stop_reason': output.outputs[0].stop_reason, 'finished': output.finished})
+         write_json(args.output / f'rank{args.rank}.mixed.json', {
+             'rank': args.rank, 'backend': args.backend, 'variant': os.environ.get('PTO_CSA_VARIANT'),
+             'pto_attention': args.pto_attention, 'attention_implementations': implementations,
+@@ -55,7 +58,9 @@
+             'atomic_add': os.environ.get('VLLM_ASCEND_PTO_CSA_ATOMIC_ADD'),
+             'pto_runtime': os.environ.get('PTO_CSA_RUNTIME'), 'deterministic': args.deterministic,
+             'hccl_deterministic': os.environ.get('HCCL_DETERMINISTIC'),
+-            'observation': observation, 'spec_decode': spec_decode_metrics(llm)})
++            'observation': observation, 'spec_decode': spec_decode_metrics(llm),
++            'sampling': {'temperature': 0.0, 'ignore_eos': False, 'max_tokens': args.decode_tokens},
++            'tokenizer_eos_token_id': llm.get_tokenizer().eos_token_id})
+ 
+ 
+ def collect(root, bank, batch, tokens, mean_range=(3.0, 4.0)):

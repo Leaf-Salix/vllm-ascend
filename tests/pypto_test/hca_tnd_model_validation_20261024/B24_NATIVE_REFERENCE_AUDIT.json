@@ -1,0 +1,24 @@
+{
+  "status": "PASS",
+  "scope": "仅复用Native正确性参考，不比较跨版本性能",
+  "native_path_unchanged": true,
+  "native_source_commit": "99268437c90132bcd0b1dec1007ecf615c80f4bd",
+  "pto_source_commit": "15b64665acafe64e3a851cba29a6fd78378d06e7",
+  "reference": "tests/pypto_test/csa_tnd_model_validation_20261023/runs/v12_native_b24",
+  "unchanged_native_math_paths": [
+    "vllm_ascend/models/deepseek_v4.py",
+    "vllm_ascend/models/deepseek_v4_dspark.py",
+    "vllm_ascend/models/deepseek_v4_mtp.py",
+    "vllm_ascend/attention/dsa_v1.py",
+    "vllm_ascend/quantization",
+    "vllm_ascend/ops/linear_op.py"
+  ],
+  "conditional_changes": {
+    "vllm_ascend/compilation/acl_graph.py": "仅已有PTO TND合同拒绝时设置重派发标记；纯Native没有该合同",
+    "vllm_ascend/ops/dsa.py": "仅pto_csa_tnd_padded_redispatch=True时建立Native容量视图；纯Native不会设置",
+    "vllm_ascend/worker/model_runner_v1.py": "仅具有_pto_csa_tnd_capture_sequence_length的PTO模型改变dummy捕获历史；纯Native无该属性"
+  },
+  "hca_overlay": "显式新模型/运行时及对应Host图选择；原Native架构与数学不变",
+  "common_inputs": "同权重、KV bank、前24问题与请求顺序、NZ2、level1、event1、HCCL768、B24预算0.935；比较器再次核对配置与纯Native路由",
+  "reuse_explanation": "B24 Native与已审核B16 Native为同一源码提交和实际Native数学路径；只复用正确性，不比较性能"
+}

@@ -171,5 +171,47 @@
       "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_model_validation_20261024/runs/qkv_all_bf16_stage_v3"
     ],
     "scope": "采Native真实QB及head RMS中间值，排查恢复BF16边界后的77个Q差异"
+  },
+  {
+    "name": "model_b24_v04",
+    "task_id": "task_20261024_151031_276989322516",
+    "command": [
+      "bash",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_model_validation_20261024/run_model.sh",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_model_validation_20261024/experiments/v04_graph_service/source",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_model_validation_20261024/runs/model_b24_v04",
+      "pto",
+      "24",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_model_validation_20261024/runs/single_v04/result.json"
+    ],
+    "scope": "正式FP32 HCA TND继续完整B24模型接入验证，复用已通过单卡门禁与B16；不使用BF16候选"
+  },
+  {
+    "name": "quality_native_b16_v07",
+    "task_id": "task_20261024_151736_304873916770",
+    "command": [
+      "bash",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_model_validation_20261024/experiments/v07_quality_eos2048/run_quality.sh",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_model_validation_20261024/experiments/v07_quality_eos2048/source",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_model_validation_20261024/runs/quality_native_b16_v07",
+      "native",
+      "16",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_model_validation_20261024/runs/single_v04/result.json"
+    ],
+    "scope": "用户确认的正常EOS、2048token上限完整答案验证；正式FP32 HCA/Native，须先通过B24功能"
+  },
+  {
+    "name": "quality_pto_b16_v07",
+    "task_id": "task_20261024_151736_304886014592",
+    "command": [
+      "bash",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_model_validation_20261024/experiments/v07_quality_eos2048/run_quality.sh",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_model_validation_20261024/experiments/v07_quality_eos2048/source",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_model_validation_20261024/runs/quality_pto_b16_v07",
+      "pto",
+      "16",
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hca_tnd_model_validation_20261024/runs/single_v04/result.json"
+    ],
+    "scope": "用户确认的正常EOS、2048token上限完整答案验证；正式FP32 HCA/Native，须先通过B24功能"
   }
 ]
