@@ -1,0 +1,44 @@
+{
+  "round": "attention_pv_prefetch",
+  "closed": true,
+  "device_execution": false,
+  "performance_measured": false,
+  "production_changed": false,
+  "formal_gmean_ratio_unchanged": 0.9843498918572288,
+  "full_payload_cpu_error": "Vec buffer usage (202240 bytes) exceeds platform limit (188416 bytes)\nCheck failed: limit == 0 || used <= limit at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-shared-20261022/src/ir/transforms/allocate_memory_addr_pass.cpp:473",
+  "left_payload_codegen": "attention_pv_prefetch_v2_codegen.json",
+  "protocol": {
+    "patterns": 1092,
+    "phase_graphs": 4368,
+    "total_nodes": 691800,
+    "negative_controls": 2,
+    "event_cycles_absent": true,
+    "phase_level_raw_war_and_stats_checks": true,
+    "limitation": "Phase/event model only; async fences and UB lifetimes still need codegen/device checks"
+  },
+  "user_request": "本轮优化之后停下",
+  "requested_goal_action": "pause after recording this round",
+  "references": [
+    {
+      "repo": "https://gitcode.com/cann/cann-recipes-infer",
+      "commit": "a06336361c2614c7bcaebcb9046181a9e23008f7",
+      "path": "ops/ascendc/src/gather_selection_kv_cache/op_kernel/gather_selection_kv_cache_split_bs_reuse.h",
+      "lines": [
+        423,
+        458
+      ],
+      "finding": "Separate buffer allocation/queue ownership and release after stores; not evidence that early PV prefetch improves CSA"
+    },
+    {
+      "repo": "https://gitcode.com/cann/ops-transformer",
+      "commit": "28f4035406a1aea65a8d65c6eb527a85ab84e624",
+      "path": "attention/sparse_flash_mla/op_kernel/arch22/sparse_flash_mla_csa_block_vector.h",
+      "lines": [
+        879,
+        932
+      ],
+      "finding": "A3 native PV buffer pingpong with explicit MTE2/V waits; the attempted cross-softmax PV schedule is a separate experiment"
+    }
+  ],
+  "unstarted_directions": "No Score-first or all-valid fast-path implementation was begun after the stop request"
+}

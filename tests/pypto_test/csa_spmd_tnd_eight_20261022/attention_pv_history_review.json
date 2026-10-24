@@ -1,0 +1,34 @@
+{
+  "retained_actual_PV_Right": [
+    0,
+    32768
+  ],
+  "retained_actual_PV_Acc_offsets": [
+    0,
+    32768
+  ],
+  "corrected_assumption": "Two Acc buffers do not imply two Right buffers; all four retained PV Right loads use address 0",
+  "historical_double_Right": {
+    "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_OPTIMIZATION_LOG.md:18487",
+    "evidence": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_pipeline_retest_20261019",
+    "actual_Right_offsets": [
+      0,
+      32768,
+      0,
+      32768
+    ],
+    "B16_reference_us": 821.96,
+    "B16_candidate_us": 838.0,
+    "same_sdk_as_current": false,
+    "not_remeasured": true,
+    "limitation": "Historical combination with Acc96 and restricted GM compiler fix; cannot isolate pure Right-buffer effect"
+  },
+  "historical_row_chunking": {
+    "log_line": 6991,
+    "B16_retained_us": 815.84,
+    "B16_candidate_us": 831.32,
+    "not_remeasured": true
+  },
+  "PV_pool_distinction": "Four exact original M64/N128/K128 products collected into one M64/N512 Acc; one contiguous store; no N256 or K64/head-split arithmetic",
+  "performance_eligible": false
+}

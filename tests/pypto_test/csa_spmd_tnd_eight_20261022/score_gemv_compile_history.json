@@ -1,0 +1,25 @@
+{
+  "v1": {
+    "source": "score_gemv_v1.json",
+    "cpu_report": "runs/compile_score_gemv_C04_v1/result.json",
+    "passed": false,
+    "error": "1 function(s) failed to compile:\n\n  Function          | Error\n  ------------------+--------------------------------------------------------------\n  dynamic_csa_full  | ptoas compilation failed:\n                    | loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-\n                    | spmd-tnd-\n                    | 20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/s\n                    | core_gemv_v1/indexer_score_stages.py\":813:17): error:\n                    | 'pto.subview' op boxed layout subview sizes must be\n                    | multiples of inner shape\n  ------------------+--------------------------------------------------------------\n\n  Full details: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/compile_score_gemv_C04_v1/kernel/report/codegen_errors.txt",
+    "device_execution": false,
+    "reason": "Prototype Left K64 slice violates boxed subview alignment; retain physical K256"
+  },
+  "v2": {
+    "source": "score_gemv_v2.json",
+    "cpu_report": "runs/compile_score_gemv_C04_v2/result.json",
+    "passed": false,
+    "error": "1 function(s) failed to compile:\n\n  Function          | Error\n  ------------------+--------------------------------------------------------------\n  dynamic_csa_full  | ptoas compilation failed:\n                    | loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-\n                    | spmd-tnd-\n                    | 20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/s\n                    | core_gemv_v2/indexer_score_stages.py\":1010:29): error:\n                    | 'pto.tmov' op expects mat-source tmov to use matching\n                    | src/dst shapes\n  ------------------+--------------------------------------------------------------\n\n  Full details: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/compile_score_gemv_C04_v2/kernel/report/codegen_errors.txt",
+    "device_execution": false,
+    "reason": "PTOResolveBufferSelect widens Mat source to its parent shape; standalone PTOAS issue 1680"
+  },
+  "v3": {
+    "source": "score_gemv_v3.json",
+    "cpu_report": "score_gemv_v3_codegen.json",
+    "passed": true,
+    "workaround": "Narrow source valid prefix, then explicit TEXTRACT; consume valid K64 only",
+    "shared_sdk_modified": false
+  }
+}

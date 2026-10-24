@@ -1,0 +1,40 @@
+{
+  "failures": [
+    {
+      "version": 1,
+      "log": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/compile_packed_score_keys_C04_v1.log",
+      "device_execution": false,
+      "error": "pl.tensor operation 'reinterpret_view': tensor.reinterpret_view cannot prove byte-size equality for an explicit shape with dynamic dimensions; omit shape to use layout-aware auto detection, or provide fully static shapes"
+    },
+    {
+      "version": 2,
+      "log": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/compile_packed_score_keys_C04_v2.log",
+      "device_execution": false,
+      "error": "The operator tile.gather_row requires src to be a TensorType (GM), but got TileType\nCheck failed: src_type at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-shared-20261022/src/ir/op/tile_ops/paged_gather.cpp:65 at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/packed_score_keys_v2/indexer_score_stages.py:883:25"
+    },
+    {
+      "version": 3,
+      "log": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/compile_packed_score_keys_C04_v3.log",
+      "device_execution": false,
+      "error": "@pl.jit: missing inferred tensor metadata for parameter 'packed_keys' of '_indexer_score_cube_split_store'. This usually means the tensor's shape/dtype could not be statically determined, or that the call site passing it was not resolved (no call to '_indexer_score_cube_split_store' found in its caller). Pass the tensor directly as a function argument, or ensure any intermediate pl.create_tensor() used for this parameter has a statically inferable shape and dtype."
+    },
+    {
+      "version": 4,
+      "log": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/compile_packed_score_keys_C04_v4.log",
+      "device_execution": false,
+      "error": "Verification failed after 'pipeline_input' for properties {TypeChecked, NoRedundantBlocks, BreakContinueValid, InOutUseValid, ManualDepsOnSubmitOnly, AtomicAddDtypeValid}:\nIR Verification Report\n======================\nTotal diagnostics: 1 (1 errors, 0 warnings)\n\n[1] ERROR - InOutUseDiscipline\n  Message: variable 'packed_keys' was passed as InOut/Out at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/packed_score_keys_v4/entry.py:312:9; read the post-call return value instead of the pre-call variable\n  Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/packed_score_keys_v4/entry.py:143:1\n  Error Code: 0\n\nStatus: FAILED (1 error(s) found)\n"
+    },
+    {
+      "version": 5,
+      "log": "tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/compile_packed_score_keys_C04_v5.log",
+      "device_execution": false,
+      "error": "1 function(s) failed to compile:\n\n  Function          | Error\n  ------------------+--------------------------------------------------------------\n  dynamic_csa_full  | PTO codegen cannot materialize symbol\n                    | 'packed_direction_inline6036__phi_v2' in function\n                    | 'cube_schedule_aic': it is not a physical tensor dimension,\n                    | a scalar parameter, or a loop variable of this kernel. Pass\n                    | the extent as a pl.Scalar[pl.INDEX] parameter and use it in\n                    | pl.load(..., valid_shape=[...]) instead of naming it in the\n                    | parameter's pl.TensorView(valid_shape=...) annotation.\n                    | [/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tn\n                    | d-\n                    | 20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/p\n                    | acked_score_keys_v5/indexer_score_stages.py:853:17]\n  ------------------+--------------------------------------------------------------\n\n  Full details: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/runs/compile_packed_score_keys_C04_v5/kernel/report/codegen_errors.txt"
+    }
+  ],
+  "latest": "packed_score_keys_v6",
+  "adopted": false,
+  "sdk_modified": false,
+  "latest_full_codegen_passed": true,
+  "runtime_result": "packed_score_keys_v6_results.json",
+  "latest_decision": "Rejected after complete-L1 regression"
+}

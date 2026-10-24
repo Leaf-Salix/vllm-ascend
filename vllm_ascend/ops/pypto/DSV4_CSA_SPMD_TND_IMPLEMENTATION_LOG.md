@@ -5557,3 +5557,528 @@ AIC Mat475136/Acc131072/Left65536/Right65536，AIV Vec180224；容量和ABI
 绑定output_group_owners_v2_tasks.json；分析时显式使用retained_output_rectangle.json
 保留版清单，原八档分母不变。当前尚无新候选设备收益；五项正式机制及
 1.5650108143%累计耗时下降保持。
+
+### 2026-10-23：B16三核输出组完整L1负向，不采用
+
+task_20261023_144806_271128030529 completed/exit0，六组逐bit/保护、十个
+完整72角色窗口、同卡同SDK及实际四CPP匹配均通过。中位786.10μs，对
+保留763.65μs增加2.939828%。拒绝output_group_owners_v2，不扩C02、不增加
+采用状态门禁，不由源级载入量减少推断实际收益。结果及所有原始样本保存在
+output_group_owners_v2_results.json。当前五项正式机制、八档0.9843498918572288
+保持；本次用户授权的累积push已在77a19c4ce完成，后续继续默认不push。
+
+下一步检查Attention AIC循环内的就绪次序：现状每拍先获取当前KV并做QK，
+再做两拍前的PV；后者的P与L1 KV可能已就绪。若先执行旧PV，有机会把其Cube
+工作放进当前KV采集等待中。它不同于此前AIV侧的DMA/softmax重排；目前
+只读代码未发现已测同一AIC方案。先验证全部mask、启动/排空、三槽复用及
+两AIV事件配对，不假设重排必然重叠或提速，不删除同步。
+
+### 2026-10-23：PV先行排重、Q_B尾部补位及消费者就绪审查
+
+PV先行候选的13项源码事件DAG/三槽先读后复用/数学保持检查通过，但进一步
+查另一会话E42，发现其完整AIC helper AST与本候选逐节点相同。历史长B16
+811.44→819.02μs、短B32 941.86→944.64μs，均完整精确通过而回退。因此
+在新的完整CPU或NPU前停止该重复方案。attention_pv_first_dedup.json记录
+原五窗证据和源码同一性；旧SDK结果仅用于设计排重，不能填本轮八档或算收益。
+另查到E43/E44/E46及DQ穿插Score已有完整试验：AIV显式逐行DMA、独立32KiB
+缓冲和逐8head DQ穿插均未在长B16形成足够收益，不按原样重复。
+
+独立qb_tail_helpers_v1保留Q_B M128/N256/K256数学，把128列任务中的前120项
+留给20个主核（各6），后8项由4个Hadamard核在发布其原结果后各算2项。
+Q_B信号改在真实写完之后发布，原消费者本就等全部24物理AIC，不增加集合。
+仅NZ/N256且辅助核数4启用，wide-N/其它分工保持。18项源码合同检查已收齐：
+首轮17过，T0的Counter与显式零字典比较误报修正后仅补该1项，通过；源码与
+门槛未改。C04/C05/C03完整编译、ABI和资源通过，C03关闭域四CPP相同。
+见qb_tail_helpers_v1_codegen.json。本轮没有提交设备性能。
+
+最初按每列区间作线性估计，Q_B末端可能前移约8～10μs；补查后继才发现
+这不是充分的全链理由。C04三个诊断窗的Q_B最晚213.12/215.50/213.10μs，
+所有48条AIV到达Q_B等待前的IDX_SCALE都更晚，没有暴露该段生产者等待。
+C05到达差最多约2.40μs，且该诊断早于最新输出局部改动。它们不是严格性能
+上界，不能把Scalar就绪区间当可删延时，但不足以支持单独采此候选。因此
+暂存编译结果，不因局部工作均衡就上卡。逐核端点与模型见qb_tail_readiness_review.json。
+
+下一步具体审查量化/系数融合。现有idx_query_quant每token由token%48唯一
+拥有，量化的FP32 reciprocal scale写GM后，全48核等待，再由group%48的核
+重读scale并构造16×(G*64)的对角系数矩阵。考虑保持原量化所有权和完整
+64-head/两次64列amax/INT8舍入数学，直接用本核scale生成原FP16系数，
+每token只写其[group*16+lane, lane*64]的64列对角片。
+
+为了避免每token重复扫描B，也避免并发清零覆盖有效片，可在META唯一写者
+阶段先把实际group系数矩阵置零，并填token→group/lane的INT32映射。明确
+扩展group_offsets末尾T个字，不借用旧scale链表/证明区：先全置-1，再依据
+原group descriptor的first/live写group*G+lane；Host binding与核内base必须
+共用同一容量合同。原组描述符、causal检查、动态尾组、inactive/padding保持。
+首选长G6/64≤T容量≤96区间；须检查META新增工作是否仍有余量，不能推广
+C04空隙到B24。该设计尚未写入候选、更未验证收益。
+
+若实现，head_weights等待移到融合前；量化/系数完成后才发布原QUANT及COEFF。
+AIC已等待全部量化实际写者，若QUANT发布同时覆盖系数，可在开启域去掉随后
+冗余COEFF获取；必须以源码发布顺序和状态测试证明，不删业务cache/fence。
+需核对META清零与token写者之间的可见性、128B片无重叠、整组非对角及尾行
+精确为零、所有工作区边界与四CPP资源，再决定NPU。此路线减少中间读回和
+跨核阶段获取，而非仅缩短已被后继覆盖的Q_B末端。当前无待收取CPU/NPU，
+正式五项机制及1.5650108143%保持，目标继续active；新记录只本地提交。
+
+
+### 2026-10-23：按用户要求收敛到B16 Indexer/Attention核内流水
+
+- 用户先要求抓大放小、直接看源码，随后明确先聚焦128K/B16/S6，再限定
+  Indexer和Attention的核内流水，并指定参考cann-recipes-infer的ops。
+  原八档等权、完整72角色L1中位数、严格bitwise及状态/图约束不变；
+  最终回归仍覆盖八档，不把重点单档改成新的目标分母。
+- `macro_budget_v1.json`按每个既有诊断窗口的单调全局切点分段，避免
+  相减独立中位数。B16前段/Score相关/TopK-plan-Attention/输出段占比约
+  31.58/27.06/24.01/17.39%；这是带插桩的描述，不是纯引擎或可回收时间。
+  当前正式几何平均比仍为0.984349891857；达到0.90还需全八档统一降低
+  8.569%，若只改善两档则各需约30.117%。不把诊断数据混入收益。
+- query量化与head系数融合原型`fused_coefficients_v1`已完成C04/C05
+  CPU完整编译，但没有设备测试或采用。保留生成器、模板、描述符和冻结
+  源码，按新聚焦范围搁置；其余正确性/关闭域/codegen审计尚未验收。
+- Score源码已具备live<=3的Cube分支、连续页scale合并、三行2048候选
+  排序，不能重复宣称为新优化。Key仍每页4096B搬运、N64面板两页。
+  是否搬运/发射限制，需要与AIV消费和双槽背压区分。旧SDK诊断不能
+  直接代替当前已改变scale/sort路径的诊断，也不能当独占硬件耗时。
+- `score_fifo_probe.py`在进程内包围原event0/1等待；保留原wait/set、
+  native150 GM等待和所有数学，仅在每角色Score发布后写独占512B槽
+  第三缓存行32..37。含额外计时、DCCI/DSB扰动，明确performance_eligible=false。
+  8项CPU检查通过，反向去除插桩后C04/C05生成体逐字还原；导出依据
+  本次device计划/组描述符核对24AIC+48AIV的动态次数和所有其他槽。
+- B16唯一任务`task_20261023_162601_23644089762`已通过task-submit
+  排队并开始执行，使用共同validated工具链和已采用的output_rectangle生产
+  冻结源；三轮诊断保留严格输出/TopK/score/cache/state/guards检查，
+  尚无设备结论。B24任务`task_20261023_162601_236444925396`已在
+  排队状态取消，原因是用户要求先聚焦B16。
+- GitCode网页/默认代理访问失败后，直连Git成功取得指定仓库master
+  `a06336361c2614c7bcaebcb9046181a9e23008f7`（2026-10-22）。独立只读
+  参考检出位于工作区`.cache/csa-recipes-infer-20261023`，没有改公共SDK。
+  后续逐项比较真实源码的buffer寿命、预取距离和交接协议；不能仅凭
+  示例使用双缓冲就声称适合本例或已经提速。
+
+
+### 2026-10-23：B16 READY/ACK收取，参考指定源码建立连续Key供数原型
+
+- B16诊断任务23644089762 completed/exit0，7组完整bitwise/状态/保护
+  检查通过，三轮各24AIC+48AIV均为22次成对事件。插桩前CPP与现生产
+  C04完整CPU产物仅去pto位置注释后逐字相同，SDK相同。AIC ACK累计
+  中位14.52/15.81/15.08us；AIV READY为60.25/60.14/60.94us。
+  优先研究Cube生产链，不把这些Scalar区间当作可省时间。原始窗口和
+  证据见`score_fifo_C04_v1_results.json`；无正式性能重测。
+- `recipes_pipeline_reference_v1.json`固定指定仓库a0633636下六份源码。
+  AscendC GatherSelectionKvCache用绑定队列管理KV/KRope搬入、搬出和
+  最后消费者释放，tiling对metadata与两份payload的总UB预算做检查。
+  这些可借鉴的buffer合同已纳入候选；其块命中复用、旧BF16 Indexer归约
+  和TileLang串行示例不直接替换当前INT8/N64/严格bitwise数学。
+- 新`packed_score_keys`候选仅先在C04实验。两AIV各用二维DMA读取16个
+  Native页的4096B key前缀，跳过64B scale；逆序页按页恢复，页内字节
+  不变。prefill第0块，随后在消费Score(s)前准备Key(s+1)。AIC从连续GM
+  环一次读入128KiB L1，保留原N64、双M192 QK早FIX、WS和TopK次序。
+- 只在已采用leaf-layout策略内、live>3、叶的有效行数整除1024、全部页
+  证明连续时启用。部分叶/碎片页/小live沿原页DMA。两AIV仍各读原私有
+  scale，避免旧共享scale协议反例。新增KEY_READY事件6，原Score READY
+  证明先前Key已消费，原ACK和drain保留；有限交错模型15组全部通过。
+- 复用balanced G6闲置9MiB score_arena前6MiB，不增加workspace分配。
+  初版核内动态reinterpret受字节/Tile推导限制，入口表达也没有向深层
+  helper传出可推导metadata；当前以binding零拷贝INT8 view传递，增加
+  一个内部kernel别名参数，不新增业务输入。Cube只读，AIV按InOut规则
+  传递返回值。不得再称底层kernel ABI完全未变。
+- v5错误地在AIC调用含Vector归约的布局proof，自动拆分后出现游离
+  Scalar；这是原型的角色分配错误。v6改为AIC Scalar逐页整数检查，
+  保留与AIV相同的256页/2^24物理域和全页合法条件。它的额外成本也
+  必须接受完整L1验证，不删除检查或将末页无条件当连续。
+- v1～v5编译失败均封存于`packed_score_keys_compile_history.json`，
+  没有修改SDK、没有把这些调用限制或原型错误直接报告为上游bug。
+  v6的21项CPU检查通过：实际helper正反向字节、唯一半块写入、
+  原Cube数学/Vector顺序、零拷贝容量、完整协议模型及Scalar证明边界。
+  C04完整CPU编译正在进行，未上卡、未采用、未声称性能收益。
+
+- 补记：v6完整CPU编译通过且仍只有原AIC/AIV两个函数、一个MIX模块。
+  AIC Mat475136/Acc131072/Left65536/Right65536B，AIV Vec176128B，
+  均在限制内。AIC的历史Vec描述符未新增，也没有TROWMAX/TGATHERB等
+  Vector指令；业务root不变，新增内部别名参数已如实记录。
+  证据`packed_score_keys_v6_codegen.json`。
+- B16设备8唯一任务`task_20261023_171002_9596929355`已提交，沿用
+  `launch_sdk_measure_v2.sh`、历史同SDK同卡原基线和保留版，严格6组
+  eager/graph/post-L1检查及至少10个完整72角色L1窗口。尚待终态。
+
+
+### 2026-10-23：B16连续Key供数完整通过但回退11.33%，不采用
+
+- 唯一设备任务`task_20261023_171002_9596929355` completed/exit0，设备8。
+  reference/candidate各eager、graph、post-L1共6组完整bitwise检查通过，
+  输出、TopK/score、cache/state、保护区及代际通过；实际四份CPP与CPU
+  门禁产物一致。该检查不冒充额外metadata状态矩阵或服务验收。
+- 10个完整72角色L1窗口为
+  `[844.66,860.60,849.36,856.10,854.54,850.26,857.10,850.02,845.42,845.36]`us。
+  中位850.14us，历史同卡同SDK保留版763.65us，回退11.325869%。
+  原始窗口、同卡/SDK/源一致性与严格检查见`packed_score_keys_v6_results.json`，
+  分母未重测，未用插桩区间充当收益。
+- 已核对fixture的original页表逐请求逆序连续；`reverse_pages=False`只
+  表示不倒置请求物理所有者，并不意味着页内升序。此候选必须真实处理
+  逆序页，不能从输入标签推断成无需重排。CPU模型及设备精度均覆盖本轮
+  取数结果；整体退步不能单独归因成某一条TGATHERB、Scalar证明或GM搬运。
+- 不采用、不扩B24/八档、不追加该负例的状态/服务或参数扫描。新增Key
+  GM交接、布局证明与重排的总成本没有转化成完整收益。下一轮继续用户
+  指定的B16 Indexer/Attention核内流水，优先有生成物机制依据且不同于
+  已有负例的路径。正式五项保留优化、八档几何平均0.984349891857及
+  0.90目标均保持；goal仍active，所有本轮任务已终态，无push。
+
+
+### 2026-10-23：保留N64双QK Acc，调整半组QK/WS发射次序
+
+- 上一goal轮为progress：取得当前B16的完整供数负例，生产五项保留优化和
+  原八档10%目标不变。当前仅B16、Indexer/Attention核内流水，无悬挂旧任务。
+- 在用户指定recipes源码之外，继续只读核对本地CANN ops-transformer
+  `28f4035406a1aea65a8d65c6eb527a85ab84e624`的arch22 QLI与SFA实现；
+  入口及README确认A2/A3路径。它是参考实现，不是当前测量SDK或最新
+  Native性能分母。QLI的ProcessQk/ProcessWs交错及独立资源事件提供比较
+  依据，没有复制其不同分组和归约数学。
+- 新`score_half_interleave_v1`只移动原N64完整G6分支的一条WS0赋值：
+  `QK0/FIX0 → QK1/FIX1 → WS0 → WS1`改成
+  `QK0/FIX0 → WS0 → QK1/FIX1 → WS1`。旧N128单Acc已测负例采用类似
+  顺序遮蔽破坏性Acc复用，那个宽面板/单Acc方案本轮不重测。
+- 本轮继续保留两份独立48KiB QK Acc及4KiB WS Acc、两K192加权归约
+  的先后顺序、N64面板、Key预取、所有FIFO/页guard和写回。<=3 live
+  分支及全部Vector源码逐字保持，未增加GM数据量、workspace或根参数。
+- 两项源码DAG/其他模块检查通过；完整CPU编译通过。实际PTO共64个
+  完整分支MMA：首面板QK0/QK1、15组交错和末尾WS0/WS1，所有PTO操作
+  数量与原版本相同。Acc区间[0,49152)、[49152,98304)、[98304,102400)
+  不重叠；全部内存仍在实际限制内，AIV Vec180224B。
+- 第一版审计把AIV包装文件当成仅含Vector函数而错误要求全文相同；
+  该文件同时包含两种arch guard helper。已修正为核对实际AIV函数及
+  后续wrapper逐字相同、共同前缀相同，orchestration和kernel ABI也相同，
+  没有为修审计改算子源码。证据`score_half_interleave_v1_codegen.json`。
+- B16设备8唯一任务`task_20261023_173612_10939417938`已提交。按原规范保留
+  严格6组检查和10个完整72角色L1窗口，以历史同卡同SDK保留版763.65us
+  判收益；当前未采用、未扩其它档位、未push。
+
+
+### 2026-10-23：N64半组交错完整通过，B16回退2.41%
+
+- task_20261023_173612_10939417938 completed/exit0，设备8。
+  六组eager/graph/post-L1严格bitwise及状态/保护检查通过，实际四份CPP
+  匹配CPU产物，和所选历史保留/原始分母为同卡同SDK。
+- 完整十窗L1中位782.05us，对保留版763.65us回退2.409481%。
+  样本及原始72角色窗口见score_half_interleave_v1_results.json。
+  没有把源码交错/事件减少解释成已测异步重叠或可独占归因的收益。
+- 不采用、不扩状态/服务/其它档位，不继续扫描附近发射排列。
+  当前正式五项保留机制和八档几何平均0.984349891857不变；
+  原10%目标未达到，继续B16 Indexer/Attention核内流水研究。
+
+
+### 2026-10-23：Indexer 真 GEMV 数值探针通过，Acc 列池问题已上报
+
+- 沿用户指定 recipes 的 Indexer/Attention 数据流对照，继续检查本地
+  ops-transformer 的 A3 QLI WS：它逐 query 计算 K64、M16。保留版
+  使用对角系数的两段 K192；本轮检查真正 M1 的 TGEMV 能否减少无效计算。
+  这不是把 Native 的源码写法直接当作性能结论。
+- `score_gemv_probe.py` 的原两次 K192 matmul 与六次 K64 GEMV，
+  在 3 个种子、4 类输入（正负/正/零/宽动态范围）的 eager/graph 共
+  24 组检查中 FP32 位级一致，含 signed-zero 比较、输入不变及输出保护区。
+  唯一成功任务 `task_20261023_182030_349647015713`，设备1，exit0。
+  CPU 完整二进制编译通过，设备生成 CPP 与 CPU 完全相同；未计性能。
+- 初版漏了 A3 单行 Mat→Left 的 512B 物理 K 对齐，任务
+  `task_20261023_181703_335272912270` 在设备内核执行前编译失败；
+  改成物理 K256/有效 K64，并把完整二进制编译加入 CPU 门禁。
+  该问题属于探针布局错误，不作为 SDK bug。
+- Acc 列池版本另有独立 CPU 复现：已共享 MemRef 的 GEMV 输出在 assemble
+  时仍生成 Acc→Acc TMOV。最小复现 `score_gemv_alias_repro.py` 已按
+  512B 对齐修正后再次确认；查重后提交 PyPTO #3132。公共 SDK 未修改。
+  按用户新要求，#3132 标题和正文已改为中文并回读核验，后续 issue
+  同样使用中文，代码和报错保留原文。
+- 证据 `score_gemv_probe_results.json`、`upstream_issue_3132.json`。
+  数值探针不替代完整 CSA 正确性、状态/服务检查与 L1 性能。下一步在
+  C04 尝试独立写回 GEMV，核对新增指令/搬运的代价；生产保留版和分母不变。
+
+
+### 2026-10-23：B16 独立 GEMV 完整候选通过编译门禁并提交
+
+- `prepare_score_gemv.py` 冻结 `score_gemv_v3`：只改已有长 G6 分支的
+  WS，不改 QK/INT32→FP16 FIX+ReLU、Key 页读取、scale、TopK 或事件协议。
+  live≤3 分支、其余 Python 模块、ABI、orchestration、实际 AIV 函数及
+  wrapper 均与保留版一致。使用原六行 FIFO、原 GM 容量，无额外 GM 回搬。
+- 六个系数行先以物理 K256/有效 K64 搬到 Left；FP16 QK Mat 父池扩成
+  384 行，显式 TEXTRACT 的目的物理 K256/有效 K64，每次只读取真实生成
+  的 192 行内对应的 64 行。独立 GEMV 顺次复用原 4KiB WS Acc。
+  实际每个 1024 列步骤为 96 次 GEMV，替代原 32 次 WS MMA，增加 80 次
+  FIX 写回。这是明确的开销权衡，不用少算零值推断性能必然提高。
+- v1 的 Left K64 切片不满足 boxed subview 要求；v2 的 Mat 子视图在
+  PTOResolveBufferSelect 后源形状从256×64扩大成384×64，触发TMOV形状
+  检查。已抽出无 GEMV 依赖的 Python/PTO 最小复现，并直接调用 PTOAS
+  定位失败 pass；查重后以中文提交 PTOAS #1680。v3 使用显式 TEXTRACT，
+  公共 SDK 未修改。CPU 历史见 `score_gemv_compile_history.json`。
+- `audit_score_gemv.py` 完成实际指令、有效尺寸边界、原同步参数、资源、
+  独立 Acc 区间和完整 CCE/host 二进制门禁。资源证据见
+  `score_gemv_v3_codegen.json`。
+- 唯一完整 C04 任务 `task_20261023_183940_8927319593`，设备8，
+  同 SDK/同卡历史原基线与保留版；沿用6组严格检查和10个完整72角色
+  L1窗口。待终态；未采用、未扩测其他档位、未push。
+
+
+### 2026-10-23：独立写回 GEMV 的完整 B16 L1 回退42.74%，不采用
+
+- `task_20261023_183940_8927319593` completed/exit0，设备8。reference/
+  candidate 的 eager、graph、post-L1 共6组严格输出/TopK/score/cache/state/
+  保护区检查通过，实际四份 CPP 与 CPU 门禁产物相符，同卡同公共SDK。
+  不将这些检查冒充额外metadata状态矩阵或服务验收。
+- 10个完整72角色窗口为
+  `[1084.18,1085.38,1093.56,1086.46,1093.84,1099.64,1085.68,1094.04,1073.62,1094.98]`us。
+  中位1090.01us，比历史保留版763.65us慢42.736856%。未重测分母；
+  全部原始窗口、严格检查和源码对应关系见 `score_gemv_v3_results.json`。
+- 不采用，不扩展状态/服务/其它档位测试，不继续扫描附近的GEMV独立写回
+  参数。该候选同时改变 GEMV 模式、物理操作数布局及 MTE1/FIX 发射次数，
+  不能仅凭整链退化把原因归结为某一条指令，也不能推断修复 Acc 列池后的
+  实现一定更快或一定更慢。后者须有新的机制证据及完整L1结果。
+- 本轮增补实际96个Right分配的有效K64/N64核验，确认GEMV不消费物理
+  K256的填充区。AIC Mat475136/Acc131072/Left65536/Right65536B，
+  AIV Vec180224B；无共享SDK修改，无生产代码变更。
+- 生产仍为 `output_rectangle_production_v1`，八档等权原始分母不变，
+  当前比值0.9843498918572288，10%目标仍未达成。没有未完成的本轮设备
+  任务。#3132已中文回读确认，新报PTOAS #1680也为中文；本地阶段提交，
+  未push。下一轮仍按用户要求聚焦B16的Attention/Indexer核内流水，
+  避免重复已有负向候选。
+
+
+### 2026-10-23：Attention PV 保持四次N128/K128，聚合Acc后一次写回
+
+- 上一轮GEMV完整负例与两处组件复现属于已完成进展，本轮不重测。
+  核对共享工具链仍为 validated/logical-codegen，生产保留版不变。
+- 直接对照用户指定recipes的KV队列生命周期及本地ops-transformer
+  arch22 SparseFlashMLA源码，检查三槽KV复用、PV写回及Cube/FIX同步。
+  原实现已让QK/PV共享一次L1 KV，不再把此项当新增优化。
+- 校正一个源级推断：当前PV确有两个交替Acc，但四次Right提取实际
+  全部使用地址0的32KiB，不能由N128和全核Right峰值64KiB推断双缓冲。
+  又查到旧Acc96/受限GM修复组合中，真实Right 0/32768交替已经B16
+  821.96→838.00us回退；32行KV分块也有负例。本轮均未重跑，且不把
+  旧SDK组合结果当当前性能分母。见`attention_pv_history_review.json`。
+- 独立候选`attention_pv_pool_v1`只改PV：原M64/N128/K128四次乘法
+  依次写入一个64×512 Acc的四列窗，再一次连续写回。不同于旧N256
+  扩Right和32-head/N512改K64。保留当前单32KiB Right、原QK/Vector
+  数学、三槽/事件、输入ABI、GM容量及布局，不叠加GEMV或双Right。
+- C04完整代码及CCE/host二进制门禁通过。四列窗字节区间0/32768/
+  65536/98304，各32768B；Acc池131072B，QK使用前32768B。源级
+  同步调用参数不变，实际AIV及wrapper/orchestration与保留版一致。
+  片上峰值与保留版相同，实际四次PV乘法和K128不变，TSTORE 4→1；
+  整份产物FIX barrier80→76，其余各pipe barrier计数不变。
+  这些仅为机制/资源证据，不推出性能收益。
+- 唯一B16设备8完整任务`task_20261023_191200_189585727090`已提交。
+  沿用6组严格检查及10个完整72角色L1窗口，分母不重测，待终态。
+- Native的MMAD/FIX使用unitFlag配对，而公共PyPTO的Matmul/Acc接口
+  不接受acc_phase。独立CPU对照默认入口通过，两个phase入口分别
+  报对应关键字错误；最小PTO可以生成Final模板，但仍保留M→FIX
+  set/wait，因此不声称开放参数就能加速。已查重并以中文提交PyPTO
+  #3134，未修改公共SDK、未运行phase设备内核。首版把三分支放进
+  constexpr if导致控制组也被前端解析失败，已分开入口更正，不报成
+  组件bug。证据`matmul_phase_api_evidence.json`。
+
+- 排队补记：`task-submit --status`与`--list`确认本任务仍pending，
+  16卡由正在运行的CI任务`task_20261023_184321_26138113677`占用。
+  不取消他人任务，不重复提交；保持该唯一句柄等待验证，无性能结论。
+
+
+### 2026-10-23：PV四列Acc一次写回完整B16回退1.34%，不采用
+
+- 排队期间多轮均通过同一任务句柄核对为pending；前置CI、两项16卡
+  及设备8的单卡任务依次完成后，原任务正常获得设备8。没有重复提交、
+  换卡拼分母或取消他人任务；这几轮属于已核实的等待。
+- `task_20261023_191200_189585727090` completed/exit0。reference/
+  candidate各eager、graph、post-L1共6组输出、TopK/score、cache/state、
+  保护区严格检查通过；实际四份CPP匹配CPU门禁，同卡同公共SDK。
+  这不代替额外metadata状态矩阵或服务验收。
+- 10个完整72角色L1窗口为
+  `[769.00,774.70,775.50,774.32,773.46,776.10,762.52,779.02,766.42,772.44]`us。
+  中位773.89us，历史保留版763.65us，回退1.340928%。同卡原基线与
+  保留版均复用合格历史窗口，未重测分母。证据
+  `attention_pv_pool_v1_results.json`保留全部原始窗口、严格检查与源码对应。
+- 不采用、不扩其它档/状态/服务矩阵，不继续扫描相邻PV写回粒度。
+  源级变化不仅是4次FIX变成1次，也将写回推迟到四次PV都提交之后，并
+  让下一次QK与整个128KiB池复用存在关联；不能仅凭L1回退量化归因为
+  FIX带宽或某一处barrier。原始四次N128/K128乘法和数值顺序未变。
+- 当前生产仍为`output_rectangle_production_v1`，八档原始分母不变，
+  等权比值仍0.9843498918572288；10%目标未达成。新轮继续聚焦B16
+  Attention/Indexer，但不把已测单Right/双Right、分块gather、PV整行
+  或连续写回方案改名重复。公共SDK未变，没有未完成的本轮任务。
+
+
+### 2026-10-23：Indexer三query根归并合批，先验证同分语义
+
+- 上一轮PV完整负例已归档，属完成进展。本轮继续B16 Indexer内核，
+  没有重复PV粒度、双Right或KV分块试验，生产保留版不变。
+- 现有G6完整分支已经合批三个query的Sort32/三级MRGSort，但末尾
+  new512+old512仍各自调用format2。当前PTO-ISA的format2先写tmp，
+  再经PIPE_V屏障和UB→UB复制写dst；format1重复归并直接写dst。
+  这是源码机制，不将字节/指令减少直接当成性能收益。
+- 将每个已排序512项根分成两个256项有序run，可把两路归并表示为
+  四路256-run归并。三query按每行2048个FP32 pair元素排列，展平后
+  用block_len=512、repeat=3；数学上query边界独立，但硬件同分index
+  优先级不能推定。探针同时检查自然排列和根内两半交换的排列。
+- `probe_batched_root_merge.py`完整CPU/PTOAS/CCE二进制通过，实际
+  3次原format2与2次候选format1均生成；后两条的真实块长为512，
+  输入/输出都是6144个FP32元素。独立设备任务
+  `task_20261023_201156_121183621901`已提交auto卡，尚pending。
+  计划3种子×8类输入×eager/graph共48组，每组3query，逐bit比较
+  Top512的score/index，同时记录整1024项结果、输入不变和两侧保护。
+  包含普通/量化多同分、全同分、新/旧根优势、正负零、最小值和pad。
+- `prepare_batched_root_merge.py`已准备两种排列，AST检查证明原
+  新分数排序、可见性证明、完整/尾部分支、Cube和FFTS均不变；只有
+  原三次根merge替换为合批。入口强制要求对应设备探针通过，未生成
+  或编译完整CSA候选，不把小探针当完整性能或状态验收。
+  公共SDK未改，八档原目标和分母不变；本阶段本地提交，不push。
+
+
+### 2026-10-23：自然顺序根归并通过探针，完整B16候选已提交
+
+- 原探针任务 `task_20261023_201156_121183621901` 在设备5完成/exit0。
+  48组 eager/graph 检查全部输入不变、保护区通过；自然顺序布局的
+  Top512前缀与完整1024项 score/index 均逐bit一致。CPU/设备源码与
+  CPP对应。结果原文保存在 `batched_root_probe_results.json`。
+- swapped布局在量化同分、全同分、正负零、sentinel和padded输入下
+  改变索引顺序，淘汰。自然布局探针的同分输入来自CPU稳定排序，
+  不将有限探针当成完整CSA状态/域验收，也不放松数值要求。
+- 经资格门禁生成 `batched_root_natural_v1`。完整C04 PyPTO/PTOAS/
+  CCE/host二进制编译通过；实际3次format2改成1次format1，块长
+  512个FP32字、重复3次。完整产物MRGSort36→34、extract277→270，
+  concat4→5；只说明静态代码变化，不推算耗时。
+- Cube函数逐字对应，根ABI与orchestration相同，跨核通知/等待数相同；
+  全部片上资源峰值不变，AIV UB仍180224B，未提升188416B上限。
+  `audit_batched_root_merge.py` 与 `batched_root_natural_v1_codegen.json`
+  保留门禁证据。公共SDK未改。
+- 唯一完整性能任务 `task_20261023_205221_325224127705` 指定设备8，沿用原始同卡同SDK分母、
+  6组严格检查与至少10个完整72角色L1窗口。尚未获得性能结果，
+  未替换生产保留版、未扩到其它档、未push。
+- 操作补记：一次状态查询遗漏 `--`，误提交无卡命令
+  `task_20261023_204355_29287176208`，已exit127；没有运行内核或占卡。
+  已改用 `task-submit --status` 核对正式任务。
+
+
+### 2026-10-23：Indexer三query根归并合批完整B16回退1.23%，不采用
+
+- `task_20261023_205221_325224127705` 在设备8完成/exit0。reference/
+  candidate的eager、graph、post-L1共6组严格检查全部通过；输出、
+  TopK/score、cache/state与保护区均满足原门禁。实际四份CPP匹配
+  CPU编译产物，公共SDK、卡号、原始分母及保留版记录一致。
+- 10个完整72角色L1窗口为
+  `[768.64,776.82,779.24,762.94,773.34,772.58,774.98,776.36,772.54,772.70]`us。
+  中位773.02us，相对保留版763.65us回退1.2270019%。
+  `batched_root_natural_v1_results.json`保存全部样本、原始窗口和
+  运行源码匹配证据；历史原始分母和保留版耗时均未重测。
+- 淘汰完整候选，生产保持`output_rectangle_production_v1`。不进行
+  额外状态/服务/其它档扩展，也不盲扫同类根布局。虽然三次format2
+  变成一次format1、静态Vector barrier933→923，但完整耗时未改善；
+  不能仅凭静态调用数断言流水加速或将回退归因于某个单独屏障。
+- 八档等权比值保持0.9843498918572288，10%目标仍未达成。
+  本轮设备/编译任务全部结束，负例已归档；后续继续按B16的
+  Attention/Indexer范围寻找新机制，不重复已完成的相同试验。
+  本地阶段提交，不push。
+
+
+### 2026-10-23：找到GEMV Acc池的公开API布局规避写法
+
+- 上一轮根归并完整负例已归档。本轮先排重Key L1槽级依赖修正及
+  两级预取历史；已测机制不直接重复。转向此前被#3132阻断的
+  六GEMV合并写回路径，区别于已退步42.74%的六次独立FIX版本。
+- CPU对照发现：结果后加静态slice/set_validshape、让空间自动推导、
+  对父池重设完整有效形状均仍生成Acc→Acc TMOV。失败IR的slot
+  显式row_major/none_box/fractal512，结果为Acc规范布局；不是仅凭
+  静态/动态有效尺寸即可解释。源码DeduceTileSliceType在父Tile
+  无显式TileView时只按shape推blayout，写回SSA别名又要求相同签名。
+- 对每次slice先建立命名父视图`pool_live=pl.tile.set_validshape(
+  pool,1,128)`，物理16行不变，可保留规范布局。两个列偏移的
+  PyPTO/PTOAS/CCE/host完整编译通过，没有Acc搬运，未改公共SDK。
+  直接把窄视图回赋pool的首版被前端类型检查拒绝，改为命名视图；
+  该原型错误不作为SDK bug。完整对照见`gemv_acc_views_review.json`。
+- 六GEMV数值探针已完整CPU/二进制通过，原两K192矩阵乘作参考，
+  六GEMV写入16×384列池后一次FIX；原三种子×四输入×eager/graph
+  24组检查、输入不变和保护区校验器AST未变。唯一设备任务
+  `task_20261023_212226_36326220432` 使用auto卡，仅验证数值/布局，不计性能。
+  尚未生成完整CSA候选；完整应用仍需处理GM交接布局及AIV解包，
+  不能把少FIX次数当端到端收益。原八档目标和生产源码保持。
+
+- 已将布局定位、四种编译失败写法与命名父视图规避方案补充到原
+  PyPTO #3132，全文中文并回读确认；明确仅CPU完整编译通过，
+  不称SDK缺陷已修复或已有性能收益。
+- `prepare_pooled_gemv.py`已准备完整接入变换：生产端改同容量GM的
+  panel-major布局，消费端MTE2完成后先发原ACK，再在私有UB用TGATHER
+  恢复query顺序。原SPLIT_SCORE_ROWS constexpr从entry传到AIV，
+  G6/N64/1024、balanced、buf_live>3两侧共同决定新布局，短/尾分支
+  保留。整数模型覆盖24worker×2slot×2lane的294912项；其它Score
+  helper、<=3分支及源级FFTS调用AST保持一致，记录见
+  `score_gemv_pool_layout_review.json`。这不代替资源和设备验收。
+- 当前唯一探针仍pending；前置全卡任务正在运行，未重复提交。
+  生成器要求设备24组通过才生成完整候选，尚未运行该入口或完整
+  CSA编译。阶段性本地提交，不push；目标与正式保留版不变。
+
+
+### 2026-10-23：六GEMV列池数值通过，完整B16性能任务已提交
+
+- `task_20261023_212226_36326220432` 在设备3完成/exit0。六GEMV
+  合并一次FIX的24组eager/graph输出逐bit一致，保护区/输入不变/
+  有限值检查全部通过，CPU和设备源码及CPP一致。全部检查原文存于
+  `score_gemv_pool_probe_results.json`；#3132中文补充也已更新并回读。
+- 排队期间把独立CPU资源预检前移，设备性能门禁仍要求探针先通过。
+  preview_v1错用会转Tile的reshape，v2改tensor.view后遇A3不支持
+  INT32 TANDS；正式v1转INT16后又遇无INT16→INT32 tcvt路径。
+  这些是原型接口/目标dtype修正，失败源码与记录均保留，未报新SDK bug。
+- 正式v2从INT32 arange重解释为双INT16半字，以INT16计算索引，
+  高半字始终为0、低半字及中间结果不超过3071，最后原样重解释为
+  INT32给TGATHER。3072项逐bit表示与294912项完整地址模型均通过；
+  不是经FP16转换近似索引。源码模型与记录`score_gemv_pool_index_bits_v2.json`。
+- 完整C04 PyPTO/PTOAS/CCE/host二进制通过。实际96条GEMV替换32条
+  WS矩阵乘，QK数学顺序不变；每1024段仍16次FIX，而独立写回旧负例
+  多80次。24KiB Acc池的六个4KiB槽连续且与两块QK Acc不重叠。
+  AIV实际16×192 strided load，ACK之后3072项gather恢复query序；
+  原ABI、orchestration、源级跨核调用及生成通知/等待数保持。资源
+  未超过原上限，详见`score_gemv_pool_v2_codegen.json`。审计初版
+  把live_half同名后缀的store也计入，已按完整operand前缀更正，未改算子。
+- 唯一完整B16性能任务 `task_20261023_215458_192056520869` 指定设备8，沿用原同SDK历史
+  分母与保留版、6组严格检查及至少10个完整72角色L1窗口。尚未
+  获得性能结果，不提前采用、不扩其它档；公共SDK未改，本地提交不push。
+
+
+### 2026-10-23：GEMV列池完整B16回退22.80%，不采用
+
+- `task_20261023_215458_192056520869` 在设备8完成/exit0。
+  reference/candidate的eager、graph、post-L1共6组原严格数值、
+  TopK/score、cache/state与保护区检查全部通过；实际四份CPP与
+  CPU门禁匹配，同卡同SDK条件满足，基线与保留版均复用合格历史。
+- 10个完整72角色L1窗口为
+  `[931.06,944.18,942.16,940.20,929.50,924.26,935.02,937.82,937.78,939.30]`us。
+  中位937.80us，相对保留版763.65us回退22.8049499%，不采用。
+  原始窗口、全部样本与源码匹配见`score_gemv_pool_v2_results.json`。
+- 与此前独立写回GEMV负例相比，列池确实去掉了额外80次FIX，
+  但两者均不是生产保留版，不能把负例之间的改善算成目标收益。
+  本轮还有GEMV/MTE1发射与AIV解包变化，不能将完整耗时单因
+  归结为某条指令或某种硬件模式。保留已验证的原对角WS路径。
+- 不扩其它档、状态或服务矩阵；原10%目标仍未达成，八档
+  等权比值保持0.9843498918572288。所有本轮CPU/设备任务已终结，
+  没有重复提交或共享SDK修改。编译规避方案和24组独立数值证据
+  继续留在中文#3132，不能将可编译/数值可用当成性能已改善。
+  本阶段本地提交，不push。
+
+
+### 2026-10-23：Attention PV预取未过资源/重叠门禁，本轮结束后按用户要求暂停
+
+- 上一轮GEMV列池完整负例已归档。本轮只检查AIV提前搬入旧PV，
+  保留Cube、原FP32乘/加/归约顺序、KV/Score/Prob通知和三槽协议。
+  参考CANN recipes的队列生命周期与A3 SFA的PV输入buffer；Native
+  源码有明确MTE2/V等待，不能据此声称已存在本候选的跨softmax重叠。
+- 源AST在恢复移动的wait/load并移除预取块后，与整份原模块一致。
+  阶段级模型检查1092种mask模式、4368张图、691800个节点；空核、
+  大/小T通知次序、跨query和三槽复用通过，两个故意移错/删掉等待的
+  反例被检出。该模型不替代异步局部fence、机器码和NPU验证。
+- v1同时预取两半64KiB，CPU规划Vec202240B > 原188416B上限，
+  未上卡。v2仅预取左半32KiB，右半保留原读点；完整PyPTO/PTOAS
+  codegen通过，AIV Vec峰值180224B，Cube生成函数/ABI/orchestration
+  与保留版一致，未改SDK或放宽上限。
+- v2实际CPP：80652行PV TLOAD；80856行PIPE_ALL后才在80857行
+  读Score，80878行又有PIPE_ALL，80887行才开始softmax TMULS。
+  因而相关路径上的PV预取已在softmax开始前排空，没有实现目标重叠。
+  `audit_attention_pv_prefetch.py`与`attention_pv_prefetch_v2_codegen.json`
+  保存固定产物行锚、原文及资源证据；本候选在该门禁停止，没有继续
+  CCE二进制或NPU计时，不宣称其精度/性能已通过，也未删除任何屏障。
+- 用户明确要求“本轮优化之后停下”。当前两版已收尾，全部CPU句柄
+  已终结，本轮没有NPU任务；未实现Score先加载或全有效快速路径等
+  新方向。归档并本地提交后暂停goal，不push。
+- 生产仍为output_rectangle_production_v1，八档原分母和等权比值
+  0.9843498918572288均不变；10%目标未达成。汇总证据为
+  `attention_pv_prefetch_round_review.json`，后续须用户明确恢复后推进。

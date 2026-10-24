@@ -54,22 +54,16 @@
   "log": "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_TND_IMPLEMENTATION_LOG.md",
   "log_anchor": "csa-tnd-eight-case-10pct-20261022",
   "pending_cpu": null,
-  "pending_tasks": {
-    "task_20261023_144806_271128030529": {
-      "case": "C04",
-      "candidate": "output_group_owners_v2",
-      "mode": "complete_L1_candidate",
-      "performance_eligible": true
-    }
-  },
+  "pending_tasks": {},
   "next_steps": [
-    "Preserve five retained mechanisms and original eight-case denominator; 10% goal remains active",
-    "Collect task_20261023_144806_271128030529; analyze_priority_candidate.py output_group_owners_v2 --retained retained_output_rectangle.json; do not repeat C05 timing",
-    "Reduce measured full-chain service work or exploit demonstrated resource complementarity; no more simple DMA/Vector reorderings",
-    "Do not implement whole-leaf-round Attention insertion on existing owners: optimistic serialized-resource model already increases C05 waiting",
-    "Do not repeat negative head partitioning or direct HC tail-copy removal without a new mechanism",
-    "Retain exact arithmetic, device metadata, cache/state and all 72-role complete-L1 gates",
-    "No push without a new explicit request"
+    "Continue source-backed B16 Attention/Indexer work; four-column PV Acc pool is now a measured negative",
+    "Do not repeat PV whole-row accumulation or Right double buffering without a distinct mechanism; fewer FIX stores alone did not improve complete L1",
+    "Packed AIV key supply is a measured negative; do not expand its state/service/case matrix or scan nearby buffering parameters",
+    "Do not scan independent-store GEMV parameters; reconsider only with a distinct proven mechanism, such as a usable Acc pool after issue 3132, and new full-L1 evidence",
+    "Attention follow-up must differ from measured direct-AIC gather, persistent-KV buffering and simple producer/consumer reorderings",
+    "Preserve original arithmetic, A3 resource bounds and cache/slot visibility; require mechanism evidence before another device candidate",
+    "Original eight-case 0.90 geomean objective and final regression remain active",
+    "No push without new explicit request"
   ],
   "knowledge_query": {
     "status": "index_missing",
@@ -105,9 +99,14 @@
     "capacity_production_contracts": 164,
     "hc_cooperative_math_ownership": 11,
     "hc_cooperative_packed_math_ownership": 11,
-    "output_rectangle_v3": 29
+    "output_rectangle_v3": 29,
+    "attention_pv_first_events": 13,
+    "qb_tail_helpers_ownership": 18,
+    "score_fifo_probe": 8,
+    "packed_score_keys_v6": 21,
+    "score_half_interleave": 2
   },
-  "updated_at": "2026-10-23T14:49:02.641859+08:00",
+  "updated_at": "2026-10-23T14:56:12.284296+00:00",
   "failed_attempts": [
     {
       "task_id": "task_20261022_164733_203463730090",
@@ -286,6 +285,79 @@
       ],
       "evidence": "hc_cooperative_v4_results.json",
       "reason": "All strict checks pass; full L1 regresses +1.300334%/+1.797571%; no adoption"
+    },
+    {
+      "candidate": "output_group_owners_v2",
+      "case_id": "C04",
+      "evidence": "output_group_owners_v2_results.json",
+      "reason": "Strict checks pass; complete L1 786.10 versus 763.65 us, +2.939828%, not adopted"
+    },
+    {
+      "candidate": "packed_score_keys_v6",
+      "case_id": "C04",
+      "evidence": "packed_score_keys_v6_results.json",
+      "median_us": 850.14,
+      "retained_median_us": 763.65,
+      "change_pct": 11.325869180907478,
+      "reason": "Strict checks passed but complete-L1 regressed; no domain expansion or production adoption"
+    },
+    {
+      "candidate": "score_half_interleave_v1",
+      "case_id": "C04",
+      "evidence": "score_half_interleave_v1_results.json",
+      "median_us": 782.05,
+      "retained_median_us": 763.65,
+      "change_pct": 2.4094807830812526
+    },
+    {
+      "candidate": "score_gemv_v3",
+      "case_id": "C04",
+      "evidence": "score_gemv_v3_results.json",
+      "median_us": 1090.01,
+      "retained_median_us": 763.65,
+      "change_pct": 42.73685588947818,
+      "reason": "Independent-store GEMV passes strict checks but complete-L1 regresses 42.74%; no adoption"
+    },
+    {
+      "candidate": "attention_pv_pool_v1",
+      "case_id": "C04",
+      "evidence": "attention_pv_pool_v1_results.json",
+      "median_us": 773.8900000000001,
+      "retained_median_us": 763.65,
+      "change_pct": 1.3409284358017581,
+      "reason": "Full-L1 regression despite one contiguous store instead of four; no adoption"
+    },
+    {
+      "candidate": "batched_root_natural_v1",
+      "case_id": "C04",
+      "evidence": "batched_root_natural_v1_results.json",
+      "median_us": 773.02,
+      "retained_median_us": 763.65,
+      "change_pct": 1.227001898775626,
+      "reason": "Fewer root merge/copy/barrier operations did not improve complete L1; no adoption or broader validation"
+    },
+    {
+      "candidate": "score_gemv_pool_v2",
+      "case_id": "C04",
+      "evidence": "score_gemv_pool_v2_results.json",
+      "median_us": 937.8,
+      "retained_median_us": 763.65,
+      "change_pct": 22.80494991160873,
+      "reason": "One pooled store removes the prior 80 extra FIX stores but full L1 remains slower than retained diagonal WS; no adoption"
+    },
+    {
+      "candidate": "attention_pv_prefetch_v1",
+      "case_id": "C04",
+      "evidence": "attention_pv_prefetch_round_review.json",
+      "device_execution": false,
+      "reason": "CPU Vec allocation 202240 exceeds unchanged 188416 limit"
+    },
+    {
+      "candidate": "attention_pv_prefetch_v2",
+      "case_id": "C04",
+      "evidence": "attention_pv_prefetch_round_review.json",
+      "device_execution": false,
+      "reason": "Target overlap absent in generated code; no device performance claim"
     }
   ],
   "promising_candidates": [
@@ -525,13 +597,30 @@
     "output_group_owners_v2": {
       "source": "output_group_owners_v2.json",
       "adopted": false,
-      "status": "complete_L1_pending",
+      "status": "rejected_complete_L1",
       "parent": "output_rectangle_production_v1",
       "planned_case": "C04",
       "source_checks": 29,
       "codegen": "output_group_owners_v2_codegen.json",
       "closed_C05_all_four_cpp_equal": true,
-      "tasks": "output_group_owners_v2_tasks.json"
+      "tasks": "output_group_owners_v2_tasks.json",
+      "measurement": "output_group_owners_v2_results.json"
+    },
+    "attention_pv_first_v1": {
+      "source": "attention_pv_first_v1.json",
+      "status": "parked_duplicate_of_historical_negative",
+      "source_checks": 13,
+      "evidence": "attention_pv_first_dedup.json",
+      "device_execution": false
+    },
+    "qb_tail_helpers_v1": {
+      "source": "qb_tail_helpers_v1.json",
+      "status": "CPU_passed_parked_after_consumer_readiness_review",
+      "source_checks": 18,
+      "evidence": "qb_tail_readiness_review.json",
+      "device_execution": false,
+      "codegen": "qb_tail_helpers_v1_codegen.json",
+      "closed_C03_all_four_cpp_equal": true
     }
   },
   "current_sdk_baseline": "baseline_current_sdk_C04_C05.json",
@@ -591,6 +680,24 @@
       "number": 1674,
       "url": "https://github.com/hw-native-sys/PTOAS/issues/1674",
       "evidence": "mgather_overlap_codegen_evidence.json"
+    },
+    {
+      "repo": "hw-native-sys/pypto",
+      "number": 3132,
+      "url": "https://github.com/hw-native-sys/pypto/issues/3132",
+      "evidence": "upstream_issue_3132.json"
+    },
+    {
+      "repo": "hw-native-sys/PTOAS",
+      "number": 1680,
+      "url": "https://github.com/hw-native-sys/PTOAS/issues/1680",
+      "evidence": "upstream_ptoas_issue_1680.json"
+    },
+    {
+      "repo": "hw-native-sys/pypto",
+      "number": 3134,
+      "url": "https://github.com/hw-native-sys/pypto/issues/3134",
+      "evidence": "upstream_issue_3134.json"
     }
   ],
   "signal_layout_audit": "signal_layout_audit.json",
@@ -604,10 +711,8 @@
   ],
   "pending_observation": {
     "own_pending_tasks": 0,
-    "tasks": {
-      "task_20261023_101533_4702752956": "completed (exit=0)",
-      "task_20261023_101534_47081128521": "completed (exit=0)"
-    }
+    "tasks": {},
+    "verified_at": "2026-10-23T14:56:12.284296+00:00"
   },
   "prepared_uniform_state": "uniform_meta_state_v1.json",
   "macro_review": {
@@ -671,7 +776,9 @@
     "coarse_interleaving": "coarse_interleaving_resource_model.json",
     "hc_cooperative_v4_C04": "hc_cooperative_v4_C04_phase.json",
     "hc_endpoint_direction_mismatch": "hc_cooperative_v4_C04_phase_comparison.json",
-    "C05_OA_observed_service": "C05_output_observed_service.json"
+    "C05_OA_observed_service": "C05_output_observed_service.json",
+    "QB_producer_and_consumer_readiness": "qb_tail_readiness_review.json",
+    "PV_first_historical_negative": "attention_pv_first_dedup.json"
   },
   "same_sdk_reused_other_references": "same_sdk_reused_other_references.json",
   "same_sdk_reference_coverage": {
@@ -692,7 +799,7 @@
   "current_sdk_C08_reference": "baseline_current_sdk_C08.json",
   "current_implementation": "output_rectangle_production_v1",
   "earlier_stage_commit": "3a0f423c6",
-  "latest_stage": "output_group_owners_C04_complete_L1_submitted",
+  "latest_stage": "Attention PV prefetch closed: full payload exceeds UB; left-only compiles but PIPE_ALL prevents target overlap; no NPU run or adoption, user requested pause after this round",
   "retained_results": "retained_output_rectangle.json",
   "production_source_manifest": "output_rectangle_production_v1.json",
   "prior_production_commit": "32a1426d9",
@@ -727,5 +834,40 @@
       "reason": "N80 lowering retains an additional Right allocation; 106496 > 65536 bytes",
       "device_execution": false
     }
+  },
+  "focus": {
+    "case": "C04 H128K/B16/S6",
+    "regions": [
+      "Indexer",
+      "Attention"
+    ],
+    "layer": "In-core dataflow and pipeline",
+    "reference": "https://gitcode.com/cann/cann-recipes-infer/tree/master/ops",
+    "final_regression": "Original eight cases remain required"
+  },
+  "macro_budget": "macro_budget_v1.json",
+  "parked_fused_coefficients": {
+    "source": "fused_coefficients_v1.json",
+    "cpu_compile_passed": [
+      "C04",
+      "C05"
+    ],
+    "device_execution": false,
+    "adopted": false,
+    "reason": "User narrowed focus to B16 Indexer and Attention kernel pipelines"
+  },
+  "score_fifo_result": "score_fifo_C04_v1_results.json",
+  "recipes_reference": "recipes_pipeline_reference_v1.json",
+  "upstream_reporting_language": "zh-CN (titles and prose; code/errors retain original spelling)",
+  "score_gemv_feasibility": "score_gemv_probe_results.json",
+  "attention_pv_review": "attention_pv_history_review.json",
+  "batched_root_probe": "batched_root_probe_v1.json",
+  "gemv_pool_feasibility": "gemv_acc_views_review.json",
+  "user_stop_after_round": {
+    "requested": true,
+    "round": "attention_pv_prefetch",
+    "round_closed": true,
+    "requested_goal_action": "pause",
+    "evidence": "attention_pv_prefetch_round_review.json"
   }
 }

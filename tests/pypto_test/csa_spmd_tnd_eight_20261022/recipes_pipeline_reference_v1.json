@@ -1,0 +1,77 @@
+{
+  "upstream": "https://gitcode.com/cann/cann-recipes-infer",
+  "commit": "a06336361c2614c7bcaebcb9046181a9e23008f7",
+  "source_only": true,
+  "files": {
+    "ops/ascendc/src/gather_selection_kv_cache/op_kernel/gather_selection_kv_cache_split_bs_reuse.h": {
+      "lines": [
+        423,
+        458
+      ],
+      "finding": "Bound VECIN/VECOUT queue releases a gathered buffer after its GM stores; whole blocks are copied, not a flag-only double-buffer declaration",
+      "local": "/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-recipes-infer-20261023/ops/ascendc/src/gather_selection_kv_cache/op_kernel/gather_selection_kv_cache_split_bs_reuse.h",
+      "sha256": "49a700975d6913a6be92a7121bdd19ca25103d6d1ccd3d95485ddf81240cac0f",
+      "url": "https://gitcode.com/cann/cann-recipes-infer/blob/a06336361c2614c7bcaebcb9046181a9e23008f7/ops/ascendc/src/gather_selection_kv_cache/op_kernel/gather_selection_kv_cache_split_bs_reuse.h"
+    },
+    "ops/ascendc/src/gather_selection_kv_cache/op_host/gather_selection_kv_cache_tiling.cpp": {
+      "lines": [
+        585,
+        617
+      ],
+      "finding": "Checks all live UB metadata plus two KV/KRope payload buffers before enabling the operator",
+      "local": "/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-recipes-infer-20261023/ops/ascendc/src/gather_selection_kv_cache/op_host/gather_selection_kv_cache_tiling.cpp",
+      "sha256": "eda700c31ce37ad8e8d69669281a76b873f6fa3b31281662c102e66b6ceceb75",
+      "url": "https://gitcode.com/cann/cann-recipes-infer/blob/a06336361c2614c7bcaebcb9046181a9e23008f7/ops/ascendc/src/gather_selection_kv_cache/op_host/gather_selection_kv_cache_tiling.cpp"
+    },
+    "ops/pypto/src/deepseek_indexer_attention/op_kernel/selected_attention.cpp": {
+      "lines": [
+        86,
+        161
+      ],
+      "finding": "Tile-local softmax produces independent maxima/sums and later merges normalized state; this mechanism is already present in retained CSA",
+      "local": "/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-recipes-infer-20261023/ops/pypto/src/deepseek_indexer_attention/op_kernel/selected_attention.cpp",
+      "sha256": "97a86ff97e4e61c8b6dc1ba5e02af6db1bbd69cb3d9cd612433b6b39b079fb45",
+      "url": "https://gitcode.com/cann/cann-recipes-infer/blob/a06336361c2614c7bcaebcb9046181a9e23008f7/ops/pypto/src/deepseek_indexer_attention/op_kernel/selected_attention.cpp"
+    },
+    "ops/pypto/src/lightning_indexer_pto/op_kernel/lightning_indexer_topk.cpp": {
+      "lines": [
+        91,
+        147
+      ],
+      "finding": "Page blocks are unrolled, then concatenated before Vector weighting/reduction; BF16, 2048 topK and reduction order differ from retained INT8 G6 path",
+      "local": "/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-recipes-infer-20261023/ops/pypto/src/lightning_indexer_pto/op_kernel/lightning_indexer_topk.cpp",
+      "sha256": "148b74351a96b8fc5e7bde1b931b10d163fe3fa3e1d530f45d8ac42187c7cade",
+      "url": "https://gitcode.com/cann/cann-recipes-infer/blob/a06336361c2614c7bcaebcb9046181a9e23008f7/ops/pypto/src/lightning_indexer_pto/op_kernel/lightning_indexer_topk.cpp"
+    },
+    "ops/tilelang/ds_v4/sparse_flash_attention.py": {
+      "lines": [
+        104,
+        175
+      ],
+      "finding": "Explicit KV/Score/Probability/PV workspaces show handoff costs; serial sample is not evidence of a superior pipelined implementation",
+      "local": "/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-recipes-infer-20261023/ops/tilelang/ds_v4/sparse_flash_attention.py",
+      "sha256": "9e9d7a1d5f2c9986ce2dfa1eb696be59ecc0b0845dc33dd742cde132f9ec19c5",
+      "url": "https://gitcode.com/cann/cann-recipes-infer/blob/a06336361c2614c7bcaebcb9046181a9e23008f7/ops/tilelang/ds_v4/sparse_flash_attention.py"
+    },
+    "ops/pypto_python/impl/sparse_compress_flash_attention_pypto.py": {
+      "lines": [
+        85,
+        160
+      ],
+      "finding": "Gathers SWA/compressed KV before QK and exposes multi-data-load/L1 reuse options; high-level runtime buffering cannot be copied as a validated single-SPMD schedule",
+      "local": "/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-recipes-infer-20261023/ops/pypto_python/impl/sparse_compress_flash_attention_pypto.py",
+      "sha256": "94c44f34a287197b664adbeb541801647d0b6a96c3e1bdc0972c5e5a89f99d34",
+      "url": "https://gitcode.com/cann/cann-recipes-infer/blob/a06336361c2614c7bcaebcb9046181a9e23008f7/ops/pypto_python/impl/sparse_compress_flash_attention_pypto.py"
+    }
+  },
+  "focus": "C04 Indexer and Attention in-core pipelines",
+  "decisions": [
+    "Implement one B16 coalesced-key supply prototype using explicit existing-arena ownership and a paired event6 protocol",
+    "Preserve original QK, FP16 FIX/ReLU, weighted sum and TopK order; no transfer of incompatible BF16 arithmetic",
+    "Keep scale private and read at its original consumption point, avoiding historical shared-scale overwrite counterexamples",
+    "Do not repeat direct AIC sparse KV gather (historical complete-L1 regression), whole-key AIC page batching, or simple DMA/Vector reorderings"
+  ],
+  "candidate": "packed_score_keys_v6.json",
+  "component_evidence": "Local A2/A3 MGather.hpp has internal completion waits; source placement alone is not asynchronous overlap",
+  "performance_eligible": false
+}
