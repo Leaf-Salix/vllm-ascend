@@ -17,6 +17,7 @@ def main():
     parser.add_argument("--revision", default="HEAD")
     parser.add_argument("--workspace-fix", action="store_true")
     parser.add_argument("--redispatch-fix", action="store_true")
+    parser.add_argument("--graph-replay-fix", action="store_true")
     args = parser.parse_args()
     here = Path(__file__).resolve().parent
     repo = here.parents[2]
@@ -30,6 +31,7 @@ def main():
         "tests/pypto_test/low_acceptance_20261001",
         "tests/pypto_test/csa_shared_toolchain",
         "tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py",
+        "tests/pypto_test/csa_mpmd_tnd_20261021/scenarios.py",
         "tests/pypto_test/dsv4_csa_env.py",
         "tests/pypto_test/dsv4_hca_prepare_opp.py",
     ]
@@ -70,6 +72,13 @@ def main():
             "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/graph_contract.py",
             "tests/pypto_test/dsv4_csa_native_case.py",
         ]
+    if args.graph_replay_fix:
+        overlays += [
+            "vllm_ascend/models/pypto_deepseek_v4.py",
+            "vllm_ascend/worker/model_runner_v1.py",
+            "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/service.py",
+            "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/graph_contract.py",
+        ]
     for path in overlays:
         shutil.copy2(repo / path, source / path)
     if overlays:
@@ -105,6 +114,8 @@ def main():
     manifest = {
         "repository": str(repo),
         "source_commit": revision,
+        "internal_workspace": args.graph_replay_fix,
+        "require_tnd_graph_replay": args.graph_replay_fix,
         "source_overlays": overlays,
         "harness_delta": "关闭静态编译的独立CLI；只替换观测类，保留真实模型/调度/采样",
         "native_extension": str(binaries[0]),

@@ -15,10 +15,12 @@ import torch
 from ..deepseek_v4_flash_csa.native_adapter import prepare_weights
 from ..deepseek_v4_flash_csa.service import AttentionServiceBase
 from .binding import PreparedDynamicCSA
-from .graph_contract import TNDGraphContract, tensor_descriptor
+from .graph_contract import TNDGraphContract, compact_metadata_capacity, graph_compact_request, tensor_descriptor
 from .native_adapter import bind_native_inputs, token_capacity_view
 from .policy import select_policy
 from .service_config import MAX_QUERY_TOKENS, native_query_bound, supported_descriptor
+
+_TND_COMPACT_METADATA_CACHE = "pto_csa_tnd_compact_compressor_metadata"
 
 
 def _descriptor_key(native):
@@ -97,6 +99,18 @@ class CSAServiceRuntime(AttentionServiceBase):
                 self, hidden.shape[0], None
             )
 
+    def _compact_metadata(self, context, req, tokens):
+        """沿Native设备生产者计算，固定图容量，同步跨层复用一次结果。"""
+        cache = context.additional_kwargs.setdefault(_TND_COMPACT_METADATA_CACHE, {})
+        key = (id(req), tokens)
+        cached = cache.get(key)
+        if cached is not None and cached[0] is req:
+            return cached[1]
+        adapted = graph_compact_request(req, tokens)
+        value = self.wrapper.dsa_attn.impl._compute_compressor_metadata(adapted)
+        cache[key] = (req, value)
+        return value
+
     def graph_signature(self, context, tokens):
         """不执行metadata生产者或读取Tensor内容，避免旧图绕过真实服务判定。"""
         from vllm_ascend.ops.dsa import _build_kv_cache
@@ -147,27 +161,19 @@ class CSAServiceRuntime(AttentionServiceBase):
                             "seq_lens",
                             "query_start_loc",
                             "block_table",
-                            "slot_mapping",
-                            "input_positions",
                             "start_pos",
                         )
                     ),
                 )
             )
             if name in ("compressed", "indexer"):
-                # Native compressor_metadata also captures these Host scalars
-                # and table roots. Changed capacity/request count needs redispatch.
+                # The producer consumes device Q/L at the captured capacity.
+                # Actual request count and shortened token views may change.
+                # Slots/RoPE are checked below through initialized capacity views.
                 descriptors.append(
                     (
                         name + ".compact_producer",
-                        tuple(
-                            getattr(req, field, None)
-                            for field in (
-                                "num_reqs_actual",
-                                "num_compressed_tokens",
-                                "block_size",
-                            )
-                        ),
+                        (requests, compact_metadata_capacity(tokens, requests), req.block_size),
                         tensor_descriptor(getattr(req, "full_compress_cos", None)),
                         tensor_descriptor(getattr(req, "full_compress_sin", None)),
                     )
@@ -295,7 +301,10 @@ class CSAServiceRuntime(AttentionServiceBase):
             self._hadamard = hadamard
 
         wait_for_kv_layer_from_connector(self.layer_name)
-        compact = {name: self._compact_metadata(context, metadata[name].decode) for name in ("compressed", "indexer")}
+        tokens = hidden.shape[0]
+        compact = {
+            name: self._compact_metadata(context, metadata[name].decode, tokens) for name in ("compressed", "indexer")
+        }
         compressed, swa, state, indexer_state, indexer_key, indexer_scale = kv_cache
         groups = {
             "swa": (metadata["swa"], (swa,)),
@@ -304,7 +313,6 @@ class CSAServiceRuntime(AttentionServiceBase):
             "indexer": (metadata["indexer"], (indexer_key, indexer_scale)),
             "indexer_state": (metadata["indexer_state"], (indexer_state,)),
         }
-        tokens = hidden.shape[0]
         native = bind_native_inputs(
             self.weights,
             hidden,

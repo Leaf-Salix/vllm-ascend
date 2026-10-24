@@ -3264,6 +3264,12 @@ class NPUModelRunner(GPUModelRunner):
                         else max_query_len
                     )  # type: ignore[assignment]
 
+                tnd_capture_length = None
+                if not is_profile and uniform_decode and (force_attention or is_graph_capturing):
+                    tnd_capture_length = getattr(self.get_model(), "_pto_csa_tnd_capture_sequence_length", None)
+                if tnd_capture_length is not None and profile_seq_lens is None:
+                    seq_lens = tnd_capture_length
+
                 self.optimistic_seq_lens_cpu[:num_reqs] = seq_lens
                 self.optimistic_seq_lens_cpu[num_reqs:].fill_(0)
                 self.seq_lens.copy_(self.optimistic_seq_lens_cpu, non_blocking=True)
@@ -3296,6 +3302,19 @@ class NPUModelRunner(GPUModelRunner):
                 if self.use_compress:
                     self.positions.fill_(127)
                     self._dsa_positions_cpu_buf.fill_(127)
+                    if tnd_capture_length is not None:
+                        # Dummy-only setup: positions and device lengths describe
+                        # the same valid history. Real scheduling remains unchanged.
+                        token_start = 0
+                        for query_length in num_scheduled_tokens:
+                            token_end = token_start + int(query_length)
+                            self._dsa_positions_cpu_buf[token_start:token_end] = torch.arange(
+                                seq_lens - int(query_length), seq_lens, dtype=torch.int64
+                            )
+                            token_start = token_end
+                        self.positions[:token_start].copy_(
+                            self._dsa_positions_cpu_buf[:token_start], non_blocking=True
+                        )
                 attn_metadata, _ = self._build_attention_metadata(
                     num_tokens=num_tokens_unpadded,
                     num_tokens_padded=num_tokens_padded,

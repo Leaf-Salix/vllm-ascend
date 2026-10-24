@@ -23640,3 +23640,51 @@ max_seq_len>=8192，可能导致捕获Native并留下空TND合同。当前未做
 因此不把该推断写成已证实根因，也不归因于PyPTO。修复模型级图重放属于尚未完成的
 独立事项；保留保护条件，不用放宽合同冒充成功。已向用户说明实际eager路径并询问
 是否将整模型图重放修复追加为本次完成条件，当前没有新增设备任务。
+
+
+### 735.115 TND模型图重放候选：C04单卡通过，C08捕获图池断言后停下讨论（2026-10-24）
+
+用户已明确：本轮同时完成满批B16/B24、尾批和padding的真实PTO replay；
+单卡增加规范C04（H131072/B16/S6/T96）与C08（固定混长列表/T56，容量也为56）
+验证。C08不补成B×6，尾批/padding为另外的功能场景。所有新提交使用详细中文说明。
+前序累积提交已推送：vLLM-Ascend为646b84097；PyPTO按用户纠正快进到既有
+nalinaly/pypto的feat/csa-mpmd-upstream-fixes-20261021分支d44925c1，误建远端
+group-dims分支已删除，公共SDK源码和构建未变。
+
+根因核对：DSpark的dummy capture选择max_query_len=6，TND服务支持下界8192，
+因此旧模型捕获Native并保留空TND合同。候选只给TND模型登记支持范围内的捕获
+长度，dummy warmup/capture使用该长度并构造相符positions；真实调度与Native/BSH
+默认分支不改。不是把短历史的Host标量单独改大而保留错误device长度。
+
+尾批候选继续复用Native compressor_metadata：输出行容量固定为
+min(T_capacity, T_capacity//4+B_capacity)，请求数使用描述符容量；在图内由device L
+把失活请求的start_pos映射为-1。Native内核本身已有start_pos<0产生零行的分支。
+该操作只作用于传给Native生产者的浅拷贝，不原地修改Native metadata，实际有效行
+仍由device Q/start_pos推导，不新增D2H或Host逐请求计划。缓存按原请求对象和token
+容量跨层共享。图合同保留Q/L、页表、start_pos及KV根地址/策略检查，将slots/RoPE
+按已有初始化容量视图检查，允许实际请求数和短view变化。PTO内部工作区仍由Simpler申请，
+普通Top-K不外露，MPMD没有新增软同步。
+
+172项TND服务CPU检查通过，含失活请求屏蔽、原metadata不变、尾批同容量放行与
+替换存储拒绝。新observer记录每步全21层graph放行及Python是否重提交；新模型门禁
+要求真实满批、尾批和padding都命中graph，而非只看外层FULL标签。尚未运行16卡。
+实际服务图单卡脚本使用正式第4层/NZ2/seed1024，独立参考仍从原Native metadata
+生产者取实际请求数；候选普通图验证输出/cache/state/保护区，显式诊断入口核对
+Top-K及score。未采性能，不将功能结果填入性能规范的六列计时。
+
+冻结v26基于9d08b173b及明确的4个运行时overlay，SDK仍是公共d44925c1。
+MPMD任务task_20261024_120930_105931620745的C04完成4步真实ACLGraphWrapper重放：
+满16请求、尾7请求、最后1请求及返回满批。输出/cache/state逐bit等于独立eager参考，
+Top-K/score诊断一致、保护区通过、外部scratch为0、无Python重提交。
+
+随后C08的eager warmup返回，但在第二档图的capture_begin处触发
+NPUCachingAllocator.cpp:2106的use_count>0内部断言；还未进入该次捕获的CSA计算。
+任务exit=1，不能认定C08、C05/B24或整模型通过。疑点是测试脚本销毁上一档图后，
+下一档沿用全局图池；真实模型会保留各档图。此归因尚未由独立对照证实，不直接报成
+PyPTO编译缺陷，也不改算子或场景绕过它。
+
+按用户“遇到问题停下讨论”的要求，终止并行SPMD任务
+task_20261024_121244_120622929591（exit=130）；它尚无完成结论，不能标为SPMD
+自身失败。两个设备任务均终态，16卡尚未启动。已向用户提出保留各档图到测试结束、
+或先独立复现图池生命周期两个方向，等待讨论后再继续。证据为
+graph_replay_v26_summary.json、graph_replay_v26_failure.log及相应runs原始结果。

@@ -71,6 +71,22 @@ def check(root):
                     for layer in observation["tnd_bindings"]
                     for binding in layer["bindings"]
                 ), "内部工作区版本不能保留外部scratch"
+            if config.get("require_tnd_graph_replay"):
+                routes = observation.get("tnd_execution_routes", [])
+                real_decode = [
+                    row
+                    for row in routes
+                    if row["requested_mode"] == "FULL" and row["actual_tokens"] > 0 and row["max_seq_len"] >= 8192
+                ]
+                assert real_decode, (rank, "缺少真实长历史图执行证据")
+                assert any(row["actual_requests"] == batch for row in real_decode), (rank, "满批未覆盖")
+                assert any(row["actual_requests"] < batch for row in real_decode), (rank, "尾批未覆盖")
+                assert any(row["actual_tokens"] < row["padded_tokens"] for row in real_decode), (rank, "padding未覆盖")
+                assert all(row["all_csa_graph_replayed"] and not row["python_resubmitted"] for row in real_decode), (
+                    rank,
+                    "真实decode仍有eager重派发",
+                    real_decode,
+                )
         rows.append(
             {
                 "rank": rank,
@@ -82,6 +98,7 @@ def check(root):
                 "physical_workspace_bytes": observation.get("tnd_physical_workspace_bytes"),
                 "all_csa_graph_replay_proven": bool(package)
                 and all(r["decode_graph_checks"]["allowed"] > 0 for r in observation["tnd_bindings"]),
+                "execution_routes": observation.get("tnd_execution_routes", []),
                 "workspace_bytes": sum(
                     b["workspace_bytes"] for r in observation["tnd_bindings"] for b in r["bindings"]
                 ),

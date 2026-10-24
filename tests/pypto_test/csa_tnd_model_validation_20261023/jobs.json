@@ -379,5 +379,89 @@
     "comparison": "internal_b24_comparison.json",
     "acceptance": "两种TND正常decode、简单问题逐token一致、复杂差异完整披露；模型级图重放未通过，见graph_execution_audit.json",
     "model_graph_replay": "未通过；实际为eager PTO重派发，不影响已记录的真实PTO提交与功能结果"
+  },
+  "graph_replay_single_card_v26": {
+    "source": "experiments/v26_graph_replay/source",
+    "scope": "真实custom-op/ACLGraphWrapper，不是低层固定参数图或整模型通过",
+    "required_cases": {
+      "C04": {
+        "history": 131072,
+        "queries": [
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6
+        ],
+        "token_capacity": 96
+      },
+      "C08": {
+        "history": 131072,
+        "queries": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          6,
+          5,
+          4,
+          3,
+          2,
+          1,
+          1,
+          3,
+          4,
+          6
+        ],
+        "token_capacity": 56
+      }
+    },
+    "additional_cases": [
+      "C05 B24/S6",
+      "尾批与padding同址更新",
+      "最后单请求B1/S6图档位"
+    ],
+    "ring_config": {
+      "heap_mb": [
+        16,
+        256,
+        16,
+        16
+      ],
+      "task_window": 4096
+    },
+    "mpmd_tnd": {
+      "task": "task_20261024_120930_105931620745",
+      "state": "completed_exit_1",
+      "output": "runs/graph_replay_v26_mpmd",
+      "passed_scope": "C04四个同址重放步骤",
+      "failure": "C08 capture_begin allocator断言"
+    },
+    "spmd_tnd": {
+      "task": "task_20261024_121244_120622929591",
+      "state": "cancelled_exit_130",
+      "output": "runs/graph_replay_v26_spmd",
+      "reason": "MPMD触发图池断言后，按用户遇到问题停下讨论的要求终止同轮设备测试，不认定为SPMD缺陷"
+    },
+    "cpu_contract": {
+      "passed": 172,
+      "log": "runs/graph_replay_cpu_v1.log"
+    },
+    "model_gate": "两种实现单卡全部通过后才启动16卡B16/B24；新模型检查必须证明满批、尾批、padding真实replay，无Python重提交",
+    "summary": "graph_replay_v26_summary.json",
+    "decision": "等待用户讨论图池生命周期处理；不启动16卡"
   }
 }

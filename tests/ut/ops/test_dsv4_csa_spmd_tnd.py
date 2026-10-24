@@ -231,6 +231,8 @@ def native_case():
         req = NS(
             seq_lens=lengths,
             query_start_loc=bounds,
+            start_pos=lengths - (bounds[1:] - bounds[:-1]),
+            block_size=32,
             block_table=torch.zeros((requests, 8), dtype=torch.int32),
             slot_mapping=torch.zeros((tokens, 2), dtype=torch.int32),
             cos={layer_name: cos},
@@ -473,11 +475,12 @@ def test_custom_op_routes_mixed_tnd_and_reuses_prepared_binding(monkeypatch, var
     context.attn_metadata["indexer"].hadamard = hadamard
     context.additional_kwargs = {}
     by_request = {
-        id(context.attn_metadata[name].decode): case["compact_metadata"][name] for name in ("compressed", "indexer")
+        id(context.attn_metadata[name].decode.query_start_loc): case["compact_metadata"][name]
+        for name in ("compressed", "indexer")
     }
     wrapper = NS(
         _pto_csa_runtime=runtime,
-        dsa_attn=NS(impl=NS(_compute_compressor_metadata=lambda req: by_request[id(req)])),
+        dsa_attn=NS(impl=NS(_compute_compressor_metadata=lambda req: by_request[id(req.query_start_loc)])),
     )
     context.no_compile_layers = {"layer": wrapper}
     runtime.wrapper = wrapper
@@ -591,6 +594,56 @@ def test_graph_contract_allows_values_but_rejects_changed_roots_and_policy(monke
     context.attn_metadata["swa"].decode.block_table = original
     for metadata in context.attn_metadata.values():
         metadata.decode.max_seq_lens = 131078
+    assert not captured.allows_replay(context)
+
+
+def test_graph_compact_metadata_uses_capacity_and_device_active_mask():
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.graph_contract import graph_compact_request
+
+    request = NS(
+        seq_lens=torch.tensor([131078, 131078, 0], dtype=torch.int32),
+        start_pos=torch.tensor([131072, 131072, 0], dtype=torch.int32),
+        num_reqs_actual=2,
+        num_compressed_tokens=5,
+    )
+    adapted = graph_compact_request(request, 18)
+    assert adapted.num_reqs_actual == 3 and adapted.num_compressed_tokens == 7
+    assert adapted.start_pos.tolist() == [131072, 131072, -1]
+    assert request.start_pos.tolist() == [131072, 131072, 0]
+    assert request.num_reqs_actual == 2 and request.num_compressed_tokens == 5
+    request.seq_lens[1] = 0
+    request.num_reqs_actual = 1
+    next_step = graph_compact_request(request, 18)
+    assert next_step.num_reqs_actual == 3 and next_step.num_compressed_tokens == 7
+    assert next_step.start_pos.tolist() == [131072, -1, -1]
+
+
+def test_graph_contract_accepts_tail_with_same_native_capacity(monkeypatch):
+    from vllm_ascend.ops import dsa
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.graph_contract import TNDGraphContract
+
+    runtime, context, case = service_case()
+    runtime.wrapper = NS()
+    context.attn_metadata["indexer"].hadamard = torch.eye(128, dtype=torch.bfloat16)
+    cache = tuple(view for _, views in case["groups"].values() for view in views)
+    monkeypatch.setattr(dsa, "_build_kv_cache", lambda *args: cache)
+    signature = runtime.graph_signature(context, 9)
+    assert signature is not None
+    captured = TNDGraphContract(runtime, 9, signature)
+    for metadata in context.attn_metadata.values():
+        metadata.num_actual_tokens = 5
+        req = metadata.decode
+        req.num_reqs_actual = 2
+        req.num_compressed_tokens = 4
+        req.seq_lens[2] = 0
+        req.slot_mapping = req.slot_mapping[:5]
+        req.input_positions = req.input_positions[:5]
+        for kind in ("cos", "sin"):
+            values = getattr(req, kind)
+            values[runtime.layer_name] = values[runtime.layer_name][:5]
+    assert captured.allows_replay(context)
+    # Capacity normalization must still reject a replacement allocation.
+    context.attn_metadata["state"].decode.slot_mapping = torch.zeros((9, 2), dtype=torch.int32)
     assert not captured.allows_replay(context)
 
 

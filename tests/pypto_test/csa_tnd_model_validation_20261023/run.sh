@@ -55,6 +55,8 @@ if (data.get('source_overlays') or data.get('internal_workspace')) and variant !
     if data.get('internal_workspace'):
         assert gate.get('service_binding') is True, '内部工作区须验证实际服务绑定'
         assert all(gate['toolchain'][name] == data['toolchain'][name] for name in ('pypto', 'ptoas', 'simpler')), '单卡证据SDK须一致'
+    if data.get('require_tnd_graph_replay'):
+        assert gate.get('framework_graph_replay') is True, '必须先验证真实ACLGraphWrapper及变metadata重放'
     if ring_config:
         batches = gate.get('batches', [gate.get('batch')])
         assert int(batch) in batches and gate.get('ring_config') == ring_config, 'ring配置须有同档单卡证据'
@@ -66,6 +68,7 @@ data.update(variant=variant, batch=int(batch), gpu_memory_utilization=float(budg
             TP=1, DP=16, EP=16, HCA='native', NZ=2, EPLB=False, static_kernel=False, superkernel=False,
             graph_mode='FULL_DECODE_ONLY', deterministic_level=1, cann='9.2.0-beta.2',
             pto_ring_config=ring_config, hccl_buffer_mb=int(hccl_buffer))
+data['require_tnd_graph_replay'] = bool(data.get('require_tnd_graph_replay') and variant != 'native')
 (pathlib.Path(output) / 'configuration.json').write_text(json.dumps(data, ensure_ascii=False, indent=2)+'\n')
 PY
 export LD_LIBRARY_PATH="$repo/.cache/csa/native-install:$LD_LIBRARY_PATH"

@@ -10,6 +10,33 @@ from dataclasses import dataclass
 from typing import Any
 
 TND_PADDED_REDISPATCH = "pto_csa_tnd_padded_redispatch"
+CSA_COMPRESS_RATIO = 4
+
+
+def compact_metadata_capacity(tokens, requests):
+    """Native C4输出容量上界；实际关闭行数仍由设备Q/start_pos决定。"""
+    return min(tokens, tokens // CSA_COMPRESS_RATIO + requests)
+
+
+def graph_compact_request(request, tokens):
+    """固定图容量，用设备L屏蔽padding，不捕获某一步的实际请求数。
+
+    Native compressor_metadata对start_pos<0的请求产生零行。只修改传给该
+    Native算子的浅拷贝；原metadata及其start_pos存储不变。where在图内执行，
+    每次replay都读取本步L，且不从设备读回有效请求数。
+    """
+    from copy import copy
+
+    import torch
+
+    requests = request.seq_lens.numel()
+    if request.start_pos.shape != (requests,) or request.start_pos.dtype != torch.int32:
+        raise ValueError("Native C4 start_pos须为INT32请求容量向量")
+    adapted = copy(request)
+    adapted.num_reqs_actual = requests
+    adapted.num_compressed_tokens = compact_metadata_capacity(tokens, requests)
+    adapted.start_pos = torch.where(request.seq_lens > 0, request.start_pos, -1)
+    return adapted
 
 
 def native_decode_capacity_views(metadata, hidden_tokens, compress_ratio):

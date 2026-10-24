@@ -143,6 +143,17 @@ def prepare_csa_model(model):
             count += 1
     if not count:
         raise ValueError("No target C4 attention layers found for PTO CSA")
+    if selected_variant() in ("spmd_tnd", "mpmd_tnd"):
+        from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.service_config import (
+            MAX_SEQUENCE_LENGTH,
+            MIN_SEQUENCE_LENGTH,
+        )
+
+        # Graph warmup must select the same supported long-history service as
+        # real decode. Native/BSH models do not expose this opt-in attribute.
+        capture_length = config.model_config.max_model_len
+        if MIN_SEQUENCE_LENGTH <= capture_length <= MAX_SEQUENCE_LENGTH:
+            model._pto_csa_tnd_capture_sequence_length = capture_length
     logger.info(
         "PTO_CSA_LAYOUT variant=%s effective_mode=%d root_layouts=%s nz_packed=%s",
         selected_variant(),

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """生成结束后记录TND绑定/工作区；不向forward增加同步或tensor读取。"""
 
+import json
 from collections import Counter
 
 from offline_pd.observer import OfflineCSAObserver
@@ -17,6 +18,24 @@ def install_graph_observer():
         if not hasattr(runtime, "_validation_graph_counts"):
             runtime._validation_graph_counts = {"allowed": 0, "rejected": 0}
         runtime._validation_graph_counts["allowed" if allowed else "rejected"] += 1
+        if not allowed:
+            reasons = getattr(runtime, "_validation_graph_rejections", [])
+            if len(reasons) < 3:
+                current = runtime.graph_signature(context, contract.token_capacity)
+                reason = {
+                    "token_capacity": contract.token_capacity,
+                    "captured_signature_present": contract.signature is not None,
+                    "current_signature_present": current is not None,
+                }
+                if current is not None and contract.signature is not None:
+                    old, new = dict(contract.signature[0]), dict(current[0])
+                    reason["changed_descriptors"] = [
+                        key for key in old.keys() | new.keys() if old.get(key) != new.get(key)
+                    ]
+                    reason["policy_changed"] = contract.signature[1] != current[1]
+                reasons.append(reason)
+                runtime._validation_graph_rejections = reasons
+                print("TND_GRAPH_REJECT " + json.dumps(reason, ensure_ascii=False), flush=True)
         return allowed
 
     TNDGraphContract.allows_replay = counted
@@ -31,11 +50,18 @@ class TNDObserver(OfflineCSAObserver):
 
         result = super().offline_begin_observation()
         self._tnd_decode_occupancy = Counter()
+        self._tnd_execution_routes = Counter()
+        self._tnd_runtimes = [
+            layer.self_attn.dsa_attn._pto_csa_runtime
+            for layer in self.model_runner.get_model().model.layers
+            if getattr(layer.self_attn.dsa_attn, "_pto_csa_runtime", None) is not None
+        ]
         self._tnd_occupancy_origin = self.model_runner._model_forward
         prefix = self._offline_csa_layer_names[0]
 
         def count_occupancy(num_tokens_padded, *args, **kwargs):
             context = get_forward_context()
+            route = None
             if not context.capturing and not getattr(context, "is_draft_model", False):
                 metadata = (context.attn_metadata or {}).get(prefix)
                 if metadata is not None and not metadata.num_prefills and metadata.decode is not None:
@@ -43,7 +69,28 @@ class TNDObserver(OfflineCSAObserver):
                     requests = metadata.decode.num_reqs_actual
                     if requests is not None:
                         self._tnd_decode_occupancy[(requests, metadata.num_actual_tokens, num_tokens_padded)] += 1
-            return self._tnd_occupancy_origin(num_tokens_padded, *args, **kwargs)
+                        route = (
+                            requests,
+                            metadata.num_actual_tokens,
+                            num_tokens_padded,
+                            metadata.decode.max_seq_lens,
+                            context.cudagraph_runtime_mode.name,
+                        )
+            before = [
+                (runtime.submissions, getattr(runtime, "_validation_graph_counts", {}).get("allowed", 0))
+                for runtime in self._tnd_runtimes
+            ]
+            value = self._tnd_occupancy_origin(num_tokens_padded, *args, **kwargs)
+            if route is not None and self._tnd_runtimes:
+                replayed = all(
+                    getattr(runtime, "_validation_graph_counts", {}).get("allowed", 0) > counters[1]
+                    for runtime, counters in zip(self._tnd_runtimes, before)
+                )
+                resubmitted = any(
+                    runtime.submissions > counters[0] for runtime, counters in zip(self._tnd_runtimes, before)
+                )
+                self._tnd_execution_routes[(*route, replayed, resubmitted)] += 1
+            return value
 
         self.model_runner._model_forward = count_occupancy
         self._tnd_before = {}
@@ -61,6 +108,21 @@ class TNDObserver(OfflineCSAObserver):
         result["decode_occupancy"] = [
             {"actual_requests": b, "actual_tokens": t, "padded_tokens": capacity, "steps": steps}
             for (b, t, capacity), steps in sorted(self._tnd_decode_occupancy.items())
+        ]
+        result["tnd_execution_routes"] = [
+            dict(
+                actual_requests=b,
+                actual_tokens=t,
+                padded_tokens=capacity,
+                max_seq_len=length,
+                requested_mode=mode,
+                all_csa_graph_replayed=replayed,
+                python_resubmitted=resubmitted,
+                steps=steps,
+            )
+            for (b, t, capacity, length, mode, replayed, resubmitted), steps in sorted(
+                self._tnd_execution_routes.items()
+            )
         ]
         rows = []
         unique_storage = {}
@@ -84,6 +146,7 @@ class TNDObserver(OfflineCSAObserver):
                         k: graph.get(k, 0) - before_graph.get(k, 0) for k in ("allowed", "rejected")
                     },
                     "empty_calls": runtime.empty_calls,
+                    "graph_rejection_examples": getattr(runtime, "_validation_graph_rejections", []),
                     "bindings": [
                         {
                             "policy": binding.policy.constexprs(),
