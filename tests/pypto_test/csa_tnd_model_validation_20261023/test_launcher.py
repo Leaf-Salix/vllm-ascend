@@ -15,10 +15,11 @@ class LaunchConfigurationTest(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("offline_launch_test", source)
         runner = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(runner)
-        for command, explicit, expected, ranks in (
-            ("decode", None, 1800, 16),
-            ("decode", 768, 768, 16),
-            ("prefill", None, 1024, 4),
+        for command, explicit, expected, ranks, respect_eos in (
+            ("decode", None, 1800, 16, False),
+            ("decode", 768, 768, 16, False),
+            ("prefill", None, 1024, 4, False),
+            ("decode", 1800, 1800, 16, True),
         ):
             with self.subTest(command=command, explicit=explicit), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -28,6 +29,8 @@ class LaunchConfigurationTest(unittest.TestCase):
                 argv = [str(source), command, "--bank", str(bank), "--output", str(root / "out")]
                 model = root / "formal-checkpoint"
                 argv += ["--model", str(model), "--host", "127.0.0.1", "--nic", "lo"]
+                if respect_eos:
+                    argv += ["--respect-eos", "--mixed-requests", "--decode-tokens", "2048"]
                 if explicit:
                     argv += ["--hccl-buffer-mb", str(explicit)]
                 children = []
@@ -51,6 +54,9 @@ class LaunchConfigurationTest(unittest.TestCase):
                     self.assertEqual(cmd[cmd.index("--model") + 1], str(model))
                     self.assertEqual(env["HCCL_IF_IP"], "127.0.0.1")
                     self.assertEqual(env["HCCL_SOCKET_IFNAME"], "lo")
+                    self.assertEqual("--respect-eos" in cmd, respect_eos)
+                    if respect_eos:
+                        self.assertEqual(cmd[cmd.index("--decode-tokens") + 1], "2048")
 
 
 if __name__ == "__main__":

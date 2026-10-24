@@ -28,6 +28,7 @@ def run_batches(llm, args, cases):
     if not args.save_extended_bank and len(chosen) != args.batch:
         raise ValueError('混合验证必须有足够的不同请求填满batch')
     records = []
+    respect_eos = getattr(args, 'respect_eos', False)
     implementations = llm.collective_rpc('offline_attention_implementations')
     for offset in range(0, len(chosen), args.batch):
         chunk = chosen[offset:offset + args.batch]
@@ -35,7 +36,7 @@ def run_batches(llm, args, cases):
         for case in chunk:
             tokens = json.loads((args.bank / case['tokens']).read_text())
             prompts.append({'prompt_token_ids': tokens[:-1] if args.save_extended_bank else tokens})
-            params.append(SamplingParams(temperature=0, max_tokens=args.decode_tokens, ignore_eos=True,
+            params.append(SamplingParams(temperature=0, max_tokens=args.decode_tokens, ignore_eos=not respect_eos,
                                          extra_args={'kv_transfer_params': {'offline_key': case['key']}}))
         llm.collective_rpc('offline_begin_observation')
         outputs = generate_aligned_batch(llm, prompts, params)
@@ -46,7 +47,10 @@ def run_batches(llm, args, cases):
         for case, output in zip(chunk, outputs):
             records.append({'key': case['key'], 'kind': case['question_kind'],
                             'request_id': output.request_id,
-                            'output_token_ids': list(output.outputs[0].token_ids)})
+                            'output_token_ids': list(output.outputs[0].token_ids),
+                            'output_text': output.outputs[0].text,
+                            'finish_reason': output.outputs[0].finish_reason,
+                            'stop_reason': output.outputs[0].stop_reason, 'finished': output.finished})
         write_json(args.output / f'rank{args.rank}.mixed.json', {
             'rank': args.rank, 'backend': args.backend, 'variant': os.environ.get('PTO_CSA_VARIANT'),
             'pto_attention': args.pto_attention, 'attention_implementations': implementations,
@@ -55,10 +59,12 @@ def run_batches(llm, args, cases):
             'atomic_add': os.environ.get('VLLM_ASCEND_PTO_CSA_ATOMIC_ADD'),
             'pto_runtime': os.environ.get('PTO_CSA_RUNTIME'), 'deterministic': args.deterministic,
             'hccl_deterministic': os.environ.get('HCCL_DETERMINISTIC'),
-            'observation': observation, 'spec_decode': spec_decode_metrics(llm)})
+            'observation': observation, 'spec_decode': spec_decode_metrics(llm),
+            'sampling': {'temperature': 0.0, 'ignore_eos': not respect_eos, 'max_tokens': args.decode_tokens},
+            'tokenizer_eos_token_id': llm.get_tokenizer().eos_token_id})
 
 
-def collect(root, bank, batch, tokens, mean_range=(3.0, 4.0)):
+def collect(root, bank, batch, tokens, mean_range=(3.0, 4.0), respect_eos=False):
     plan = json.loads((bank / 'plan.json').read_text())
     expected = [c['key'] for c in plan['cases'][:batch]]
     rows, errors, distributions = [], [], [0] * 6
@@ -93,7 +99,9 @@ def collect(root, bank, batch, tokens, mean_range=(3.0, 4.0)):
                 counts[2] += accepted
                 for i in range(accepted):
                     per_pos[i] += 1
-            if len(request['output_token_ids']) != tokens or record['output_tokens'] != tokens or not sum(histogram):
+            actual_tokens = len(request['output_token_ids'])
+            valid_length = 0 < actual_tokens <= tokens if respect_eos else actual_tokens == tokens
+            if not valid_length or record['output_tokens'] != actual_tokens or not sum(histogram):
                 raise ValueError(f'rank{rank}/{request["key"]}: token或草稿事件缺失')
             mean = sum(i * value for i, value in enumerate(histogram)) / sum(histogram)
             distributions = [a + b for a, b in zip(distributions, histogram)]
@@ -129,9 +137,10 @@ if __name__ == '__main__':
     parser.add_argument('--bank', type=Path, required=True)
     parser.add_argument('--batch', type=int, required=True)
     parser.add_argument('--tokens', type=int, default=192)
+    parser.add_argument('--respect-eos', action='store_true')
     parser.add_argument('--mean-range', nargs=2, type=float, default=(3.0, 4.0),
                         help='主批3 4；其他batch可指定1 5，不限制每个请求的平均值')
     args = parser.parse_args()
-    report = collect(args.root, args.bank, args.batch, args.tokens, tuple(args.mean_range))
+    report = collect(args.root, args.bank, args.batch, args.tokens, tuple(args.mean_range), args.respect_eos)
     (args.root / 'acceptance.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
     print(json.dumps({k: v for k, v in report.items() if k != 'requests'}, ensure_ascii=False))

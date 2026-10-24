@@ -87,6 +87,11 @@ def main():
         )
     # 只覆盖本轮已知测试改动，其他会话未提交的HCA改动不进入本次验证。
     shutil.copy2(repo / "tests/pypto_test/offline_pd/run.py", source / "tests/pypto_test/offline_pd/run.py")
+    mixed = "tests/pypto_test/low_acceptance_20261001/mixed.py"
+    shutil.copy2(repo / mixed, source / mixed)
+    (root / "mixed.patch").write_text(
+        subprocess.check_output(["git", "-C", str(repo), "diff", revision, "--", mixed], text=True)
+    )
     harness = source / here.relative_to(repo)
     harness.mkdir(parents=True, exist_ok=True)
     for item in here.iterdir():
@@ -117,7 +122,7 @@ def main():
         "internal_workspace": args.graph_replay_fix,
         "require_tnd_graph_replay": args.graph_replay_fix,
         "source_overlays": overlays,
-        "harness_delta": "关闭静态编译的独立CLI；只替换观测类，保留真实模型/调度/采样",
+        "harness_delta": "独立CLI关闭静态编译，正常EOS可显式选择；记录实际输出与结束原因，模型计算/调度不变",
         "native_extension": str(binaries[0]),
         "toolchain": json.loads((repo / "tests/pypto_test/csa_shared_toolchain/manifest.json").read_text()),
     }

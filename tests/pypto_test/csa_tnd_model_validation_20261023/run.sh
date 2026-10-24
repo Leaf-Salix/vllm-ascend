@@ -12,6 +12,8 @@ single_card_gate=
 ring_heap_mb=
 ring_task_window=
 hccl_buffer_mb=1800
+decode_tokens=192
+respect_eos=0
 environment=
 bank=
 vllm_root=
@@ -25,6 +27,8 @@ while [[ $# -gt 0 ]]; do
         --ring-heap-mb) ring_heap_mb=${2:?}; shift 2 ;;
         --ring-task-window) ring_task_window=${2:?}; shift 2 ;;
         --hccl-buffer-mb) hccl_buffer_mb=${2:?}; shift 2 ;;
+        --decode-tokens) decode_tokens=${2:?}; shift 2 ;;
+        --respect-eos) respect_eos=1; shift ;;
         --environment) environment=${2:?}; shift 2 ;;
         --bank) bank=${2:?}; shift 2 ;;
         --vllm-root) vllm_root=${2:?}; shift 2 ;;
@@ -50,10 +54,11 @@ bank=$(realpath "${bank:-$workspace/csa-repro-20261021-clean/kv-repro/mixed128k_
 vllm_root=$(realpath "${vllm_root:-$workspace/.cache/migration-v0.25.1rc1/vllm}")
 model=$(python -c 'import json,sys;print(json.load(open(sys.argv[1]))["model"])' "$bank/plan.json")
 mkdir "$output"
-python - "$record" "$CSA_SHARED_TOOLCHAIN_MANIFEST" "$bank" "$output" "$variant" "$batch" "$budget" "$single_card_gate" "$ring_heap_mb" "$ring_task_window" "$hccl_buffer_mb" <<'PY'
+python - "$record" "$CSA_SHARED_TOOLCHAIN_MANIFEST" "$bank" "$output" "$variant" "$batch" "$budget" "$single_card_gate" "$ring_heap_mb" "$ring_task_window" "$hccl_buffer_mb" "$decode_tokens" "$respect_eos" <<'PY'
 import json, pathlib, sys
-record, shared, bank, output, variant, batch, budget, single_card_gate, heap, window, hccl_buffer = sys.argv[1:]
+record, shared, bank, output, variant, batch, budget, single_card_gate, heap, window, hccl_buffer, decode_tokens, respect_eos = sys.argv[1:]
 assert int(hccl_buffer) > 0
+assert int(decode_tokens) > 0
 assert bool(heap) == bool(window), 'ring配置须完整提供'
 ring_config = {'heap_mb': [int(x) for x in heap.split(',')], 'task_window': int(window)} if heap else None
 if ring_config:
@@ -80,7 +85,7 @@ if (data.get('source_overlays') or data.get('internal_workspace')) and variant !
 plan = json.load(open(pathlib.Path(bank) / 'plan.json'))
 assert plan['mixed_requests'] and len(plan['cases']) >= int(batch)
 data.update(variant=variant, batch=int(batch), gpu_memory_utilization=float(budget), bank=bank,
-            selected_cases=plan['cases'][:int(batch)], decode_tokens=192,
+            selected_cases=plan['cases'][:int(batch)], decode_tokens=int(decode_tokens), ignore_eos=not bool(int(respect_eos)),
             TP=1, DP=16, EP=16, HCA='native', NZ=2, EPLB=False, static_kernel=False, superkernel=False,
             graph_mode='FULL_DECODE_ONLY', deterministic_level=1, cann='9.2.0-beta.2',
             pto_ring_config=ring_config, hccl_buffer_mb=int(hccl_buffer))
@@ -110,6 +115,8 @@ mkdir -p "$ASCEND_PROCESS_LOG_PATH" "$ASCEND_CACHE_PATH" "$PYPTO_CACHE_DIR" "$VL
 export ASCEND_OPP_PATH=$(python "$source_tree/tests/pypto_test/dsv4_hca_prepare_opp.py" --destination "$output/private_opp")
 backend=pto
 [[ "$variant" == native ]] && backend=native
+eos_options=()
+[[ "$respect_eos" == 1 ]] && eos_options+=(--respect-eos)
 cd "$output/compile"
 python "$source_tree/tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py" \
     --shared-toolchain --workspace-root "$workspace" --vllm-root "$vllm_root" \
@@ -118,9 +125,10 @@ python "$source_tree/tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py"
     --output "$output" --backend "$backend" --pto-attention csa --mixed-requests \
     --decode-dp 16 --gpu-memory-utilization "$budget" --batch "$batch" --deterministic \
     --hccl-buffer-mb "$hccl_buffer_mb" \
-    --decode-tokens 192 --weight-nz-mode 2 --graph-mode full_decode_only --no-static-kernel \
+    --decode-tokens "$decode_tokens" "${eos_options[@]}" --weight-nz-mode 2 --graph-mode full_decode_only --no-static-kernel \
     --capture-sizes 6 "$((batch * 6))" --event-work-mode 1 --port 30881 \
     > "$output/launch.log" 2>&1
 python "$source_tree/tests/pypto_test/low_acceptance_20261001/mixed.py" \
-    --root "$output" --bank "$bank" --batch "$batch" --mean-range 1 5 > "$output/acceptance_summary.log"
+    --root "$output" --bank "$bank" --batch "$batch" --tokens "$decode_tokens" "${eos_options[@]}" \
+    --mean-range 1 5 > "$output/acceptance_summary.log"
 python "$source_tree/tests/pypto_test/csa_tnd_model_validation_20261023/check.py" "$output"

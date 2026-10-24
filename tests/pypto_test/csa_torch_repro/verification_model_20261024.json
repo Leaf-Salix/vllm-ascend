@@ -1,0 +1,658 @@
+{
+  "status": "PASS",
+  "scope": "独立Python模型环境、CANN/ATB9.2、重新构建Native依赖，B16的16卡Native与两种TND decode；复用本地已审计KV，不在本轮重新prefill；固定192token仅作功能及图重放证据，完整答案另测正常EOS/2048",
+  "workspace": "/data/pyptouser/qinchuanyu/pto-eager/csa-repro-20261024-current",
+  "operator_source_commit": "27891ae42bf164f4c8b98cd310d5b711523c09df",
+  "shared_toolchain": {
+    "release": "csa-shared-20261024-group-dims",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-shared-group-dims-20261024",
+      "commit": "d44925c17d9ff7d7fa8e5067e41c4b4f80bf3063"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_tnd_model_validation_20261023/internal_toolchain_upgrade.json",
+    "published_for_validation_at": "2026-10-24T02:59:40+08:00",
+    "validated_at": "2026-10-24T03:45:54+08:00"
+  },
+  "vllm_commit": "752a3a504485790a2e8491cacbb35c137339ad34",
+  "python_environment": "/data/pyptouser/qinchuanyu/pto-eager/csa-repro-20261024-current/.venv-model",
+  "cann": "9.2.0-beta.2",
+  "atb": "9.2.0-beta.2",
+  "atb_cxx_abi": 1,
+  "native_build": {
+    "host_compiler": "GCC10.3.1",
+    "cmake": "3.31.10",
+    "native_extension_install": "/data/pyptouser/qinchuanyu/pto-eager/csa-repro-20261024-current/model-source/.cache/csa/native-install",
+    "custom_opp": "/data/pyptouser/qinchuanyu/pto-eager/csa-repro-20261024-current/native-ops-install/packages/vendors/csa_repro_transformer",
+    "build_status": "PASS",
+    "packaging_status": "PASS",
+    "packaging_fix": "custom_build.cmake使用makeself-fetch.cmake提供的MAKESELF_PATH，以支持外置CANN_3RD_LIB_PATH",
+    "extension_cann_root": "/data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2",
+    "ops_cann_root": "/data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2"
+  },
+  "kv_bank_reused_readonly": "/data/pyptouser/qinchuanyu/pto-eager/csa-repro-20261021-clean/kv-repro/mixed128k_fixed",
+  "failed_environment_attempts": {
+    "native": {
+      "task": "task_20261024_153640_391256819523",
+      "state": "completed (exit=1)"
+    },
+    "mpmd_tnd": {
+      "task": "task_20261024_153640_39126079793",
+      "state": "completed (exit=1)"
+    },
+    "spmd_tnd": {
+      "task": "task_20261024_153640_391266812997",
+      "state": "completed (exit=130)"
+    }
+  },
+  "failure_cause": "清理旧环境后漏加载配套ATB，torch_npu worker在libop_plugin_atb.so加载时报libatb.so缺失；未到模型CSA执行。显式加载ATB9.2 ABI1后新目录重试。",
+  "jobs": {
+    "native": {
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/csa-repro-20261024-current/model-results/v2_native_b16",
+      "task": "task_20261024_154604_4978330221",
+      "environment": "env-model-v2.sh",
+      "state": "completed (exit=0)",
+      "functional_status": "PASS"
+    },
+    "mpmd_tnd": {
+      "task": "task_20261024_154843_13509429120",
+      "environment": "env-model-v2.sh",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/csa-repro-20261024-current/model-results/v2_mpmd_tnd_b16",
+      "state": "completed (exit=0)",
+      "functional_status": "PASS"
+    },
+    "spmd_tnd": {
+      "task": "task_20261024_154843_13518127865",
+      "environment": "env-model-v2.sh",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/csa-repro-20261024-current/model-results/v2_spmd_tnd_b16",
+      "state": "completed (exit=0)",
+      "functional_status": "PASS"
+    }
+  },
+  "published_source_commit": "54b2309e7a8fb1d91af1168c1f87543f763c1a98",
+  "source_provenance": {
+    "frozen_model_base": "27891ae42bf164f4c8b98cd310d5b711523c09df",
+    "portable_launcher": "--model、环境、KV、vLLM源码、网卡使用本机参数；旧版FORMAL_MODEL赋值实现和显式args实现均已验证相同CLI，PTO使用显式args版本。",
+    "native_cmake_overlay": "将CPACK_MAKESELF_PATH改为MAKESELF_PATH，构建/安装均从该独立源码进行。",
+    "release_changes_since_base": [
+      "csrc/cmake/custom_build.cmake",
+      "vllm_ascend/models/__init__.py",
+      "vllm_ascend/models/pypto_deepseek_v4_hca.py",
+      "vllm_ascend/ops/dsv4_hca.py",
+      "vllm_ascend/ops/pypto/HCA_TND_MPMD_OPTIMIZATION_LOG.md",
+      "vllm_ascend/ops/pypto/deepseek_v4_flash_hca/service_config.py",
+      "vllm_ascend/ops/pypto/deepseek_v4_flash_hca_tnd/graph_service.py",
+      "vllm_ascend/worker/model_runner_v1.py"
+    ],
+    "review": "CSA两种TND包和服务实现未变；合入的HCA TND入口仅由独立模型架构选择，本次三侧HCA保持Native。模型runner的新增HCA判断在CSA原分支外扩展，Native算子C++/AscendC计算源码未变。"
+  },
+  "native_result": {
+    "status": "PASS",
+    "scope": "功能及实际S6路由通过；不代替输出正确性或整模型图重放验收；FULL模式计数不证明实际重放",
+    "variant": "native",
+    "batch": 16,
+    "requests": 256,
+    "output_tokens": 49152,
+    "acceptance": {
+      "qualified": true,
+      "criterion": "同批不同请求，实际接受长度0..5均覆盖；主批均值3..4/目标约3.8，其他batch允许1..5",
+      "mean_range": [
+        1.0,
+        5.0
+      ],
+      "mean_accepted": 3.806501547987616,
+      "accepted_length_histogram": [
+        544,
+        784,
+        1440,
+        720,
+        720,
+        6128
+      ],
+      "full_five_draft_histogram": [
+        544,
+        784,
+        1440,
+        720,
+        720,
+        6128
+      ],
+      "num_drafts": 10336,
+      "num_draft_tokens": 51680,
+      "num_accepted_tokens": 39344,
+      "acceptance_rate": 0.7613003095975233,
+      "request_mean_min": 2.6792452830188678,
+      "request_mean_max": 4.9393939393939394,
+      "total_preemptions": 0,
+      "requests_with_preemption": 0,
+      "errors": []
+    }
+  },
+  "mpmd_result": {
+    "status": "PASS",
+    "scope": "功能及实际S6路由通过；不代替输出正确性或整模型图重放验收；FULL模式计数不证明实际重放",
+    "variant": "mpmd_tnd",
+    "batch": 16,
+    "requests": 256,
+    "output_tokens": 49152,
+    "acceptance": {
+      "qualified": true,
+      "criterion": "同批不同请求，实际接受长度0..5均覆盖；主批均值3..4/目标约3.8，其他batch允许1..5",
+      "mean_range": [
+        1.0,
+        5.0
+      ],
+      "mean_accepted": 3.7956656346749225,
+      "accepted_length_histogram": [
+        576,
+        688,
+        1440,
+        928,
+        640,
+        6064
+      ],
+      "full_five_draft_histogram": [
+        576,
+        688,
+        1440,
+        928,
+        640,
+        6064
+      ],
+      "num_drafts": 10336,
+      "num_draft_tokens": 51680,
+      "num_accepted_tokens": 39232,
+      "acceptance_rate": 0.7591331269349845,
+      "request_mean_min": 3.106382978723404,
+      "request_mean_max": 4.9393939393939394,
+      "total_preemptions": 0,
+      "requests_with_preemption": 0,
+      "errors": []
+    },
+    "ranks": [
+      {
+        "rank": 0,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 1,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 2,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 3,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 4,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 5,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 6,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 7,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 8,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 9,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 10,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 11,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 12,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 13,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 14,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 15,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      }
+    ]
+  },
+  "spmd_result": {
+    "status": "PASS",
+    "scope": "功能及实际S6路由通过；不代替输出正确性或整模型图重放验收；FULL模式计数不证明实际重放",
+    "variant": "spmd_tnd",
+    "batch": 16,
+    "requests": 256,
+    "output_tokens": 49152,
+    "acceptance": {
+      "qualified": true,
+      "criterion": "同批不同请求，实际接受长度0..5均覆盖；主批均值3..4/目标约3.8，其他batch允许1..5",
+      "mean_range": [
+        1.0,
+        5.0
+      ],
+      "mean_accepted": 3.7956656346749225,
+      "accepted_length_histogram": [
+        576,
+        688,
+        1440,
+        928,
+        640,
+        6064
+      ],
+      "full_five_draft_histogram": [
+        576,
+        688,
+        1440,
+        928,
+        640,
+        6064
+      ],
+      "num_drafts": 10336,
+      "num_draft_tokens": 51680,
+      "num_accepted_tokens": 39232,
+      "acceptance_rate": 0.7591331269349845,
+      "request_mean_min": 3.106382978723404,
+      "request_mean_max": 4.9393939393939394,
+      "total_preemptions": 0,
+      "requests_with_preemption": 0,
+      "errors": []
+    },
+    "ranks": [
+      {
+        "rank": 0,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 1,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 2,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 3,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 4,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 5,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 6,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 7,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 8,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 9,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 10,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 11,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 12,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 13,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 14,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      },
+      {
+        "rank": 15,
+        "all_csa_graph_replay_proven": true,
+        "external_workspace_bytes": 0,
+        "full_steps": 33,
+        "tail_steps": 15,
+        "padding_steps": 15,
+        "no_python_resubmission": true
+      }
+    ]
+  },
+  "sampling": {
+    "ignore_eos": true,
+    "max_tokens": 192
+  },
+  "comparison": {
+    "file": "/data/pyptouser/qinchuanyu/pto-eager/csa-repro-20261024-current/model-results/v2_b16_comparison.json",
+    "modes": {
+      "native": {
+        "functional": "PASS",
+        "mean_accepted": 3.806501547987616,
+        "accepted_length_histogram": [
+          544,
+          784,
+          1440,
+          720,
+          720,
+          6128
+        ],
+        "simple_answer_status": "PASS"
+      },
+      "spmd_tnd": {
+        "functional": "PASS",
+        "mean_accepted": 3.7956656346749225,
+        "accepted_length_histogram": [
+          576,
+          688,
+          1440,
+          928,
+          640,
+          6064
+        ],
+        "simple_answer_status": "PASS"
+      },
+      "mpmd_tnd": {
+        "functional": "PASS",
+        "mean_accepted": 3.7956656346749225,
+        "accepted_length_histogram": [
+          576,
+          688,
+          1440,
+          928,
+          640,
+          6064
+        ],
+        "simple_answer_status": "PASS"
+      }
+    },
+    "pairs": {
+      "native_vs_spmd_tnd": {
+        "requests": 256,
+        "tokens": 49152,
+        "output_tokens_by_mode": {
+          "native": 49152,
+          "spmd_tnd": 49152
+        },
+        "matched_requests": 64,
+        "token_mismatches": 22416,
+        "matched_draft_event_requests": 32,
+        "by_kind": {
+          "easy_repeat": {
+            "requests": 32,
+            "matched_requests": 32
+          },
+          "ledger_transform": {
+            "requests": 48,
+            "matched_requests": 16
+          },
+          "python_trace": {
+            "requests": 96,
+            "matched_requests": 0
+          },
+          "transition_trace": {
+            "requests": 80,
+            "matched_requests": 16
+          }
+        }
+      },
+      "native_vs_mpmd_tnd": {
+        "requests": 256,
+        "tokens": 49152,
+        "output_tokens_by_mode": {
+          "native": 49152,
+          "mpmd_tnd": 49152
+        },
+        "matched_requests": 64,
+        "token_mismatches": 22416,
+        "matched_draft_event_requests": 32,
+        "by_kind": {
+          "easy_repeat": {
+            "requests": 32,
+            "matched_requests": 32
+          },
+          "ledger_transform": {
+            "requests": 48,
+            "matched_requests": 16
+          },
+          "python_trace": {
+            "requests": 96,
+            "matched_requests": 0
+          },
+          "transition_trace": {
+            "requests": 80,
+            "matched_requests": 16
+          }
+        }
+      },
+      "spmd_tnd_vs_mpmd_tnd": {
+        "requests": 256,
+        "tokens": 49152,
+        "output_tokens_by_mode": {
+          "spmd_tnd": 49152,
+          "mpmd_tnd": 49152
+        },
+        "matched_requests": 256,
+        "token_mismatches": 0,
+        "matched_draft_event_requests": 256,
+        "by_kind": {
+          "easy_repeat": {
+            "requests": 32,
+            "matched_requests": 32
+          },
+          "ledger_transform": {
+            "requests": 48,
+            "matched_requests": 48
+          },
+          "python_trace": {
+            "requests": 96,
+            "matched_requests": 96
+          },
+          "transition_trace": {
+            "requests": 80,
+            "matched_requests": 80
+          }
+        }
+      }
+    }
+  }
+}

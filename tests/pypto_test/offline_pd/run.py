@@ -1118,6 +1118,8 @@ def launch(args):
                 cmd += ["--save-extended-bank", str(args.save_extended_bank.resolve())]
             if args.mixed_requests:
                 cmd.append("--mixed-requests")
+            if args.respect_eos:
+                cmd.append("--respect-eos")
             if args.profile_forward_events:
                 cmd.append("--profile-forward-events")
             if args.embedding_tp:
@@ -1197,6 +1199,8 @@ def main():
                         help="performance 在一次模型加载内扫描实际 batch，容量固定为 --batch；"
                              "每档单独预热、采样和记录 DSpark 增量")
     parser.add_argument("--decode-tokens", type=int, default=128)
+    parser.add_argument("--respect-eos", action="store_true",
+                        help="混合请求decode按正常EOS停止；decode-tokens只作为生成上限")
     parser.add_argument("--layout-only", action="store_true", help="加载D模型后仅采集缓存描述符")
     parser.add_argument("--warmup-rounds", type=int, default=1, help="诊断前的预热轮数，排除首次编译与缓存冷读")
     parser.add_argument("--warmup-tokens", type=int, default=96, help="每个预热轮的生成token数")
@@ -1262,6 +1266,8 @@ def main():
     parser.add_argument("--compare-top", type=int, default=25, help="profile-compare列出的kernel差异条数")
     args = parser.parse_args()
     args.model = args.model.expanduser().absolute()
+    if args.respect_eos and (args.command != "decode" or not args.mixed_requests or args.save_extended_bank):
+        parser.error("正常EOS答案验证仅用于混合请求decode，不用于KV生成或固定长度性能采样")
     if args.save_extended_bank:
         if (args.command != "decode" or args.backend != "native" or args.graph_mode != "eager"
                 or (args.batch != 1 and not args.mixed_requests)

@@ -3,13 +3,29 @@
 
 import json
 import sys
+from collections import Counter
 from pathlib import Path
+
+
+def check_completion(request, limit, respect_eos):
+    """区分EOS完成与上限截断；正常停止本身不证明答案正确。"""
+    count = len(request["output_token_ids"])
+    if not respect_eos:
+        assert count == limit
+        return "fixed_length"
+    assert request["finished"] and 0 < count <= limit
+    reason = request["finish_reason"]
+    assert reason in ("stop", "length"), reason
+    assert reason != "length" or count == limit
+    assert isinstance(request["output_text"], str)
+    return reason
 
 
 def check(root):
     config = json.loads((root / "configuration.json").read_text())
     variant, batch = config["variant"], config["batch"]
     tokens = config["decode_tokens"]
+    respect_eos = not config.get("ignore_eos", True)
     plan = json.loads((Path(config["bank"]) / "plan.json").read_text())
     vocab = json.loads((Path(plan["model"]) / "config.json").read_text())["vocab_size"]
     package = {"mpmd_tnd": "deepseek_v4_flash_csa_tnd", "spmd_tnd": "deepseek_v4_flash_csa_spmd_tnd"}.get(variant)
@@ -17,13 +33,19 @@ def check(root):
     assert acceptance["qualified"], acceptance
     assert acceptance["total_preemptions"] == 0, "不能用抢占缩减实际并发来冒充B16/B24"
     rows = []
+    total_output_tokens = 0
+    completion = Counter()
     for rank in range(16):
         data = json.loads((root / f"rank{rank}.mixed.json").read_text())
         assert data["rank"] == rank and data["batch"] == batch and data["decode_tokens"] == tokens
         assert data["backend"] == ("pto" if package else "native")
         assert not package or data["variant"] == variant
         assert len(data["requests"]) == batch
-        assert all(len(r["output_token_ids"]) == tokens for r in data["requests"])
+        reasons = Counter(check_completion(r, tokens, respect_eos) for r in data["requests"])
+        completion.update(reasons)
+        total_output_tokens += sum(len(r["output_token_ids"]) for r in data["requests"])
+        if respect_eos:
+            assert data["sampling"] == {"temperature": 0.0, "ignore_eos": False, "max_tokens": tokens}
         assert all(type(t) is int and 0 <= t < vocab for r in data["requests"] for t in r["output_token_ids"])
         (implementations,) = data["attention_implementations"]
         csa = [r for r in implementations if r["kind"] == "csa"]
@@ -90,6 +112,7 @@ def check(root):
         rows.append(
             {
                 "rank": rank,
+                "completion": dict(reasons),
                 # FULL是调用时的图模式标签，合同拒绝后仍可能实际执行eager。
                 "full_s6_graph_mode_forwards": observation["model_forward_counts"][key],
                 "actual_full_s6_steps": full_s6_steps if occupancy else None,
@@ -110,7 +133,9 @@ def check(root):
         "variant": variant,
         "batch": batch,
         "requests": 16 * batch,
-        "output_tokens": 16 * batch * tokens,
+        "output_tokens": total_output_tokens,
+        "sampling": {"ignore_eos": not respect_eos, "max_tokens": tokens},
+        "completion": dict(completion),
         "acceptance": {k: v for k, v in acceptance.items() if k != "requests"},
         "ranks": rows,
     }
