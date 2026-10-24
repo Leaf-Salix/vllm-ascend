@@ -856,3 +856,48 @@ cache/state严格1e-5差异继续单列，不能宣布全精度或整模型token
 PTO L1重新计算八档跨度，核对两侧fixture、环境、样本数、中位数和百分比通过，
 该核对没有再次执行设备。大trace、静态包、编译产物和权重不提交，不做hash扫描。
 本轮只提交详细中文测试记录，不push；原优化目标保持暂停。
+
+## 2026-10-24：HCA TND整模型候选完成16卡B16真实图重放，停在token精度讨论点
+
+用户要求参考CSA-MPMD-TND进行完整vllm-ascend接入，有疑惑先停下来讨论；
+并澄清“PTO不使用ACLGraph”仅限单算子性能测试，整模型应验证真实图重放。
+本轮仅切换20层C128 HCA，21层CSA、SWA及FFN保持Native，原性能优化目标未恢复。
+
+接入候选基于已提交15b64665a冻结框架，新增显式PyptoHCATND模型、HCA图服务、
+C128 compact容量及地址/策略合同、捕获历史选择与逐层实际路由观测。复用原HCA
+计算入口和公共TND图合同接口，数学、tile、共享SDK均未修改；没有带入另一个
+CSA会话的未提交测试改动。代码在tests/pypto_test/hca_tnd_model_validation_20261024
+的生成器、candidates和MODEL_ADAPTER.patch，正式模型入口尚未切换。
+
+单卡过程：v01入口漏接队列注入--device，未执行算子；v02沿用CSA heap配置导致
+ring2申请22044672B超过16MiB；v03增大ring2后B16和混长11步通过，但B24在ring0
+申请20372480B超过16MiB。设备日志已给出明确容量不足证据，未归因为编译器bug。
+v04采用heap=[64,256,64,64] MiB、task_window4096后，6类29步全部通过，
+任务task_20261024_132445_31180867686 exit=0。覆盖B16/B24、混长T56、S1/S5/S6、
+B1、C128关闭边界、历史131071/131073/131199、7请求和1请求尾批、padding、
+请求重排及返回满批；图输出/cache/state对独立PTO eager逐bit一致、保护区通过，
+replay期间Python提交数不增加；每类场景Native输出原0.01容差通过。
+
+16卡任务task_20261024_132810_32584376495（冻结v04）exit=0，TP1、DP/EP16，
+正式W8A8/NZ2权重及既有mixed128k_fixed离线KV。功能配置沿用CSA：
+FULL_DECODE_ONLY/npugraph_ex、deterministic level1、HCCL1800、AIV展开、event1、
+EPLB关闭、预算0.92、静态编译/SuperKernel关闭；不做模型性能比较。
+256请求共49152输出token、零抢占；每rank33个真实满批S6 step、18个真实尾批step，
+其中15步padding。全部51个真实长历史FULL step的20层HCA均真正replay，
+无Python重新派发。另有1步正常S1 eager及34步短dummy图，单独记录，
+不把dummy或捕获计数当作真实业务步骤。
+
+对Native历史正确性参考做源码与配置审计：原数学路径未变，新增34行框架逻辑
+仅在PTO TND模型/合同/回退标记下执行；复用同权重、bank、问题、预算和推理配置
+的Native结果，仅比较正确性，不跨版本比较性能。报告NATIVE_REFERENCE_AUDIT.json。
+
+精度结论：64/256请求完整token一致，其中简单问题32/32；其余192个复杂请求
+有分歧，q08/q12/q14在第0个输出token即不同。HCA的16个DP rank输出完全相同。
+平均接受草稿数HCA=3.753067484662577，Native=3.806501547987616，DSpark事件
+不全相同。单卡图/eager精确一致与模型功能通过不能代替Native token一致，
+当前未定位差异是数学误差传播还是接入问题，不擅自接受另一个会话的较宽口径。
+
+按用户要求停止新设备任务，未提交B24，建议先定位首token分歧后再决定继续范围。
+五次任务均已终态；完整命令、日志、29步单卡结果、16rank输出及接受事件、
+源码/SDK清单、问答全文和首处分歧已归档。大权重、KV、二进制和编译快照本地保留，
+不做hash扫描。阶段性详细中文commit，不push。

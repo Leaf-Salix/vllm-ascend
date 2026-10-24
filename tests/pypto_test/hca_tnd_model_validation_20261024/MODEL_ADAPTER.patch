@@ -1,0 +1,128 @@
+--- a/vllm_ascend/models/__init__.py
++++ b/vllm_ascend/models/__init__.py
+@@ -2,6 +2,9 @@
+ 
+ 
+ def register_model():
++    ModelRegistry.register_model(
++        "PyptoHCATNDDeepseekV4ForCausalLM", "vllm_ascend.models.pypto_deepseek_v4_hca:PyptoHCATNDDeepseekV4ForCausalLM",
++    )
+     ModelRegistry.register_model(
+         "PyptoCSAHCADeepseekV4ForCausalLM",
+         "vllm_ascend.models.pypto_deepseek_v4_hca:PyptoCSAHCADeepseekV4ForCausalLM",
+--- a/vllm_ascend/models/pypto_deepseek_v4_hca.py
++++ b/vllm_ascend/models/pypto_deepseek_v4_hca.py
+@@ -78,3 +78,30 @@
+         # CSA 初始化一次公共运行时；HCA 随后只注册算子并绑定各层。
+         super().process_weights_after_loading()
+         prepare_hca_model(self)
++
++
++class PyptoHCATNDDeepseekV4ForCausalLM(PyptoHCADeepseekV4ForCausalLM):
++    """显式HCA TND模型；仅C128使用新MPMD，C4/SWA/FFN保持Native。"""
++    def process_weights_after_loading(self):
++        from pypto import passes
++        from pypto.runtime import CompileOptions
++        from vllm.config import get_current_vllm_config
++        from vllm_ascend.ops.pypto.deepseek_v4_flash_hca_tnd.native_adapter import HCAOperators
++        from vllm_ascend.ops.pypto.deepseek_v4_flash_hca_tnd.graph_service import HCATNDGraphServiceRuntime
++
++        init_pto_runtime()
++        config = get_current_vllm_config()
++        operators = HCAOperators.register(config=CompileOptions(platform="a2a3", memory_planner=passes.MemoryPlanner.PYPTO))
++        count = 0
++        for layer in self.model.layers:
++            if layer.self_attn.compress_ratio == 128:
++                layer.self_attn.dsa_attn._pto_hca_runtime = HCATNDGraphServiceRuntime(
++                    layer.self_attn, operators, config.scheduler_config.max_num_seqs, layer,
++                    config.scheduler_config.max_num_batched_tokens,
++                )
++                count += 1
++        if not count:
++            raise ValueError("模型中未找到C128 HCA层")
++        # 捕获时使用服务的历史容量，避免在短dummy上冻结K128后真实长历史只能回退。
++        self._pto_hca_tnd_capture_sequence_length = config.model_config.max_model_len
++        logger.info("PTO_HCA_MULTITASK_TND layers=%d package=deepseek_v4_flash_hca_tnd", count)
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_hca/service_config.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_hca/service_config.py
+@@ -7,7 +7,7 @@
+ 
+ 
+ def is_hca_model(config):
+-    return any(name in (MODEL_ARCHITECTURE, "PyptoCSAHCADeepseekV4ForCausalLM")
++    return any(name in (MODEL_ARCHITECTURE, "PyptoCSAHCADeepseekV4ForCausalLM", "PyptoHCATNDDeepseekV4ForCausalLM")
+                for name in getattr(config.model_config.hf_config, "architectures", ()))
+ 
+ 
+@@ -17,3 +17,7 @@
+     _validate_configuration(config)
+     if envs.VLLM_ASCEND_PTO_CSA_ATOMIC_ADD != 0:
+         raise ValueError("HCA 首版使用固定归约，请设置 VLLM_ASCEND_PTO_CSA_ATOMIC_ADD=0")
++
++
++def is_tnd_hca_model(config):
++    return "PyptoHCATNDDeepseekV4ForCausalLM" in getattr(config.model_config.hf_config, "architectures", ())
+--- a/vllm_ascend/ops/dsv4_hca.py
++++ b/vllm_ascend/ops/dsv4_hca.py
+@@ -21,6 +21,12 @@
+     context = get_forward_context()
+     wrapper = context.no_compile_layers[layer_name]
+     runtime = getattr(wrapper, "_pto_hca_runtime", None)
++    record_route = getattr(type(runtime), "record_graph_route", None)
++    if record_route is not None:
++        record_route(runtime, context, hidden, positions)
++    empty_call = getattr(type(runtime), "handle_empty_call", None)
++    if empty_call is not None and empty_call(runtime, context, hidden, positions, output):
++        return
+     if runtime is None or not runtime.eligible(context, hidden, positions):
+         native_attention_half(wrapper, hidden, positions, output)
+         return
+--- a/vllm_ascend/worker/model_runner_v1.py
++++ b/vllm_ascend/worker/model_runner_v1.py
+@@ -132,7 +132,7 @@
+     is_tnd_csa_model,
+     tnd_graph_lengths_supported,
+ )
+-from vllm_ascend.ops.pypto.deepseek_v4_flash_hca.service_config import is_hca_model
++from vllm_ascend.ops.pypto.deepseek_v4_flash_hca.service_config import is_hca_model, is_tnd_hca_model
+ from vllm_ascend.ops.rotary_embedding import set_cos_and_sin, update_cos_sin
+ from vllm_ascend.patch.worker.patch_draft_quarot import patch_load_weights
+ from vllm_ascend.quantization.utils import enable_fa_quant
+@@ -2751,7 +2751,7 @@
+                 if not can_replay_csa_graph(
+                     num_tokens=csa_actual_tokens, num_reqs=num_reqs,
+                     uniform_decode=uniform_decode, padded_tokens=descriptor.num_tokens,
+-                    single_spmd_tnd=is_tnd_csa_model(self.vllm_config),
++                    single_spmd_tnd=(is_tnd_csa_model(self.vllm_config) or is_tnd_hca_model(self.vllm_config)),
+                 ):
+                     return CUDAGraphMode.NONE, BatchDescriptor(num_tokens)
+             return mode, descriptor
+@@ -3267,6 +3267,8 @@
+                 tnd_capture_length = None
+                 if not is_profile and uniform_decode and (force_attention or is_graph_capturing):
+                     tnd_capture_length = getattr(self.get_model(), "_pto_csa_tnd_capture_sequence_length", None)
++                    if tnd_capture_length is None:
++                        tnd_capture_length = getattr(self.get_model(), "_pto_hca_tnd_capture_sequence_length", None)
+                 if tnd_capture_length is not None and profile_seq_lens is None:
+                     seq_lens = tnd_capture_length
+ 
+--- a/tests/pypto_test/offline_pd/run.py
++++ b/tests/pypto_test/offline_pd/run.py
+@@ -802,7 +802,7 @@
+     overrides = {"sliding_window": 128}
+     if not prefill and args.backend == "pto":
+         overrides["architectures"] = [{
+-            "csa": "PyptoCSADeepseekV4ForCausalLM", "hca": "PyptoHCADeepseekV4ForCausalLM",
++            "csa": "PyptoCSADeepseekV4ForCausalLM", "hca": "PyptoHCATNDDeepseekV4ForCausalLM",
+             "both": "PyptoCSAHCADeepseekV4ForCausalLM",
+         }[args.pto_attention]]
+     llm = LLM(
+@@ -867,7 +867,7 @@
+                            "eplb_config": {"dynamic_eplb": False}},
+         model_loader_extra_config={"enable_multithread_load": True, "num_threads": 16 if prefill else 128},
+         kv_transfer_config=connector, disable_log_stats=False,
+-        **({} if prefill else {"worker_extension_cls": "offline_pd.observer.OfflineCSAObserver"}),
++        **({} if prefill else {"worker_extension_cls": "hca_tnd_model_validation_20261024.observer.HCAObserver"}),
+     )
+     print(f"OFFLINE_MODEL_READY role={args.command} dp={args.rank}", flush=True)
+     args.worker_runtime_config = llm.collective_rpc("offline_runtime_config")
