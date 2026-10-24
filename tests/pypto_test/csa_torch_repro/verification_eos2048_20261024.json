@@ -1,0 +1,2080 @@
+{
+  "status": "EXECUTION_PASS_ANSWER_CONTENT_CHECK_FAILED",
+  "scope": "CANN/ATB9.2独立环境、16卡B16、Native和两种TND正常EOS/2048；功能成功不代表题意内容正确",
+  "source_code_release": "015493995d1f8edc86230c646c30ae5dcb5cf9fb",
+  "operator_base_commit": "27891ae42bf164f4c8b98cd310d5b711523c09df",
+  "source_note": "与已验证192token同一模型/算子基础源码；仅追加已提交的EOS采样和观测入口。发布提交还包含不在本次路径启用的HCA入口。",
+  "toolchain": {
+    "release": "csa-shared-20261024-group-dims",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-shared-group-dims-20261024",
+      "commit": "d44925c17d9ff7d7fa8e5067e41c4b4f80bf3063"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_tnd_model_validation_20261023/internal_toolchain_upgrade.json",
+    "published_for_validation_at": "2026-10-24T02:59:40+08:00",
+    "validated_at": "2026-10-24T03:45:54+08:00"
+  },
+  "environment": {
+    "cann": "9.2.0-beta.2",
+    "atb": "9.2.0-beta.2",
+    "atb_cxx_abi": 1,
+    "python": "/data/pyptouser/qinchuanyu/pto-eager/csa-repro-20261024-current/.venv-model",
+    "native_dependencies": "独立目录内重新从源码构建，见verification_model_20261024.json"
+  },
+  "sampling": {
+    "ignore_eos": false,
+    "max_tokens": 2048
+  },
+  "comparison": "/data/pyptouser/qinchuanyu/pto-eager/csa-repro-20261024-current/model-results/eos2048_b16_comparison.json",
+  "comparison_exit_code": 1,
+  "answer_validation": {
+    "scope": "正常EOS完整内容；上限截断不能标完整",
+    "simple_contents_pass": false,
+    "all_answers_complete_correct": false
+  },
+  "modes": {
+    "native": {
+      "task": "task_20261024_161311_122108921082",
+      "task_exit_code": 0,
+      "results": "/data/pyptouser/qinchuanyu/pto-eager/csa-repro-20261024-current/model-results/eos2048_native_b16",
+      "functional_status": "PASS",
+      "requests": 256,
+      "output_tokens": 297520,
+      "preemptions": 0,
+      "mean_accepted": 4.367099567099567,
+      "completion_all_16_dp": {
+        "length": 80,
+        "stop": 176
+      },
+      "quality_distinct_answers": {
+        "scope": "同问题、同token和同结束原因的DP副本合并；正常结束与答案正确性分别判断",
+        "unique_questions": 16,
+        "unique_answers": 16,
+        "normal_stop": 11,
+        "token_limit": 5,
+        "complete_correct": 0,
+        "limitation": "INCOMPLETE_OR_UNPARSED须人工核对；格式备注与内容正确性分开，不把Native答案当真值"
+      },
+      "question_verdicts": [
+        {
+          "key": "h131072_q00",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "INCOMPLETE_OR_UNPARSED",
+            "parsed_rows": 5,
+            "first_wrong": null,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q01",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "INCOMPLETE_OR_UNPARSED",
+            "parsed_rows": 22,
+            "first_wrong": null,
+            "observed_sum": null,
+            "expected_sum": 5638,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q02",
+          "finish_reason": "stop",
+          "tokens": 328,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": {
+              "row": 1,
+              "observed": [
+                1,
+                20,
+                92,
+                63
+              ],
+              "expected": [
+                1,
+                9,
+                5,
+                24
+              ]
+            },
+            "expected_queue": [
+              140,
+              20,
+              51,
+              239,
+              28,
+              91,
+              230
+            ],
+            "observed_queue": [
+              14,
+              30,
+              4,
+              39,
+              20,
+              9,
+              40
+            ],
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q03",
+          "finish_reason": "stop",
+          "tokens": 556,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS_OR_ORDER",
+            "parsed_rows": 20,
+            "first_wrong": {
+              "position": 1,
+              "observed": {
+                "id": "f1",
+                "net": 4739,
+                "score": 1008,
+                "tag": "C"
+              },
+              "expected": {
+                "id": "n0",
+                "net": 3069,
+                "score": 965,
+                "tag": "A"
+              }
+            },
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q04",
+          "finish_reason": "stop",
+          "tokens": 1822,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": {
+              "observed": [
+                4,
+                6,
+                271,
+                8,
+                442
+              ],
+              "expected": [
+                4,
+                6,
+                283,
+                8,
+                5
+              ]
+            },
+            "observed_sum": 6250,
+            "expected_sum": 6129,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q05",
+          "finish_reason": "stop",
+          "tokens": 256,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_TEXT_OR_COUNT",
+            "observed_lines": 85,
+            "required_lines": 80,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q06",
+          "finish_reason": "stop",
+          "tokens": 508,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": {
+              "row": 1,
+              "observed": [
+                1,
+                21,
+                37,
+                0
+              ],
+              "expected": [
+                1,
+                11,
+                86,
+                114
+              ]
+            },
+            "expected_queue": [
+              38,
+              77,
+              158,
+              128,
+              178,
+              202,
+              226
+            ],
+            "observed_queue": [
+              15,
+              31,
+              5,
+              41,
+              21,
+              11,
+              39
+            ],
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q07",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 23,
+            "first_wrong": {
+              "observed": [
+                4,
+                6,
+                226,
+                2,
+                70
+              ],
+              "expected": [
+                4,
+                6,
+                226,
+                2,
+                49
+              ]
+            },
+            "observed_sum": null,
+            "expected_sum": 6073,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q08",
+          "finish_reason": "stop",
+          "tokens": 330,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": {
+              "row": 1,
+              "observed": [
+                1,
+                22,
+                135,
+                40
+              ],
+              "expected": [
+                1,
+                13,
+                175,
+                156
+              ]
+            },
+            "expected_queue": [
+              109,
+              71,
+              203,
+              1,
+              239,
+              190,
+              130
+            ],
+            "observed_queue": [
+              190,
+              74,
+              111,
+              74,
+              4,
+              99,
+              190
+            ],
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q09",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "INCOMPLETE_OR_UNPARSED",
+            "parsed_rows": 5,
+            "first_wrong": null,
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q10",
+          "finish_reason": "stop",
+          "tokens": 1839,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": {
+              "observed": [
+                7,
+                13,
+                461,
+                9,
+                219
+              ],
+              "expected": [
+                7,
+                13,
+                461,
+                9,
+                225
+              ]
+            },
+            "observed_sum": 6242,
+            "expected_sum": 5972,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q11",
+          "finish_reason": "stop",
+          "tokens": 416,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_TEXT_OR_COUNT",
+            "observed_lines": 83,
+            "required_lines": 81,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q12",
+          "finish_reason": "stop",
+          "tokens": 328,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": {
+              "row": 1,
+              "observed": [
+                1,
+                23,
+                100,
+                50
+              ],
+              "expected": [
+                1,
+                15,
+                15,
+                35
+              ]
+            },
+            "expected_queue": [
+              30,
+              8,
+              65,
+              193,
+              223,
+              190,
+              220
+            ],
+            "observed_queue": [
+              17,
+              33,
+              7,
+              45,
+              23,
+              15,
+              37
+            ],
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q13",
+          "finish_reason": "stop",
+          "tokens": 1646,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": null,
+            "observed_sum": 4647,
+            "expected_sum": 5047,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q14",
+          "finish_reason": "stop",
+          "tokens": 326,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": {
+              "row": 1,
+              "observed": [
+                1,
+                24,
+                178,
+                8
+              ],
+              "expected": [
+                1,
+                17,
+                207,
+                234
+              ]
+            },
+            "expected_queue": [
+              124,
+              37,
+              41,
+              15,
+              143,
+              132,
+              247
+            ],
+            "observed_queue": [
+              18,
+              34,
+              8,
+              47,
+              24,
+              17,
+              36
+            ],
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q15",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "INCOMPLETE_OR_UNPARSED",
+            "parsed_rows": 0,
+            "first_wrong": null,
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        }
+      ],
+      "ranks": [
+        {
+          "rank": 0,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        },
+        {
+          "rank": 1,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        },
+        {
+          "rank": 2,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        },
+        {
+          "rank": 3,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        },
+        {
+          "rank": 4,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        },
+        {
+          "rank": 5,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        },
+        {
+          "rank": 6,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        },
+        {
+          "rank": 7,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        },
+        {
+          "rank": 8,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        },
+        {
+          "rank": 9,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        },
+        {
+          "rank": 10,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        },
+        {
+          "rank": 11,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        },
+        {
+          "rank": 12,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        },
+        {
+          "rank": 13,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        },
+        {
+          "rank": 14,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        },
+        {
+          "rank": 15,
+          "completion": {
+            "length": 5,
+            "stop": 11
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": null,
+          "full_steps": null,
+          "tail_steps": null,
+          "padding_steps": null,
+          "no_python_resubmission": null
+        }
+      ]
+    },
+    "mpmd_tnd": {
+      "task": "task_20261024_161311_122114011578",
+      "task_exit_code": 0,
+      "results": "/data/pyptouser/qinchuanyu/pto-eager/csa-repro-20261024-current/model-results/eos2048_mpmd_tnd_b16",
+      "functional_status": "PASS",
+      "requests": 256,
+      "output_tokens": 354144,
+      "preemptions": 0,
+      "mean_accepted": 4.371089012854718,
+      "completion_all_16_dp": {
+        "length": 112,
+        "stop": 144
+      },
+      "quality_distinct_answers": {
+        "scope": "同问题、同token和同结束原因的DP副本合并；正常结束与答案正确性分别判断",
+        "unique_questions": 16,
+        "unique_answers": 16,
+        "normal_stop": 9,
+        "token_limit": 7,
+        "complete_correct": 0,
+        "limitation": "INCOMPLETE_OR_UNPARSED须人工核对；格式备注与内容正确性分开，不把Native答案当真值"
+      },
+      "question_verdicts": [
+        {
+          "key": "h131072_q00",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "INCOMPLETE_OR_UNPARSED",
+            "parsed_rows": 6,
+            "first_wrong": null,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q01",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 23,
+            "first_wrong": {
+              "observed": [
+                13,
+                11,
+                505,
+                9,
+                24
+              ],
+              "expected": [
+                13,
+                11,
+                505,
+                9,
+                18
+              ]
+            },
+            "observed_sum": null,
+            "expected_sum": 5638,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q02",
+          "finish_reason": "stop",
+          "tokens": 326,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": {
+              "row": 1,
+              "observed": [
+                1,
+                20,
+                92,
+                63
+              ],
+              "expected": [
+                1,
+                9,
+                5,
+                24
+              ]
+            },
+            "expected_queue": [
+              140,
+              20,
+              51,
+              239,
+              28,
+              91,
+              230
+            ],
+            "observed_queue": [
+              14,
+              30,
+              4,
+              39,
+              20,
+              9,
+              40
+            ],
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q03",
+          "finish_reason": "stop",
+          "tokens": 556,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS_OR_ORDER",
+            "parsed_rows": 20,
+            "first_wrong": {
+              "position": 1,
+              "observed": {
+                "id": "f1",
+                "net": 4739,
+                "score": 1008,
+                "tag": "C"
+              },
+              "expected": {
+                "id": "n0",
+                "net": 3069,
+                "score": 965,
+                "tag": "A"
+              }
+            },
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q04",
+          "finish_reason": "stop",
+          "tokens": 1840,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": {
+              "observed": [
+                11,
+                7,
+                491,
+                3,
+                355
+              ],
+              "expected": [
+                11,
+                7,
+                491,
+                3,
+                361
+              ]
+            },
+            "observed_sum": 6653,
+            "expected_sum": 6129,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q05",
+          "finish_reason": "stop",
+          "tokens": 247,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_TEXT_OR_COUNT",
+            "observed_lines": 82,
+            "required_lines": 80,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q06",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_PARTIAL_NUMBERS",
+            "parsed_rows": 6,
+            "first_wrong": {
+              "observed": [
+                1,
+                41,
+                202,
+                206
+              ],
+              "expected": [
+                1,
+                11,
+                86,
+                114
+              ]
+            },
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q07",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 23,
+            "first_wrong": {
+              "observed": [
+                4,
+                6,
+                226,
+                2,
+                70
+              ],
+              "expected": [
+                4,
+                6,
+                226,
+                2,
+                49
+              ]
+            },
+            "observed_sum": null,
+            "expected_sum": 6073,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q08",
+          "finish_reason": "stop",
+          "tokens": 326,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": {
+              "row": 1,
+              "observed": [
+                1,
+                22,
+                133,
+                44
+              ],
+              "expected": [
+                1,
+                13,
+                175,
+                156
+              ]
+            },
+            "expected_queue": [
+              109,
+              71,
+              203,
+              1,
+              239,
+              190,
+              130
+            ],
+            "observed_queue": [
+              16,
+              32,
+              6,
+              43,
+              22,
+              13,
+              38
+            ],
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q09",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "INCOMPLETE_OR_UNPARSED",
+            "parsed_rows": 5,
+            "first_wrong": null,
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q10",
+          "finish_reason": "stop",
+          "tokens": 1926,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": null,
+            "observed_sum": 5177,
+            "expected_sum": 5972,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q11",
+          "finish_reason": "stop",
+          "tokens": 416,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_TEXT_OR_COUNT",
+            "observed_lines": 83,
+            "required_lines": 81,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q12",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_PARTIAL_NUMBERS",
+            "parsed_rows": 8,
+            "first_wrong": {
+              "observed": [
+                1,
+                45,
+                251,
+                191
+              ],
+              "expected": [
+                1,
+                15,
+                15,
+                35
+              ]
+            },
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q13",
+          "finish_reason": "stop",
+          "tokens": 1835,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": null,
+            "observed_sum": 4647,
+            "expected_sum": 5047,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q14",
+          "finish_reason": "stop",
+          "tokens": 326,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": {
+              "row": 1,
+              "observed": [
+                1,
+                24,
+                178,
+                22
+              ],
+              "expected": [
+                1,
+                17,
+                207,
+                234
+              ]
+            },
+            "expected_queue": [
+              124,
+              37,
+              41,
+              15,
+              143,
+              132,
+              247
+            ],
+            "observed_queue": [
+              47,
+              17,
+              36,
+              18,
+              34,
+              8,
+              47
+            ],
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q15",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "INCOMPLETE_OR_UNPARSED",
+            "parsed_rows": 2,
+            "first_wrong": null,
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        }
+      ],
+      "ranks": [
+        {
+          "rank": 0,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 1,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 2,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 3,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 4,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 5,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 6,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 7,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 8,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 9,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 10,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 11,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 12,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 13,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 14,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 15,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        }
+      ]
+    },
+    "spmd_tnd": {
+      "task": "task_20261024_161311_122118513877",
+      "task_exit_code": 0,
+      "results": "/data/pyptouser/qinchuanyu/pto-eager/csa-repro-20261024-current/model-results/eos2048_spmd_tnd_b16",
+      "functional_status": "PASS",
+      "requests": 256,
+      "output_tokens": 354144,
+      "preemptions": 0,
+      "mean_accepted": 4.371089012854718,
+      "completion_all_16_dp": {
+        "length": 112,
+        "stop": 144
+      },
+      "quality_distinct_answers": {
+        "scope": "同问题、同token和同结束原因的DP副本合并；正常结束与答案正确性分别判断",
+        "unique_questions": 16,
+        "unique_answers": 16,
+        "normal_stop": 9,
+        "token_limit": 7,
+        "complete_correct": 0,
+        "limitation": "INCOMPLETE_OR_UNPARSED须人工核对；格式备注与内容正确性分开，不把Native答案当真值"
+      },
+      "question_verdicts": [
+        {
+          "key": "h131072_q00",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "INCOMPLETE_OR_UNPARSED",
+            "parsed_rows": 6,
+            "first_wrong": null,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q01",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 23,
+            "first_wrong": {
+              "observed": [
+                13,
+                11,
+                505,
+                9,
+                24
+              ],
+              "expected": [
+                13,
+                11,
+                505,
+                9,
+                18
+              ]
+            },
+            "observed_sum": null,
+            "expected_sum": 5638,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q02",
+          "finish_reason": "stop",
+          "tokens": 326,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": {
+              "row": 1,
+              "observed": [
+                1,
+                20,
+                92,
+                63
+              ],
+              "expected": [
+                1,
+                9,
+                5,
+                24
+              ]
+            },
+            "expected_queue": [
+              140,
+              20,
+              51,
+              239,
+              28,
+              91,
+              230
+            ],
+            "observed_queue": [
+              14,
+              30,
+              4,
+              39,
+              20,
+              9,
+              40
+            ],
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q03",
+          "finish_reason": "stop",
+          "tokens": 556,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS_OR_ORDER",
+            "parsed_rows": 20,
+            "first_wrong": {
+              "position": 1,
+              "observed": {
+                "id": "f1",
+                "net": 4739,
+                "score": 1008,
+                "tag": "C"
+              },
+              "expected": {
+                "id": "n0",
+                "net": 3069,
+                "score": 965,
+                "tag": "A"
+              }
+            },
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q04",
+          "finish_reason": "stop",
+          "tokens": 1840,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": {
+              "observed": [
+                11,
+                7,
+                491,
+                3,
+                355
+              ],
+              "expected": [
+                11,
+                7,
+                491,
+                3,
+                361
+              ]
+            },
+            "observed_sum": 6653,
+            "expected_sum": 6129,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q05",
+          "finish_reason": "stop",
+          "tokens": 247,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_TEXT_OR_COUNT",
+            "observed_lines": 82,
+            "required_lines": 80,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q06",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_PARTIAL_NUMBERS",
+            "parsed_rows": 6,
+            "first_wrong": {
+              "observed": [
+                1,
+                41,
+                202,
+                206
+              ],
+              "expected": [
+                1,
+                11,
+                86,
+                114
+              ]
+            },
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q07",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 23,
+            "first_wrong": {
+              "observed": [
+                4,
+                6,
+                226,
+                2,
+                70
+              ],
+              "expected": [
+                4,
+                6,
+                226,
+                2,
+                49
+              ]
+            },
+            "observed_sum": null,
+            "expected_sum": 6073,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q08",
+          "finish_reason": "stop",
+          "tokens": 326,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": {
+              "row": 1,
+              "observed": [
+                1,
+                22,
+                133,
+                44
+              ],
+              "expected": [
+                1,
+                13,
+                175,
+                156
+              ]
+            },
+            "expected_queue": [
+              109,
+              71,
+              203,
+              1,
+              239,
+              190,
+              130
+            ],
+            "observed_queue": [
+              16,
+              32,
+              6,
+              43,
+              22,
+              13,
+              38
+            ],
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q09",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "INCOMPLETE_OR_UNPARSED",
+            "parsed_rows": 5,
+            "first_wrong": null,
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q10",
+          "finish_reason": "stop",
+          "tokens": 1926,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": null,
+            "observed_sum": 5177,
+            "expected_sum": 5972,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q11",
+          "finish_reason": "stop",
+          "tokens": 416,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_TEXT_OR_COUNT",
+            "observed_lines": 83,
+            "required_lines": 81,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q12",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_PARTIAL_NUMBERS",
+            "parsed_rows": 8,
+            "first_wrong": {
+              "observed": [
+                1,
+                45,
+                251,
+                191
+              ],
+              "expected": [
+                1,
+                15,
+                15,
+                35
+              ]
+            },
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q13",
+          "finish_reason": "stop",
+          "tokens": 1835,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": null,
+            "observed_sum": 4647,
+            "expected_sum": 5047,
+            "format_notes": []
+          }
+        },
+        {
+          "key": "h131072_q14",
+          "finish_reason": "stop",
+          "tokens": 326,
+          "complete_correct": false,
+          "verdict": {
+            "content": "WRONG_NUMBERS",
+            "parsed_rows": 24,
+            "first_wrong": {
+              "row": 1,
+              "observed": [
+                1,
+                24,
+                178,
+                22
+              ],
+              "expected": [
+                1,
+                17,
+                207,
+                234
+              ]
+            },
+            "expected_queue": [
+              124,
+              37,
+              41,
+              15,
+              143,
+              132,
+              247
+            ],
+            "observed_queue": [
+              47,
+              17,
+              36,
+              18,
+              34,
+              8,
+              47
+            ],
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        },
+        {
+          "key": "h131072_q15",
+          "finish_reason": "length",
+          "tokens": 2048,
+          "complete_correct": false,
+          "verdict": {
+            "content": "INCOMPLETE_OR_UNPARSED",
+            "parsed_rows": 2,
+            "first_wrong": null,
+            "format_notes": [
+              "含Markdown代码围栏，内容与格式分开核对"
+            ]
+          }
+        }
+      ],
+      "ranks": [
+        {
+          "rank": 0,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 1,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 2,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 3,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 4,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 5,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 6,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 7,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 8,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 9,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 10,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 11,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 12,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 13,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 14,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        },
+        {
+          "rank": 15,
+          "completion": {
+            "length": 7,
+            "stop": 9
+          },
+          "external_workspace_bytes": 0,
+          "all_csa_graph_replay_proven": true,
+          "full_steps": 43,
+          "tail_steps": 350,
+          "padding_steps": 349,
+          "no_python_resubmission": true
+        }
+      ]
+    }
+  },
+  "pairs": {
+    "native_vs_spmd_tnd": {
+      "requests": 256,
+      "tokens": 354384,
+      "output_tokens_by_mode": {
+        "native": 297520,
+        "spmd_tnd": 354144
+      },
+      "matched_requests": 48,
+      "token_mismatches": 245760,
+      "matched_draft_event_requests": 16,
+      "by_kind": {
+        "easy_repeat": {
+          "requests": 32,
+          "matched_requests": 16
+        },
+        "ledger_transform": {
+          "requests": 48,
+          "matched_requests": 16
+        },
+        "python_trace": {
+          "requests": 96,
+          "matched_requests": 0
+        },
+        "transition_trace": {
+          "requests": 80,
+          "matched_requests": 16
+        }
+      }
+    },
+    "native_vs_mpmd_tnd": {
+      "requests": 256,
+      "tokens": 354384,
+      "output_tokens_by_mode": {
+        "native": 297520,
+        "mpmd_tnd": 354144
+      },
+      "matched_requests": 48,
+      "token_mismatches": 245760,
+      "matched_draft_event_requests": 16,
+      "by_kind": {
+        "easy_repeat": {
+          "requests": 32,
+          "matched_requests": 16
+        },
+        "ledger_transform": {
+          "requests": 48,
+          "matched_requests": 16
+        },
+        "python_trace": {
+          "requests": 96,
+          "matched_requests": 0
+        },
+        "transition_trace": {
+          "requests": 80,
+          "matched_requests": 16
+        }
+      }
+    },
+    "spmd_tnd_vs_mpmd_tnd": {
+      "requests": 256,
+      "tokens": 354144,
+      "output_tokens_by_mode": {
+        "spmd_tnd": 354144,
+        "mpmd_tnd": 354144
+      },
+      "matched_requests": 256,
+      "token_mismatches": 0,
+      "matched_draft_event_requests": 256,
+      "by_kind": {
+        "easy_repeat": {
+          "requests": 32,
+          "matched_requests": 32
+        },
+        "ledger_transform": {
+          "requests": 48,
+          "matched_requests": 48
+        },
+        "python_trace": {
+          "requests": 96,
+          "matched_requests": 96
+        },
+        "transition_trace": {
+          "requests": 80,
+          "matched_requests": 80
+        }
+      }
+    }
+  },
+  "download": "/data/pyptouser/qinchuanyu/pto-eager/downloads/CSA_TND_CANN92_B16_EOS2048_20261024",
+  "interpretation": "旧192token简单题PASS仅证明前缀。完整答案另检查结束原因、重复次数及题意数值；截断和未解析不计通过，不把Native当真值，不改问题或阈值。",
+  "not_validated": [
+    "本轮未新生成KV，复用已审计本地bank",
+    "本轮未验证B24正常EOS/2048",
+    "不作性能结论"
+  ]
+}
