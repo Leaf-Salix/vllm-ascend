@@ -68,7 +68,7 @@ def select_case(manifest, name, boundary_query_length=None):
     return case
 
 
-def export_l1(source, destination, side, kernel_config):
+def export_l1(source, destination, side, kernel_config, *, allow_spmd_prologue=False):
     """使用 incore begin/end 字段，不用派发时间，也不累加重叠 task。"""
     import subprocess
 
@@ -81,8 +81,13 @@ def export_l1(source, destination, side, kernel_config):
     if any(len(r) != 6 or r[4] < r[3] or r[3] <= 0 for r in rows):
         raise ValueError("incore 时间戳非法")
     task_ids = {r[1] for r in rows}
-    if side == "spmd" and (len(rows) != 72 or len(task_ids) != 1):
-        raise ValueError("冻结 SPMD 基线不再是完整 MIX SPMD")
+    if side == "spmd":
+        if allow_spmd_prologue:
+            # 内部工作区版先清零signal；完整L1必须把这些初始化task也计入。
+            if not any(len({r[0] for r in rows if r[1] == task}) == 72 for task in task_ids):
+                raise ValueError("SPMD记录缺少覆盖72核的主体task")
+        elif len(rows) != 72 or len(task_ids) != 1:
+            raise ValueError("冻结 SPMD 基线不再是完整 MIX SPMD")
     if side.startswith("mpmd") and len(task_ids) <= 1:
         raise ValueError("MPMD 必须包含多个独立调度 task")
     names = {}

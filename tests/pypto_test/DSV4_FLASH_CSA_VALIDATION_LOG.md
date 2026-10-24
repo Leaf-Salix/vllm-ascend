@@ -23843,3 +23843,57 @@ v25 eager与v27 graph在每请求192token结束、模型未销毁时的rank0空�
 为保留实际回答，不修改原文以消除这些告警；排除该生成报告后，其余暂存改动检查
 通过。前述普通git diff --check不等同于新加入原文文件也无whitespace告警；本次明确
 保留这一边界，不声称全仓格式检查通过。它不影响已完成的设备功能和token对照。
+
+
+### 735.123 两阶段复现手册更新进行中（2026-10-24）
+
+用户要求更新DSV4_CSA_REPRODUCTION_20261021.md并提交对应分支，随后明确拆为
+纯PyTorch单卡与安装vLLM后的16卡decode两阶段，手册去掉CANN9.0内容，后续统一9.2。
+远端已核对：PyPTO feat/csa-mpmd-upstream-fixes-20261021为d44925c1，PTOAS同名
+分支914863ed，Simpler dsv4-csa-spmd-repro-20261019为57e49923；三仓干净且均在线。
+vLLM源码752a3a50来自官方仓且工作区干净。未为依赖创建新分支或改共享SDK。
+
+旧纯PyTorch入口仍传已删除allocator参数，新current.py使用当前两种TND的普通55参
+入口及显式诊断入口，检查零外部scratch、eager、两次NPUGraph与保护区；可选L1至少
+10窗/侧，计入SPMD内部signal清零的前序task。新增与性能规范相同业务描述的C01～C08
+场景，C04为T96，C08为原始T56。旧入口和旧版本证据保留在Git，不再作为新手册主入口。
+
+在工作区csa-repro-20261024-current新建纯PyTorch .venv和独立model-source，SDK
+仍指向公共已构建版本。第一次单卡task_20261024_144446_207397018399因测试场景
+缺reverse_pages字段在输入构造阶段退出1，没有执行PTO；补齐字段后冻结cases-v2，
+任务task_20261024_144639_21197692428顺序验证C04和C08。C04已完成两侧诊断、普通
+入口、图和post-L1，全部通过；SPMD/MPMD各10窗，完整结果及泳道在独立目录。
+C08尚在运行，不能先标两场景均通过。纯入口未导入vLLM或注册Native自定义算子。
+
+第二阶段的offline_pd/run.py新增正式权重本机路径CLI并转发给全部DP子进程，
+模型run.sh新增环境、bank、vLLM源码、host/nic参数，保留原默认行为和严格graph门禁。
+CPU启动器测试验证模型路径、HCCL容量和网卡信息贯穿prefill/decode子进程，已通过。
+
+发现历史Native构建缓存仍指向旧工具包，不能将已有CANN9.2运行记录称为全部9.2
+源码构建。按用户新口径，在独立model-source验证9.2完整构建；C++扩展已成功构建
+安装，未替换共享产物。AscendC包构建先缺GNU patch，已私有安装2.7.6；随后第三方
+abseil在GCC15下报uintptr_t缺头，准备使用与C++扩展相同的系统GCC10.3.1重新构建。
+两阶段手册只保留9.2构建/运行步骤，历史失败归主日志，不混入复现主流程。
+
+新 .venv-model 的固定Python依赖集合已安装；Triton Ascend3.2.2不在默认PyPI镜像，
+已查官方安装指南，需使用https://mirrors.huaweicloud.com/ascend/repos/pypi源。
+本轮仍在验证入口和构建，不宣称新独立16卡环境已通过，也未提交未验证的手册。
+
+
+### 735.124 当前内部工作区版本的独立PyTorch单卡复现完成（2026-10-24）
+
+task_20261024_144639_21197692428已exit=0，C04与原始C08均complete/框架外直接调用。
+两种TND的诊断入口、普通入口、两次图重放及C04采样后输出/cache/state/Top-K检查全部
+通过，所有已对照数值逐bit一致，保护区通过；普通入口55个外部Tensor、scratch为0，
+没有写入测试专用Top-K缓冲。新 .venv 未安装vLLM/vLLM-Ascend，运行也没有导入vLLM
+或注册Native自定义算子。源码冻结，SDK仍是公共同一套已构建产物，不复制或重建它。
+
+C04使用第4层正式权重、seed1024、H131072/B16/S6/T96，SPMD与MPMD各10个完整L1窗；
+SPMD median808.81us、MPMD median965.80us，包含内部signal清零与task等待。
+此处是纯PyTorch输入的两侧同进程对照，不填入Native六列性能表或与旧版本计算收益。
+C08保持T56容量、固定混长顺序，仅做功能，不额外采性能。汇总见
+csa_torch_repro/verification_single_card_20261024.json，原始结果及泳道在
+工作区csa-repro-20261024-current/results/v2/。
+
+第一阶段入口已验证；第二阶段仍在验证新的CANN9.2 Native构建和独立模型环境，
+此阶段提交不声称新16卡环境已经完成。手册草稿仍待最终固定版本和第二阶段证据。
