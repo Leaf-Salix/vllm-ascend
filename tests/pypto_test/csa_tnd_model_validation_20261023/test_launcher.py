@@ -26,6 +26,8 @@ class LaunchConfigurationTest(unittest.TestCase):
                 bank.mkdir()
                 (bank / "audit.json").write_text(json.dumps({"status": "PASS"}))
                 argv = [str(source), command, "--bank", str(bank), "--output", str(root / "out")]
+                model = root / "formal-checkpoint"
+                argv += ["--model", str(model), "--host", "127.0.0.1", "--nic", "lo"]
                 if explicit:
                     argv += ["--hccl-buffer-mb", str(explicit)]
                 children = []
@@ -46,6 +48,9 @@ class LaunchConfigurationTest(unittest.TestCase):
                 for cmd, env in children:
                     self.assertEqual(env["HCCL_BUFFSIZE"], str(expected))
                     self.assertEqual(cmd[cmd.index("--hccl-buffer-mb") + 1], str(expected))
+                    self.assertEqual(cmd[cmd.index("--model") + 1], str(model))
+                    self.assertEqual(env["HCCL_IF_IP"], "127.0.0.1")
+                    self.assertEqual(env["HCCL_SOCKET_IFNAME"], "lo")
 
 
 if __name__ == "__main__":

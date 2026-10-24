@@ -23897,3 +23897,28 @@ csa_torch_repro/verification_single_card_20261024.json，原始结果及泳道�
 
 第一阶段入口已验证；第二阶段仍在验证新的CANN9.2 Native构建和独立模型环境，
 此阶段提交不声称新16卡环境已经完成。手册草稿仍待最终固定版本和第二阶段证据。
+
+
+### 735.125 独立环境的CANN9.2 Native构建与16卡参考完成（2026-10-24）
+
+第二阶段使用csa-repro-20261024-current/.venv-model、官方vLLM752a3a50及独立
+model-source27891ae42。公共PyPTO/PTOAS/Simpler不变；新构建不修改共享Native产物。
+Native C++扩展和15个自定义AscendC算子均显式指定CANN9.2.0-beta.2，以GCC10.3.1、
+CMake3.31.10构建安装通过。CPack暴露makeself路径硬编码，修正custom_build.cmake
+使用makeself-fetch.cmake的MAKESELF_PATH后完整打包成功，外置第三方源码路径可用。
+
+新模型环境首次启动漏加载配套ATB，Native/MPMD在worker初始化时报libatb.so缺失
+并退出1，SPMD停止退出130，均未执行模型CSA。已在新的env-model-v2.sh中加载
+ATB9.2.0-beta.2的C++ ABI1，不恢复其他版本ATB；失败和新任务使用不同输出目录。
+
+重试Native任务task_20261024_154604_4978330221已退出0，16rank、256请求、49152
+输出token，功能检查PASS、零抢占，DSpark mean accepted=3.806501547987616，接受
+长度0～5均覆盖。静态编译和superkernel均关闭，图配置npugraph_ex/FULL_DECODE_ONLY。
+本轮只读复用已审计的mixed128k_fixed，不宣称重新生成了KV；手册保留接收方自行生成
+公共前缀、40问题后缀及审计的完整流程。
+
+当前MPMD task_20261024_154843_13509429120、SPMD task_20261024_154843_13518127865
+排队，不能先标全部模型复现通过。更新后的路径CLI使用显式args.model，未增加可变
+全局状态；CPU回归已覆盖prefill/decode向每个DP子进程传递权重路径、网卡和HCCL容量。
+手册已按两阶段重写且只给CANN/ATB9.2步骤，15段Bash语法及本地链接检查通过；仍待
+两种PTO新环境模型结果、最终源码SHA和证据整理后发布。

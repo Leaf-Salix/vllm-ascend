@@ -52,9 +52,9 @@ def write_json(path, data):
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
-def read_plan(bank):
+def read_plan(bank, model=FORMAL_MODEL):
     plan = json.loads((bank / "plan.json").read_text())
-    if plan["model"] != FORMAL_MODEL:
+    if plan["model"] != str(model):
         raise ValueError("Only the formal ModelSlim checkpoint is authorized")
     return plan
 
@@ -66,7 +66,7 @@ def make_plan(args):
     bank.mkdir(parents=True, exist_ok=True)
     if (bank / "plan.json").exists():
         raise FileExistsError(bank / "plan.json")
-    model = Path(FORMAL_MODEL)
+    model = args.model
     index = json.loads((model / "quant_model_weights.safetensors.index.json").read_text())
     shards = sorted(set(index["weight_map"].values()))
     if len(shards) != 75 or any(not (model / shard).is_file() for shard in shards):
@@ -87,7 +87,7 @@ def make_plan(args):
             cases.append({"key": key, "history": history, "p_dp_rank": variant,
                           "tokens": f"{key}.tokens.json"})
     write_json(bank / "plan.json", {
-        "schema": 1, "model": FORMAL_MODEL,
+        "schema": 1, "model": str(model),
         "weight_shards": len(shards), "weight_bytes": sum((model / s).stat().st_size for s in shards),
         "prefill": {"tp": 4, "dp": 4, "ep": 16},
         "decode": {"tp": 1, "dp": 16, "ep": 16, "speculative_tokens": 5},
@@ -181,8 +181,8 @@ def audit(args):
     from prefix import cache_contract, prefix_tensor
     from safetensors.torch import load_file
 
-    plan = read_plan(args.bank)
-    config = json.loads((Path(FORMAL_MODEL) / "config.json").read_text())
+    plan = read_plan(args.bank, args.model)
+    config = json.loads((args.model / "config.json").read_text())
     expected = cache_contract(config)
     results, payloads = [], []
     for case in plan["cases"]:
@@ -785,7 +785,7 @@ def worker(args):
     # Match `vllm serve` model/config registration before constructing LLM.
     current_platform.pre_register_and_update()
 
-    plan = read_plan(args.bank)
+    plan = read_plan(args.bank, args.model)
     prefill = args.command == "prefill"
     if prefill and plan.get("inherited_prefix_bank"):
         raise ValueError("派生bank只复用源前缀，禁止向它的cache软链接写入prefill结果")
@@ -1089,6 +1089,7 @@ def launch(args):
             if args.command == "swimlane" and rank == args.swimlane_rank:
                 env["OFFLINE_PTO_SWIMLANE_DIR"] = str((args.output / "swimlane").resolve())
             cmd = [sys.executable, str(Path(__file__).resolve()), args.command,
+                   "--model", str(args.model),
                    "--bank", str(args.bank.resolve()), "--output", str(args.output.resolve()),
                    "--rank", str(rank), "--batch", str(args.batch),
                    "--rank-batch", str(rank_counts[rank]),
@@ -1170,6 +1171,8 @@ def main():
                                             "swimlane", "swimlane-export",
                                             "padding-capture", "steady", "bitcompare", "argdump", "moe-routing"])
     parser.add_argument("--bank", type=Path, required=True)
+    parser.add_argument("--model", type=Path, default=Path(FORMAL_MODEL),
+                        help="同一正式ModelSlim权重在本机的路径；未指定时保留原默认路径")
     parser.add_argument("--save-extended-bank", type=Path,
                         help="仅Native/eager/B1或显式混合批次：加载旧前缀，prefill后缀并保存新的固定前缀")
     parser.add_argument("--mixed-requests", action="store_true",
@@ -1258,6 +1261,7 @@ def main():
     parser.add_argument("--analyse-processes", type=int, default=16, help="离线解析使用的进程数上限")
     parser.add_argument("--compare-top", type=int, default=25, help="profile-compare列出的kernel差异条数")
     args = parser.parse_args()
+    args.model = args.model.expanduser().absolute()
     if args.save_extended_bank:
         if (args.command != "decode" or args.backend != "native" or args.graph_mode != "eager"
                 or (args.batch != 1 and not args.mixed_requests)
@@ -1284,13 +1288,13 @@ def main():
             parser.error("扫描 batch 须严格递增，且在 1..--batch 范围内")
         if args.rank_batch not in (None, args.batch) or args.rank_decode_token not in (None, args.decode_tokens):
             parser.error("扫描不能覆盖单 rank 的请求数或生成长度")
-        query = read_plan(args.bank)["decode"]["speculative_tokens"] + 1
+        query = read_plan(args.bank, args.model)["decode"]["speculative_tokens"] + 1
         if args.graph_mode != "full_decode_only" or not set(
             b * query for b in [*batches, args.batch]
         ).issubset(args.capture_sizes or []):
             parser.error("扫描须使用 full_decode_only，并显式捕获每个 batch 及容量的 S6 档位")
     if args.command in ("steady", "performance"):
-        query = read_plan(args.bank)["decode"]["speculative_tokens"] + 1
+        query = read_plan(args.bank, args.model)["decode"]["speculative_tokens"] + 1
         minimum = (args.warmup_steps + args.steady_cycles + 3) * query
         if args.steady_cycles < 10 or args.warmup_steps < 0 or args.decode_tokens < minimum:
             parser.error(f"稳态至少采 10 个周期；--decode-tokens 须 >= {minimum}，为收尾留余量")

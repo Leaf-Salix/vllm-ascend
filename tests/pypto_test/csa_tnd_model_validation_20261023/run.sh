@@ -12,6 +12,11 @@ single_card_gate=
 ring_heap_mb=
 ring_task_window=
 hccl_buffer_mb=1800
+environment=
+bank=
+vllm_root=
+host=192.168.0.106
+nic=enp23s0f3
 if [[ $# -gt 0 && "$1" != --* ]]; then batch=$1; shift; fi
 if [[ $# -gt 0 && "$1" != --* ]]; then budget=$1; shift; fi
 if [[ $# -gt 0 && "$1" != --* ]]; then single_card_gate=$1; shift; fi
@@ -20,6 +25,11 @@ while [[ $# -gt 0 ]]; do
         --ring-heap-mb) ring_heap_mb=${2:?}; shift 2 ;;
         --ring-task-window) ring_task_window=${2:?}; shift 2 ;;
         --hccl-buffer-mb) hccl_buffer_mb=${2:?}; shift 2 ;;
+        --environment) environment=${2:?}; shift 2 ;;
+        --bank) bank=${2:?}; shift 2 ;;
+        --vllm-root) vllm_root=${2:?}; shift 2 ;;
+        --host) host=${2:?}; shift 2 ;;
+        --nic) nic=${2:?}; shift 2 ;;
         --device) shift 2 ;; # 队列已通过TASK_DEVICE指定实际设备
         *) exit 2 ;;
     esac
@@ -29,10 +39,16 @@ if [[ "$batch" != 16 && "$batch" != 24 ]]; then exit 2; fi
 record=$(dirname "$source_tree")/manifest.json
 repo=$(python -c 'import json,sys;print(json.load(open(sys.argv[1]))["repository"])' "$record")
 workspace=$(dirname "$repo")
-source "$workspace/env-dsv4-0251rc1.sh"
-source "$repo/tests/pypto_test/results/csa_native_template_20260929/env.sh"
+if [[ -n "$environment" ]]; then
+    source "$environment"
+else
+    source "$workspace/env-dsv4-0251rc1.sh"
+    source "$repo/tests/pypto_test/results/csa_native_template_20260929/env.sh"
+fi
 source "$repo/tests/pypto_test/csa_shared_toolchain/env.sh"
-bank="$workspace/csa-repro-20261021-clean/kv-repro/mixed128k_fixed"
+bank=$(realpath "${bank:-$workspace/csa-repro-20261021-clean/kv-repro/mixed128k_fixed}")
+vllm_root=$(realpath "${vllm_root:-$workspace/.cache/migration-v0.25.1rc1/vllm}")
+model=$(python -c 'import json,sys;print(json.load(open(sys.argv[1]))["model"])' "$bank/plan.json")
 mkdir "$output"
 python - "$record" "$CSA_SHARED_TOOLCHAIN_MANIFEST" "$bank" "$output" "$variant" "$batch" "$budget" "$single_card_gate" "$ring_heap_mb" "$ring_task_window" "$hccl_buffer_mb" <<'PY'
 import json, pathlib, sys
@@ -72,7 +88,7 @@ data['require_tnd_graph_replay'] = bool(data.get('require_tnd_graph_replay') and
 (pathlib.Path(output) / 'configuration.json').write_text(json.dumps(data, ensure_ascii=False, indent=2)+'\n')
 PY
 export LD_LIBRARY_PATH="$repo/.cache/csa/native-install:$LD_LIBRARY_PATH"
-export PYTHONPATH="$source_tree:$source_tree/tests/pypto_test:$workspace/.cache/migration-v0.25.1rc1/vllm:$PYTHONPATH"
+export PYTHONPATH="$source_tree:$source_tree/tests/pypto_test:$vllm_root:${PYTHONPATH:-}"
 export VLLM_ASCEND_PTO_CSA_ATOMIC_ADD=0 PTO_CSA_RUNTIME=tensormap_and_ringbuffer
 export PTO_CSA_VARIANT="$variant"
 if [[ -n "$ring_heap_mb" ]]; then
@@ -87,7 +103,7 @@ export DYNAMIC_EPLB=false EXPERT_MAP_RECORD=false
 export ASCEND_WORK_PATH="$output/ascend" ASCEND_PROCESS_LOG_PATH="$output/ascend/log"
 export PYPTO_PROG_BUILD_DIR="$output/build" PYPTO_CACHE_DIR="$output/pypto_cache"
 export VLLM_CACHE_ROOT="$output/vllm_cache" ASCEND_CACHE_PATH="$output/ascend_cache"
-export TORCH_EXTENSIONS_DIR="$workspace/csa-repro-20261021-clean/torch_extensions"
+export TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-$workspace/csa-repro-20261021-clean/torch_extensions}"
 export TORCHINDUCTOR_CACHE_DIR="$output/inductor_cache" TRITON_CACHE_DIR="$output/triton_cache"
 mkdir -p "$ASCEND_PROCESS_LOG_PATH" "$ASCEND_CACHE_PATH" "$PYPTO_CACHE_DIR" "$VLLM_CACHE_ROOT" \
     "$PYPTO_PROG_BUILD_DIR" "$TORCHINDUCTOR_CACHE_DIR" "$TRITON_CACHE_DIR" "$output/compile"
@@ -96,9 +112,10 @@ backend=pto
 [[ "$variant" == native ]] && backend=native
 cd "$output/compile"
 python "$source_tree/tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py" \
-    --shared-toolchain --workspace-root "$workspace" --vllm-root "$workspace/.cache/migration-v0.25.1rc1/vllm" \
+    --shared-toolchain --workspace-root "$workspace" --vllm-root "$vllm_root" \
     "$source_tree/tests/pypto_test/offline_pd/run.py" decode \
-    --bank "$bank" --output "$output" --backend "$backend" --pto-attention csa --mixed-requests \
+    --bank "$bank" --model "$model" --host "$host" --nic "$nic" \
+    --output "$output" --backend "$backend" --pto-attention csa --mixed-requests \
     --decode-dp 16 --gpu-memory-utilization "$budget" --batch "$batch" --deterministic \
     --hccl-buffer-mb "$hccl_buffer_mb" \
     --decode-tokens 192 --weight-nz-mode 2 --graph-mode full_decode_only --no-static-kernel \

@@ -876,7 +876,9 @@ if (NOT ENABLE_BUILT_IN AND BUILD_OPEN_PROJECT)
       if (EXISTS ${ASCEND_CMAKE_DIR}/makeself.cmake)
         set(CPACK_EXTERNAL_PACKAGE_SCRIPT ${ASCEND_CMAKE_DIR}/makeself.cmake)
       else()
-        set(CPACK_MAKESELF_PATH ${OPS_TRANSFORMER_DIR}/third_party/makeself)
+        # Keep the package generator aligned with makeself-fetch.cmake when
+        # CANN_3RD_LIB_PATH points outside the source tree.
+        set(CPACK_MAKESELF_PATH "${MAKESELF_PATH}")
         set(CPACK_EXTERNAL_PACKAGE_SCRIPT ${CMAKE_SOURCE_DIR}/cmake/makeself_custom.cmake)
       endif()
     endif()
