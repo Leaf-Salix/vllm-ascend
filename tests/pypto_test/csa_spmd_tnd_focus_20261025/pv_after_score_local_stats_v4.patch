@@ -1,0 +1,11 @@
+--- a/policy.py
++++ b/policy.py
+@@ -217,7 +217,7 @@
+         # 同一AIV生产和消费的mi/li留在UB三槽；只在长历史G6/N128域默认启用。
+         # B4/B8/B15/B16重复测得收益；短历史T>96两点方向不一致，保留原GM。
+         # 实际T/请求边界仍在device读取；依赖编译器删除关闭分支的死Tile状态。
+-        local_attention_stats=long_history and group == 6 and tokens <= LOCAL_STATS_MAX_TOKENS,
++        local_attention_stats=long_history and group == 6 and tokens <= 192,
+         # 连续scale读取需要先在META证明页布局；该工作并非所有负载都划算。
+         # 沿已有小M16并行域和O_A N256的较大T域启用，中间域保留逐页读取。
+         # 不按B/history验收点枚举；页是否连续仍由本轮device表完整证明。

@@ -1,0 +1,95 @@
+--- a/attention_stream_stages.py
++++ b/attention_stream_stages.py
+@@ -372,8 +372,6 @@
+                                                     qk_kv_half, cmp_kv_flat, [qk_row, 0], [qk_src, 0], [1, HEAD_DIM]
+                                                 )
+                 pl.store(qk_kv_half, [qk_kv_row + qk_lane_kv, 0], kv_transfer)
+-        # 大档先消费上一块SCORE通知，再发布已经写好的本块KV；
+-        # 先让Cube推进，再做上一块softmax，同时限制SCORE覆盖速度。
+         if t_dim >= EARLY_KV_MIN_TOKENS:
+             if qk_tick > 0 and qk_tick <= qk_block_count:
+                 if (
+@@ -394,24 +392,59 @@
+                     pl.system.sync_set(
+                         EVENT_BASE + QK_KV_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
+                     )
++        sm_scores_hold = pl.tile.create([H // 2, ATTN_K_TILE], dtype=pl.FP32)
++        sm_bias_hold = pl.tile.create([1, ATTN_K_TILE], dtype=pl.FP32)
++        if qk_tick > 0 and qk_tick <= qk_block_count:
++            sm_work = qk_tick - 1
++            sm_sb = sm_work % SPARSE_BLOCKS
++            sm_t = qk_core + (sm_work // SPARSE_BLOCKS) * CORE_GROUPS
++            sm_active_valid = pl.read(valid_block_mask, [sm_t, sm_sb])
++            if sm_active_valid > 0:
++                sm_row = (qk_core * QK_TRANSFER_SLOTS + sm_work % QK_TRANSFER_SLOTS) * H
++                if t_dim < EARLY_KV_MIN_TOKENS:
++                    pl.system.sync_wait(
++                        EVENT_BASE + QK_SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV
++                    )
++                sm_scores = pl.load(score_transfer, [sm_row + qk_lane_head, 0], [H // 2, ATTN_K_TILE])
++                sm_bias = pl.load(sparse_bias, [sm_t, sm_sb * ATTN_K_TILE], [1, ATTN_K_TILE])
++                sm_scores_valid, sm_bias_valid = pl.yield_(sm_scores, sm_bias)
++            else:
++                sm_scores_valid, sm_bias_valid = pl.yield_(sm_scores_hold, sm_bias_hold)
++            sm_active, prefetched_scores, prefetched_bias = pl.yield_(sm_active_valid, sm_scores_valid, sm_bias_valid)
++        else:
++            sm_active, prefetched_scores, prefetched_bias = pl.yield_(pl.cast(0, pl.INT32), sm_scores_hold, sm_bias_hold)
++        pv_left_hold = pl.tile.create([H // 2, HEAD_DIM // 2], dtype=pl.FP32)
++        if qk_tick >= QK_PRE_LAUNCH + 1:
++            pf_pv_work = qk_tick - QK_PRE_LAUNCH - 1
++            pf_pv_sb = pf_pv_work % SPARSE_BLOCKS
++            pf_pv_t = qk_core + (pf_pv_work // SPARSE_BLOCKS) * CORE_GROUPS
++            if pl.read(valid_block_mask, [pf_pv_t, pf_pv_sb]) > 0:
++                pf_pv_slot = qk_core * QK_TRANSFER_SLOTS + pf_pv_work % QK_TRANSFER_SLOTS
++                pf_pv_row = pf_pv_slot * H
++                pl.system.sync_wait(EVENT_BASE + QK_PV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
++                pf_pv_left = pl.load(pv_transfer, [pf_pv_row + qk_lane_head, 0], [H // 2, HEAD_DIM // 2])
++                pv_left_valid = pl.yield_(pf_pv_left)
++            else:
++                pv_left_valid = pl.yield_(pv_left_hold)
++            prefetched_pv_left = pl.yield_(pv_left_valid)
++        else:
++            prefetched_pv_left = pl.yield_(pv_left_hold)
++        # 大档先消费上一块SCORE通知，再发布已经写好的本块KV；
++        # 先让Cube推进，再做上一块softmax，同时限制SCORE覆盖速度。
+         if qk_tick > 0 and qk_tick <= qk_block_count:
+             softmax_work = qk_tick - 1
+             softmax_sb = softmax_work % SPARSE_BLOCKS
+             softmax_t = qk_core + (softmax_work // SPARSE_BLOCKS) * CORE_GROUPS
+-            if pl.read(valid_block_mask, [softmax_t, softmax_sb]) > 0:
++            if sm_active > 0:
+                 qk_slot = qk_core * QK_TRANSFER_SLOTS + softmax_work % QK_TRANSFER_SLOTS
+                 qk_transfer_row = qk_slot * H
+                 qk_s0 = softmax_sb * ATTN_K_TILE
+-                if t_dim < EARLY_KV_MIN_TOKENS:
+-                    pl.system.sync_wait(
+-                        EVENT_BASE + QK_SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV
+-                    )
+                 # 整条 H//2 一次做完：原先按 SOFTMAX_HEAD_TILE=8 切成四段，
+                 # 是 ATTN_K_TILE=512 时 UB 放不下留下的，现在 128 宽已无必要。
+                 # 归约临时区不跨块保存状态，限制在此阶段，让末块发布复用UB。
+                 qk_reduce_tmp = pl.create_tile([H // 2, ATTN_K_TILE], dtype=pl.FP32, target_memory=pl.MemorySpace.Vec)
+-                qk_scores_half = pl.load(score_transfer, [qk_transfer_row + qk_lane_head, 0], [H // 2, ATTN_K_TILE])
+-                qk_bias = pl.load(sparse_bias, [softmax_t, qk_s0], [1, ATTN_K_TILE])
++                qk_scores_half = prefetched_scores
++                qk_bias = prefetched_bias
+                 qk_masked = pl.col_expand_add(pl.mul(qk_scores_half, SOFTMAX_SCALE), qk_bias)
+                 # 块内取局部最大值，跨块的重标定挪到下面的归并里；
+                 # 这样每块 softmax 互不依赖，流水才排得开。
+@@ -461,7 +494,6 @@
+             if pl.read(valid_block_mask, [pv_t, pv_sb]) > 0:
+                 pv_slot = qk_core * QK_TRANSFER_SLOTS + pv_work % QK_TRANSFER_SLOTS
+                 pv_transfer_row = pv_slot * H
+-                pl.system.sync_wait(EVENT_BASE + QK_PV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
+                 # 同一 work 的 mi/li 已在两拍前产生；使用本 tick 更新后的环，
+                 # 当前 softmax 与 merge 相差两槽，互不覆盖。仍先等 PV_READY，
+                 # 此优化不代替 Cube 写回完成通知，也不缩短原流水排空。
+@@ -496,7 +528,7 @@
+                 alpha = pl.exp(pl.sub(m_iter, next_m))
+                 beta = pl.exp(pl.sub(pv_m, next_m))
+                 next_l = pl.add(pl.mul(alpha, l_iter), pl.mul(beta, pv_l))
+-                pv_left = pl.load(pv_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, HEAD_DIM // 2])
++                pv_left = prefetched_pv_left
+                 next_left = pl.add(pl.row_expand_mul(left_iter, alpha), pl.row_expand_mul(pv_left, beta))
+                 pv_right = pl.load(
+                     pv_transfer, [pv_transfer_row + qk_lane_head, HEAD_DIM // 2], [H // 2, HEAD_DIM // 2]
