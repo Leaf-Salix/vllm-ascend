@@ -1,0 +1,23 @@
+--- a/projection_overlap_stages.py
++++ b/projection_overlap_stages.py
+@@ -40,6 +40,8 @@
+ """
+ 
+ import pypto.language as pl
++
++from .qb_tall import q_b_tall_stage
+ 
+ from .compressor_projection_stages import compressor_project_stage
+ from .indexer_compressor_output_stages import indexer_compressor_hadamard_stage
+@@ -171,7 +173,10 @@
+         # 后部连续N个物理核对N取模是双射，既覆盖全部列块，也让NZ地址从
+         # 非负表达式构成。消费者等待全部Q_B实际生产者，不依赖置换前的编号。
+         qb_worker = worker % (GROUPS - BRANCH_GROUPS)
+-        q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, qb_worker, GROUPS - BRANCH_GROUPS, QB_WIDE_N)
++        if JOINT_BF16_PREFIX and tokens > 128 and tokens <= 192:
++            q_proj = q_b_tall_stage(wq_b, qr_matmul, q_proj, tokens, qb_worker, GROUPS - BRANCH_GROUPS)
++        else:
++            q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, qb_worker, GROUPS - BRANCH_GROUPS, QB_WIDE_N)
+         signal = publish_phase(signal, PHASE_QB, worker, CORES, generation)
+     # 同一组24个KV逻辑worker做循环置换，保持全部M/N块唯一归属。常见的
+     # 最多12个非空worker落在Q_B一侧，不继续堆到Hadamard辅助核；即便
