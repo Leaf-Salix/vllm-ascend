@@ -1,22 +1,7 @@
 {
-  "status": "investigating",
+  "status": "archived_after_user_cleared_goal",
   "user_instruction": "好好查内部工作区迁移为何变慢，把性能恢复回来",
-  "pending_tasks": [
-    {
-      "task_id": "task_20261025_204944_2121601438",
-      "case": "C04",
-      "attempt": "h131072_b16_s6_init_arrive_overlap_v1_r1",
-      "candidate": "init_arrive_overlap_v1",
-      "purpose": "原MIX初始化到达/等待之间重叠独立RMS和metadata；三侧各10窗及严格检查"
-    },
-    {
-      "task_id": "task_20261025_204944_2114353050",
-      "case": "C01",
-      "attempt": "h131072_b1_s6_init_arrive_overlap_v1_r1",
-      "candidate": "init_arrive_overlap_v1",
-      "purpose": "原MIX初始化到达/等待之间重叠独立RMS和metadata；三侧各10窗及严格检查"
-    }
-  ],
+  "pending_tasks": [],
   "adopted_changes": [],
   "baseline_not_redefined": true,
   "CPU_gate": "runs/codegen_initial_triple_C04/result.json",
@@ -232,6 +217,63 @@
       "purpose": "修正后的四点时间戳诊断，不作收益",
       "status": "completed (exit=0)",
       "result": "h131072_b16_s6_boot_clock_v3_r2_result.json"
+    },
+    {
+      "task_id": "task_20261025_204944_2114353050",
+      "case": "C01",
+      "attempt": "h131072_b1_s6_init_arrive_overlap_v1_r1",
+      "candidate": "init_arrive_overlap_v1",
+      "purpose": "原MIX初始化到达/等待之间重叠独立RMS和metadata；三侧各10窗及严格检查",
+      "status": "completed (exit=0)",
+      "result": "h131072_b1_s6_init_arrive_overlap_v1_r1_result.json"
+    },
+    {
+      "task_id": "task_20261025_204944_2121601438",
+      "case": "C04",
+      "attempt": "h131072_b16_s6_init_arrive_overlap_v1_r1",
+      "candidate": "init_arrive_overlap_v1",
+      "purpose": "原MIX初始化到达/等待之间重叠独立RMS和metadata；三侧各10窗及严格检查",
+      "status": "completed (exit=0)",
+      "result": "h131072_b16_s6_init_arrive_overlap_v1_r1_result.json"
+    },
+    {
+      "task_id": "task_20261025_205353_35384111279",
+      "case": "C04",
+      "attempt": "h131072_b16_s6_identical_source_AA_r1",
+      "candidate": "internal_single_f72a",
+      "purpose": "A/A：同一f72源码注册两份对照，检查准备/分配/实例差异；无算法变化，不计优化收益",
+      "status": "completed (exit=0)",
+      "result": "h131072_b16_s6_identical_source_AA_r1_result.json"
+    },
+    {
+      "task_id": "task_20261025_212217_12686468087",
+      "case": "C01",
+      "attempt": "h131072_b1_s6_init_arrive_overlap_v1_r2",
+      "candidate": "init_arrive_overlap_v1",
+      "device": 0,
+      "purpose": "B1正收益后反向准备顺序、同卡复测稳定性",
+      "status": "completed (exit=0)",
+      "result": "h131072_b1_s6_init_arrive_overlap_v1_r2_result.json"
+    },
+    {
+      "task_id": "task_20261025_213055_149506010067",
+      "case": "C04",
+      "attempt": "h131072_b16_s6_init_arrive_rms_v1_r1",
+      "candidate": "init_arrive_rms_v1",
+      "device": 1,
+      "purpose": "拆分RMS/metadata提前的独立消融；同SDK三侧严格正确性与完整L1各10窗",
+      "status": "completed (exit=0)",
+      "result": "h131072_b16_s6_init_arrive_rms_v1_r1_result.json"
+    },
+    {
+      "task_id": "task_20261025_213055_14943503947",
+      "case": "C04",
+      "attempt": "h131072_b16_s6_init_arrive_meta_v1_r1",
+      "candidate": "init_arrive_meta_v1",
+      "device": 3,
+      "purpose": "拆分RMS/metadata提前的独立消融；同SDK三侧严格正确性与完整L1各10窗",
+      "status": "completed (exit=0)",
+      "result": "h131072_b16_s6_init_arrive_meta_v1_r1_result.json"
     }
   ],
   "initial_comparison": "initial_triple_C04_r1.json",
@@ -242,6 +284,15 @@
     "init_ablation_CPU_gate.json"
   ],
   "original_stop_superseded_by_user_recovery_request": true,
-  "next_analysis": "已收齐boot_clock_v3的B1/B16各20窗，固定MIX拓扑逐核验证2880段；编译初始化到达/等待拆分并重叠纯RMS/metadata的候选，尚未采用。",
-  "user_L2_hypothesis": "历史测试所有scratch有构造时填充，signal额外zero_一次；CANN总体L2读命中未明显退化，额外预热无收益；不能排除局部布局效应，性能恢复未完成。"
+  "next_analysis": "用户已清除goal；仅归档提交并推送，不继续自动优化。B1候选尚未生产验收；B16未恢复历史763.65us。",
+  "user_L2_hypothesis": "历史测试所有scratch有构造时填充，signal额外zero_一次；CANN总体L2读命中未明显退化，额外预热无收益；不能排除局部布局效应，性能恢复未完成。",
+  "user_cleared_goal": true,
+  "goal_achieved": false,
+  "optimization_continues_automatically": false,
+  "production_code_commit": "f72a1f752",
+  "CPU_feasibility_failures": [
+    "static_nd_signature_compile_failed.json",
+    "static_nd_local_shape_reassignment_failed.json",
+    "static_nd_noninvertible_wrapper_shape_failed.json"
+  ]
 }

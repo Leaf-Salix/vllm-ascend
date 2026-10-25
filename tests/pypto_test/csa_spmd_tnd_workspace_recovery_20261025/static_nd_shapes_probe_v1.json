@@ -1,0 +1,3762 @@
+{
+  "candidate": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_workspace_recovery_20261025/candidates/static_nd_shapes_probe_v1",
+  "parent": "internal_single_f72a",
+  "CPU_feasibility_only": true,
+  "adopted": false,
+  "only_parameter_annotations_changed_AST_verified": true,
+  "all_computations_and_control_flow_unchanged": true,
+  "explicit_non_ND_layout_annotations_unchanged": true,
+  "shared_SDK_unchanged": true,
+  "scope": "ND Tensor容量由实际绑定形状推导特化；请求Q/L/positions/pages的值仍全部由设备运行时读取",
+  "open_requirements": [
+    "确认原调用域、dtype与形状合同没有放宽，所有Native绑定校验仍保留",
+    "确认实际生成物的参数处理/Scalar指令得到减少，不能仅凭注解变化宣称优化",
+    "候选编译数量/缓存占用以及混长、padding、同址metadata和多图服务验证",
+    "尚未通过CPU可行性或NPU验证，禁止作为正式版本使用"
+  ],
+  "changes": {
+    "projection_overlap_stages": [
+      {
+        "parameter": "query_rope",
+        "before": "pl.Tensor[[IDX_ROPE_HEAD_ROWS, 128], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "query_had",
+        "before": "pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "normed",
+        "before": "pl.Tensor[[T, 4096], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_value",
+        "before": "pl.Tensor[[MPROJ, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_score",
+        "before": "pl.Tensor[[MPROJ, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "weights_partial",
+        "before": "pl.Tensor[[WEIGHTS_PARTIAL_ROWS, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "query_rope",
+        "before": "pl.Tensor[[IDX_ROPE_HEAD_ROWS, 128], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "query_had",
+        "before": "pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_matmul",
+        "before": "pl.Tensor[[QR_ROWS, 1024], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "q_proj",
+        "before": "pl.Tensor[[QPROJ_ROWS, 32768], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_lengths",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_normed",
+        "before": "pl.Tensor[[ICPAD, 128], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_had",
+        "before": "pl.Tensor[[ICPAD, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_fp32",
+        "before": "pl.Tensor[[KV_ROWS, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "signal",
+        "before": "pl.Tensor[[WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "output_projection_a_stages": [
+      {
+        "parameter": "o_packed",
+        "before": "pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_r_pad",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_packed",
+        "before": "pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_r_pad",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_packed",
+        "before": "pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_r_pad",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_packed",
+        "before": "pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_r_pad",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_packed",
+        "before": "pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_r_pad",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_packed",
+        "before": "pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_r_pad",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_r_pad",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_r_i8_pad",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "act_scale_dq",
+        "before": "pl.Tensor[[O_GROUPS, SCALE_ROWS_DYN], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_r_pad",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_r_i8_pad",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "act_scale_dq",
+        "before": "pl.Tensor[[O_GROUPS, SCALE_ROWS_DYN], pl.FP32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "indexer_topk_stages": [
+      {
+        "parameter": "pair_arena",
+        "before": "pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pair_arena",
+        "before": "pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_arena",
+        "before": "pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pair_arena",
+        "before": "pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pair_arena",
+        "before": "pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_arena",
+        "before": "pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "attention_plan_stages": [
+      {
+        "parameter": "table",
+        "before": "pl.Tensor[[REQUESTS_DYN, COMPRESSED_COLUMNS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "compressed_table",
+        "before": "pl.Tensor[[REQUESTS_DYN, COMPRESSED_COLUMNS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "indices",
+        "before": "pl.Tensor[[PLAN_CAP_DYN, TOPK], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "topk",
+        "before": "pl.Tensor[[T_DYN, TOPK], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "original_table",
+        "before": "pl.Tensor[[REQUESTS_DYN, ORIGINAL_COLUMNS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "compressed_table",
+        "before": "pl.Tensor[[REQUESTS_DYN, COMPRESSED_COLUMNS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "indices",
+        "before": "pl.Tensor[[PLAN_CAP_DYN, TOPK], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bias",
+        "before": "pl.Tensor[[PLAN_CAP_DYN, BIAS_COLS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "valid_blocks",
+        "before": "pl.Tensor[[PLAN_CAP_DYN, MASK_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "signals",
+        "before": "pl.Tensor[[SIGNAL_WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "plan",
+        "before": "pl.Tensor[[PLAN_CAP_DYN, MASK_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "sin",
+        "before": "pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "signed_sin",
+        "before": "pl.Tensor[[ROPE_CAP_DYN, ROPE_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "joint_prefix_stages": [
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T, 4096], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "output",
+        "before": "pl.Tensor[[MPROJ, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T, 4096], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "output",
+        "before": "pl.Tensor[[KV_ROWS, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "normed",
+        "before": "pl.Tensor[[T, 4096], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_value",
+        "before": "pl.Tensor[[MPROJ, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_score",
+        "before": "pl.Tensor[[MPROJ, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_fp32",
+        "before": "pl.Tensor[[KV_ROWS, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "request_geometry": [
+      {
+        "parameter": "query_start_loc",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "seq_lens",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "query_start_loc",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "seq_lens",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "query_start_loc",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "seq_lens",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "indexer_score_stages": [
+      {
+        "parameter": "qr_hadamard_i8",
+        "before": "pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "coefficients",
+        "before": "pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_kv_cache",
+        "before": "pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_kv_cache_shift64",
+        "before": "pl.Tensor[[KEY64_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_native_kv_cache",
+        "before": "pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_block_table",
+        "before": "pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "position_ids",
+        "before": "pl.Tensor[[TOKENS_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_seq_lens",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "buf_score_transfer",
+        "before": "pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_hadamard_i8",
+        "before": "pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "coefficients",
+        "before": "pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_kv_cache",
+        "before": "pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_kv_cache_shift64",
+        "before": "pl.Tensor[[KEY64_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_native_kv_cache",
+        "before": "pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_block_table",
+        "before": "pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "position_ids",
+        "before": "pl.Tensor[[TOKENS_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_seq_lens",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "buf_score_transfer",
+        "before": "pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_hadamard_i8",
+        "before": "pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "coefficients",
+        "before": "pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_kv_cache",
+        "before": "pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_kv_cache_shift64",
+        "before": "pl.Tensor[[KEY64_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_native_kv_cache",
+        "before": "pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_block_table",
+        "before": "pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "position_ids",
+        "before": "pl.Tensor[[TOKENS_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_seq_lens",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "buf_score_transfer",
+        "before": "pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_native_kv_cache",
+        "before": "pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_block_table",
+        "before": "pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "position_ids",
+        "before": "pl.Tensor[[TOKENS_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_seq_lens",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "buf_score_transfer",
+        "before": "pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pair_arena",
+        "before": "pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_native_kv_cache",
+        "before": "pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_block_table",
+        "before": "pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "position_ids",
+        "before": "pl.Tensor[[TOKENS_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_seq_lens",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "buf_score_transfer",
+        "before": "pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_arena",
+        "before": "pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pair_arena",
+        "before": "pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "vector_schedule": [
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T, 16384], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "x_fp32",
+        "before": "pl.Tensor[[T, 16384], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "inv",
+        "before": "pl.Tensor[[P16, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "partials",
+        "before": "pl.Tensor[[PARTIAL, 32], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "raw",
+        "before": "pl.Tensor[[P16, 32], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pre",
+        "before": "pl.Tensor[[P16, 8], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "post",
+        "before": "pl.Tensor[[T, 4], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "comb",
+        "before": "pl.Tensor[[T, 16], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "mixed",
+        "before": "pl.Tensor[[P8, 4096], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "normed",
+        "before": "pl.Tensor[[T, 4096], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qa",
+        "before": "pl.Tensor[[P16, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr",
+        "before": "pl.Tensor[[T, 1024], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_scale",
+        "before": "pl.Tensor[[T, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_matmul",
+        "before": "pl.Tensor[[QR_ROWS, 1024], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_scale_pad",
+        "before": "pl.Tensor[[P8, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_cos",
+        "before": "pl.Tensor[[T, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_sin",
+        "before": "pl.Tensor[[T, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_signed",
+        "before": "pl.Tensor[[T, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_swap",
+        "before": "pl.Tensor[[T, 64], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "q_proj",
+        "before": "pl.Tensor[[QPROJ_ROWS, 32768], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "q_flat",
+        "before": "pl.Tensor[[T, 32768], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_fp32",
+        "before": "pl.Tensor[[KV_ROWS, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv",
+        "before": "pl.Tensor[[T, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "native_slots",
+        "before": "pl.Tensor[[T, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cache_rows",
+        "before": "pl.Tensor[[CACHE_ROWS, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_value",
+        "before": "pl.Tensor[[MPROJ, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_score",
+        "before": "pl.Tensor[[MPROJ, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_state",
+        "before": "pl.Tensor[[MSTATE_PAGES, MSTATE_ELEMS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_state_table",
+        "before": "pl.Tensor[[B, MTABLE_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_bounds",
+        "before": "pl.Tensor[[MQ], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_lengths",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_state_slots",
+        "before": "pl.Tensor[[T, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_pooled",
+        "before": "pl.Tensor[[MPOOL, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_cos",
+        "before": "pl.Tensor[[MC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_sin",
+        "before": "pl.Tensor[[MC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_offsets",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_slots",
+        "before": "pl.Tensor[[MSLOTS, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_normed",
+        "before": "pl.Tensor[[MNORM, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_debug",
+        "before": "pl.Tensor[[T, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_cache",
+        "before": "pl.Tensor[[MCACHE_ROWS, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_value",
+        "before": "pl.Tensor[[IPROJ, 256], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_score",
+        "before": "pl.Tensor[[IPROJ, 256], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_state",
+        "before": "pl.Tensor[[ISTATE_PAGES, ISTATE_ELEMS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_state_table",
+        "before": "pl.Tensor[[B, ITABLE_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_bounds",
+        "before": "pl.Tensor[[IQ], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_lengths",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_state_slots",
+        "before": "pl.Tensor[[T, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_pooled",
+        "before": "pl.Tensor[[IPOOL, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_cos",
+        "before": "pl.Tensor[[IC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_sin",
+        "before": "pl.Tensor[[IC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_offsets",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_slots",
+        "before": "pl.Tensor[[ISLOTS, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_normed",
+        "before": "pl.Tensor[[ICPAD, 128], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_had",
+        "before": "pl.Tensor[[ICPAD, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_scales",
+        "before": "pl.Tensor[[ISCALES, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_debug",
+        "before": "pl.Tensor[[T, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_cache",
+        "before": "pl.Tensor[[ICACHE_PAGES, ICACHE_BYTES], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "original_table",
+        "before": "pl.Tensor[[B, ORIGINAL_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "compressed_table",
+        "before": "pl.Tensor[[B, COMPRESSED_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "indexer_table",
+        "before": "pl.Tensor[[B, INDEXER_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_acc",
+        "before": "pl.Tensor[[IDX_PROJ_ROWS, 8192], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_rope",
+        "before": "pl.Tensor[[IDX_ROPE_ROWS, 8192], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_had",
+        "before": "pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_i8",
+        "before": "pl.Tensor[[IDX_HEAD_ROWS, 128], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_scale",
+        "before": "pl.Tensor[[IDX_HEAD_ROWS, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_scale_heads",
+        "before": "pl.Tensor[[IDX_SCALE_T_ROWS, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "weights_partial",
+        "before": "pl.Tensor[[WEIGHTS_PARTIAL_ROWS, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "head_weights",
+        "before": "pl.Tensor[[WEIGHTS_ROWS, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "group_offsets",
+        "before": "pl.Tensor[[GROUP_OFFSET_ROWS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "coefficients",
+        "before": "pl.Tensor[[COEFF_ROWS, COEFF_COLS], pl.FP16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "indexer_transfer",
+        "before": "pl.Tensor[[INDEX_TRANSFER_ROWS, INDEX_TRANSFER_COLS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_arena",
+        "before": "pl.Tensor[[SCORE_ROWS, 8192], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pair_arena",
+        "before": "pl.Tensor[[PAIR_ROWS, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "topk_scores",
+        "before": "pl.Tensor[[T, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "topk_indices",
+        "before": "pl.Tensor[[T, 512], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "attention_indices",
+        "before": "pl.Tensor[[ATTN_PLAN_ROWS, 512], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "attention_bias",
+        "before": "pl.Tensor[[ATTN_PLAN_ROWS, 640], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "attention_mask",
+        "before": "pl.Tensor[[ATTN_PLAN_ROWS, 16], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "inverse_sin",
+        "before": "pl.Tensor[[T, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_ring",
+        "before": "pl.Tensor[[KV_RING_ROWS, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_ring",
+        "before": "pl.Tensor[[HEAD_RING_ROWS, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "probability_ring",
+        "before": "pl.Tensor[[HEAD_RING_ROWS, 128], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pv_ring",
+        "before": "pl.Tensor[[HEAD_RING_ROWS, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "mi_ring",
+        "before": "pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "li_ring",
+        "before": "pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "packed",
+        "before": "pl.Tensor[[PACK_ROWS, 4096], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_r",
+        "before": "pl.Tensor[[O_MM_ROWS, 8192], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_quant",
+        "before": "pl.Tensor[[O_MM_ROWS, 8192], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_scales",
+        "before": "pl.Tensor[[8, O_SCALE_ROWS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_partials",
+        "before": "pl.Tensor[[O_MM_ROWS, 32768], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "output",
+        "before": "pl.Tensor[[T, 16384], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "signal",
+        "before": "pl.Tensor[[WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "compressor_projection_stages": [
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T_DYN, D], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_proj_pad",
+        "before": "pl.Tensor[[MAIN_PAD_ROWS_DYN, CMP_OUT_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_proj_pad",
+        "before": "pl.Tensor[[MAIN_PAD_ROWS_DYN, CMP_OUT_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T_DYN, D], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_proj_pad",
+        "before": "pl.Tensor[[INDEXER_PAD_ROWS_DYN, INDEXER_OUT_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_proj_pad",
+        "before": "pl.Tensor[[INDEXER_PAD_ROWS_DYN, INDEXER_OUT_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "indexer_group_stages": [
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[TOKENS_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[TOKENS_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[TOKENS_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "scales",
+        "before": "pl.Tensor[[SCALE_ROWS_DYN, HEADS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "weights",
+        "before": "pl.Tensor[[WEIGHT_ROWS_DYN, HEADS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[TOKENS_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "coefficients",
+        "before": "pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "attention_stream_stages": [
+      {
+        "parameter": "q_flat",
+        "before": "pl.Tensor[[Q_ROWS_DYN, HEAD_DIM], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "valid_block_mask",
+        "before": "pl.Tensor[[PLAN_CAP_DYN, 16], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_transfer",
+        "before": "pl.Tensor[[KV_RING_ROWS_DYN, HEAD_DIM], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_transfer",
+        "before": "pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "probability_transfer",
+        "before": "pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pv_transfer",
+        "before": "pl.Tensor[[HEAD_RING_ROWS_DYN, HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "ori_kv_flat",
+        "before": "pl.Tensor[[ORIGINAL_ROWS_DYN, HEAD_DIM], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cmp_kv_flat",
+        "before": "pl.Tensor[[COMPRESSED_ROWS_DYN, HEAD_DIM], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "ori_block_table",
+        "before": "pl.Tensor[[REQUESTS_DYN, ORIGINAL_COLUMNS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cmp_block_table",
+        "before": "pl.Tensor[[REQUESTS_DYN, COMPRESSED_COLUMNS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "position_ids",
+        "before": "pl.Tensor[[T_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cmp_sparse_indices",
+        "before": "pl.Tensor[[PLAN_CAP_DYN, CMP_TOPK], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "sparse_bias",
+        "before": "pl.Tensor[[PLAN_CAP_DYN, 640], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "valid_block_mask",
+        "before": "pl.Tensor[[PLAN_CAP_DYN, 16], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "freqs_cos",
+        "before": "pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_sin_signed",
+        "before": "pl.Tensor[[ROPE_CAP_DYN, ROPE_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_transfer",
+        "before": "pl.Tensor[[KV_RING_ROWS_DYN, HEAD_DIM], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_transfer",
+        "before": "pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "probability_transfer",
+        "before": "pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pv_transfer",
+        "before": "pl.Tensor[[HEAD_RING_ROWS_DYN, HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "mi_transfer",
+        "before": "pl.Tensor[[HEAD_RING_ROWS_DYN, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "li_transfer",
+        "before": "pl.Tensor[[HEAD_RING_ROWS_DYN, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_packed_heads",
+        "before": "pl.Tensor[[PACK_ROWS_DYN, O_GROUP_IN], pl.BF16]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "score_group_order_stages": [
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[ORDER_WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[ORDER_WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "phase_sync": [
+      {
+        "parameter": "signals",
+        "before": "pl.Tensor[[SIGNAL_WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "signals",
+        "before": "pl.Tensor[[SIGNAL_WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "signals",
+        "before": "pl.Tensor[[SIGNAL_WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "signals",
+        "before": "pl.Tensor[[SIGNAL_WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "fused_coefficients": [
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[TOKENS_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "coefficients",
+        "before": "pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qh_acc_gm",
+        "before": "pl.Tensor[[HADAMARD_ROWS_DYN, IDX_HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_hadamard_i8",
+        "before": "pl.Tensor[[QUANT_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_hadamard_scale_dq",
+        "before": "pl.Tensor[[SCALE_ROWS_DYN, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "weights",
+        "before": "pl.Tensor[[WEIGHT_ROWS_DYN, HEADS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[TOKENS_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "coefficients",
+        "before": "pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "indexer_compressor_output_stages": [
+      {
+        "parameter": "pooled",
+        "before": "pl.Tensor[[POOL_ROWS_DYN, HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cos",
+        "before": "pl.Tensor[[COMPACT_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "sin",
+        "before": "pl.Tensor[[COMPACT_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "normed",
+        "before": "pl.Tensor[[COMPACT_PAD_ROWS_DYN, HEAD_DIM], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "normed",
+        "before": "pl.Tensor[[COMPACT_PAD_ROWS_DYN, HEAD_DIM], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "output",
+        "before": "pl.Tensor[[COMPACT_PAD_ROWS_DYN, HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "indexer_cache_stages": [
+      {
+        "parameter": "values",
+        "before": "pl.Tensor[[VALUE_ROWS_DYN, HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "slots",
+        "before": "pl.Tensor[[SLOT_ROWS_DYN, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "scale_values",
+        "before": "pl.Tensor[[SCALE_ROWS_DYN, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_debug",
+        "before": "pl.Tensor[[T_DYN, HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cache",
+        "before": "pl.Tensor[[CACHE_PAGES_DYN, CACHE_BYTES_DYN], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "scale_values",
+        "before": "pl.Tensor[[SCALE_ROWS_DYN, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "slots",
+        "before": "pl.Tensor[[SLOT_ROWS_DYN, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cache",
+        "before": "pl.Tensor[[CACHE_PAGES_DYN, CACHE_BYTES_DYN], pl.INT8]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "output_projection_b_stages": [
+      {
+        "parameter": "o_r_i8_pad",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "partials",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * D], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_r_i8_pad",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "partials",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * D], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_r_i8_pad",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "partials",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * D], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "partials",
+        "before": "pl.Tensor[[MM_ROWS_DYN, O_GROUPS * D], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "act_scale_dq",
+        "before": "pl.Tensor[[O_GROUPS, SCALE_ROWS_DYN], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "residual_flat",
+        "before": "pl.Tensor[[T_DYN, HC_MULT * D], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "post",
+        "before": "pl.Tensor[[T_DYN, HC_MULT], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "comb",
+        "before": "pl.Tensor[[T_DYN, HC_MULT * HC_MULT], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "out_flat",
+        "before": "pl.Tensor[[T_DYN, HC_MULT * D], pl.BF16]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "indexer_publish_stages": [
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[TOKENS_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "attention_metadata",
+        "before": "pl.Tensor[[PLAN_CAP_DYN, IDX_TOPK], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "signals",
+        "before": "pl.Tensor[[SIGNAL_WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pair_arena",
+        "before": "pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "topk_scores",
+        "before": "pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "topk_indices",
+        "before": "pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[TOKENS_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_arena",
+        "before": "pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "topk_scores",
+        "before": "pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "topk_indices",
+        "before": "pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_arena",
+        "before": "pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "topk_scores",
+        "before": "pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "topk_indices",
+        "before": "pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.INT32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "indexer_query_stages": [
+      {
+        "parameter": "qr",
+        "before": "pl.Tensor[[T_DYN, Q_LORA], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_acc_pad",
+        "before": "pl.Tensor[[PROJ_ROWS_DYN, IDX_N_HEADS * IDX_HEAD_DIM], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_scale",
+        "before": "pl.Tensor[[T_DYN, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cos",
+        "before": "pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "sin",
+        "before": "pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_acc_pad",
+        "before": "pl.Tensor[[PROJ_ROWS_DYN, IDX_N_HEADS * IDX_HEAD_DIM], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_bf16_2d",
+        "before": "pl.Tensor[[ROPE_ROWS_DYN, IDX_N_HEADS * IDX_HEAD_DIM], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_bf16",
+        "before": "pl.Tensor[[ROPE_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qh_acc_gm",
+        "before": "pl.Tensor[[HADAMARD_ROWS_DYN, IDX_HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qh_acc_gm",
+        "before": "pl.Tensor[[HADAMARD_ROWS_DYN, IDX_HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_hadamard_i8",
+        "before": "pl.Tensor[[QUANT_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_hadamard_scale_dq",
+        "before": "pl.Tensor[[SCALE_ROWS_DYN, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T_DYN, D], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "weights_partial",
+        "before": "pl.Tensor[[WEIGHTS_PARTIAL_ROWS_DYN, IDX_N_HEADS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "weights_partial",
+        "before": "pl.Tensor[[WEIGHTS_PARTIAL_ROWS_DYN, IDX_N_HEADS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "weights",
+        "before": "pl.Tensor[[WEIGHTS_ROWS_DYN, IDX_N_HEADS], pl.FP32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "indexer_scale_plan_stages": [
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "compact_offsets",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "slots",
+        "before": "pl.Tensor[[SLOT_ROWS_DYN, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cache",
+        "before": "pl.Tensor[[CACHE_PAGES_DYN, CACHE_BYTES_DYN], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "workspace",
+        "before": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "workspace",
+        "before": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cache",
+        "before": "pl.Tensor[[CACHE_PAGES_DYN, CACHE_BYTES_DYN], pl.INT8]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "indexer_scale_layout_stages": [
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "block_table",
+        "before": "pl.Tensor[[REQUESTS_DYN, LAYOUT_TABLE_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "workspace",
+        "before": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "cube_schedule": [
+      {
+        "parameter": "x_fp32",
+        "before": "pl.Tensor[[T, 16384], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "partials",
+        "before": "pl.Tensor[[PARTIAL, 32], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "normed",
+        "before": "pl.Tensor[[T, 4096], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qa",
+        "before": "pl.Tensor[[P16, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr",
+        "before": "pl.Tensor[[T, 1024], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_matmul",
+        "before": "pl.Tensor[[QR_ROWS, 1024], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "q_proj",
+        "before": "pl.Tensor[[QPROJ_ROWS, 32768], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_fp32",
+        "before": "pl.Tensor[[KV_ROWS, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_value",
+        "before": "pl.Tensor[[MPROJ, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_score",
+        "before": "pl.Tensor[[MPROJ, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_value",
+        "before": "pl.Tensor[[IPROJ, 256], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_score",
+        "before": "pl.Tensor[[IPROJ, 256], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_bounds",
+        "before": "pl.Tensor[[IQ], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_lengths",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_normed",
+        "before": "pl.Tensor[[ICPAD, 128], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_had",
+        "before": "pl.Tensor[[ICPAD, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_cache",
+        "before": "pl.Tensor[[ICACHE_PAGES, ICACHE_BYTES], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "q_heads",
+        "before": "pl.Tensor[[QUERY_HEAD_ROWS, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "indexer_table",
+        "before": "pl.Tensor[[B, INDEXER_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_acc",
+        "before": "pl.Tensor[[IDX_PROJ_ROWS, 8192], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_rope_heads",
+        "before": "pl.Tensor[[IDX_ROPE_HEAD_ROWS, 128], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_had",
+        "before": "pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_i8",
+        "before": "pl.Tensor[[IDX_HEAD_ROWS, 128], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "weights_partial",
+        "before": "pl.Tensor[[WEIGHTS_PARTIAL_ROWS, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "group_offsets",
+        "before": "pl.Tensor[[GROUP_OFFSET_ROWS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "coefficients",
+        "before": "pl.Tensor[[COEFF_ROWS, COEFF_COLS], pl.FP16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_key0",
+        "before": "pl.Tensor[[KEY0_ROWS, 128], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_key64",
+        "before": "pl.Tensor[[KEY64_ROWS, 128], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "indexer_transfer",
+        "before": "pl.Tensor[[INDEX_TRANSFER_ROWS, INDEX_TRANSFER_COLS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "attention_mask",
+        "before": "pl.Tensor[[ATTN_PLAN_ROWS, 16], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_ring",
+        "before": "pl.Tensor[[KV_RING_ROWS, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_ring",
+        "before": "pl.Tensor[[HEAD_RING_ROWS, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "probability_ring",
+        "before": "pl.Tensor[[HEAD_RING_ROWS, 128], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pv_ring",
+        "before": "pl.Tensor[[HEAD_RING_ROWS, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "packed",
+        "before": "pl.Tensor[[PACK_ROWS, 4096], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_r",
+        "before": "pl.Tensor[[O_MM_ROWS, 8192], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_quant",
+        "before": "pl.Tensor[[O_MM_ROWS, 8192], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_partials",
+        "before": "pl.Tensor[[O_MM_ROWS, 32768], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "signal",
+        "before": "pl.Tensor[[WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "attention_dependencies": [
+      {
+        "parameter": "signals",
+        "before": "pl.Tensor[[SIGNAL_WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "signals",
+        "before": "pl.Tensor[[SIGNAL_WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "hc_stages": [
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T_DYN, HC_DIM], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "x_fp32",
+        "before": "pl.Tensor[[T_DYN, HC_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "inv_rms",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T_DYN, HC_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "mixes_partials",
+        "before": "pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "mixes_partials",
+        "before": "pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "mixes_raw",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, MIX_PAD], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "partials",
+        "before": "pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "raw",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, MIX_PAD], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "inv_rms",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "mixes_raw",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, MIX_PAD], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pre_val_store",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, HC_PAD], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "post",
+        "before": "pl.Tensor[[T_DYN, HC_MULT], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "partials",
+        "before": "pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "inv_rms",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "mixes_raw",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, MIX_PAD], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "comb",
+        "before": "pl.Tensor[[T_DYN, HC_MULT * HC_MULT], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "partials",
+        "before": "pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T_DYN, HC_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pre_val_store",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, HC_PAD], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "x_mixed",
+        "before": "pl.Tensor[[MIX_ROWS_DYN, D], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "x_normed",
+        "before": "pl.Tensor[[T_DYN, D], pl.BF16]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "vector_prefix_stages": [
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_value",
+        "before": "pl.Tensor[[IPROJ, 256], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_score",
+        "before": "pl.Tensor[[IPROJ, 256], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_state",
+        "before": "pl.Tensor[[ISTATE_PAGES, ISTATE_ELEMS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_state_table",
+        "before": "pl.Tensor[[B, ITABLE_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_bounds",
+        "before": "pl.Tensor[[IQ], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_lengths",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_state_slots",
+        "before": "pl.Tensor[[T, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_pooled",
+        "before": "pl.Tensor[[IPOOL, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_cos",
+        "before": "pl.Tensor[[IC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_sin",
+        "before": "pl.Tensor[[IC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_offsets",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_normed",
+        "before": "pl.Tensor[[ICPAD, 128], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "signal",
+        "before": "pl.Tensor[[WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_value",
+        "before": "pl.Tensor[[MPROJ, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_score",
+        "before": "pl.Tensor[[MPROJ, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_state",
+        "before": "pl.Tensor[[MSTATE_PAGES, MSTATE_ELEMS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_state_table",
+        "before": "pl.Tensor[[B, MTABLE_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_bounds",
+        "before": "pl.Tensor[[MQ], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_lengths",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_state_slots",
+        "before": "pl.Tensor[[T, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_pooled",
+        "before": "pl.Tensor[[MPOOL, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_cos",
+        "before": "pl.Tensor[[MC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_sin",
+        "before": "pl.Tensor[[MC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_offsets",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_slots",
+        "before": "pl.Tensor[[MSLOTS, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_normed",
+        "before": "pl.Tensor[[MNORM, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_debug",
+        "before": "pl.Tensor[[T, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_cache",
+        "before": "pl.Tensor[[MCACHE_ROWS, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "signal",
+        "before": "pl.Tensor[[WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_cos",
+        "before": "pl.Tensor[[T, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_signed",
+        "before": "pl.Tensor[[T, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_swap",
+        "before": "pl.Tensor[[T, 64], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_fp32",
+        "before": "pl.Tensor[[KV_ROWS, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv",
+        "before": "pl.Tensor[[T, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "native_slots",
+        "before": "pl.Tensor[[T, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cache_rows",
+        "before": "pl.Tensor[[CACHE_ROWS, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "signal",
+        "before": "pl.Tensor[[WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "kv_stages": [
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T_DYN, D], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_fp32",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T_DYN, D], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_fp32",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_fp32",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_cos_il",
+        "before": "pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_sin_signed",
+        "before": "pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_swap_idx",
+        "before": "pl.Tensor[[T_DYN, ROPE_DIM], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv",
+        "before": "pl.Tensor[[T_DYN, HEAD_DIM], pl.BF16]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "cache_stages": [
+      {
+        "parameter": "kv",
+        "before": "pl.Tensor[[T_DYN, HEAD_DIM], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "slots",
+        "before": "pl.Tensor[[T_DYN, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cache_rows",
+        "before": "pl.Tensor[[CACHE_ROWS_DYN, HEAD_DIM], pl.BF16]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "query_projection_stages": [
+      {
+        "parameter": "qr_i8_matmul",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, Q_LORA], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "q_proj_i32",
+        "before": "pl.Tensor[[QPROJ_ROWS_DYN, H * HEAD_DIM], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_i8_matmul",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, Q_LORA], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "q_proj_i32",
+        "before": "pl.Tensor[[QPROJ_ROWS_DYN, H * HEAD_DIM], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_i8_matmul",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, Q_LORA], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "q_proj_i32",
+        "before": "pl.Tensor[[QPROJ_ROWS_DYN, H * HEAD_DIM], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_cos_il",
+        "before": "pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_sin_signed",
+        "before": "pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_swap_idx",
+        "before": "pl.Tensor[[T_DYN, ROPE_DIM], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "q_flat",
+        "before": "pl.Tensor[[T_DYN, H * HEAD_DIM], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_scale_pad_store",
+        "before": "pl.Tensor[[PAD_ROWS_DYN, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "q_proj_i32",
+        "before": "pl.Tensor[[QPROJ_ROWS_DYN, H * HEAD_DIM], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_sin",
+        "before": "pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_sin_signed",
+        "before": "pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_swap_idx",
+        "before": "pl.Tensor[[T_DYN, ROPE_DIM], pl.INT32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "qkv_stages": [
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T_DYN, D], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qa_fp32",
+        "before": "pl.Tensor[[QA_ROWS_DYN, Q_LORA], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T_DYN, D], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qa_fp32",
+        "before": "pl.Tensor[[QA_ROWS_DYN, Q_LORA], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T_DYN, D], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qa_fp32",
+        "before": "pl.Tensor[[QA_ROWS_DYN, Q_LORA], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qa_fp32",
+        "before": "pl.Tensor[[QA_ROWS_DYN, Q_LORA], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr",
+        "before": "pl.Tensor[[T_DYN, Q_LORA], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_scale",
+        "before": "pl.Tensor[[T_DYN, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_i8_matmul",
+        "before": "pl.Tensor[[MATMUL_ROWS_DYN, Q_LORA], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_scale_pad",
+        "before": "pl.Tensor[[SCALE_ROWS_DYN, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "leaf_scale_layout_stages": [
+      {
+        "parameter": "block_table",
+        "before": "pl.Tensor[[REQUESTS_DYN, LAYOUT_TABLE_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "metadata_stages": [
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cos",
+        "before": "pl.Tensor[[COMPACT_ROWS_DYN, ROPE_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "sin",
+        "before": "pl.Tensor[[COMPACT_ROWS_DYN, ROPE_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "offsets",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "entry": [
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T, 16384], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "x_fp32",
+        "before": "pl.Tensor[[T, 16384], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "inv",
+        "before": "pl.Tensor[[P16, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "partials",
+        "before": "pl.Tensor[[PARTIAL, 32], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "raw",
+        "before": "pl.Tensor[[P16, 32], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pre",
+        "before": "pl.Tensor[[P16, 8], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "post",
+        "before": "pl.Tensor[[T, 4], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "comb",
+        "before": "pl.Tensor[[T, 16], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "mixed",
+        "before": "pl.Tensor[[P8, 4096], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "normed",
+        "before": "pl.Tensor[[T, 4096], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qa",
+        "before": "pl.Tensor[[P16, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr",
+        "before": "pl.Tensor[[T, 1024], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_scale",
+        "before": "pl.Tensor[[T, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_matmul",
+        "before": "pl.Tensor[[QR_ROWS, 1024], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "qr_scale_pad",
+        "before": "pl.Tensor[[P8, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_cos",
+        "before": "pl.Tensor[[T, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_sin",
+        "before": "pl.Tensor[[T, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_signed",
+        "before": "pl.Tensor[[T, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_swap",
+        "before": "pl.Tensor[[T, 64], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "q_proj",
+        "before": "pl.Tensor[[QPROJ_ROWS, 32768], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "q_flat",
+        "before": "pl.Tensor[[T, 32768], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_fp32",
+        "before": "pl.Tensor[[KV_ROWS, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv",
+        "before": "pl.Tensor[[T, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "native_slots",
+        "before": "pl.Tensor[[T, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cache_rows",
+        "before": "pl.Tensor[[CACHE_ROWS, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_value",
+        "before": "pl.Tensor[[MPROJ, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_score",
+        "before": "pl.Tensor[[MPROJ, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_state",
+        "before": "pl.Tensor[[MSTATE_PAGES, MSTATE_ELEMS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_state_table",
+        "before": "pl.Tensor[[B, MTABLE_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_bounds",
+        "before": "pl.Tensor[[MQ], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_lengths",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_state_slots",
+        "before": "pl.Tensor[[T, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_pooled",
+        "before": "pl.Tensor[[MPOOL, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_cos",
+        "before": "pl.Tensor[[MC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_sin",
+        "before": "pl.Tensor[[MC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_offsets",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_slots",
+        "before": "pl.Tensor[[MSLOTS, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_normed",
+        "before": "pl.Tensor[[MNORM, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_debug",
+        "before": "pl.Tensor[[T, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_cache",
+        "before": "pl.Tensor[[MCACHE_ROWS, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_value",
+        "before": "pl.Tensor[[IPROJ, 256], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_score",
+        "before": "pl.Tensor[[IPROJ, 256], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_state",
+        "before": "pl.Tensor[[ISTATE_PAGES, ISTATE_ELEMS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_state_table",
+        "before": "pl.Tensor[[B, ITABLE_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_bounds",
+        "before": "pl.Tensor[[IQ], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_lengths",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_state_slots",
+        "before": "pl.Tensor[[T, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_pooled",
+        "before": "pl.Tensor[[IPOOL, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_cos",
+        "before": "pl.Tensor[[IC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_sin",
+        "before": "pl.Tensor[[IC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_offsets",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_slots",
+        "before": "pl.Tensor[[ISLOTS, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_normed",
+        "before": "pl.Tensor[[ICPAD, 128], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_had",
+        "before": "pl.Tensor[[ICPAD, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_scales",
+        "before": "pl.Tensor[[ISCALES, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_debug",
+        "before": "pl.Tensor[[T, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_cache",
+        "before": "pl.Tensor[[ICACHE_PAGES, ICACHE_BYTES], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "q_heads",
+        "before": "pl.Tensor[[QUERY_HEAD_ROWS, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "original_table",
+        "before": "pl.Tensor[[B, ORIGINAL_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "compressed_table",
+        "before": "pl.Tensor[[B, COMPRESSED_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "indexer_table",
+        "before": "pl.Tensor[[B, INDEXER_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_acc",
+        "before": "pl.Tensor[[IDX_PROJ_ROWS, 8192], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_rope",
+        "before": "pl.Tensor[[IDX_ROPE_ROWS, 8192], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_rope_heads",
+        "before": "pl.Tensor[[IDX_ROPE_HEAD_ROWS, 128], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_had",
+        "before": "pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_i8",
+        "before": "pl.Tensor[[IDX_HEAD_ROWS, 128], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_scale",
+        "before": "pl.Tensor[[IDX_HEAD_ROWS, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_query_scale_heads",
+        "before": "pl.Tensor[[IDX_SCALE_T_ROWS, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "weights_partial",
+        "before": "pl.Tensor[[WEIGHTS_PARTIAL_ROWS, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "head_weights",
+        "before": "pl.Tensor[[WEIGHTS_ROWS, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "group_offsets",
+        "before": "pl.Tensor[[GROUP_OFFSET_ROWS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "coefficients",
+        "before": "pl.Tensor[[COEFF_ROWS, COEFF_COLS], pl.FP16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_key0",
+        "before": "pl.Tensor[[KEY0_ROWS, 128], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_key64",
+        "before": "pl.Tensor[[KEY64_ROWS, 128], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "indexer_transfer",
+        "before": "pl.Tensor[[INDEX_TRANSFER_ROWS, INDEX_TRANSFER_COLS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_arena",
+        "before": "pl.Tensor[[SCORE_ROWS, 8192], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pair_arena",
+        "before": "pl.Tensor[[PAIR_ROWS, 1024], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "topk_scores",
+        "before": "pl.Tensor[[T, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "topk_indices",
+        "before": "pl.Tensor[[T, 512], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "attention_indices",
+        "before": "pl.Tensor[[ATTN_PLAN_ROWS, 512], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "attention_bias",
+        "before": "pl.Tensor[[ATTN_PLAN_ROWS, 640], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "attention_mask",
+        "before": "pl.Tensor[[ATTN_PLAN_ROWS, 16], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "inverse_sin",
+        "before": "pl.Tensor[[T, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_ring",
+        "before": "pl.Tensor[[KV_RING_ROWS, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_ring",
+        "before": "pl.Tensor[[HEAD_RING_ROWS, 128], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "probability_ring",
+        "before": "pl.Tensor[[HEAD_RING_ROWS, 128], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pv_ring",
+        "before": "pl.Tensor[[HEAD_RING_ROWS, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "mi_ring",
+        "before": "pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "li_ring",
+        "before": "pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "packed",
+        "before": "pl.Tensor[[PACK_ROWS, 4096], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_r",
+        "before": "pl.Tensor[[O_MM_ROWS, 8192], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_quant",
+        "before": "pl.Tensor[[O_MM_ROWS, 8192], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_scales",
+        "before": "pl.Tensor[[8, O_SCALE_ROWS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "o_partials",
+        "before": "pl.Tensor[[O_MM_ROWS, 32768], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "output",
+        "before": "pl.Tensor[[T, 16384], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "signal",
+        "before": "pl.Tensor[[WORDS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T, 16384], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_cos",
+        "before": "pl.Tensor[[T, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_sin",
+        "before": "pl.Tensor[[T, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "native_slots",
+        "before": "pl.Tensor[[T, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cache_rows",
+        "before": "pl.Tensor[[CACHE_ROWS, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_state",
+        "before": "pl.Tensor[[MSTATE_PAGES, MSTATE_ELEMS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_state_table",
+        "before": "pl.Tensor[[B, MTABLE_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_bounds",
+        "before": "pl.Tensor[[MQ], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_lengths",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_state_slots",
+        "before": "pl.Tensor[[T, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_cos",
+        "before": "pl.Tensor[[MC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_sin",
+        "before": "pl.Tensor[[MC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_slots",
+        "before": "pl.Tensor[[MSLOTS, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_cache",
+        "before": "pl.Tensor[[MCACHE_ROWS, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_state",
+        "before": "pl.Tensor[[ISTATE_PAGES, ISTATE_ELEMS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_state_table",
+        "before": "pl.Tensor[[B, ITABLE_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_bounds",
+        "before": "pl.Tensor[[IQ], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_lengths",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_state_slots",
+        "before": "pl.Tensor[[T, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_cos",
+        "before": "pl.Tensor[[IC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_sin",
+        "before": "pl.Tensor[[IC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_slots",
+        "before": "pl.Tensor[[ISLOTS, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_cache",
+        "before": "pl.Tensor[[ICACHE_PAGES, ICACHE_BYTES], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "original_table",
+        "before": "pl.Tensor[[B, ORIGINAL_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "compressed_table",
+        "before": "pl.Tensor[[B, COMPRESSED_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "indexer_table",
+        "before": "pl.Tensor[[B, INDEXER_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "topk_scores",
+        "before": "pl.Tensor[[T, 512], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "topk_indices",
+        "before": "pl.Tensor[[T, 512], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "output",
+        "before": "pl.Tensor[[T, 16384], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "x",
+        "before": "pl.Tensor[[T, 16384], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_cos",
+        "before": "pl.Tensor[[T, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "rope_sin",
+        "before": "pl.Tensor[[T, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "native_slots",
+        "before": "pl.Tensor[[T, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cache_rows",
+        "before": "pl.Tensor[[CACHE_ROWS, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_state",
+        "before": "pl.Tensor[[MSTATE_PAGES, MSTATE_ELEMS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_state_table",
+        "before": "pl.Tensor[[B, MTABLE_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_bounds",
+        "before": "pl.Tensor[[MQ], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_lengths",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_state_slots",
+        "before": "pl.Tensor[[T, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_cos",
+        "before": "pl.Tensor[[MC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_sin",
+        "before": "pl.Tensor[[MC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_slots",
+        "before": "pl.Tensor[[MSLOTS, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "main_cache",
+        "before": "pl.Tensor[[MCACHE_ROWS, 512], pl.BF16]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_state",
+        "before": "pl.Tensor[[ISTATE_PAGES, ISTATE_ELEMS], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_state_table",
+        "before": "pl.Tensor[[B, ITABLE_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_bounds",
+        "before": "pl.Tensor[[IQ], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_lengths",
+        "before": "pl.Tensor[[B], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_state_slots",
+        "before": "pl.Tensor[[T, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_cos",
+        "before": "pl.Tensor[[IC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_sin",
+        "before": "pl.Tensor[[IC, 64], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_slots",
+        "before": "pl.Tensor[[ISLOTS, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "idx_cache",
+        "before": "pl.Tensor[[ICACHE_PAGES, ICACHE_BYTES], pl.INT8]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "original_table",
+        "before": "pl.Tensor[[B, ORIGINAL_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "compressed_table",
+        "before": "pl.Tensor[[B, COMPRESSED_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "indexer_table",
+        "before": "pl.Tensor[[B, INDEXER_COLS], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "output",
+        "before": "pl.Tensor[[T, 16384], pl.BF16]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "compressor_pool_stages": [
+      {
+        "parameter": "kv_proj",
+        "before": "pl.Tensor[[PROJECTION_ROWS_DYN, OUT_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_proj",
+        "before": "pl.Tensor[[PROJECTION_ROWS_DYN, OUT_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "state",
+        "before": "pl.Tensor[[STATE_PAGES_DYN, STATE_ELEMENTS_DYN], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "state_table",
+        "before": "pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pooled",
+        "before": "pl.Tensor[[POOL_ROWS_DYN, HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_proj",
+        "before": "pl.Tensor[[PROJECTION_ROWS_DYN, IDX_OUT_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_proj",
+        "before": "pl.Tensor[[PROJECTION_ROWS_DYN, IDX_OUT_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "state",
+        "before": "pl.Tensor[[STATE_PAGES_DYN, STATE_ELEMENTS_DYN], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "state_table",
+        "before": "pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "pooled",
+        "before": "pl.Tensor[[POOL_ROWS_DYN, IDX_HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_proj",
+        "before": "pl.Tensor[[PROJECTION_ROWS_DYN, OUT_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_proj",
+        "before": "pl.Tensor[[PROJECTION_ROWS_DYN, OUT_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "state_slots",
+        "before": "pl.Tensor[[T_DYN, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "state",
+        "before": "pl.Tensor[[STATE_PAGES_DYN, STATE_ELEMENTS_DYN], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_proj",
+        "before": "pl.Tensor[[PROJECTION_ROWS_DYN, IDX_OUT_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "score_proj",
+        "before": "pl.Tensor[[PROJECTION_ROWS_DYN, IDX_OUT_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "state_slots",
+        "before": "pl.Tensor[[T_DYN, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "state",
+        "before": "pl.Tensor[[STATE_PAGES_DYN, STATE_ELEMENTS_DYN], pl.FP32]",
+        "after": "pl.Tensor"
+      }
+    ],
+    "compressor_output_stages": [
+      {
+        "parameter": "pooled_kv",
+        "before": "pl.Tensor[[POOLED_ROWS_DYN, HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cos",
+        "before": "pl.Tensor[[COMPACT_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "sin",
+        "before": "pl.Tensor[[COMPACT_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "bounds",
+        "before": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "lengths",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "positions",
+        "before": "pl.Tensor[[T_DYN], pl.INT64]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "compact_offsets",
+        "before": "pl.Tensor[[REQUESTS_DYN], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "compact_slots",
+        "before": "pl.Tensor[[COMPACT_SLOT_ROWS_DYN, 2], pl.INT32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "normed_kv",
+        "before": "pl.Tensor[[NORMED_ROWS_DYN, HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "kv_debug",
+        "before": "pl.Tensor[[T_DYN, HEAD_DIM], pl.FP32]",
+        "after": "pl.Tensor"
+      },
+      {
+        "parameter": "cache_flat",
+        "before": "pl.Tensor[[CACHE_ROWS_DYN, HEAD_DIM], pl.BF16]",
+        "after": "pl.Tensor"
+      }
+    ]
+  },
+  "source_hashes": {
+    "__init__.py": "eb6c2895ce9d6e616e2d5f7ae095a4cbe773bf485deca02b0f213c0a3651e158",
+    "attention_dependencies.py": "dd3cc675ed9b6d81c74bd630163df4fdcbb041a8be187e6d8474dd413210970c",
+    "attention_plan_stages.py": "34b5a1024d0a249d053a46f4131f40369d9cdd62a6da3c07ba0c1d331ba48542",
+    "attention_stream_stages.py": "7824d151a8540972e7b09371021466c2efa0294544ebcba62d34542f364210b6",
+    "binding.py": "0ee45de5d343e7ffa6bfab0fd89344a04aa5548efcd942c0d68849e722e875f0",
+    "cache_stages.py": "6aa4e9eb838680ca602e4a5c1b577b28bb5817e3bd6df296eeb82db994bc140c",
+    "compressor_output_stages.py": "77ece3d50fa136fb597c6a8b397ef04fe942f7b1210b6e9ae15df5c4db9d716d",
+    "compressor_pool_stages.py": "87f094a34639a88f2f841947d2d6879301867b02a46429e2b0f5a97cf1ad50e8",
+    "compressor_projection_stages.py": "c8393f91ecbbaf83fee6de086c077e2192befac6ced300ce93bc250907ece0f8",
+    "cube_schedule.py": "a41dc5da060eb29c4c4b68834b761db0c79b2b4bf8c2fcc3a3fc24c272069dee",
+    "entry.py": "13a0c9bb1e851f07380c33821a14f86a2e44b8e4731598d966467a6db9699ee7",
+    "fused_coefficients.py": "7afb39b78a7f7d0a494301a084f2e993c2a5da92b4a88140c9e9603ca2f9f293",
+    "graph_contract.py": "cb2eeffec5fd9b6e7a0487b62c20a0590fc13cc016e72d52e73faa6bc23087fb",
+    "hc_stages.py": "8dd4a8276c93939d9a19f6d11fc21af0a0409173e83705555cc73e5cf23251fb",
+    "indexer_cache_stages.py": "2159f6dfb6a1e1c0de9e508a60dd20e101502a8df826b6af1510649b7b895bfd",
+    "indexer_compressor_output_stages.py": "4aecb7dc44bf6fc417d8084560ef9f20ec99f6b696ecc08f21ed1fa49f278d73",
+    "indexer_group_stages.py": "6b03a6fa1eff00ed4d5e9aa6e9389d28c86d90314dab66a2d363bc852265d8e6",
+    "indexer_publish_stages.py": "dec70a8e59a2d355a0161ef6256366d01387ea58e00166eed5ee2e2da03bb98b",
+    "indexer_query_stages.py": "96dccf238584cfc6671ab0ac79d3a691ea0de82f199223e82d24ebc1481ed4dc",
+    "indexer_scale_layout_stages.py": "533f02f5523a491301a6803f6b452ccaba5de5c845ae6216da62f3a6cc7e2fad",
+    "indexer_scale_plan_stages.py": "a8824a3f309c4b3223e1ca7375cbe0913e78160a7c67d1c2105c3f33c65eb206",
+    "indexer_score_stages.py": "7b113c0655d35fae93452949ba7cc557e26c81f930ef5e9bd2123e153426dc20",
+    "indexer_topk_stages.py": "7817f6106ec6d4800ea384565d34bcebcff79fc0104f6b80fa613343de2bad4e",
+    "joint_prefix_stages.py": "4627f1def586edc835f044ca3064d1d906ae3c947f5ec4bcf3c030dec51c5dac",
+    "kv_stages.py": "74dd08e675477f4227034cfd9aabeee68daee812e98e3d09bc293022384f5fb8",
+    "leaf_scale_layout_stages.py": "a95bffb51c5a9287710913d1ffc93e93f3d353d99a849bbccf865f17ab721efa",
+    "metadata_stages.py": "3a9f40646d30a2fc790d02a00f42cdc41138c3f72583bfec39724360d71e5bfb",
+    "native_adapter.py": "49c3f7174e6d7f128bd9215286be35ba5c59be6679a7b061ef093e2e0c055ec3",
+    "output_projection_a_stages.py": "862c6a4cf391bde0a1931b09da656d4aa5b292fba6fc801676aec497369443b9",
+    "output_projection_b_stages.py": "7c5946123054bd4c996c406c4a1ee4da21b58b9e67f746afca774a40fdaad359",
+    "phase_sync.py": "6ee8d61aef508f7d34443a5ccf5f21f37273d66c1ccaed3315aaaa4b4aaf83d3",
+    "policy.py": "0f52d365a93456fa73204a9c246ccd766b976dd4767296ebc851e2f8e60722ba",
+    "projection_overlap_stages.py": "f9cc88a7516245f05abecfb6e64922035d6c2291d9e8095deb8aac17d7a7c066",
+    "qkv_stages.py": "085c91fef337d51f2a70c67494799b40487229c83f690f2936ad5598cf0eb8de",
+    "query_projection_stages.py": "e27f9954cdb1892689b8fd0761679e7e48537f835c0abc9d878a5c6c267c588d",
+    "request_geometry.py": "59e3012ad194e7954d8ce1d656329351b375e3bc972a82b6e5eb7f6303e67c81",
+    "runtime_abi.py": "e4c7f9d698fc262879f3fb6a2a7a0a4dc0a7b098c3a354ef033c4fea359824ef",
+    "score_group_order_stages.py": "adc7912c2cfb2e9369a416bd57e1ee9a3a8c8ff7298b7d83c98e5909ea7a1732",
+    "service.py": "1377cae0ecdd0ba2db761c340036c89e921b33ea330ce08cf242cc67ebbfe6d1",
+    "service_config.py": "4ede9b00df0a41907738cff982575773af565f7e95eaf9f54b3e27c3a1d588b3",
+    "signals.py": "b011b8ed742a31b3befc0a9ad4354be050d502c65b3df2bbf677cbb0a6906ab4",
+    "topk_threshold_stages.py": "5065f1c2bd567cfbe7f995816fa7fd18b57ba1585f67d459cc71f627a01a55ff",
+    "vector_prefix_stages.py": "9fa2fb6ff1cfe4ea1efea58d94ddfa15d26dfe79e90a92c7815c0799bd27849e",
+    "vector_schedule.py": "c87ca8bdcd5571c61b13faeb4c93394fe3df7714fa529f5ff64a9b00218d5166",
+    "wait_codegen.py": "f4c49be94ca720734acaba172edc703a5f05940aaf475c81d30b6ce5e834b890"
+  },
+  "status": "CPU_feasibility_failed_not_adopted",
+  "NPU_executed": false,
+  "latest_failure": "使用meta样本后在本地Tensor维度变量与静态callee返回类型重赋值处失败"
+}

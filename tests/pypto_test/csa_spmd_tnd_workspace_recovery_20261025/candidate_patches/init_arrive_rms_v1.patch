@@ -1,0 +1,67 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/runtime_abi.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/runtime_abi.py
+@@ -15,6 +15,9 @@
+ 
+ GROUPS = 24
+ VECTORS = 48
++# 沿用PTO-ISA A2/A3 MIX屏障的原事件；业务事件0..5不变。
++SIGNAL_INIT_ARRIVE_EVENT = 12
++SIGNAL_INIT_RELEASE_EVENT = 13
+ CORES = 72
+ ATTN_PLAN_ROWS = pl.dynamic("CSA_FULL_ATTN_PLAN_ROWS")
+ B = pl.dynamic("CSA_FULL_B")
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/vector_schedule.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/vector_schedule.py
+@@ -174,6 +174,8 @@
+     QPROJ_ROWS,
+     QR_ROWS,
+     SCORE_ROWS,
++    SIGNAL_INIT_ARRIVE_EVENT,
++    SIGNAL_INIT_RELEASE_EVENT,
+     VECTORS,
+     WEIGHTS_PARTIAL_ROWS,
+     WEIGHTS_ROWS,
+@@ -401,15 +403,17 @@
+     # Preserve the full 512-byte phase-slot stride and all padding.
+     zero = pl.tile.full([1, PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS], dtype=pl.INT32, value=0)
+     pl.store(zero, [worker, 0], signal_init_matrix)
+-    # Both explicit Group members rendezvous before any signal read/write.
+-    # This is hardware FFTS (events 11/12/13), never a GM boot barrier.
++    # 完成全量清零后先发送原MIX屏障的AIV到达事件。Cube仍执行原SYNCALL<MIX>。
++    # 只有独立的RMS准备与Cube全局会合并行；所有signal访问仍在释放之后。
+     pl.system.cacheinvalid()
+     pl.system.fence()
+-    pl.system.syncall(core_type=pl.KernelType.MIX)
++    pl.system.sync_set(SIGNAL_INIT_ARRIVE_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV)
++    tokens = pl.tensor.dim(x, 0)
++    x_fp32, inv = hc_widen_rms_range(x, x_fp32, inv, widen_tail, worker, VECTORS)
++    # 原MIX屏障的释放事件：必须等到所有48个AIV完成清零，才允许读写signal。
++    pl.system.sync_wait(SIGNAL_INIT_RELEASE_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
+     pl.system.cacheinvalid()
+     signal, generation = begin_invocation(signal, core)
+-    tokens = pl.tensor.dim(x, 0)
+-    x_fp32, inv = hc_widen_rms_range(x, x_fp32, inv, widen_tail, worker, VECTORS)
+     if BALANCED and QUERY_GROUP == 2:
+         if worker < (tokens + 7) // 8:
+             signal = publish_phase(signal, PHASE_INPUT, core, CORES, generation)
+@@ -422,9 +426,8 @@
+     else:
+         signal = publish_phase(signal, PHASE_INPUT, core, CORES, generation)
+ 
+-    # 公共metadata只有Q/L/positions依赖，可与HC投影重叠。选择第一个没有HC M8条带的
+-    # AIV；若48核都有工作，则选47号，先完成其本轮全部widen并发布，再计算计划。
+-    # 所以既没有永久保留一核，也没有让AIC等metadata才能开始HC。
++    # metadata仅依赖本次调用不可变的Q/L/positions/slots，不读取signal或HC产物。
++    # 选择原来的首个空闲AIV；若全部有RMS工作，则仍由47号依次完成。
+     planner = pl.min((tokens + 7) // 8, VECTORS - 1)
+     if worker == planner:
+         # 两套compact Q/L分开扫描；只共用真实T，不合并Native语义不同的Tensor。
+@@ -489,6 +492,8 @@
+             group_offsets, coefficients = prepare_fused_query_coefficients(
+                 idx_bounds, idx_lengths, positions, group_offsets, coefficients, tokens, QUERY_GROUP
+             )
++
++    if worker == planner:
+         signal = publish_phase(signal, PHASE_META, core, CORES, generation)
+ 
+     if HC_CONSUMER_REDUCE:

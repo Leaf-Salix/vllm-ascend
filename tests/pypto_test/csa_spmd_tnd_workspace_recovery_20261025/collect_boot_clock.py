@@ -127,8 +127,7 @@ def main():
         "validated_physical_intervals": 1440,
         "mapping": "AIC直接探针为0..23置换；AIV通过Simpler固定1C2V拓扑推导，并逐核验证时间包含关系",
         "mapping_source": (
-            "simpler 57e499238fd4ee3548947ad860be456aaeeb16b5: "
-            "scheduler_cold_path.cpp:968; scheduler_types.h:214..218"
+            "simpler 57e499238fd4ee3548947ad860be456aaeeb16b5: scheduler_cold_path.cpp:968; scheduler_types.h:214..218"
         ),
         "limits": [
             "原AIV物理builtin探针无效；原始报告保持mapping=False，不冒称直接测得AIV物理号",
