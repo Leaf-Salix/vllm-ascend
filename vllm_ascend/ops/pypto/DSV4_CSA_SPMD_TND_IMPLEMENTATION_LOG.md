@@ -6406,3 +6406,61 @@ Simpler的packed输出跨度按1024B对齐，不能凭内部申请就假定64B�
 
 两试验同进程同时测迁移前外部版、已保留f72a版及候选，各自三侧10窗，不用跨任务
 差额替代同轮对照。结果待收，当前没有新采用优化，恢复目标尚未达成。
+
+### 2026-10-25：信号生命周期消融、历史采样差异与L2假设核对
+
+上述两项试验均已完成，各9组严格检查、30个完整L1窗口通过。
+稀疏清零卡6同轮external/current/candidate中位为779.31/771.27/772.36μs，
+候选反而慢0.1413%，只有4/10对更短，不保留。仅signal外置的诊断版卡8同轮
+为783.89/772.02/768.05μs，比current短0.5142%，10/10对更短；仅用于隔离
+signal生命周期的整体影响，不能把全部差额认定为清零指令或L2收益，也不得生产采用。
+完整结果与样本已归档到恢复目录的`evidence/`和两份`*_C04_r1_result.json`。
+
+历史763.65μs脚本的参考图不采DFX，仅候选图采DFX，且两图按sample奇偶交替次序。
+当前配对harness采双方/三方DFX，导出及空闲间隔不同。为隔离该因素，冻结历史参考
+的精确源码，建立`prepare_cadence_diagnostic.py`：同进程对旧外部版、当前内部版
+分别运行“参考不采”和“参考也采”两种协议，各10窗；协议只改变参考是否采DFX。
+四个固定顺序块若观察明显差异还需反转顺序，不能把采样上下文变化算作代码优化。
+CPU全后端通过，任务`task_20261025_173928_30744472693`卡6运行。
+
+另一个独立候选`constant_generation_v1`从f72a复制，保留每次完整2,211,840B清零、
+两个角色的硬MIX屏障、缓存维护及所有业务数学。由于清零后phase0恒为零，改用
+INT32常量generation=1，去掉两个角色的重复phase0读取、递增与发布。业务阶段编号
+从1开始，不引用phase0；该变换只适用于无条件每次初始化的内部入口，不能用于外部
+持久信号。CPU后端通过，产物仍有两处`SYNCALL<SyncCoreType::Mix>`，TNOTIFY由
+48处减为46处；卡7任务`task_20261025_173929_30749564729`验证，尚未采用。
+
+用户提出“外部清零是否导致驻留L2 Cache”。核对须区分生产绑定与历史测试覆盖：
+生产外部绑定默认用`torch.empty`分配scratch，仅signal在构造时`zero_()`一次；
+但历史性能脚本给绑定传入allocator，实际以`torch.full(..., 37)`填充全部scratch，
+附加首尾512B保护区。B16 scratch有效容量130.5907MiB，其中signal为2.109375MiB。
+这发生在准备阶段，后面仍有正确性检查和多次warmup，不能直接断言各计时窗口仍因
+最初填充而保持热缓存。当前外部参考沿用同一红区allocator，不遗漏该历史条件。
+
+普通L2缓存模式会发生替换，外部持久Tensor不等于硬件锁定L2；官方说明见
+[SetL2CacheHint](https://www.hiascend.com/document/detail/en/CANNCommunityEdition/910/API/ascendcopapi/docs/en/api/SIMD-API/basic_api/data_structures/GlobalTensor/SetL2CacheHint.md)。
+内部allocator的reset路径也把heap位置重新置零，不能仅凭`pl.create_tensor`就声称
+每次重放必换一套物理地址。继续核对布局、复用及实际缓存计数，暂未判定L2是根因。
+
+第一次L2诊断使用`pypto.torch.init(enable_pmu=8)`，任务
+`task_20261025_174142_312710121272`在初始化前明确报参数不支持。继续查源码确认
+当前Simpler `KernelStaticConfig::validate`也显式拒绝kernel模式PMU；没有取得计数，
+不能当作零命中率。失败记录保留为`evidence/l2_pmu_unsupported_C04_r1.json`。
+随后改用已安装torch_npu/CANN的Level1、AiCMetrics.L2Cache采样，保留全部原始PROF；
+三侧图重放各10窗并加CPU标签，任务`task_20261025_174640_325114713557`卡5运行。
+不修改或重建公共SDK，插桩L1单列诊断，不与正式无PMU结果计算收益。
+
+后续收齐卡6/7结果：固定代际候选同轮external/current/candidate为
+770.39/775.77/776.16μs，中位慢0.0503%、5/10对更快，9组严格检查通过但没有收益，
+不采用。采样方式诊断的current在“参考不采/参考也采”下分别782.11/782.01μs，
+只差0.10μs，不支持该因素解释历史约20μs差距；旧外部版分别773.10/767.38μs，
+但两个顺序块存在时间漂移混杂，未反向验证，不认定5.72μs为采样方式的因果效果。
+90个原始窗口均重新核对完整72角色与单MIX，全部样本及严格结果归档，当前没有新保留优化。
+
+allocator复用链进一步定位为AICPU每次调用`runtime_reset_for_reuse`，进而
+`OrchestratorState::reset_for_reuse`调用各ring的`TaskAllocator::init`重置heap位置。
+因此“内部create_tensor必然每次换地址变冷”缺少依据。另建不改算子的上下文诊断，
+对旧外部b2e0和当前内部f72a交替安排通常重放、紧邻额外重放后再次restore、restore后
+读写独立1GiB INT8缓冲三种条件，各10窗。额外重放也改变设备活跃程度，1GiB GM读写
+也不是硬件保证的L2 flush，均只用于检验敏感性。内部初始化仍完整计入MIX，禁止以
+额外预热的结果冒充优化收益。任务`task_20261025_175450_343989829738`卡6运行。

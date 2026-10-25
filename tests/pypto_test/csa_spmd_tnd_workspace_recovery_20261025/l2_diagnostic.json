@@ -1,0 +1,23 @@
+{
+  "status": "unsupported_kernel_mode_no_counts",
+  "scope": "L2诊断；PMU插桩的L1不可与无PMU历史值直接计算收益",
+  "event_type": 8,
+  "event_source": "simpler/src/a2a3/platform/include/common/pmu_profiling.h:PMU_EVENTS_A2A3_L2_CACHE",
+  "counters": [
+    "write_cache_hit",
+    "write_cache_miss_allocate",
+    "r0_read_cache_hit",
+    "r0_read_cache_miss_allocate",
+    "r1_read_cache_hit",
+    "r1_read_cache_miss_allocate"
+  ],
+  "sides": {
+    "reference": "b2e0外部持久工作区，诊断harness在构造时full(37)且signal zero_一次",
+    "current": "f72a内部工作区，全部初始化和业务在单MIX内",
+    "candidate": "仅signal外置的诊断版；其余scratch内部，禁止生产采用"
+  },
+  "sampling": "同进程三侧轮转、各10窗；保留所有L1原始记录及PMU CSV",
+  "interpretation": "先核对72核完整性及计数有效性；计数差异只反映整个MIX，不能直接归因signal或某个阶段",
+  "result": "evidence/l2_pmu_unsupported_C04_r1.json",
+  "next": "cann_l2_diagnostic.json"
+}

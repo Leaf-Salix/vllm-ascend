@@ -1,0 +1,17 @@
+{
+  "status": "AST_pass_existing_operators_CPU_gates_reused",
+  "scope": "CANN L2Cache诊断，不作为正式L1优化验收",
+  "sampling": "同进程旧外部/current内部/仅signal外部三侧轮转各10窗；每个图重放带CPU标签",
+  "cann_capture": {
+    "profiler_level": "Level1",
+    "aic_metrics": "L2Cache",
+    "data_simplification": false
+  },
+  "raw_artifacts": "runs/<attempt>/cann_l2/，保留原始PROF及导出数据；L1仍保留每窗口原始记录",
+  "simpler_pmu_failure": {
+    "task_id": "task_20261025_174142_312710121272",
+    "result": "runs/h131072_b16_s6_l2_pmu_r1/result.json",
+    "reason": "pypto.torch.init无enable_pmu参数；Simpler KernelStaticConfig::validate也明确拒绝PMU。不是零命中计数。"
+  },
+  "interpretation": "先验证实际产生非空且可关联到各side的L2计数；只能解释完整运行，不直接归因signal或某阶段"
+}

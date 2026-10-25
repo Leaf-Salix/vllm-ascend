@@ -3,20 +3,18 @@
   "user_instruction": "好好查内部工作区迁移为何变慢，把性能恢复回来",
   "pending_tasks": [
     {
-      "task_id": "task_20261025_165308_192794930577",
+      "task_id": "task_20261025_174640_325114713557",
       "case": "C04",
-      "attempt": "h131072_b16_s6_signal_headers_v1_r1",
-      "device": 6,
-      "candidate": "signal_headers_v1",
-      "purpose": "同进程旧外部/current_f72/候选三侧对照；hybrid只用于归因，不采用"
+      "attempt": "h131072_b16_s6_cann_l2_r1",
+      "device": 5,
+      "purpose": "CANN L2Cache三侧诊断，原始数据不作为正式L1验收"
     },
     {
-      "task_id": "task_20261025_165308_19280565627",
+      "task_id": "task_20261025_175450_343989829738",
       "case": "C04",
-      "attempt": "h131072_b16_s6_external_signal_diagnostic_v1_r1",
-      "device": 8,
-      "candidate": "external_signal_diagnostic_v1",
-      "purpose": "同进程旧外部/current_f72/候选三侧对照；hybrid只用于归因，不采用"
+      "attempt": "h131072_b16_s6_cache_context_r1",
+      "device": 6,
+      "purpose": "不改代码，比较通常重放/紧邻预热/1GiB GM读写扰动，两侧每组合10窗"
     }
   ],
   "adopted_changes": [],
@@ -35,6 +33,53 @@
       ],
       "purpose": "当前SDK同进程三侧归因对照",
       "status": "completed (exit=0)"
+    },
+    {
+      "task_id": "task_20261025_165308_192794930577",
+      "case": "C04",
+      "attempt": "h131072_b16_s6_signal_headers_v1_r1",
+      "device": 6,
+      "candidate": "signal_headers_v1",
+      "purpose": "同进程旧外部/current_f72/候选三侧对照；hybrid只用于归因，不采用",
+      "status": "completed (exit=0)",
+      "result": "signal_headers_v1_C04_r1_result.json"
+    },
+    {
+      "task_id": "task_20261025_165308_19280565627",
+      "case": "C04",
+      "attempt": "h131072_b16_s6_external_signal_diagnostic_v1_r1",
+      "device": 8,
+      "candidate": "external_signal_diagnostic_v1",
+      "purpose": "同进程旧外部/current_f72/候选三侧对照；hybrid只用于归因，不采用",
+      "status": "completed (exit=0)",
+      "result": "external_signal_diagnostic_v1_C04_r1_result.json"
+    },
+    {
+      "task_id": "task_20261025_174142_312710121272",
+      "case": "C04",
+      "attempt": "h131072_b16_s6_l2_pmu_r1",
+      "device": 5,
+      "purpose": "PMU8 L2 hit/miss，旧外部/current内部/仅signal外部三侧诊断，不用于正式性能收益",
+      "status": "completed (exit=1)",
+      "reason": "pypto.torch.init无PMU参数；Simpler kernel模式也明确拒绝PMU，未获得计数"
+    },
+    {
+      "task_id": "task_20261025_173928_30744472693",
+      "case": "C04",
+      "attempt": "h131072_b16_s6_cadence_r1",
+      "device": 6,
+      "purpose": "同进程诊断历史单侧DFX与配对双侧DFX采样；不作为优化收益",
+      "status": "completed (exit=0)",
+      "result": "cadence_C04_r1_result.json"
+    },
+    {
+      "task_id": "task_20261025_173929_30749564729",
+      "case": "C04",
+      "attempt": "h131072_b16_s6_constant_generation_v1_r1",
+      "device": 7,
+      "purpose": "全量内部初始化后固定generation=1，三侧完整L1与严格正确性",
+      "status": "completed (exit=0)",
+      "result": "constant_generation_v1_C04_r1_result.json"
     }
   ],
   "initial_comparison": "initial_triple_C04_r1.json",
@@ -44,5 +89,7 @@
     "external_kernel_binary_comparison.json",
     "init_ablation_CPU_gate.json"
   ],
-  "original_stop_superseded_by_user_recovery_request": true
+  "original_stop_superseded_by_user_recovery_request": true,
+  "next_analysis": "核对历史采样中未计时reference重放与当前全侧计时的上下文差异；另检查每调用清零后不再需要代际读取的固定generation候选",
+  "user_L2_hypothesis": "检查外部清零/持久地址复用与内部工作区布局是否影响L2；旧代码signal仅构造时zero_，其他scratch empty；尚未证明L2归因"
 }

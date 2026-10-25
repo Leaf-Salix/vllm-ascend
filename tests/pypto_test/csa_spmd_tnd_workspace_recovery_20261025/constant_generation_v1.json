@@ -1,0 +1,22 @@
+{
+  "source": "tests/pypto_test/csa_spmd_tnd_workspace_recovery_20261025/candidates/constant_generation_v1",
+  "parent": "tests/pypto_test/csa_spmd_tnd_workspace_recovery_20261025/candidates/internal_single_f72a",
+  "production_eligible_if_validated": true,
+  "status": "rejected_no_benefit",
+  "contract": "所有输入档位每调用全量清零signal并硬MIX同步后，所有业务阶段期待值恒为1；phase0只被旧begin_invocation使用。保留全量初始化、全部缓存维护/业务发布等待、数学及workspace布局。仅删除每核phase0读取递增和发布。",
+  "risks_checked_before_NPU": [
+    "普通/诊断入口无独立初始化或无清零路径",
+    "所有参与核均在任何信号读写前经过同一硬MIX屏障",
+    "业务阶段从PHASE_INPUT=1开始，无业务消费者读取phase0"
+  ],
+  "adopted": false,
+  "CPU_gate": {
+    "path": "runs/codegen_constant_generation_C04_v1/result.json",
+    "passed": true,
+    "SYNCALL_Mix": 2,
+    "TNOTIFY": 46,
+    "whole_clear_preserved": true,
+    "business_phase_IDs": "1..59；phase0仅用于原begin_invocation，移除两个角色的重复代际读/写不影响业务phase"
+  },
+  "result": "constant_generation_v1_C04_r1_result.json"
+}
