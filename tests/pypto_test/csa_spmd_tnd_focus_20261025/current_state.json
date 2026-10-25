@@ -2,10 +2,13 @@
   "goal": "在当前的性能基础上再优化10%，以128K B16 B24 为主要优化场景",
   "status": "paused",
   "baseline": "baseline.json",
-  "adopted_optimizations": [],
+  "adopted_optimizations": [
+    "signal_initialization_inside_single_MIX_SPMD_all_cases",
+    "indexer_query_quantization_and_coefficients_fusion_long_G6_T64_192"
+  ],
   "pending_device_tasks": [],
-  "candidate": "init_coeff_combined_v1",
-  "candidate_state": "round_closed_experiments_preserved_production_unchanged",
+  "candidate": "init_coeff_single_spmd_v2",
+  "candidate_state": "production_adopted_validated_round_finished",
   "prior_paused_goal_preserved": true,
   "push_authorized": false,
   "adoption_preference": {
@@ -28,7 +31,24 @@
     "h131072_b16_s6_init_coeff_combined_v1": "h131072_b16_s6_init_coeff_combined_v1_result.json",
     "h131072_b16_s6_state_init_coeff_combined_v1": "evidence/h131072_b16_s6_state_init_coeff_combined_v1.json",
     "h131072_b24_s6_init_coeff_combined_v1": "h131072_b24_s6_init_coeff_combined_v1_result.json",
-    "h131072_b24_s6_state_init_coeff_combined_v1": "evidence/h131072_b24_s6_state_init_coeff_combined_v1.json"
+    "h131072_b24_s6_state_init_coeff_combined_v1": "evidence/h131072_b24_s6_state_init_coeff_combined_v1.json",
+    "h131072_b1_s6_init_coeff_production_v1_final": "h131072_b1_s6_init_coeff_production_v1_final_result.json",
+    "h262144_b16_s6_init_coeff_production_v1_final": "h262144_b16_s6_init_coeff_production_v1_final_result.json",
+    "h131072_b8_s6_init_coeff_production_v1_final": "h131072_b8_s6_init_coeff_production_v1_final_result.json",
+    "h131072_b16_s6_init_coeff_production_v1_final": "h131072_b16_s6_init_coeff_production_v1_final_result.json",
+    "h131072_b24_s6_init_coeff_production_v1_final": "h131072_b24_s6_init_coeff_production_v1_final_result.json",
+    "h131072_b28_s6_init_coeff_production_v1_final": "h131072_b28_s6_init_coeff_production_v1_final_result.json",
+    "h8192_b32_s6_init_coeff_production_v1_final": "h8192_b32_s6_init_coeff_production_v1_final_result.json",
+    "h131072_b16_mixed_init_coeff_production_v1_final": "h131072_b16_mixed_init_coeff_production_v1_final_result.json",
+    "init_coeff_production_v1_model_graph": "evidence/init_coeff_production_v1_model_graph.json",
+    "h131072_b1_s6_init_coeff_single_spmd_v2_final": "h131072_b1_s6_init_coeff_single_spmd_v2_final_result.json",
+    "h262144_b16_s6_init_coeff_single_spmd_v2_final": "h262144_b16_s6_init_coeff_single_spmd_v2_final_result.json",
+    "h131072_b8_s6_init_coeff_single_spmd_v2_final": "h131072_b8_s6_init_coeff_single_spmd_v2_final_result.json",
+    "h131072_b16_s6_init_coeff_single_spmd_v2_final": "h131072_b16_s6_init_coeff_single_spmd_v2_final_result.json",
+    "h131072_b24_s6_init_coeff_single_spmd_v2_final": "h131072_b24_s6_init_coeff_single_spmd_v2_final_result.json",
+    "h131072_b28_s6_init_coeff_single_spmd_v2_final": "h131072_b28_s6_init_coeff_single_spmd_v2_final_result.json",
+    "h8192_b32_s6_init_coeff_single_spmd_v2_final": "h8192_b32_s6_init_coeff_single_spmd_v2_final_result.json",
+    "h131072_b16_mixed_init_coeff_single_spmd_v2_final": "h131072_b16_mixed_init_coeff_single_spmd_v2_final_result.json"
   },
   "qb_l1_codegen": "qb_l1_C04_v1_codegen.json",
   "current_round_tasks": [
@@ -188,6 +208,159 @@
       "attempt": "h131072_b24_s6_state_init_coeff_combined_v1",
       "observed_status": "completed (exit=0)",
       "checked_at_utc": "2026-10-25T06:53:14.557919+00:00"
+    },
+    {
+      "task_id": "task_20261025_150033_351516831057",
+      "case": "C01",
+      "candidate": "init_coeff_production_v1",
+      "attempt": "h131072_b1_s6_init_coeff_production_v1_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "组合八档收尾；C04/C05同时为原卡反转准备顺序独立复测",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_150033_351527513928",
+      "case": "C02",
+      "candidate": "init_coeff_production_v1",
+      "attempt": "h262144_b16_s6_init_coeff_production_v1_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "组合八档收尾；C04/C05同时为原卡反转准备顺序独立复测",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_150033_351532023270",
+      "case": "C03",
+      "candidate": "init_coeff_production_v1",
+      "attempt": "h131072_b8_s6_init_coeff_production_v1_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "组合八档收尾；C04/C05同时为原卡反转准备顺序独立复测",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_150033_3515376256",
+      "case": "C04",
+      "candidate": "init_coeff_production_v1",
+      "attempt": "h131072_b16_s6_init_coeff_production_v1_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "组合八档收尾；C04/C05同时为原卡反转准备顺序独立复测",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_150033_35154691548",
+      "case": "C05",
+      "candidate": "init_coeff_production_v1",
+      "attempt": "h131072_b24_s6_init_coeff_production_v1_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "组合八档收尾；C04/C05同时为原卡反转准备顺序独立复测",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_150033_351563615163",
+      "case": "C06",
+      "candidate": "init_coeff_production_v1",
+      "attempt": "h131072_b28_s6_init_coeff_production_v1_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "组合八档收尾；C04/C05同时为原卡反转准备顺序独立复测",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_150033_351582714736",
+      "case": "C07",
+      "candidate": "init_coeff_production_v1",
+      "attempt": "h8192_b32_s6_init_coeff_production_v1_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "组合八档收尾；C04/C05同时为原卡反转准备顺序独立复测",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_150033_351600411165",
+      "case": "C08",
+      "candidate": "init_coeff_production_v1",
+      "attempt": "h131072_b16_mixed_init_coeff_production_v1_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "组合八档收尾；C04/C05同时为原卡反转准备顺序独立复测",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_150155_356203232133",
+      "case": "C04/C08/C05/tail_B1",
+      "candidate": "init_coeff_production_v1",
+      "attempt": "init_coeff_production_v1_model_graph",
+      "observed_status": "completed (exit=0)",
+      "purpose": "实际custom-op/ACLGraphWrapper普通入口功能验证，不采性能",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_151311_384899430269",
+      "case": "C01",
+      "candidate": "init_coeff_single_spmd_v2",
+      "attempt": "h131072_b1_s6_init_coeff_single_spmd_v2_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "最终无独立清零/无回退版本八档完整L1和正确性验收",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_151311_384903532025",
+      "case": "C02",
+      "candidate": "init_coeff_single_spmd_v2",
+      "attempt": "h262144_b16_s6_init_coeff_single_spmd_v2_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "最终无独立清零/无回退版本八档完整L1和正确性验收",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_151311_384909730077",
+      "case": "C03",
+      "candidate": "init_coeff_single_spmd_v2",
+      "attempt": "h131072_b8_s6_init_coeff_single_spmd_v2_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "最终无独立清零/无回退版本八档完整L1和正确性验收",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_151311_38491385796",
+      "case": "C04",
+      "candidate": "init_coeff_single_spmd_v2",
+      "attempt": "h131072_b16_s6_init_coeff_single_spmd_v2_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "最终无独立清零/无回退版本八档完整L1和正确性验收",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_151312_38492048158",
+      "case": "C05",
+      "candidate": "init_coeff_single_spmd_v2",
+      "attempt": "h131072_b24_s6_init_coeff_single_spmd_v2_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "最终无独立清零/无回退版本八档完整L1和正确性验收",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_151312_38493867767",
+      "case": "C06",
+      "candidate": "init_coeff_single_spmd_v2",
+      "attempt": "h131072_b28_s6_init_coeff_single_spmd_v2_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "最终无独立清零/无回退版本八档完整L1和正确性验收",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_151312_38496345344",
+      "case": "C07",
+      "candidate": "init_coeff_single_spmd_v2",
+      "attempt": "h8192_b32_s6_init_coeff_single_spmd_v2_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "最终无独立清零/无回退版本八档完整L1和正确性验收",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
+    },
+    {
+      "task_id": "task_20261025_151312_3849878685",
+      "case": "C08",
+      "candidate": "init_coeff_single_spmd_v2",
+      "attempt": "h131072_b16_mixed_init_coeff_single_spmd_v2_final",
+      "observed_status": "completed (exit=0)",
+      "purpose": "最终无独立清零/无回退版本八档完整L1和正确性验收",
+      "checked_at_utc": "2026-10-25T07:31:14.968999+00:00"
     }
   ],
   "positive_first_rounds": {
@@ -199,13 +372,16 @@
   },
   "all_eight_current_sdk_baselines_complete": true,
   "goal_achieved": false,
-  "round_closure": "round_closure.json",
-  "paused_at_utc": "2026-10-25T06:53:14.557919+00:00",
-  "pause_reason": "用户明确要求：这一轮优化后停下",
+  "round_closure": "final_round_closure.json",
+  "paused_at_utc": "2026-10-25T07:31:54.623863+00:00",
+  "pause_reason": "已按用户澄清完成本轮代码落地与必要验证，然后停止",
   "retained_experimental_mechanisms": [
     "fused_signal_init_v3",
     "fused_coefficients_current_v2"
   ],
-  "production_operator_changed": false,
-  "remaining_work_scheduled": false
+  "production_operator_changed": true,
+  "remaining_work_scheduled": false,
+  "user_clarification": "完成本轮代码优化和必要验证后再停下，撤销仅归档即停的解释；不扩展新优化方向",
+  "prior_round_closure": "round_closure.json",
+  "final_eight_case_results": "single_spmd_v2_eight_case_validation.json"
 }

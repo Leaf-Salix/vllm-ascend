@@ -207,6 +207,7 @@ def cube_schedule(
     JOINT_BF16_PREFIX: pl.constexpr = False,
     PREFIX_PROJECTION_ROWS: pl.constexpr = 128,
     SCORE_GROUP_ORDER: pl.constexpr = False,
+    FUSED_INDEXER_COEFF: pl.constexpr = False,
 ):
     # 保留五份流式权重的BYPASS声明；预定义incore使用函数属性表达。
     # 当前PyPTO此属性只接受(参数序号,策略整数)，1表示CachePolicy.BYPASS。
@@ -234,8 +235,14 @@ def cube_schedule(
     o_partials_gm = o_partials
     signal_gm = signal
     worker = pl.tile.get_block_idx()
-    signal, generation = begin_invocation(signal, worker)
     pl.system.set_ffts(ffts)
+    # Both explicit Group members rendezvous before any signal read/write.
+    # This is hardware FFTS (events 11/12/13), never a GM boot barrier.
+    pl.system.cacheinvalid()
+    pl.system.fence()
+    pl.system.syncall(core_type=pl.KernelType.MIX)
+    pl.system.cacheinvalid()
+    signal, generation = begin_invocation(signal, worker)
     tokens = pl.tensor.dim(x_fp32, 0)
     if HC_ROW_DEPENDENCIES:
         # HC投影task=(M16行块*4+K4096分片)，task=worker+wave*24。
@@ -426,8 +433,9 @@ def cube_schedule(
     # Score消费query INT8、系数和Native key/scale。Key写回与scale RMW不是一件事：
     # 后者按物理页分配唯一AIV写者；全部48个writer发布后，cache才可整体消费。
     signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)
-    groups = pl.cast(pl.read(group_plan, [0]), pl.INDEX)
-    signal = wait_row_owners(signal, PHASE_COEFF, CORES, generation, 0, groups, 1, VECTORS, GROUPS, 1)
+    if not FUSED_INDEXER_COEFF:
+        groups = pl.cast(pl.read(group_plan, [0]), pl.INDEX)
+        signal = wait_row_owners(signal, PHASE_COEFF, CORES, generation, 0, groups, 1, VECTORS, GROUPS, 1)
     signal = wait_row_owners(signal, PHASE_IDX_SCALE, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
     indexer_transfer = indexer_score_cube_stage(
         idx_query_i8,

@@ -5,7 +5,7 @@
 两者沿用同一直接编排与数学helper，CPU合同检查防止数学和调度意外分叉。
 
 整体思路与阅读顺序
-    decode_csa_spmd先清零内部信号，再创建一次24组业务SPMD；_csa_core_group把AIC和双AIV角色
+    decode_csa_spmd只创建一次MIX SPMD，清零、同步与业务均在其中；_csa_core_group把AIC和双AIV角色
     装进同一个MIX任务。两种角色在设备同时推进，GM phase通知连接跨组依赖，
     组内FFTS READY/ACK驱动Score与Attention的环槽流水。先读runtime_abi.py
     和两份*_schedule.py，再读对应*_stages.py数学。不读历史IR、不在运行时
@@ -61,7 +61,7 @@
 
 同步生命周期与当前验证边界
     signal为调用内部独立INT32 Tensor，容量由PHASE_COUNT、CORES和槽步长决定；
-    每次调用均通过设备任务清零，再由依赖启动业务SPMD。图重放包含同样的
+    所有档位每次调用在同一个主MIX内清零并硬屏障。绑定要求24AIC/48AIV，图重放包含同样的
     初始化，不保留跨调用的旧信号代际。普通Top-K也在内部，诊断入口才接收输出。
     ffts[256]用于PyPTO源码接口；底层地址初始化沿用Simpler运行时，不能
     把它当作普通GM phase信号的存储。公共metadata与HC/QKV重叠，TopK后
@@ -85,7 +85,6 @@ from .runtime_abi import (
     COMPRESSED_COLS,
     CORES,
     GROUP_OFFSET_ROWS,
-    GROUPS,
     HEAD_RING_ROWS,
     IC,
     ICACHE_BYTES,
@@ -278,6 +277,7 @@ def _csa_core_group(
     wo_b_scale: pl.Tensor[[4096], pl.FP32],
     output: pl.InOut[pl.Tensor[[T, 16384], pl.BF16]],
     signal: pl.InOut[pl.Tensor[[WORDS], pl.INT32]],
+    signal_init_matrix: pl.InOut[pl.Tensor[[VECTORS, PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS], pl.INT32]],
     QUERY_GROUP: pl.constexpr,
     QK_PANEL: pl.constexpr,
     SCORE_TILE: pl.constexpr,
@@ -308,6 +308,7 @@ def _csa_core_group(
     JOINT_BF16_PREFIX: pl.constexpr = False,
     PREFIX_PROJECTION_ROWS: pl.constexpr = 128,
     SCORE_GROUP_ORDER: pl.constexpr = False,
+    FUSED_INDEXER_COEFF: pl.constexpr = False,
     PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
 ):
     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
@@ -409,6 +410,7 @@ def _csa_core_group(
             JOINT_BF16_PREFIX,
             PREFIX_PROJECTION_ROWS,
             SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
+            FUSED_INDEXER_COEFF=FUSED_INDEXER_COEFF,
         )
         (
             x_fp32,
@@ -587,6 +589,7 @@ def _csa_core_group(
             wo_b_scale,
             output,
             signal,
+            signal_init_matrix,
             QUERY_GROUP,
             QK_PANEL,
             SCORE_TILE,
@@ -612,6 +615,7 @@ def _csa_core_group(
             SHORT_TOPK_PREFIX,
             SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
             PLAN_TABLE_COLUMNS=PLAN_TABLE_COLUMNS,
+            FUSED_INDEXER_COEFF=FUSED_INDEXER_COEFF,
         )
     return (
         x_fp32,
@@ -692,16 +696,6 @@ def _csa_core_group(
         output,
         signal,
     )
-
-
-@pl.jit.incore
-def _clear_internal_signal(
-    area: pl.Out[pl.Tensor[[48, (PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS)], pl.INT32]],
-):
-    core = pl.tile.get_block_idx()
-    zero = pl.tile.full([1, (PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS)], dtype=pl.INT32, value=0)
-    pl.store(zero, [core, 0], area)
-    return area
 
 
 @pl.jit
@@ -793,6 +787,7 @@ def decode_csa_spmd_debug(
     JOINT_BF16_PREFIX: pl.constexpr = False,
     PREFIX_PROJECTION_ROWS: pl.constexpr = 128,
     SCORE_GROUP_ORDER: pl.constexpr = False,
+    FUSED_INDEXER_COEFF: pl.constexpr = False,
     PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
 ):
     t = pl.tensor.dim(x, 0)
@@ -850,9 +845,11 @@ def decode_csa_spmd_debug(
     idx_query_scale = pl.create_tensor([t * 64, 1], dtype=pl.FP32)
     weights_partial = pl.create_tensor([p16 * 4, 64], dtype=pl.FP32)
     head_weights = pl.create_tensor([p16, 64], dtype=pl.FP32)
-    group_offsets = pl.create_tensor(
-        [((b + 1 + 16 - 1) // 16 * 16 + 4 * t + 16 - 1) // 16 * 16 + 48 + 4 * t + 2 * b], dtype=pl.INT32
-    )
+    # 原分区及其偏移不变；仅融合域在内部offset尾追加T个INT32映射。
+    group_offset_words = ((b + 1 + 16 - 1) // 16 * 16 + 4 * t + 16 - 1) // 16 * 16 + 48 + 4 * t + 2 * b
+    if FUSED_INDEXER_COEFF:
+        group_offset_words = group_offset_words + t
+    group_offsets = pl.create_tensor([group_offset_words], dtype=pl.INT32)
     group_plan = pl.create_tensor([8], dtype=pl.INT32)
     coefficients = pl.create_tensor([t * 16, group * 64], dtype=pl.FP16)
     indexer_transfer = pl.create_tensor([24 * 2 * group, SCORE_TILE], dtype=pl.FP32)
@@ -879,10 +876,6 @@ def decode_csa_spmd_debug(
     rope_rows = pl.tensor.dim(idx_query_rope, 0)
     idx_query_rope_heads = pl.reshape(idx_query_rope, [rope_rows * 64, 128])
     idx_query_scale_heads = pl.reshape(idx_query_scale, [t, 64])
-    signal_matrix = pl.reshape(signal, [48, (PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS)])
-    with pl.spmd(48, sync_start=True):
-        signal_matrix = _clear_internal_signal(signal_matrix)
-    signal = pl.reshape(signal_matrix, [PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS])
     pages = pl.tensor.dim(idx_cache, 0)
     page_bytes = pl.tensor.dim(idx_cache, 1)
     cache_flat = pl.reshape(idx_cache, [pages * page_bytes])
@@ -890,7 +883,10 @@ def decode_csa_spmd_debug(
     shifted = cache_flat[64 : 64 + (pages * page_bytes - 64) // 128 * 128]
     idx_key0 = pl.reshape(prefix, [pages * page_bytes // 128, 128])
     idx_key64 = pl.reshape(shifted, [(pages * page_bytes - 64) // 128, 128])
-    with pl.spmd(GROUPS, sync_start=True):
+    # 所有输入档位统一在主MIX内清零并硬同步；没有独立初始化task。
+    # binding准备时检查24AIC/48AIV；全设备查询保证硬屏障全占用。
+    signal_init_matrix = pl.reshape(signal, [VECTORS, PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS])
+    with pl.spmd(pl.system.available_cluster_count(), sync_start=True):
         (
             x_fp32,
             inv,
@@ -1102,6 +1098,7 @@ def decode_csa_spmd_debug(
             wo_b_scale,
             output,
             signal,
+            signal_init_matrix,
             QUERY_GROUP,
             QK_PANEL,
             SCORE_TILE,
@@ -1133,6 +1130,7 @@ def decode_csa_spmd_debug(
             PREFIX_PROJECTION_ROWS,
             SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
             PLAN_TABLE_COLUMNS=PLAN_TABLE_COLUMNS,
+            FUSED_INDEXER_COEFF=FUSED_INDEXER_COEFF,
         )
     return (cache_rows, main_state, main_cache, idx_state, idx_cache, topk_scores, topk_indices, output)
 
@@ -1224,6 +1222,7 @@ def decode_csa_spmd(
     JOINT_BF16_PREFIX: pl.constexpr = False,
     PREFIX_PROJECTION_ROWS: pl.constexpr = 128,
     SCORE_GROUP_ORDER: pl.constexpr = False,
+    FUSED_INDEXER_COEFF: pl.constexpr = False,
     PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
 ):
     t = pl.tensor.dim(x, 0)
@@ -1283,9 +1282,11 @@ def decode_csa_spmd(
     idx_query_scale = pl.create_tensor([t * 64, 1], dtype=pl.FP32)
     weights_partial = pl.create_tensor([p16 * 4, 64], dtype=pl.FP32)
     head_weights = pl.create_tensor([p16, 64], dtype=pl.FP32)
-    group_offsets = pl.create_tensor(
-        [((b + 1 + 16 - 1) // 16 * 16 + 4 * t + 16 - 1) // 16 * 16 + 48 + 4 * t + 2 * b], dtype=pl.INT32
-    )
+    # 原分区及其偏移不变；仅融合域在内部offset尾追加T个INT32映射。
+    group_offset_words = ((b + 1 + 16 - 1) // 16 * 16 + 4 * t + 16 - 1) // 16 * 16 + 48 + 4 * t + 2 * b
+    if FUSED_INDEXER_COEFF:
+        group_offset_words = group_offset_words + t
+    group_offsets = pl.create_tensor([group_offset_words], dtype=pl.INT32)
     group_plan = pl.create_tensor([8], dtype=pl.INT32)
     coefficients = pl.create_tensor([t * 16, group * 64], dtype=pl.FP16)
     indexer_transfer = pl.create_tensor([24 * 2 * group, SCORE_TILE], dtype=pl.FP32)
@@ -1312,10 +1313,6 @@ def decode_csa_spmd(
     rope_rows = pl.tensor.dim(idx_query_rope, 0)
     idx_query_rope_heads = pl.reshape(idx_query_rope, [rope_rows * 64, 128])
     idx_query_scale_heads = pl.reshape(idx_query_scale, [t, 64])
-    signal_matrix = pl.reshape(signal, [48, (PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS)])
-    with pl.spmd(48, sync_start=True):
-        signal_matrix = _clear_internal_signal(signal_matrix)
-    signal = pl.reshape(signal_matrix, [PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS])
     pages = pl.tensor.dim(idx_cache, 0)
     page_bytes = pl.tensor.dim(idx_cache, 1)
     cache_flat = pl.reshape(idx_cache, [pages * page_bytes])
@@ -1323,7 +1320,10 @@ def decode_csa_spmd(
     shifted = cache_flat[64 : 64 + (pages * page_bytes - 64) // 128 * 128]
     idx_key0 = pl.reshape(prefix, [pages * page_bytes // 128, 128])
     idx_key64 = pl.reshape(shifted, [(pages * page_bytes - 64) // 128, 128])
-    with pl.spmd(GROUPS, sync_start=True):
+    # 所有输入档位统一在主MIX内清零并硬同步；没有独立初始化task。
+    # binding准备时检查24AIC/48AIV；全设备查询保证硬屏障全占用。
+    signal_init_matrix = pl.reshape(signal, [VECTORS, PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS])
+    with pl.spmd(pl.system.available_cluster_count(), sync_start=True):
         (
             x_fp32,
             inv,
@@ -1535,6 +1535,7 @@ def decode_csa_spmd(
             wo_b_scale,
             output,
             signal,
+            signal_init_matrix,
             QUERY_GROUP,
             QK_PANEL,
             SCORE_TILE,
@@ -1566,5 +1567,6 @@ def decode_csa_spmd(
             PREFIX_PROJECTION_ROWS,
             SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
             PLAN_TABLE_COLUMNS=PLAN_TABLE_COLUMNS,
+            FUSED_INDEXER_COEFF=FUSED_INDEXER_COEFF,
         )
     return (cache_rows, main_state, main_cache, idx_state, idx_cache, output)

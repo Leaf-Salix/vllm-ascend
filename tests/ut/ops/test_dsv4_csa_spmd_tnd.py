@@ -75,6 +75,47 @@ def test_output_balance_capacity_domains(tokens, requests, max_query, length, ex
 
 
 @pytest.mark.parametrize(
+    "tokens,requests,max_query,length,expected",
+    [
+        (6, 1, 6, 131078, False),
+        (48, 8, 6, 131078, False),
+        (56, 16, 6, 131078, False),
+        (63, 16, 6, 131078, False),
+        (64, 16, 6, 131078, True),
+        (96, 16, 6, 131078, True),
+        (96, 16, 6, 262150, True),
+        (144, 24, 6, 131078, True),
+        (168, 28, 6, 131078, True),
+        (192, 32, 6, 131078, True),
+        (193, 33, 6, 131078, False),
+        (96, 20, 5, 131077, False),
+        (192, 32, 6, 8198, False),
+        (96, 16, 6, 32771, False),
+        (96, 16, 6, 32772, True),
+    ],
+)
+def test_fused_indexer_coefficients_capacity_and_history_domain(tokens, requests, max_query, length, expected):
+    """限制融合资源域；Host描述符只选策略，真实尾组与causal仍由设备判断。"""
+    policy = select_policy(tokens=tokens, requests=requests, max_query_tokens=max_query, max_seq_len=length)
+    assert policy.fused_indexer_coeff is expected
+    assert policy.constexprs()["FUSED_INDEXER_COEFF"] is expected
+
+
+@pytest.mark.parametrize("cube_cores,vector_cores", [(0, 0), (23, 46), (25, 50), (24, 47), (24, 49), (32, 64)])
+def test_single_spmd_rejects_incompatible_hardware_before_submission(cube_cores, vector_cores):
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.binding import validate_core_geometry
+
+    with pytest.raises(NotImplementedError, match="不启动其他task路径"):
+        validate_core_geometry(cube_cores, vector_cores)
+
+
+def test_single_spmd_accepts_full_24_cube_48_vector_hardware():
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.binding import validate_core_geometry
+
+    validate_core_geometry(24, 48)
+
+
+@pytest.mark.parametrize(
     "tokens,requests,max_query,length,topk_prefix,half_score_ub",
     [
         (31, 6, 6, 131078, False, False),

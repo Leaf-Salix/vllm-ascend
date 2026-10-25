@@ -46,6 +46,9 @@ SHORT_PREFETCH_HALF_SORT_LIMIT = 2048
 SCORE_SPLIT_MIN_TOKENS = 32
 # At most two query-group work items per each of the 24 physical groups.
 SHORT_HALF_SCORE_GROUP_LIMIT = 48
+# 已验证量化/系数融合的长G6容量区间；实际query归属仍在device推导。
+FUSED_COEFFICIENT_MIN_TOKENS = 64
+FUSED_COEFFICIENT_MAX_TOKENS = 192
 
 
 @dataclass(frozen=True)
@@ -80,6 +83,7 @@ class CSASPMDPolicy:
     prefix_projection_rows: int = 128
     score_group_order: bool = False
     plan_table_columns: int = DEFAULT_PHYSICAL_PLAN_COLUMNS
+    fused_indexer_coeff: bool = False
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -114,6 +118,7 @@ class CSASPMDPolicy:
             "PREFIX_PROJECTION_ROWS": self.prefix_projection_rows,
             "SCORE_GROUP_ORDER": self.score_group_order,
             "PLAN_TABLE_COLUMNS": self.plan_table_columns,
+            "FUSED_INDEXER_COEFF": self.fused_indexer_coeff,
         }
 
 
@@ -234,6 +239,10 @@ def select_policy(
         # 共享同一谓词，不能仅开启生产者或消费者。区间实测与限制见优化日志。
         plan_physical_rows=plan_physical_rows,
         plan_table_columns=plan_table_columns,
+        # 只选已有长G6资源域；真实group、causal、尾组仍由device决定。
+        fused_indexer_coeff=(
+            long_history and group == 6 and FUSED_COEFFICIENT_MIN_TOKENS <= tokens <= FUSED_COEFFICIENT_MAX_TOKENS
+        ),
         # 小T保持原Score，中大T使用早FIX与单次WS写回。分界沿已有M16
         # 前段资源区间；依据完整实测取舍，不把回退唯一归因于QA或假定最优。
         # 实际有效query/长度/页表仍在device读取，不按B4/B8等测试点枚举。

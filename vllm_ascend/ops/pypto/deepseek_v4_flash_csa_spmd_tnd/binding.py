@@ -13,6 +13,18 @@ from vllm_ascend import envs
 
 from .policy import CSASPMDPolicy, select_policy
 
+REQUIRED_CUBE_CORES = 24
+REQUIRED_VECTOR_CORES = 2 * REQUIRED_CUBE_CORES
+
+
+def validate_core_geometry(cube_core_num: int, vector_core_num: int) -> None:
+    """固定CSA核角色映射要求整卡24C48V；硬件不匹配时在提交前拒绝。"""
+    if (cube_core_num, vector_core_num) != (REQUIRED_CUBE_CORES, REQUIRED_VECTOR_CORES):
+        raise NotImplementedError(
+            "CSA单SPMD的核内清零/硬同步要求24个AIC和48个AIV；"
+            f"当前为{cube_core_num}个AIC和{vector_core_num}个AIV，不启动其他task路径"
+        )
+
 
 class PreparedDynamicCSA:
     """准备Native根参数；无外部scratch，调用内由Simpler管理临时内存。"""
@@ -43,6 +55,12 @@ class PreparedDynamicCSA:
             compressed_table_columns=native["cmp_block_table"].shape[1],
         )
         device = hidden.device
+        if device.type == "npu":
+            import torch_npu
+
+            # 只查询硬件属性，不读取metadata或Tensor值；绑定准备时执行一次。
+            properties = torch_npu.npu.get_device_properties(device)
+            validate_core_geometry(properties.cube_core_num, properties.vector_core_num)
         self.buffers: dict[str, torch.Tensor] = {}
         # 名称变更只对应接口职责，Tensor保持原对象；同一组内Q/L分别保留。
         direct = {

@@ -1,0 +1,31 @@
+{
+  "status": "paused",
+  "round_finished": true,
+  "closed_at_utc": "2026-10-25T07:31:54.623863+00:00",
+  "user_instruction": "完成这一轮代码优化和验证后停止；所有场景清零必须包含于同一个SPMD，删除两task回退",
+  "goal": "在当前的性能基础上再优化10%，以128K B16 B24 为主要优化场景",
+  "goal_achieved": false,
+  "adopted_optimizations": [
+    "signal_initialization_inside_single_MIX_SPMD_all_cases",
+    "indexer_query_quantization_and_coefficients_fusion_long_G6_T64_192"
+  ],
+  "production_integration": "production_integration.json",
+  "final_candidate": "init_coeff_single_spmd_v2",
+  "final_eight_case_results": "single_spmd_v2_eight_case_validation.json",
+  "geomean_reduction_pct": 2.9720479788531096,
+  "CPU_contracts": {
+    "passed": 194,
+    "evidence": "evidence/single_spmd_v2_cpu_contract.txt"
+  },
+  "all_cases_actual_one_MIX_task": true,
+  "service_graph_steps_passed": 15,
+  "service_source_scope": "v1实际融合路径执行；最终v2入口/核内路径等价证据见production_integration.json与single_spmd_v2_codegen.json，不改写原报告版本",
+  "previous_state_validation": "round_closure.json:state_validation，两个容量各12metadata+4连续步；未直接观察内部信号/红区",
+  "prior_premature_stop_record": "round_closure.json",
+  "task_index": "final_validation_tasks.json",
+  "completed_device_tasks": 17,
+  "pending_device_tasks": [],
+  "new_optimization_scheduled": false,
+  "full_model_EOS_retested": false,
+  "pushed": false
+}

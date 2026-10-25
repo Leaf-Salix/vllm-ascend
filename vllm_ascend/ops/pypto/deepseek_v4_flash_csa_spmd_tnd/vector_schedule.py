@@ -68,6 +68,7 @@ from .attention_plan_stages import (
     attention_slot_plan_stage,
 )
 from .attention_stream_stages import attention_qk_pv_vector_lane_stage
+from .fused_coefficients import indexer_query_quant_coeff_stage, prepare_fused_query_coefficients
 from .hc_stages import hc_comb_range, hc_gates_range, hc_mix_norm_range, hc_reduce_range, hc_widen_rms_range
 from .indexer_cache_stages import indexer_compact_quant_cache_stage
 from .indexer_group_stages import indexer_group_plan_stage, indexer_head_coefficients_stage
@@ -83,7 +84,7 @@ from .indexer_score_stages import indexer_score_vector_lane_stage
 from .metadata_stages import compact_offsets_and_count_stage
 from .output_projection_a_stages import o_projection_group_quant_stage, o_projection_groups_quant_stage
 from .output_projection_b_stages import o_dequant_hc_post_stage
-from .phase_sync import begin_invocation, publish_phase, wait_row_owners
+from .phase_sync import SIGNAL_SLOT_WORDS, begin_invocation, publish_phase, wait_row_owners
 from .qkv_stages import q_r_stage
 from .query_projection_stages import q_dequant_rope_stage, q_rope_prepare_stage
 from .runtime_abi import (
@@ -139,6 +140,7 @@ from .runtime_abi import (
     PHASE_ATTN_VECTOR,
     PHASE_COEFF,
     PHASE_COMB,
+    PHASE_COUNT,
     PHASE_GATES,
     PHASE_IDX_HADAMARD,
     PHASE_IDX_QUANT,
@@ -303,6 +305,7 @@ def vector_schedule(
     wo_b_scale: pl.Tensor[[4096], pl.FP32],
     output: pl.InOut[pl.Tensor[[T, 16384], pl.BF16]],
     signal: pl.InOut[pl.Tensor[[WORDS], pl.INT32]],
+    signal_init_matrix: pl.InOut[pl.Tensor[[VECTORS, PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS], pl.INT32]],
     QUERY_GROUP: pl.constexpr,
     QK_PANEL: pl.constexpr,
     SCORE_TILE: pl.constexpr,
@@ -327,6 +330,7 @@ def vector_schedule(
     SHORT_HALF_SCORE_UB: pl.constexpr = False,
     SHORT_TOPK_PREFIX: pl.constexpr = False,
     SCORE_GROUP_ORDER: pl.constexpr = False,
+    FUSED_INDEXER_COEFF: pl.constexpr = False,
     PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
 ):
     pl.func_attr({"split_aiv": True})
@@ -392,8 +396,18 @@ def vector_schedule(
     signal_gm = signal
     worker = pl.tile.get_block_idx() * 2 + pl.tile.get_subblock_idx()
     core = GROUPS + worker
-    signal, generation = begin_invocation(signal, core)
     pl.system.set_ffts(ffts)
+    # Exactly the original 48 contiguous, disjoint 11520-word ranges.
+    # Preserve the full 512-byte phase-slot stride and all padding.
+    zero = pl.tile.full([1, PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS], dtype=pl.INT32, value=0)
+    pl.store(zero, [worker, 0], signal_init_matrix)
+    # Both explicit Group members rendezvous before any signal read/write.
+    # This is hardware FFTS (events 11/12/13), never a GM boot barrier.
+    pl.system.cacheinvalid()
+    pl.system.fence()
+    pl.system.syncall(core_type=pl.KernelType.MIX)
+    pl.system.cacheinvalid()
+    signal, generation = begin_invocation(signal, core)
     tokens = pl.tensor.dim(x, 0)
     x_fp32, inv = hc_widen_rms_range(x, x_fp32, inv, widen_tail, worker, VECTORS)
     if BALANCED and QUERY_GROUP == 2:
@@ -471,6 +485,10 @@ def vector_schedule(
             )
         # publish先排空业务写回并维护缓存，随后发单写者完成信号；不是atomic计数器。
         # 计划在本次调用保持只读，消费者直到首次使用才等这个真实producer。
+        if FUSED_INDEXER_COEFF:
+            group_offsets, coefficients = prepare_fused_query_coefficients(
+                idx_bounds, idx_lengths, positions, group_offsets, coefficients, tokens, QUERY_GROUP
+            )
         signal = publish_phase(signal, PHASE_META, core, CORES, generation)
 
     if HC_CONSUMER_REDUCE:
@@ -756,33 +774,55 @@ def vector_schedule(
             COOPERATIVE_PREFIX,
         )
     signal = wait_row_owners(signal, PHASE_IDX_QUERY_HAD, CORES, generation, 0, tokens, 1, GROUPS, 0, 1)
-    idx_query_i8, idx_query_scale = indexer_query_quant_stage(
-        idx_query_had,
-        idx_query_i8,
-        idx_query_scale,
-        tokens,
-        worker,
-        VECTORS,
-    )
-    signal = publish_phase(signal, PHASE_IDX_QUERY_QUANT, core, CORES, generation)
+    if FUSED_INDEXER_COEFF:
+        # 每个AIV在此之前已发布WEIGHTS并获取META；前移获取不依赖QUANT。
+        signal = wait_row_owners(signal, PHASE_WEIGHTS, CORES, generation, 0, tokens, 16, VECTORS, GROUPS, 1)
+        idx_query_i8, idx_query_scale, coefficients = indexer_query_quant_coeff_stage(
+            idx_query_had,
+            idx_query_i8,
+            idx_query_scale,
+            tokens,
+            worker,
+            VECTORS,
+            head_weights,
+            idx_bounds,
+            idx_lengths,
+            positions,
+            group_offsets,
+            coefficients,
+            QUERY_GROUP,
+        )
+        # 同一业务发布覆盖原INT8/scale及本token的64列对角系数片。
+        signal = publish_phase(signal, PHASE_IDX_QUERY_QUANT, core, CORES, generation)
+        signal = publish_phase(signal, PHASE_COEFF, core, CORES, generation)
+    else:
+        idx_query_i8, idx_query_scale = indexer_query_quant_stage(
+            idx_query_had,
+            idx_query_i8,
+            idx_query_scale,
+            tokens,
+            worker,
+            VECTORS,
+        )
+        signal = publish_phase(signal, PHASE_IDX_QUERY_QUANT, core, CORES, generation)
 
-    # 系数要读取其他核的head权重/scale及请求分组。公共计划此前已等待，
-    # planner在HC早期已启动；等待只建立必要数据依赖，不在SPMD入口做全核集合。
-    signal = wait_row_owners(signal, PHASE_WEIGHTS, CORES, generation, 0, tokens, 16, VECTORS, GROUPS, 1)
-    signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)
-    coefficients = indexer_head_coefficients_stage(
-        idx_query_scale_heads,
-        head_weights,
-        positions,
-        idx_bounds,
-        idx_lengths,
-        group_offsets,
-        coefficients,
-        worker,
-        VECTORS,
-        QUERY_GROUP,
-    )
-    signal = publish_phase(signal, PHASE_COEFF, core, CORES, generation)
+        # 系数要读取其他核的head权重/scale及请求分组。公共计划此前已等待，
+        # planner在HC早期已启动；等待只建立必要数据依赖，不在SPMD入口做全核集合。
+        signal = wait_row_owners(signal, PHASE_WEIGHTS, CORES, generation, 0, tokens, 16, VECTORS, GROUPS, 1)
+        signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)
+        coefficients = indexer_head_coefficients_stage(
+            idx_query_scale_heads,
+            head_weights,
+            positions,
+            idx_bounds,
+            idx_lengths,
+            group_offsets,
+            coefficients,
+            worker,
+            VECTORS,
+            QUERY_GROUP,
+        )
+        signal = publish_phase(signal, PHASE_COEFF, core, CORES, generation)
     # 系数之后先提交Indexer compact key/scale。主Query和主压缩仅供后继
     # Attention消费，仍在本AIV进入Score之前完成；这里不先等待整段Score。
     # AIC可以用既有两槽提前生产，槽复用继续由原SCORE_READY/ACK保证。

@@ -69,7 +69,14 @@ C08 的 query 长度及请求顺序固定为：
 | BSH-SPMD | BSH 单 MIX incore task 的完整 L1 首尾跨度，覆盖全部 24 AIC + 48 AIV。 |
 | TND-MPMD-AICPU | TND 多 task 完整链路的 device 执行跨度，包含 AICPU 调度及 AICore 执行；用 Profiler/trace 中所有相关活动的最早开始至最晚结束。 |
 | TND-MPMD-L1 | TND 多 task 完整链路内，所有实际 incore task 的 L1 最早开始至最晚结束，包含核内 metadata 推导。 |
-| TND-SPMD | TND 单 MIX incore task 的完整 L1 首尾跨度，覆盖全部 24 AIC + 48 AIV。 |
+| TND-SPMD | TND-SPMD 实现完整调用的 L1 首尾跨度，覆盖初始化和全部 24 AIC + 48 AIV 的业务计算。证据必须说明实际 task 数。 |
+
+`SPMD` 列名不能代替实际 task 数证明。早期外部持久工作区在准备绑定时清零一次，
+后续调用用代际推进；迁入内部临时工作区后的历史版本曾有“独立清零SPMD＋主MIX SPMD”
+两个task，其合格计时必须从清零最早开始覆盖到主MIX最晚结束，不能只截主任务。
+将初始化融合进主MIX后，完整调用应只剩一个SPMD task，清零和同步仍在计时内。
+跨这两种实现比较时，明确标注版本与实际task结构，不把两个task称为单task，
+也不把启动前一次性准备与每次调用必需的初始化混淆。
 
 计时统一采用以下边界原则：
 
