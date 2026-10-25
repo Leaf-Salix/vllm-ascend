@@ -1,0 +1,25 @@
+{
+  "source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v1",
+  "parent": "frozen_current_internal_workspace_20261025",
+  "reference_prototype": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/fused_coefficients_v1.json",
+  "changed_files": [
+    "cube_schedule.py",
+    "entry.py",
+    "fused_coefficients.py",
+    "policy.py",
+    "vector_schedule.py"
+  ],
+  "binding_unchanged": true,
+  "graph_contract_unchanged": true,
+  "policy": "long_history and query_group == 6 and 64 <= token_capacity <= 192",
+  "workspace": "debug/service两个入口各自在原group_offsets尾增加T个INT32；其余分区偏移不变",
+  "mechanism": "token%48的量化owner直接写对角系数；QUANT发布覆盖两种payload，AIC不再单独获取COEFF",
+  "status": "CPU_compiled_but_rejected_overlap_semantics",
+  "device_execution": false,
+  "adopted": false,
+  "cpu_compilations": {
+    "C04": "tests/pypto_test/csa_spmd_tnd_focus_20261025/runs/codegen_fused_coefficients_current_C04_v1/result.json",
+    "C05": "tests/pypto_test/csa_spmd_tnd_focus_20261025/runs/codegen_fused_coefficients_current_C05_v1/result.json"
+  },
+  "rejection": "原request_bounds只逐请求过滤，非单调Q可能产生有效重叠区间；单值token map会丢失其它group系数。v1保留原源码及两档CPU产物，不得上卡。"
+}

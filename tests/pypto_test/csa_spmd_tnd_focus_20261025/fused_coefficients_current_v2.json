@@ -1,0 +1,33 @@
+{
+  "source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2",
+  "parent": "frozen_current_internal_workspace_20261025",
+  "reference_prototype": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_eight_20261022/fused_coefficients_v1.json",
+  "changed_files": [
+    "cube_schedule.py",
+    "entry.py",
+    "fused_coefficients.py",
+    "policy.py",
+    "vector_schedule.py"
+  ],
+  "binding_unchanged": true,
+  "graph_contract_unchanged": true,
+  "policy": "long_history and query_group == 6 and 64 <= token_capacity <= 192",
+  "workspace": "debug/service两个入口各自在原group_offsets尾增加T个INT32；其余分区偏移不变",
+  "mechanism": "token%48的量化owner直接写对角系数；QUANT发布覆盖两种payload，AIC不再单独获取COEFF",
+  "status": "CPU_gate_passed_device_pending",
+  "device_execution": false,
+  "adopted": false,
+  "overlapping_query_intervals": "v2标记-2后由同一token owner逐组恢复原causal片；v1未覆盖，不得上卡",
+  "cpu_compilations": {
+    "C04": "tests/pypto_test/csa_spmd_tnd_focus_20261025/runs/codegen_fused_coefficients_current_C04_v2/result.json",
+    "C05": "tests/pypto_test/csa_spmd_tnd_focus_20261025/runs/codegen_fused_coefficients_current_C05_v2/result.json"
+  },
+  "contracts": "tests/pypto_test/csa_spmd_tnd_focus_20261025/fused_coefficients_current_v2_contracts.json",
+  "codegen": "tests/pypto_test/csa_spmd_tnd_focus_20261025/fused_coefficients_current_v2_codegen.json",
+  "v1_history_preserved": true,
+  "normal_query_path": "META map唯一时只直接解码该group，不执行重叠扫描；-2仅标记同token映射碰撞。",
+  "validation_limits": [
+    "完整CPU编译为正式入口；debug入口在设备壳重新编译，已有双入口容量及参数转发源码合同。",
+    "未执行NPU数值、状态、服务或性能测试；不以CPU模型代替设备逐bit检查。"
+  ]
+}

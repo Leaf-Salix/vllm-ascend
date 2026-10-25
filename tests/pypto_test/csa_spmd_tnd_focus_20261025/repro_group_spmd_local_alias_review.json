@@ -1,0 +1,83 @@
+{
+  "status": "confirmed_existing_unsupported_local_view_boundary",
+  "source": "tests/pypto_test/csa_spmd_tnd_focus_20261025/repro_group_spmd_local_alias.py",
+  "frozen_source": "tests/pypto_test/csa_spmd_tnd_focus_20261025/runs/repro_group_spmd_local_alias_v1/source.py",
+  "compile_evidence": "tests/pypto_test/csa_spmd_tnd_focus_20261025/runs/repro_group_spmd_local_alias_v1/result.json",
+  "shared_toolchain": {
+    "release": "csa-shared-20261024-group-dims",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-shared-group-dims-20261024",
+      "commit": "d44925c17d9ff7d7fa8e5067e41c4b4f80bf3063"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_tnd_model_validation_20261023/internal_toolchain_upgrade.json",
+    "published_for_validation_at": "2026-10-24T02:59:40+08:00",
+    "validated_at": "2026-10-24T03:45:54+08:00"
+  },
+  "actual_sdk_revisions": {
+    "pypto": "d44925c17d9ff7d7fa8e5067e41c4b4f80bf3063",
+    "ptoas": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f",
+    "simpler": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+  },
+  "device_execution": false,
+  "sdk_modified": false,
+  "external_issue_published": false,
+  "cpu_result": {
+    "alias_inside_spmd": "FAIL: Group param4无法映射到Spmd-wrapper形参",
+    "alias_before_spmd": "PASS: 仅把同一reshape移到SPMD外并显式转发",
+    "incore_cpp_equal_ignoring_full_line_pto_comments": true
+  },
+  "legality_and_scope": [
+    "固定形状128个INT32重排为2×64，元素数相同；两AIV各写64字，AIC写独立16×16结果；无动态维度、硬屏障、模型和NPU。",
+    "两个入口共用同一cube/vector函数及pl.spmd(1)，数学与派发形态不变；只改变视图的建立位置及转发。",
+    "前端、IR与两incore的PTO/C++生成通过，失败位于orchestration Group bridge；不是Tile/GM误用或shape不匹配。",
+    "合法reshape操作不意味着该编排位置已受支持；上游明确拒绝把descriptor-changing视图猜成完整参数别名。"
+  ],
+  "pass_boundary": {
+    "inside_IR": "tests/pypto_test/csa_spmd_tnd_focus_20261025/runs/repro_group_spmd_local_alias_v1/alias_inside_spmd/passes_dump/33_after_CanonicalizeIOOrder.py",
+    "inside_lines": [
+      51,
+      66
+    ],
+    "inside": "SPMD wrapper内matrix_inline0=pl.tensor.reshape(work,[2,64])；Group参数4为该局部Var，不是wrapper形参。",
+    "outside_IR": "tests/pypto_test/csa_spmd_tnd_focus_20261025/runs/repro_group_spmd_local_alias_v1/alias_before_spmd/passes_dump/33_after_CanonicalizeIOOrder.py",
+    "outside_lines": [
+      51,
+      80
+    ],
+    "outside": "Orchestration建立matrix并作为SPMD wrapper显式形参，桥接可解析。"
+  },
+  "exact_upstream_boundary": {
+    "pull_request": "https://github.com/hw-native-sys/pypto/pull/3142",
+    "head": "44b3caaec88a3a4771ee60a629bdafc38ed8a067",
+    "merged_at_utc": "2026-10-25T02:32:58Z",
+    "file": "https://github.com/hw-native-sys/pypto/blob/44b3caaec88a3a4771ee60a629bdafc38ed8a067/tests/ut/codegen/test_spmd_scope_tid_codegen.py#L399",
+    "file_blob_sha": "9e797d7959c2988ce2387a3584bdffc800c20edf",
+    "test": "test_mixed_spmd_bridge_resolves_complete_parameter_aliases",
+    "cases": "aliases允许；view/fresh明确期待RuntimeError does not map to any Spmd-wrapper parameter。",
+    "relevance": "精确相同的SPMD→Group桥接及拒绝诊断，reshape是descriptor-changing局部视图。"
+  },
+  "dedup_searches": [
+    "repo:hw-native-sys/pypto Spmd-wrapper",
+    "repo:hw-native-sys/pypto BuildWrapperReorderedParams",
+    "repo:hw-native-sys/pypto deduped/aliased",
+    "repo:hw-native-sys/pypto spmd reshape group"
+  ],
+  "issue_decision": "不生成、不发布重复bug正文。PR3142测试已明确此能力边界；继续用算子v3在SPMD外建视图的绕行。若未来请求局部view支持，应作为能力扩展，而非将现有InternalError当成新的编译正确性缺陷。",
+  "upstream_validation_limit": "读取精确PR/测试，未构建执行上游PR/main；CPU实测仅当前公共d44925c1。",
+  "local_validation": "脚本Ruff通过；未改其他agent文件、冻结候选、SDK或集中日志，未提交。"
+}

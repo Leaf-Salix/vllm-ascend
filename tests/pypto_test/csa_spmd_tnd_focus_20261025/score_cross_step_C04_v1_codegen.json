@@ -1,0 +1,174 @@
+{
+  "case": "C04",
+  "cpu_backend_compiled": true,
+  "device_execution": false,
+  "generated_cpp": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/runs/codegen_score_cross_step_C04_v1/build_output/decode_csa_spmd_f67tea3p/ptoas/dynamic_csa_full.cpp",
+  "baseline_cpp": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/runs/codegen_score_cross_step_baseline_C04_v1/build_output/decode_csa_spmd_rjz64uep/ptoas/dynamic_csa_full.cpp",
+  "full_score_span": [
+    24974,
+    32632
+  ],
+  "actual_policy": {
+    "QUERY_GROUP": 6,
+    "QK_PANEL": 64,
+    "SCORE_TILE": 1024,
+    "PREFETCH": 1,
+    "TO_L0": true,
+    "BALANCED": true
+  },
+  "math_trace_identical": true,
+  "math_trace_length": 112,
+  "aiv_function_equal_modulo_generated_variable_names": true,
+  "orchestration_and_compiled_metadata_unchanged": true,
+  "tile_raw_address_ends_bytes": {
+    "acc": 131072,
+    "mat": 475136,
+    "left": 65536,
+    "right": 65536,
+    "vec": 180224
+  },
+  "resource_delta_bytes": {
+    "acc": 0,
+    "mat": 0,
+    "left": 0,
+    "right": 0,
+    "vec": 0
+  },
+  "score_regions": {
+    "%buf_key_l1_pool": [
+      [
+        "mat",
+        163840,
+        16384
+      ]
+    ],
+    "%split_qk_acc0": [
+      [
+        "acc",
+        0,
+        49152
+      ]
+    ],
+    "%split_qk_acc1": [
+      [
+        "acc",
+        49152,
+        49152
+      ]
+    ],
+    "%split_ws_acc": [
+      [
+        "acc",
+        98304,
+        4096
+      ]
+    ],
+    "%buf_current_key": [
+      [
+        "right",
+        0,
+        8192
+      ],
+      [
+        "right",
+        49152,
+        8192
+      ],
+      [
+        "right",
+        57344,
+        8192
+      ]
+    ],
+    "%buf_prefetched_key": [
+      [
+        "right",
+        49152,
+        8192
+      ],
+      [
+        "right",
+        57344,
+        8192
+      ]
+    ],
+    "%split_right0": [
+      [
+        "right",
+        0,
+        24576
+      ]
+    ],
+    "%split_right1": [
+      [
+        "right",
+        24576,
+        24576
+      ]
+    ],
+    "%split_right0_last": [
+      [
+        "right",
+        0,
+        24576
+      ]
+    ],
+    "%split_right1_last": [
+      [
+        "right",
+        24576,
+        24576
+      ]
+    ]
+  },
+  "no_score_TMOV_PIPE_ALL_or_PIPE_S": true,
+  "per_pipe_barriers_unchanged": true,
+  "static_counts": {
+    "baseline": {
+      "TASSIGN": 224,
+      "TLOAD": 64,
+      "TEXTRACT": 48,
+      "TMATMUL": 48,
+      "TINSERT": 32,
+      "TMATMUL_ACC": 16,
+      "TSTORE": 16
+    },
+    "candidate": {
+      "TASSIGN": 228,
+      "TLOAD": 68,
+      "TEXTRACT": 48,
+      "TMATMUL": 48,
+      "TINSERT": 32,
+      "TMATMUL_ACC": 16,
+      "TSTORE": 16
+    }
+  },
+  "runtime_work": "For N steps: 2 prime pages once + 30*N within-step pages + 2*(N-1) cross-step pages = 32*N; exactly 16*N Key TEXTRACT, 64*N MMA, 16*N score stores.",
+  "cross_step_events": {
+    "prime_guard": 25004,
+    "next_step_guard": 32156,
+    "slot0_last_read": 31582,
+    "slot0_release_set": 31583,
+    "slot0_reuse_wait": 32155,
+    "next_key_loads_mutually_exclusive_views": [
+      32260,
+      32310,
+      32415,
+      32465
+    ],
+    "next_iteration_acquire_set": 25348,
+    "next_iteration_acquire_wait": 25363,
+    "next_iteration_first_key_extract": 25367,
+    "previous_iteration_Right_release_set": 32607,
+    "next_iteration_Right_reuse_wait": 25364,
+    "step_local_set_wait_counts_balanced": true
+  },
+  "mechanism_gate": "The next-step Key TLOADs are emitted before terminal QK/FIX/WS; next iteration acquires them without reissuing prime DMA. Right lifetime is unchanged.",
+  "limitations": [
+    "No NPU correctness, repeated graph, or complete L1 timing has been run.",
+    "Static ownership/event audit is not a proof of all asynchronous device executions.",
+    "Same bytes/MMA plus added dynamic guards: emitted overlap opportunity does not imply speedup."
+  ],
+  "adopted": false,
+  "performance_eligible": false
+}

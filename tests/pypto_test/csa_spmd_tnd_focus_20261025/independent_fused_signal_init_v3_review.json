@@ -1,0 +1,54 @@
+{
+  "candidate": "candidates/fused_signal_init_v3",
+  "review_kind": "independent_readonly",
+  "device_execution": false,
+  "candidate_protocol_blocker_found": false,
+  "passed_checks": [
+    "独立比较cube/vector从tokens定义至函数尾的源码：数学、业务phase、FFTS事件及返回均逐字相同。",
+    "正常/debug两入口的原Group实参及关键字均AST一致；仅追加signal_init_matrix与FUSED_SIGNAL_INIT。",
+    "48个AIV各写11520个INT32，完整覆盖552960字，边界均512字节对齐。",
+    "最终编排signal_init_matrix=signal.reshape([48,11520])，Simpler Tensor::reshape保留底层buffer及start_offset，无新增allocation。",
+    "实际guard为rt_available_cluster_count()==24，fused set_block_num再次使用rt_available_cluster_count且sync_start=true；fallback没有SYNCALL。",
+    "AIV TSTORE后有PIPE_ALL/DSB，随后Mix SYNCALL；AIC也在第一次代际read/notify前参与同一屏障，消费者随后DCCI。",
+    "实际ISA MIX协议使用11/12/13，业务显式FFTS仅0..5；当前CCEC不定义__PTO_AUTO__。",
+    "每次入口调用均执行guard后的clear/barrier，图重放没有host once-only开关；内部signal每次从0开始，begin_invocation同为generation1，与原独立clear语义一致。"
+  ],
+  "validation_limits": [
+    "两档完整CPU收据为正式入口；debug入口本次独立验证了源码结构和实参一致，仍待其设备壳完整编译/执行。",
+    "未运行NPU，故全卡硬屏障的真机共驻、图重放及耗时尚未验收。"
+  ],
+  "l1_findings": {
+    "pure_memory_cases": "independent_l1_boundary_review.json",
+    "reproducer": "review_complete_l1_boundaries.py",
+    "fused": [
+      "只检查run_boundaries数量，未校验[epoch,start_cycles] schema或时间归属。",
+      "start/end非有限数可绕过比较；可返回NaN/Inf。"
+    ],
+    "separate": [
+      "当前委托旧summarize，不检查boundary数量/drop、metadata核类型或finite frequency。",
+      "48条init记录只验证不同core和subset，不能保证全为AIV。"
+    ],
+    "reg_task_id_correction": "r[2]是每核dispatch token，非func_id；更改r[2]不是必然非法。当前L1无deps，不能仅用kernel_config恢复函数身份。",
+    "measurement_boundary": "begin=min所有incore start，end=max所有incore end本身正确；root boundary仅用于完整性校验，不应移入正式耗时。"
+  },
+  "compiler_issue_comparison": {
+    "v2_actual_error": "orchestration_codegen.cpp:2468，Spmd-wrapper arg for Group param132无法映射到wrapper形参；reshape在Spmd wrapper内部产生局部alias。",
+    "3138": {
+      "url": "https://github.com/hw-native-sys/pypto/issues/3138",
+      "coverage": "Group成员动态类型重绑定，已在当前d44925c1修复；非本次orchestration桥接局部alias映射。"
+    },
+    "3042": {
+      "url": "https://github.com/hw-native-sys/pypto/issues/3042",
+      "coverage": "InCore GM slice->view->load能力扩展；本例没有该slice链，非同问题。"
+    },
+    "3033": {
+      "url": "https://github.com/hw-native-sys/pypto/issues/3033",
+      "coverage": "JIT reshape metadata推导，前端specialize阶段；本例已到最终orchestration codegen，非同问题。"
+    },
+    "3014": {
+      "url": "https://github.com/hw-native-sys/pypto/issues/3014",
+      "coverage": "Group成员InOut返回别名/FREE_VAR，非Spmd wrapper内部reshape的outer-arg解析；不能直接认定重复。"
+    },
+    "recommendation": "已有不同编译阶段和v3外提成功对照，值得用固定shape、一个AIC+双AIV、无硬屏障的最小CPU case确认Spmd内reshape->Group桥接；只建议先本地复现，不发issue、不改SDK。"
+  }
+}

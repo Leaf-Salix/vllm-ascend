@@ -1,0 +1,151 @@
+{
+  "module_reviewed": "tests/pypto_test/csa_spmd_tnd_focus_20261025/complete_l1_v2.py",
+  "device_execution": false,
+  "files_modified_by_review": [
+    "tests/pypto_test/csa_spmd_tnd_focus_20261025/l1_boundary_rejection_gate.json"
+  ],
+  "cases": [
+    {
+      "layout": "fused",
+      "mutation": "valid",
+      "must_reject": false,
+      "observed": "accepted",
+      "detail": 21.42
+    },
+    {
+      "layout": "fused",
+      "mutation": "boundary_empty",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "根调用边界格式非法"
+    },
+    {
+      "layout": "fused",
+      "mutation": "boundary_future",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "incore记录早于本窗口根调用，不能混入旧样本"
+    },
+    {
+      "layout": "fused",
+      "mutation": "two_boundaries",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "窗口必须完整对应一次根调用"
+    },
+    {
+      "layout": "fused",
+      "mutation": "dropped_boundary",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "窗口必须完整对应一次根调用"
+    },
+    {
+      "layout": "fused",
+      "mutation": "nan_end",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "incore记录必须包含有限、非负的整型时钟及标识"
+    },
+    {
+      "layout": "fused",
+      "mutation": "inf_end",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "incore记录必须包含有限、非负的整型时钟及标识"
+    },
+    {
+      "layout": "fused",
+      "mutation": "nan_frequency",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "无效L1频率"
+    },
+    {
+      "layout": "fused",
+      "mutation": "different_dispatch_tokens",
+      "must_reject": false,
+      "observed": "accepted",
+      "detail": 21.42
+    },
+    {
+      "layout": "separate",
+      "mutation": "valid",
+      "must_reject": false,
+      "observed": "accepted",
+      "detail": 38.94
+    },
+    {
+      "layout": "separate",
+      "mutation": "boundary_empty",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "根调用边界格式非法"
+    },
+    {
+      "layout": "separate",
+      "mutation": "boundary_future",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "incore记录早于本窗口根调用，不能混入旧样本"
+    },
+    {
+      "layout": "separate",
+      "mutation": "two_boundaries",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "窗口必须完整对应一次根调用"
+    },
+    {
+      "layout": "separate",
+      "mutation": "dropped_boundary",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "窗口必须完整对应一次根调用"
+    },
+    {
+      "layout": "separate",
+      "mutation": "nan_end",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "incore记录必须包含有限、非负的整型时钟及标识"
+    },
+    {
+      "layout": "separate",
+      "mutation": "inf_end",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "incore记录必须包含有限、非负的整型时钟及标识"
+    },
+    {
+      "layout": "separate",
+      "mutation": "nan_frequency",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "无效L1频率"
+    },
+    {
+      "layout": "separate",
+      "mutation": "wrong_init_roles",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "独立清零必须由全部48个AIV完成"
+    },
+    {
+      "layout": "separate",
+      "mutation": "different_dispatch_tokens",
+      "must_reject": false,
+      "observed": "accepted",
+      "detail": 38.94
+    }
+  ],
+  "schema_source": "Simpler src/common/platform/shared/host/chip_swimlane_collector.cpp:1250",
+  "run_boundary_schema": "[epoch, start_cycles]；单个boundary必须非空且start_cycles不晚于最早incore记录。",
+  "dispatch_token_semantics": {
+    "row_column_2": "per-core monotonic dispatch token，用于和AICPU scheduler记录join，不是func_id。",
+    "source": "Simpler src/common/platform/include/common/chip_swimlane_profiling.h:102-109,156-161",
+    "function_identity": "L1原始记录不携带func_id；需deps.json kernel_ids[]和kernel_config后处理，当前采集没有deps。",
+    "required_action": "不能按reg_task_id等于kernel func_id或所有核reg_task_id相同添加拒收规则。"
+  },
+  "retained_measurement_scope": "仍从最早incore start到最晚incore end；boundary只验证窗口归属，不把AICPU启动边界纳入耗时。"
+}

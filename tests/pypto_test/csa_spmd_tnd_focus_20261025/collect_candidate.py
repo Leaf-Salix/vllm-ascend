@@ -7,6 +7,8 @@ import shutil
 import statistics
 from pathlib import Path
 
+from complete_l1_v2 import summarize
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -29,11 +31,23 @@ def main():
     for side in ("reference", "candidate"):
         windows = [w for w in report["windows"] if w["side"] == side]
         assert len(windows) >= 10
-        assert all(w["records"] == 120 and w["task_groups"] == 2 and w["cores"] == 72 for w in windows)
+        declared = report.get("candidate_init_layout", "separate") if side == "candidate" else "separate"
+        expected_records, expected_tasks = (72, 1) if declared == "fused" else (120, 2)
+        assert all(
+            w["records"] == expected_records
+            and w["task_groups"] == expected_tasks
+            and w["cores"] == 72
+            and w.get("init_layout", "separate") == declared
+            for w in windows
+        )
+        for window in windows:
+            checked = summarize(json.loads(Path(window["raw"]).read_text()), init_layout=declared)
+            assert checked["incore_span_us"] == window["incore_span_us"]
         samples = [w["incore_span_us"] for w in windows]
         assert samples == report["statistics_us"][side]["samples"]
         assert statistics.median(samples) == report["statistics_us"][side]["median"]
         sides[side] = {
+            "init_layout": declared,
             "median_us": statistics.median(samples),
             "samples_us": samples,
             "main_mix_median_us": statistics.median(w["main_mix_us"] for w in windows),

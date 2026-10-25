@@ -1,0 +1,40 @@
+{
+  "candidate": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/score_cross_step_v1",
+  "parent": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/frozen/pypto/deepseek_v4_flash_csa_spmd_tnd",
+  "scope": "existing split-G6 balanced N64/1024, prefetch=1, TO_L0=True, live>3",
+  "mechanism": "carry the next Score step's first N64 in existing L1 slot0; prefetch on the previous step's last panel",
+  "key_data_bytes_and_mma_count_unchanged": true,
+  "right_lifetimes_unchanged_by_design": true,
+  "source_fallback": "original split helper retained for other prefetch settings; live<=3 copied exactly",
+  "slot_contract": [
+    "Step0 primes logical panel0 into L1 slot0, then extracts to the original Right current slot.",
+    "Panel p<15 prefetches p+1 into L1 slot (p+1)%2 and into the original Right prefetch slot.",
+    "Panel15 prefetches next-step panel0 into L1 slot0 only, iff another step exists.",
+    "L1 slot0's prior panel14 was already read into Right before the panel15 prefetch.",
+    "The next step keeps its original ACK before FIFO reuse and extracts carried L1 slot0 into Right.",
+    "Final step does not prefetch past the leaf; original tail clamp and logical/physical page guards apply."
+  ],
+  "status": "CPU_gate_passed_device_unvalidated",
+  "device_execution": false,
+  "performance_eligible": false,
+  "adopted": false,
+  "contracts": "score_cross_step_v1_contracts.json",
+  "codegen": [
+    "score_cross_step_C04_v1_codegen.json",
+    "score_cross_step_C05_v1_codegen.json"
+  ],
+  "compile_runs": [
+    "runs/codegen_score_cross_step_C04_v1/result.json",
+    "runs/codegen_score_cross_step_C05_v1/result.json"
+  ],
+  "cpu_baseline_runs": [
+    "runs/codegen_score_cross_step_baseline_C04_v1/result.json",
+    "runs/codegen_score_cross_step_baseline_C05_v1/result.json"
+  ],
+  "shared_toolchain": "csa-shared-20261024-group-dims",
+  "generator_reproduces_frozen_candidate": true,
+  "lint": "ruff check and format passed for three new helper scripts",
+  "right_choice_reason": "Original first-panel Right interval overlaps terminal WS Right. Carry only L1; keep next-step M->MTE1 Right reuse event and extraction site.",
+  "numerical_status": "Source QK/FIX/WS sequence and all explicit Score protocol calls unchanged; no device bitwise check yet",
+  "performance_status": "No measured benefit; total bytes and math unchanged, added dynamic guards may offset overlap opportunity"
+}

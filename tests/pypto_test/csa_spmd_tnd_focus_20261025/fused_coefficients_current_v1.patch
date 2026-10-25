@@ -1,0 +1,352 @@
+--- a/cube_schedule.py
++++ b/cube_schedule.py
+@@ -207,6 +207,7 @@
+     JOINT_BF16_PREFIX: pl.constexpr = False,
+     PREFIX_PROJECTION_ROWS: pl.constexpr = 128,
+     SCORE_GROUP_ORDER: pl.constexpr = False,
++    FUSED_INDEXER_COEFF: pl.constexpr = False,
+ ):
+     # 保留五份流式权重的BYPASS声明；预定义incore使用函数属性表达。
+     # 当前PyPTO此属性只接受(参数序号,策略整数)，1表示CachePolicy.BYPASS。
+@@ -426,8 +427,9 @@
+     # Score消费query INT8、系数和Native key/scale。Key写回与scale RMW不是一件事：
+     # 后者按物理页分配唯一AIV写者；全部48个writer发布后，cache才可整体消费。
+     signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)
+-    groups = pl.cast(pl.read(group_plan, [0]), pl.INDEX)
+-    signal = wait_row_owners(signal, PHASE_COEFF, CORES, generation, 0, groups, 1, VECTORS, GROUPS, 1)
++    if not FUSED_INDEXER_COEFF:
++        groups = pl.cast(pl.read(group_plan, [0]), pl.INDEX)
++        signal = wait_row_owners(signal, PHASE_COEFF, CORES, generation, 0, groups, 1, VECTORS, GROUPS, 1)
+     signal = wait_row_owners(signal, PHASE_IDX_SCALE, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
+     indexer_transfer = indexer_score_cube_stage(
+         idx_query_i8,
+--- a/entry.py
++++ b/entry.py
+@@ -308,6 +308,7 @@
+     JOINT_BF16_PREFIX: pl.constexpr = False,
+     PREFIX_PROJECTION_ROWS: pl.constexpr = 128,
+     SCORE_GROUP_ORDER: pl.constexpr = False,
++    FUSED_INDEXER_COEFF: pl.constexpr = False,
+     PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
+ ):
+     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
+@@ -409,6 +410,7 @@
+             JOINT_BF16_PREFIX,
+             PREFIX_PROJECTION_ROWS,
+             SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
++            FUSED_INDEXER_COEFF=FUSED_INDEXER_COEFF,
+         )
+         (
+             x_fp32,
+@@ -612,6 +614,7 @@
+             SHORT_TOPK_PREFIX,
+             SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
+             PLAN_TABLE_COLUMNS=PLAN_TABLE_COLUMNS,
++            FUSED_INDEXER_COEFF=FUSED_INDEXER_COEFF,
+         )
+     return (
+         x_fp32,
+@@ -793,6 +796,7 @@
+     JOINT_BF16_PREFIX: pl.constexpr = False,
+     PREFIX_PROJECTION_ROWS: pl.constexpr = 128,
+     SCORE_GROUP_ORDER: pl.constexpr = False,
++    FUSED_INDEXER_COEFF: pl.constexpr = False,
+     PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
+ ):
+     t = pl.tensor.dim(x, 0)
+@@ -850,9 +854,11 @@
+     idx_query_scale = pl.create_tensor([t * 64, 1], dtype=pl.FP32)
+     weights_partial = pl.create_tensor([p16 * 4, 64], dtype=pl.FP32)
+     head_weights = pl.create_tensor([p16, 64], dtype=pl.FP32)
+-    group_offsets = pl.create_tensor(
+-        [((b + 1 + 16 - 1) // 16 * 16 + 4 * t + 16 - 1) // 16 * 16 + 48 + 4 * t + 2 * b], dtype=pl.INT32
+-    )
++    # 原分区及其偏移不变；仅融合域在内部offset尾追加T个INT32映射。
++    group_offset_words = ((b + 1 + 16 - 1) // 16 * 16 + 4 * t + 16 - 1) // 16 * 16 + 48 + 4 * t + 2 * b
++    if FUSED_INDEXER_COEFF:
++        group_offset_words = group_offset_words + t
++    group_offsets = pl.create_tensor([group_offset_words], dtype=pl.INT32)
+     group_plan = pl.create_tensor([8], dtype=pl.INT32)
+     coefficients = pl.create_tensor([t * 16, group * 64], dtype=pl.FP16)
+     indexer_transfer = pl.create_tensor([24 * 2 * group, SCORE_TILE], dtype=pl.FP32)
+@@ -1133,6 +1139,7 @@
+             PREFIX_PROJECTION_ROWS,
+             SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
+             PLAN_TABLE_COLUMNS=PLAN_TABLE_COLUMNS,
++            FUSED_INDEXER_COEFF=FUSED_INDEXER_COEFF,
+         )
+     return (cache_rows, main_state, main_cache, idx_state, idx_cache, topk_scores, topk_indices, output)
+ 
+@@ -1224,6 +1231,7 @@
+     JOINT_BF16_PREFIX: pl.constexpr = False,
+     PREFIX_PROJECTION_ROWS: pl.constexpr = 128,
+     SCORE_GROUP_ORDER: pl.constexpr = False,
++    FUSED_INDEXER_COEFF: pl.constexpr = False,
+     PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
+ ):
+     t = pl.tensor.dim(x, 0)
+@@ -1283,9 +1291,11 @@
+     idx_query_scale = pl.create_tensor([t * 64, 1], dtype=pl.FP32)
+     weights_partial = pl.create_tensor([p16 * 4, 64], dtype=pl.FP32)
+     head_weights = pl.create_tensor([p16, 64], dtype=pl.FP32)
+-    group_offsets = pl.create_tensor(
+-        [((b + 1 + 16 - 1) // 16 * 16 + 4 * t + 16 - 1) // 16 * 16 + 48 + 4 * t + 2 * b], dtype=pl.INT32
+-    )
++    # 原分区及其偏移不变；仅融合域在内部offset尾追加T个INT32映射。
++    group_offset_words = ((b + 1 + 16 - 1) // 16 * 16 + 4 * t + 16 - 1) // 16 * 16 + 48 + 4 * t + 2 * b
++    if FUSED_INDEXER_COEFF:
++        group_offset_words = group_offset_words + t
++    group_offsets = pl.create_tensor([group_offset_words], dtype=pl.INT32)
+     group_plan = pl.create_tensor([8], dtype=pl.INT32)
+     coefficients = pl.create_tensor([t * 16, group * 64], dtype=pl.FP16)
+     indexer_transfer = pl.create_tensor([24 * 2 * group, SCORE_TILE], dtype=pl.FP32)
+@@ -1566,5 +1576,6 @@
+             PREFIX_PROJECTION_ROWS,
+             SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
+             PLAN_TABLE_COLUMNS=PLAN_TABLE_COLUMNS,
++            FUSED_INDEXER_COEFF=FUSED_INDEXER_COEFF,
+         )
+     return (cache_rows, main_state, main_cache, idx_state, idx_cache, output)
+--- a/fused_coefficients.py
++++ b/fused_coefficients.py
+@@ -0,0 +1,111 @@
++# SPDX-License-Identifier: Apache-2.0
++# ruff: noqa: F401 -- Imported symbols are also used by the appended generated helper.
++"""META-owned zero initialization and token-owned diagonal coefficient writes.
++
++The offset allocation has T additional INT32 words at its end. META initializes
++them for this invocation before publishing; quantization only reads this tail.
++All coefficient rows are zeroed before any token owner writes its 64-column
++diagonal segment. Quantization publication covers that segment as well as its
++original INT8/FP32 outputs. No token can clear another token's segment.
++"""
++
++import pypto.language as pl
++
++from .indexer_group_stages import (
++    COEFF_COLS_DYN,
++    COEFF_ROWS_DYN,
++    COEFFICIENT_ROWS,
++    HEADS,
++    OFFSET_ROWS_DYN,
++    TOKENS_DYN,
++    WEIGHT_ROWS_DYN,
++    indexer_decode_group,
++    indexer_query_visibility,
++)
++from .indexer_query_stages import (
++    HADAMARD_ROWS_DYN,
++    HADAMARD_SCALE,
++    IDX_HEAD_DIM,
++    IDX_N_HEADS,
++    INT8_AMAX_EPS,
++    INT8_SCALE_MAX,
++    QH_HEAD_DIM_TILE,
++    QH_QUANT_TILE,
++    QUANT_ROWS_DYN,
++    SCALE_ROWS_DYN,
++)
++from .request_geometry import QUERY_BOUNDS_DYN, REQUESTS_DYN
++
++assert HEADS == IDX_N_HEADS == QH_QUANT_TILE == 64
++
++
++@pl.jit.inline(auto_scope=False)
++def prepare_fused_query_coefficients(
++    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
++    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
++    positions: pl.Tensor[[TOKENS_DYN], pl.INT64],
++    offsets: pl.InOut[pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]],
++    coefficients: pl.InOut[pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16]],
++    tokens: pl.Scalar[pl.INDEX],
++    GROUP_SIZE: pl.constexpr,
++):
++    """Only the existing META owner calls this, after the original group plan."""
++    map_base = pl.tensor.dim(offsets, 0) - tokens
++    for query in pl.range(tokens):
++        pl.write(offsets, [map_base + query], pl.cast(-1, pl.INT32))
++    requests = pl.cast(pl.tensor.dim(lengths, 0), pl.INDEX)
++    groups = pl.cast(pl.read(offsets, [requests]), pl.INDEX)
++    zero_rows = pl.tile.full([COEFFICIENT_ROWS, GROUP_SIZE * HEADS], dtype=pl.FP16, value=0.0)
++    for group in pl.range(groups):
++        _request, first, live, _visible = indexer_decode_group(bounds, lengths, positions, offsets, group, GROUP_SIZE)
++        coefficients = pl.store(zero_rows, [group * COEFFICIENT_ROWS, 0], coefficients)
++        for lane in pl.range(live):
++            query = first + lane
++            if query >= 0 and query < tokens:
++                pl.write(offsets, [map_base + query], pl.cast(group * GROUP_SIZE + lane, pl.INT32))
++    return offsets, coefficients
++
++
++@pl.jit.inline(auto_scope=False)
++def indexer_query_quant_coeff_stage(qh_acc_gm: pl.Tensor[[HADAMARD_ROWS_DYN, IDX_HEAD_DIM], pl.FP32], qr_hadamard_i8: pl.Tensor[[QUANT_ROWS_DYN, IDX_HEAD_DIM], pl.INT8], qr_hadamard_scale_dq: pl.Tensor[[SCALE_ROWS_DYN, 1], pl.FP32], tokens: pl.Scalar[pl.INDEX], worker_id: pl.Scalar[pl.INDEX], WORKERS: pl.constexpr, weights: pl.Tensor[[WEIGHT_ROWS_DYN, HEADS], pl.FP32], bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32], lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32], positions: pl.Tensor[[TOKENS_DYN], pl.INT64], offsets: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32], coefficients: pl.InOut[pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16]], GROUP_SIZE: pl.constexpr):
++    """AIV：先等Hadamard FP32，逐64head行归一比例并量化；输出INT8与独立FP32 scale。"""
++    bs_heads = tokens * IDX_N_HEADS
++    qh_quant_worker = worker_id
++    for idx in pl.range(qh_quant_worker, bs_heads // QH_QUANT_TILE, WORKERS):
++        o0 = idx * QH_QUANT_TILE
++        qh_full_f32 = qh_acc_gm[o0:o0 + QH_QUANT_TILE, 0:IDX_HEAD_DIM]
++        qh_full_f32 = pl.mul(qh_full_f32, HADAMARD_SCALE)
++        qh_amax = pl.full([1, QH_QUANT_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS)
++        for h0 in pl.range(0, IDX_HEAD_DIM, QH_HEAD_DIM_TILE):
++            qh_a_f32 = qh_full_f32[:, h0:h0 + QH_HEAD_DIM_TILE]
++            qh_a_neg = pl.neg(qh_a_f32)
++            qh_a_abs = pl.maximum(qh_a_f32, qh_a_neg)
++            qh_a_max_col = pl.row_max(qh_a_abs)
++            qh_a_max = pl.reshape(qh_a_max_col, [1, QH_QUANT_TILE])
++            qh_amax = pl.maximum(qh_amax, qh_a_max)
++        qh_scale_numerator = pl.full([1, QH_QUANT_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX)
++        qh_scale_quant_row = pl.div(qh_scale_numerator, qh_amax)
++        qh_scale_recip = pl.recip(qh_scale_quant_row)
++        qh_scale_dq = pl.reshape(qh_scale_recip, [QH_QUANT_TILE, 1])
++        qr_hadamard_scale_dq[o0:o0 + QH_QUANT_TILE, :] = qh_scale_dq
++        qh_scale_quant = pl.reshape(qh_scale_quant_row, [QH_QUANT_TILE, 1])
++        qh_q_scaled = pl.row_expand_mul(qh_full_f32, qh_scale_quant)
++        qh_q_i32 = pl.cast(qh_q_scaled, target_type=pl.INT32, mode='rint')
++        qh_q_half = pl.cast(qh_q_i32, target_type=pl.FP16, mode='round')
++        qh_i8 = pl.cast(qh_q_half, target_type=pl.INT8, mode='trunc')
++        qr_hadamard_i8[o0:o0 + QH_QUANT_TILE, 0:IDX_HEAD_DIM] = qh_i8
++        map_base = pl.tensor.dim(offsets, 0) - tokens
++        encoded = pl.cast(pl.read(offsets, [map_base + idx]), pl.INDEX)
++        if encoded >= 0:
++            group = encoded // GROUP_SIZE
++            lane = encoded % GROUP_SIZE
++            (request, first, live, _visible) = indexer_decode_group(bounds, lengths, positions, offsets, group, GROUP_SIZE)
++            if lane < live and idx == first + lane:
++                (_visible, causal) = indexer_query_visibility(bounds, lengths, positions, request, idx)
++                if causal != 0:
++                    query_weights = weights[idx:idx + 1, 0:HEADS]
++                    query_scale_half = pl.cast(qh_scale_recip, pl.FP16, mode='rint')
++                    query_weight_half = pl.cast(query_weights, pl.FP16, mode='rint')
++                    head_coefficients = pl.mul(query_scale_half, query_weight_half)
++                    coefficients = pl.assemble(coefficients, head_coefficients, [group * COEFFICIENT_ROWS + lane, lane * HEADS])
++    return (qr_hadamard_i8, qr_hadamard_scale_dq, coefficients)
+--- a/policy.py
++++ b/policy.py
+@@ -80,6 +80,7 @@
+     prefix_projection_rows: int = 128
+     score_group_order: bool = False
+     plan_table_columns: int = DEFAULT_PHYSICAL_PLAN_COLUMNS
++    fused_indexer_coeff: bool = False
+ 
+     def constexprs(self) -> dict[str, int | bool]:
+         return {
+@@ -114,6 +115,7 @@
+             "PREFIX_PROJECTION_ROWS": self.prefix_projection_rows,
+             "SCORE_GROUP_ORDER": self.score_group_order,
+             "PLAN_TABLE_COLUMNS": self.plan_table_columns,
++            "FUSED_INDEXER_COEFF": self.fused_indexer_coeff,
+         }
+ 
+ 
+@@ -234,6 +236,8 @@
+         # 共享同一谓词，不能仅开启生产者或消费者。区间实测与限制见优化日志。
+         plan_physical_rows=plan_physical_rows,
+         plan_table_columns=plan_table_columns,
++        # 只选已有长G6资源域；真实group、causal、尾组仍由device决定。
++        fused_indexer_coeff=(long_history and group == 6 and 64 <= tokens <= 192),
+         # 小T保持原Score，中大T使用早FIX与单次WS写回。分界沿已有M16
+         # 前段资源区间；依据完整实测取舍，不把回退唯一归因于QA或假定最优。
+         # 实际有效query/长度/页表仍在device读取，不按B4/B8等测试点枚举。
+--- a/vector_schedule.py
++++ b/vector_schedule.py
+@@ -59,6 +59,8 @@
+ """
+ 
+ import pypto.language as pl
++
++from .fused_coefficients import prepare_fused_query_coefficients, indexer_query_quant_coeff_stage
+ 
+ from .attention_dependencies import wait_attention_plan_rows
+ from .attention_plan_stages import (
+@@ -327,6 +329,7 @@
+     SHORT_HALF_SCORE_UB: pl.constexpr = False,
+     SHORT_TOPK_PREFIX: pl.constexpr = False,
+     SCORE_GROUP_ORDER: pl.constexpr = False,
++    FUSED_INDEXER_COEFF: pl.constexpr = False,
+     PLAN_TABLE_COLUMNS: pl.constexpr = PHYSICAL_PLAN_COLUMNS,
+ ):
+     pl.func_attr({"split_aiv": True})
+@@ -471,6 +474,10 @@
+             )
+         # publish先排空业务写回并维护缓存，随后发单写者完成信号；不是atomic计数器。
+         # 计划在本次调用保持只读，消费者直到首次使用才等这个真实producer。
++        if FUSED_INDEXER_COEFF:
++            group_offsets, coefficients = prepare_fused_query_coefficients(
++                idx_bounds, idx_lengths, positions, group_offsets, coefficients, tokens, QUERY_GROUP
++            )
+         signal = publish_phase(signal, PHASE_META, core, CORES, generation)
+ 
+     if HC_CONSUMER_REDUCE:
+@@ -756,33 +763,44 @@
+             COOPERATIVE_PREFIX,
+         )
+     signal = wait_row_owners(signal, PHASE_IDX_QUERY_HAD, CORES, generation, 0, tokens, 1, GROUPS, 0, 1)
+-    idx_query_i8, idx_query_scale = indexer_query_quant_stage(
+-        idx_query_had,
+-        idx_query_i8,
+-        idx_query_scale,
+-        tokens,
+-        worker,
+-        VECTORS,
+-    )
+-    signal = publish_phase(signal, PHASE_IDX_QUERY_QUANT, core, CORES, generation)
+-
+-    # 系数要读取其他核的head权重/scale及请求分组。公共计划此前已等待，
+-    # planner在HC早期已启动；等待只建立必要数据依赖，不在SPMD入口做全核集合。
+-    signal = wait_row_owners(signal, PHASE_WEIGHTS, CORES, generation, 0, tokens, 16, VECTORS, GROUPS, 1)
+-    signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)
+-    coefficients = indexer_head_coefficients_stage(
+-        idx_query_scale_heads,
+-        head_weights,
+-        positions,
+-        idx_bounds,
+-        idx_lengths,
+-        group_offsets,
+-        coefficients,
+-        worker,
+-        VECTORS,
+-        QUERY_GROUP,
+-    )
+-    signal = publish_phase(signal, PHASE_COEFF, core, CORES, generation)
++    if FUSED_INDEXER_COEFF:
++        # 每个AIV在此之前已发布WEIGHTS并获取META；前移获取不依赖QUANT。
++        signal = wait_row_owners(signal, PHASE_WEIGHTS, CORES, generation, 0, tokens, 16, VECTORS, GROUPS, 1)
++        idx_query_i8, idx_query_scale, coefficients = indexer_query_quant_coeff_stage(
++            idx_query_had, idx_query_i8, idx_query_scale, tokens, worker, VECTORS,
++            head_weights, idx_bounds, idx_lengths, positions, group_offsets, coefficients, QUERY_GROUP,
++        )
++        # 同一业务发布覆盖原INT8/scale及本token的64列对角系数片。
++        signal = publish_phase(signal, PHASE_IDX_QUERY_QUANT, core, CORES, generation)
++        signal = publish_phase(signal, PHASE_COEFF, core, CORES, generation)
++    else:
++        idx_query_i8, idx_query_scale = indexer_query_quant_stage(
++            idx_query_had,
++            idx_query_i8,
++            idx_query_scale,
++            tokens,
++            worker,
++            VECTORS,
++        )
++        signal = publish_phase(signal, PHASE_IDX_QUERY_QUANT, core, CORES, generation)
++
++        # 系数要读取其他核的head权重/scale及请求分组。公共计划此前已等待，
++        # planner在HC早期已启动；等待只建立必要数据依赖，不在SPMD入口做全核集合。
++        signal = wait_row_owners(signal, PHASE_WEIGHTS, CORES, generation, 0, tokens, 16, VECTORS, GROUPS, 1)
++        signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)
++        coefficients = indexer_head_coefficients_stage(
++            idx_query_scale_heads,
++            head_weights,
++            positions,
++            idx_bounds,
++            idx_lengths,
++            group_offsets,
++            coefficients,
++            worker,
++            VECTORS,
++            QUERY_GROUP,
++        )
++        signal = publish_phase(signal, PHASE_COEFF, core, CORES, generation)
+     # 系数之后先提交Indexer compact key/scale。主Query和主压缩仅供后继
+     # Attention消费，仍在本AIV进入Score之前完成；这里不先等待整段Score。
+     # AIC可以用既有两槽提前生产，槽复用继续由原SCORE_READY/ACK保证。

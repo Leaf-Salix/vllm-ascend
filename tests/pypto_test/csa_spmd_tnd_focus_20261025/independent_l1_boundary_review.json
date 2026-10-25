@@ -1,0 +1,151 @@
+{
+  "module_reviewed": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/frozen_v2/complete_l1_v2.py",
+  "device_execution": false,
+  "files_modified_by_review": [
+    "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/independent_l1_boundary_review.json"
+  ],
+  "cases": [
+    {
+      "layout": "fused",
+      "mutation": "valid",
+      "must_reject": false,
+      "observed": "accepted",
+      "detail": 21.42
+    },
+    {
+      "layout": "fused",
+      "mutation": "boundary_empty",
+      "must_reject": true,
+      "observed": "accepted",
+      "detail": 21.42
+    },
+    {
+      "layout": "fused",
+      "mutation": "boundary_future",
+      "must_reject": true,
+      "observed": "accepted",
+      "detail": 21.42
+    },
+    {
+      "layout": "fused",
+      "mutation": "two_boundaries",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "融合窗口必须完整对应一次根调用"
+    },
+    {
+      "layout": "fused",
+      "mutation": "dropped_boundary",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "融合窗口必须完整对应一次根调用"
+    },
+    {
+      "layout": "fused",
+      "mutation": "nan_end",
+      "must_reject": true,
+      "observed": "accepted",
+      "detail": "nan"
+    },
+    {
+      "layout": "fused",
+      "mutation": "inf_end",
+      "must_reject": true,
+      "observed": "accepted",
+      "detail": "inf"
+    },
+    {
+      "layout": "fused",
+      "mutation": "nan_frequency",
+      "must_reject": true,
+      "observed": "rejected",
+      "detail": "无效L1频率或采集层级"
+    },
+    {
+      "layout": "fused",
+      "mutation": "different_dispatch_tokens",
+      "must_reject": false,
+      "observed": "accepted",
+      "detail": 21.42
+    },
+    {
+      "layout": "separate",
+      "mutation": "valid",
+      "must_reject": false,
+      "observed": "accepted",
+      "detail": 38.94
+    },
+    {
+      "layout": "separate",
+      "mutation": "boundary_empty",
+      "must_reject": true,
+      "observed": "accepted",
+      "detail": 38.94
+    },
+    {
+      "layout": "separate",
+      "mutation": "boundary_future",
+      "must_reject": true,
+      "observed": "accepted",
+      "detail": 38.94
+    },
+    {
+      "layout": "separate",
+      "mutation": "two_boundaries",
+      "must_reject": true,
+      "observed": "accepted",
+      "detail": 38.94
+    },
+    {
+      "layout": "separate",
+      "mutation": "dropped_boundary",
+      "must_reject": true,
+      "observed": "accepted",
+      "detail": 38.94
+    },
+    {
+      "layout": "separate",
+      "mutation": "nan_end",
+      "must_reject": true,
+      "observed": "accepted",
+      "detail": "nan"
+    },
+    {
+      "layout": "separate",
+      "mutation": "inf_end",
+      "must_reject": true,
+      "observed": "accepted",
+      "detail": "inf"
+    },
+    {
+      "layout": "separate",
+      "mutation": "nan_frequency",
+      "must_reject": true,
+      "observed": "accepted",
+      "detail": "nan"
+    },
+    {
+      "layout": "separate",
+      "mutation": "wrong_init_roles",
+      "must_reject": true,
+      "observed": "accepted",
+      "detail": 38.94
+    },
+    {
+      "layout": "separate",
+      "mutation": "different_dispatch_tokens",
+      "must_reject": false,
+      "observed": "accepted",
+      "detail": 38.94
+    }
+  ],
+  "schema_source": "Simpler src/common/platform/shared/host/chip_swimlane_collector.cpp:1250",
+  "run_boundary_schema": "[epoch, start_cycles]；单个boundary必须非空且start_cycles不晚于最早incore记录。",
+  "dispatch_token_semantics": {
+    "row_column_2": "per-core monotonic dispatch token，用于和AICPU scheduler记录join，不是func_id。",
+    "source": "Simpler src/common/platform/include/common/chip_swimlane_profiling.h:102-109,156-161",
+    "function_identity": "L1原始记录不携带func_id；需deps.json kernel_ids[]和kernel_config后处理，当前采集没有deps。",
+    "required_action": "不能按reg_task_id等于kernel func_id或所有核reg_task_id相同添加拒收规则。"
+  },
+  "retained_measurement_scope": "仍从最早incore start到最晚incore end；boundary只验证窗口归属，不把AICPU启动边界纳入耗时。"
+}

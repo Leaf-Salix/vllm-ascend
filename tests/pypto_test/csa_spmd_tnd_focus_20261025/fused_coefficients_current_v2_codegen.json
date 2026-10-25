@@ -1,0 +1,213 @@
+{
+  "candidate": "fused_coefficients_current_v2",
+  "passed": true,
+  "device_execution": false,
+  "adopted": false,
+  "cases": {
+    "C04": {
+      "cpu_backend_compiled": true,
+      "compile_result": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/runs/codegen_fused_coefficients_current_C04_v2/result.json",
+      "pto": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/runs/codegen_fused_coefficients_current_C04_v2/build_output/decode_csa_spmd_u8oajy_6/ptoas/dynamic_csa_full.pto",
+      "resources": {
+        "cube_schedule": {
+          "maximum_declared_extent_bytes": {
+            "acc": 131072,
+            "mat": 475136,
+            "left": 65536,
+            "right": 65536
+          },
+          "witnesses": {
+            "acc": {
+              "address": 0,
+              "bytes": 131072,
+              "line_in_function": 1422,
+              "declaration": "%result_inline5591__tile = pto.alloc_tile addr = %c0_i64 valid_row = %648 valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=256, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=1> loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/projection_overlap_stages.py\":94:9)"
+            },
+            "mat": {
+              "address": 458752,
+              "bytes": 16384,
+              "line_in_function": 5875,
+              "declaration": "%pv_probability_inline6088__ssa_v0 = pto.alloc_tile addr = %c458752_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0> loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/attention_stream_stages.py\":185:17)"
+            },
+            "left": {
+              "address": 49152,
+              "bytes": 16384,
+              "line_in_function": 785,
+              "declaration": "%39 = pto.alloc_tile addr = %c49152_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=row_major, fractal=512, pad=0> loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/qkv_stages.py\":131:17)"
+            },
+            "right": {
+              "address": 32768,
+              "bytes": 32768,
+              "line_in_function": 608,
+              "declaration": "%10 = pto.alloc_tile addr = %c32768_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0> loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/qkv_stages.py\":131:17)"
+            }
+          }
+        },
+        "vector_schedule": {
+          "maximum_declared_extent_bytes": {
+            "vec": 180224
+          },
+          "witnesses": {
+            "vec": {
+              "address": 147456,
+              "bytes": 32768,
+              "line_in_function": 10024,
+              "declaration": "%reduce_tmp_inline3139__ssa_v0 = pto.alloc_tile addr = %c147456_i64 valid_row = %c8_index valid_col = %c1024_index : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1024, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0> loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/output_projection_a_stages.py\":292:13)"
+            }
+          }
+        }
+      },
+      "coefficient_store_declarations": [
+        "      pto.tstore ins(%zero_rows_inline191__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=384, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%coefficients__iter_v1_pview : !pto.partition_tensor_view<16x384xf16>) loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/fused_coefficients.py\":26:9)",
+        "          pto.tstore ins(%head_coefficients_inline1438__tile : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%coefficients__iter_v7_pview : !pto.partition_tensor_view<1x64xf16>) loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/fused_coefficients.py\":77:21)",
+        "            pto.tstore ins(%overlap_coefficients_inline1453__tile : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%coefficients__iter_v13_pview : !pto.partition_tensor_view<1x64xf16>) loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/fused_coefficients.py\":91:25)"
+      ],
+      "internal_offset_T_word_extension": true,
+      "external_group_offsets_parameter": false,
+      "shared_toolchain": {
+        "release": "csa-shared-20261024-group-dims",
+        "status": "validated",
+        "sessions": [
+          "CSA-SPMD",
+          "CSA-SPMD-TND",
+          "CSA-MPMD-TND"
+        ],
+        "pypto": {
+          "source": ".worktrees/pypto-csa-shared-group-dims-20261024",
+          "commit": "d44925c17d9ff7d7fa8e5067e41c4b4f80bf3063"
+        },
+        "ptoas": {
+          "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+          "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+          "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+        },
+        "simpler": {
+          "source": ".worktrees/simpler-csa-core-args-256-20261016",
+          "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+        },
+        "evidence": "../csa_tnd_model_validation_20261023/internal_toolchain_upgrade.json",
+        "published_for_validation_at": "2026-10-24T02:59:40+08:00",
+        "validated_at": "2026-10-24T03:45:54+08:00",
+        "manifest": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_shared_toolchain/manifest.json",
+        "actual_paths": {
+          "pypto": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-shared-group-dims-20261024",
+          "ptoas": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+          "simpler": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016"
+        },
+        "pypto_import": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-shared-group-dims-20261024/python/pypto/__init__.py"
+      }
+    },
+    "C05": {
+      "cpu_backend_compiled": true,
+      "compile_result": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/runs/codegen_fused_coefficients_current_C05_v2/result.json",
+      "pto": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/runs/codegen_fused_coefficients_current_C05_v2/build_output/decode_csa_spmd_s89frhi0/ptoas/dynamic_csa_full.pto",
+      "resources": {
+        "cube_schedule": {
+          "maximum_declared_extent_bytes": {
+            "mat": 475136,
+            "acc": 131072,
+            "left": 65536,
+            "right": 65536
+          },
+          "witnesses": {
+            "mat": {
+              "address": 458752,
+              "bytes": 16384,
+              "line_in_function": 5689,
+              "declaration": "%pv_probability_inline6088__ssa_v0 = pto.alloc_tile addr = %c458752_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=mat, dtype=bf16, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0> loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/attention_stream_stages.py\":185:17)"
+            },
+            "acc": {
+              "address": 0,
+              "bytes": 131072,
+              "line_in_function": 1678,
+              "declaration": "%result_inline5591__tile = pto.alloc_tile addr = %c0_i64 valid_row = %767 valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=256, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=1> loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/projection_overlap_stages.py\":94:9)"
+            },
+            "left": {
+              "address": 49152,
+              "bytes": 16384,
+              "line_in_function": 783,
+              "declaration": "%39 = pto.alloc_tile addr = %c49152_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=left, dtype=bf16, rows=64, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=row_major, fractal=512, pad=0> loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/qkv_stages.py\":131:17)"
+            },
+            "right": {
+              "address": 32768,
+              "bytes": 32768,
+              "line_in_function": 606,
+              "declaration": "%10 = pto.alloc_tile addr = %c32768_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0> loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/qkv_stages.py\":131:17)"
+            }
+          }
+        },
+        "vector_schedule": {
+          "maximum_declared_extent_bytes": {
+            "vec": 180224
+          },
+          "witnesses": {
+            "vec": {
+              "address": 147456,
+              "bytes": 32768,
+              "line_in_function": 10105,
+              "declaration": "%reduce_tmp_inline3139__ssa_v0 = pto.alloc_tile addr = %c147456_i64 valid_row = %c8_index valid_col = %c1024_index : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1024, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0> loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/output_projection_a_stages.py\":292:13)"
+            }
+          }
+        }
+      },
+      "coefficient_store_declarations": [
+        "      pto.tstore ins(%zero_rows_inline191__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=384, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%coefficients__iter_v1_pview : !pto.partition_tensor_view<16x384xf16>) loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/fused_coefficients.py\":26:9)",
+        "          pto.tstore ins(%head_coefficients_inline1438__tile : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%coefficients__iter_v7_pview : !pto.partition_tensor_view<1x64xf16>) loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/fused_coefficients.py\":77:21)",
+        "            pto.tstore ins(%overlap_coefficients_inline1453__tile : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%coefficients__iter_v13_pview : !pto.partition_tensor_view<1x64xf16>) loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-tnd-20261020/tests/pypto_test/csa_spmd_tnd_focus_20261025/candidates/fused_coefficients_current_v2/fused_coefficients.py\":91:25)"
+      ],
+      "internal_offset_T_word_extension": true,
+      "external_group_offsets_parameter": false,
+      "shared_toolchain": {
+        "release": "csa-shared-20261024-group-dims",
+        "status": "validated",
+        "sessions": [
+          "CSA-SPMD",
+          "CSA-SPMD-TND",
+          "CSA-MPMD-TND"
+        ],
+        "pypto": {
+          "source": ".worktrees/pypto-csa-shared-group-dims-20261024",
+          "commit": "d44925c17d9ff7d7fa8e5067e41c4b4f80bf3063"
+        },
+        "ptoas": {
+          "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+          "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+          "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+        },
+        "simpler": {
+          "source": ".worktrees/simpler-csa-core-args-256-20261016",
+          "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+        },
+        "evidence": "../csa_tnd_model_validation_20261023/internal_toolchain_upgrade.json",
+        "published_for_validation_at": "2026-10-24T02:59:40+08:00",
+        "validated_at": "2026-10-24T03:45:54+08:00",
+        "manifest": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_shared_toolchain/manifest.json",
+        "actual_paths": {
+          "pypto": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-shared-group-dims-20261024",
+          "ptoas": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+          "simpler": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016"
+        },
+        "pypto_import": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-shared-group-dims-20261024/python/pypto/__init__.py"
+      }
+    }
+  },
+  "limits": {
+    "vec": 188416,
+    "mat": 524288,
+    "acc": 131072,
+    "left": 65536,
+    "right": 65536
+  },
+  "dependency_proof": [
+    "META唯一planner执行group plan后清零全部实际group矩阵并填map，再发布PHASE_META。",
+    "每个AIV在indexer_compressor_vector_stage先获取META；该helper在两种COOPERATIVE_PREFIX路径均先于量化。",
+    "每个AIV先完成head-weight reduce并发布PHASE_WEIGHTS，再到新增前置获取；WEIGHTS生产者不等待QUANT。",
+    "token idx只归idx%48；128B对角片由该owner唯一写入。重复区间只让同一owner写不同group，不产生共享片。",
+    "QUANT发布在所有系数写出之后；AIC原tokens/rows_per_tile=1获取集覆盖所有实际token%48 owner，故可省COEFF获取。"
+  ],
+  "limitations": [
+    "资源为最终PTO声明地址上界并结合完整编译成功，不把地址总和当同时live峰值。",
+    "数值/状态/服务和性能均待NPU；v1重叠Q负对照失败，设备只可选择v2。",
+    "当前完整CPU编译覆盖正式入口；debug入口追加容量及参数转发有源码合同，设备壳仍将重新编译debug入口。"
+  ]
+}

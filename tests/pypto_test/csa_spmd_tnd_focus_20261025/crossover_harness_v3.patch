@@ -1,0 +1,143 @@
+--- frozen_v2/run_pto.py
++++ frozen_v3/run_pto.py
+@@ -130,6 +130,15 @@
+ 
+ from complete_l1_v2 import export_l1
+ 
++def preparation_sides(order):
++    """Preparation order never selects the numerical golden."""
++    if order == "candidate-first":
++        return ("candidate", "reference")
++    if order == "reference-first":
++        return ("reference", "candidate")
++    raise ValueError("Unknown preparation order: " + order)
++
++
+ def main():
+     helpers = Path(__file__).with_name("helpers")
+     if helpers.is_dir():
+@@ -158,7 +167,9 @@
+     comparison.add_argument("--uncompared-candidate", action="store_true")
+     comparison.add_argument("--reference-result", type=Path)
+     parser.add_argument("--candidate-init-layout", choices=("separate", "fused"), default="separate")
++    parser.add_argument("--prepare-order", choices=("candidate-first", "reference-first"), default="candidate-first")
+     args = parser.parse_args()
++    prepare_sides = preparation_sides(args.prepare_order)
+     import pypto
+     pypto.configure_cache(pypto.CacheConfig(enabled=False))
+     if args.family != "tnd" or args.control_mpmd or args.baseline_only or args.state_validation or args.service_validation:
+@@ -211,6 +222,9 @@
+         "max_query_tokens": max_query_tokens,
+         "enable_chip_swimlane": 1,
+         "candidate_init_layout": args.candidate_init_layout,
++        "prepare_order": args.prepare_order,
++        "golden_side": "reference",
++        "preparation_trace": {"package_mount": [], "binding": [], "compile_and_eager": [], "graph_capture": []},
+         "scratch_guard_scope": "外部cache/state/只读输入保护；内部Simpler heap不伪称有逐tensor红区",
+         "ring_config": {"heap_mb": [16,256,16,16], "task_window": 4096},
+         "enable_dep_gen": args.dep_gen,
+@@ -253,8 +267,15 @@
+         else:
+             mount_package(packages / "deepseek_v4_flash_csa", prefix + "deepseek_v4_flash_csa")
+             reference_package = "deepseek_v4_flash_csa_spmd_tnd" if args.family == "tnd" else "deepseek_v4_flash_csa_spmd"
+-            baseline_name = mount_package(packages / reference_package, prefix + "_mpmd_tnd_reference")
+-            candidate_name = mount_package(args.candidate, prefix + "_mpmd_tnd_candidate") if args.family == "tnd" else prefix + "deepseek_v4_flash_csa"
++            package_specs = {
++                "reference": (packages / reference_package, prefix + "_mpmd_tnd_reference"),
++                "candidate": (args.candidate, prefix + "_mpmd_tnd_candidate"),
++            }
++            mounted = {}
++            for side in prepare_sides:
++                mounted[side] = mount_package(*package_specs[side])
++                report["preparation_trace"]["package_mount"].append(side)
++            baseline_name, candidate_name = mounted["reference"], mounted["candidate"]
+         control_name = (
+             mount_package(args.control_mpmd, prefix + "_mpmd_tnd_control") if args.control_mpmd is not None else None
+         )
+@@ -267,18 +288,23 @@
+         }
+         options = CompileOptions(platform="a2a3", memory_planner=passes.MemoryPlanner.PYPTO)
+         if args.cpu:
+-            module = importlib.import_module(candidate_name + ".entry")
+-            policy = importlib.import_module(candidate_name + ".policy").select_policy(
+-                tokens=case["token_capacity"],
+-                requests=case["request_capacity"],
+-                max_query_tokens=max_query_tokens,
+-                max_seq_len=max(case["seq_lens"]),
+-            )
+-            module.decode_csa_spmd._get_dep_graph()
+-            report["policy"] = policy.constexprs()
+-            save("source_dependencies_parsed")
+-            if args.compile:
+-                module.decode_csa_spmd.compile(**policy.constexprs(), config=options)
++            report["cpu_policies"], report["cpu_prepare_trace"] = {}, []
++            package_names = {"reference": baseline_name, "candidate": candidate_name}
++            for side in prepare_sides:
++                module = importlib.import_module(package_names[side] + ".entry")
++                policy = importlib.import_module(package_names[side] + ".policy").select_policy(
++                    tokens=case["token_capacity"],
++                    requests=case["request_capacity"],
++                    max_query_tokens=max_query_tokens,
++                    max_seq_len=max(case["seq_lens"]),
++                )
++                module.decode_csa_spmd._get_dep_graph()
++                report["cpu_policies"][side] = policy.constexprs()
++                save("source_dependencies_parsed_" + side)
++                if args.compile:
++                    module.decode_csa_spmd.compile(**policy.constexprs(), config=options)
++                report["cpu_prepare_trace"].append(side)
++            report["policy"] = report["cpu_policies"]["candidate"]
+             report["passed"] = True
+             save("cpu_backend_compiled" if args.compile else "cpu_parse_passed")
+             return
+@@ -377,6 +403,8 @@
+             if control_name is not None:
+                 variants.append(("mpmd_control", control_name))
+             variants.append(("candidate", candidate_name))
++            variant_packages = dict(variants)
++            variants = [(side, variant_packages[side]) for side in prepare_sides]
+             for side, package in variants:
+                 if side.startswith("candidate") and args.baseline_only:
+                     continue
+@@ -400,6 +428,7 @@
+                         native, max_query_tokens=max_query_tokens,
+                         max_seq_len=max(case["seq_lens"]),
+                     )
++                report["preparation_trace"]["binding"].append(side)
+             report["policies"] = {name: entry.policy.constexprs() for name, entry in entries.items()}
+             report["descriptors"] = {
+                 name: {k: {"shape": list(v.shape), "dtype": str(v.dtype)} for k, v in entry.buffers.items()}
+@@ -479,7 +508,7 @@
+                         value["status"] = "FAIL"
+                 return result
+ 
+-            expected, tables, report["checks"] = None, {}, {}
++            eager_snapshots, tables, report["checks"] = {}, {}, {}
+             build = Path(os.environ["PYPTO_PROG_BUILD_DIR"])
+             for side, entry in entries.items():
+                 save("compile_and_eager_" + side)
+@@ -492,9 +521,13 @@
+                 if len(created) != 1:
+                     raise RuntimeError(f"{side} 需要唯一 root kernel 配置：{created}")
+                 tables[side] = created.pop()
+-                state, check = snapshot(side)
+-                if expected is None:
+-                    expected = state
++                eager_snapshots[side] = snapshot(side)
++                report["preparation_trace"]["compile_and_eager"].append(side)
++                save()
++            # Both snapshots are complete; preparation order cannot choose the golden.
++            expected = eager_snapshots["reference"][0]
++            for side in ("reference", "candidate"):
++                state, check = eager_snapshots[side]
+                 numerical = compare(state, expected)
+                 report["checks"][side + "_eager"] = {"guards": check, "numerical": numerical}
+                 save()
+@@ -530,6 +563,7 @@
+                     with torch.npu.graph(graph, stream=stream):
+                         entry(config=options)
+                     graphs[side] = graph
++                    report["preparation_trace"]["graph_capture"].append(side)
+                     restore(fixture)
+                     graph.replay()
+                     stream.synchronize()
