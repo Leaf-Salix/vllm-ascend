@@ -1,0 +1,424 @@
+{
+  "closed_at_utc": "2026-10-25T06:53:14.557919+00:00",
+  "status": "paused",
+  "user_instruction": "这一轮优化后停下",
+  "scope": "仅收取本轮已提交结果，不启动新优化、编译或NPU任务",
+  "goal": "在当前的性能基础上再优化10%，以128K B16 B24 为主要优化场景",
+  "goal_achieved": false,
+  "baseline_source_commit": "4f9b563133989900a5ca492583eb6bb5ba5f51ac",
+  "shared_toolchain_release": "csa-shared-20261024-group-dims",
+  "measurement": "同任务相同工具链冻结对照；两侧各10个完整L1有效窗口取中位数，所有样本保留；计入初始化和屏障",
+  "baseline_all_eight_complete": true,
+  "candidate_results": [
+    {
+      "candidate": "fused_signal_init_v3",
+      "label": "初始化融合",
+      "case": "C04",
+      "rounds": [
+        {
+          "result": "h131072_b16_s6_fused_signal_init_v3_result.json",
+          "task_id": "task_20261025_134538_15284214161",
+          "device": 0,
+          "reference_median_us": 822.6700000000001,
+          "candidate_median_us": 786.46,
+          "reduction_pct": 4.401521873898407,
+          "paired_windows_faster": 10,
+          "samples_per_side": 10,
+          "exact_eager_graph_post_l1": true
+        },
+        {
+          "result": "h131072_b16_s6_fused_signal_init_v3_crossover_r2_result.json",
+          "task_id": "task_20261025_141701_231682126434",
+          "device": 0,
+          "reference_median_us": 812.76,
+          "candidate_median_us": 790.98,
+          "reduction_pct": 2.6797578620995077,
+          "paired_windows_faster": 10,
+          "samples_per_side": 10,
+          "exact_eager_graph_post_l1": true
+        }
+      ],
+      "repeated_at_least_0_5pct_on_same_device": true,
+      "adopted_into_production": false,
+      "decision": "两轮不同准备顺序均达到0.5%，作为有稳定性证据的候选保留；未正式集成或通过组合八档验收"
+    },
+    {
+      "candidate": "fused_signal_init_v3",
+      "label": "初始化融合",
+      "case": "C05",
+      "rounds": [
+        {
+          "result": "h131072_b24_s6_fused_signal_init_v3_result.json",
+          "task_id": "task_20261025_134539_152911323176",
+          "device": 1,
+          "reference_median_us": 1040.0500000000002,
+          "candidate_median_us": 1022.41,
+          "reduction_pct": 1.6960723042161674,
+          "paired_windows_faster": 9,
+          "samples_per_side": 10,
+          "exact_eager_graph_post_l1": true
+        },
+        {
+          "result": "h131072_b24_s6_fused_signal_init_v3_crossover_r2_result.json",
+          "task_id": "task_20261025_141702_232180032604",
+          "device": 1,
+          "reference_median_us": 1033.5700000000002,
+          "candidate_median_us": 1020.1800000000001,
+          "reduction_pct": 1.2955097380922487,
+          "paired_windows_faster": 10,
+          "samples_per_side": 10,
+          "exact_eager_graph_post_l1": true
+        }
+      ],
+      "repeated_at_least_0_5pct_on_same_device": true,
+      "adopted_into_production": false,
+      "decision": "两轮不同准备顺序均达到0.5%，作为有稳定性证据的候选保留；未正式集成或通过组合八档验收"
+    },
+    {
+      "candidate": "fused_coefficients_current_v2",
+      "label": "量化与系数融合",
+      "case": "C04",
+      "rounds": [
+        {
+          "result": "h131072_b16_s6_fused_coefficients_v2_result.json",
+          "task_id": "task_20261025_134642_155907330161",
+          "device": 3,
+          "reference_median_us": 809.8800000000001,
+          "candidate_median_us": 789.4300000000001,
+          "reduction_pct": 2.52506544179385,
+          "paired_windows_faster": 10,
+          "samples_per_side": 10,
+          "exact_eager_graph_post_l1": true
+        },
+        {
+          "result": "h131072_b16_s6_fused_coefficients_v2_crossover_r2_result.json",
+          "task_id": "task_20261025_141705_23235213112",
+          "device": 3,
+          "reference_median_us": 814.86,
+          "candidate_median_us": 804.94,
+          "reduction_pct": 1.2173870358098249,
+          "paired_windows_faster": 10,
+          "samples_per_side": 10,
+          "exact_eager_graph_post_l1": true
+        }
+      ],
+      "repeated_at_least_0_5pct_on_same_device": true,
+      "adopted_into_production": false,
+      "decision": "两轮不同准备顺序均达到0.5%，作为有稳定性证据的候选保留；未正式集成或通过组合八档验收"
+    },
+    {
+      "candidate": "fused_coefficients_current_v2",
+      "label": "量化与系数融合",
+      "case": "C05",
+      "rounds": [
+        {
+          "result": "h131072_b24_s6_fused_coefficients_v2_result.json",
+          "task_id": "task_20261025_134643_155982324392",
+          "device": 4,
+          "reference_median_us": 1056.04,
+          "candidate_median_us": 1042.14,
+          "reduction_pct": 1.316238021287064,
+          "paired_windows_faster": 10,
+          "samples_per_side": 10,
+          "exact_eager_graph_post_l1": true
+        },
+        {
+          "result": "h131072_b24_s6_fused_coefficients_v2_crossover_r2_result.json",
+          "task_id": "task_20261025_141706_232438826715",
+          "device": 4,
+          "reference_median_us": 1057.6,
+          "candidate_median_us": 1028.54,
+          "reduction_pct": 2.747730711043872,
+          "paired_windows_faster": 10,
+          "samples_per_side": 10,
+          "exact_eager_graph_post_l1": true
+        }
+      ],
+      "repeated_at_least_0_5pct_on_same_device": true,
+      "adopted_into_production": false,
+      "decision": "两轮不同准备顺序均达到0.5%，作为有稳定性证据的候选保留；未正式集成或通过组合八档验收"
+    },
+    {
+      "candidate": "score_cross_step_v1",
+      "label": "跨步Key预取",
+      "case": "C04",
+      "rounds": [
+        {
+          "result": "h131072_b16_s6_score_cross_step_v1_result.json",
+          "task_id": "task_20261025_134541_153006624657",
+          "device": 2,
+          "reference_median_us": 818.85,
+          "candidate_median_us": 812.99,
+          "reduction_pct": 0.7156377846980533,
+          "paired_windows_faster": 8,
+          "samples_per_side": 10,
+          "exact_eager_graph_post_l1": true
+        },
+        {
+          "result": "h131072_b16_s6_score_cross_step_v1_crossover_r2_result.json",
+          "task_id": "task_20261025_141704_23227485654",
+          "device": 2,
+          "reference_median_us": 809.0799999999999,
+          "candidate_median_us": 824.3900000000001,
+          "reduction_pct": -1.892272704800546,
+          "paired_windows_faster": 0,
+          "samples_per_side": 10,
+          "exact_eager_graph_post_l1": true
+        }
+      ],
+      "repeated_at_least_0_5pct_on_same_device": false,
+      "adopted_into_production": false,
+      "decision": "两轮方向相反，不作为稳定优化保留；保留负结果证据"
+    },
+    {
+      "candidate": "score_cross_step_v1",
+      "label": "跨步Key预取",
+      "case": "C05",
+      "rounds": [
+        {
+          "result": "h131072_b24_s6_score_cross_step_v1_result.json",
+          "task_id": "task_20261025_141707_232535510622",
+          "device": 5,
+          "reference_median_us": 1026.5900000000001,
+          "candidate_median_us": 1017.3299999999999,
+          "reduction_pct": 0.9020154102416966,
+          "paired_windows_faster": 9,
+          "samples_per_side": 10,
+          "exact_eager_graph_post_l1": true
+        }
+      ],
+      "repeated_at_least_0_5pct_on_same_device": false,
+      "adopted_into_production": false,
+      "decision": "只有首轮正收益，尚未证明独立复测稳定性；本轮停止，不追加测试"
+    },
+    {
+      "candidate": "init_coeff_combined_v1",
+      "label": "初始化＋量化系数组合",
+      "case": "C04",
+      "rounds": [
+        {
+          "result": "h131072_b16_s6_init_coeff_combined_v1_result.json",
+          "task_id": "task_20261025_142019_242981028526",
+          "device": 6,
+          "reference_median_us": 812.86,
+          "candidate_median_us": 774.06,
+          "reduction_pct": 4.7732696897374804,
+          "paired_windows_faster": 10,
+          "samples_per_side": 10,
+          "exact_eager_graph_post_l1": true
+        }
+      ],
+      "repeated_at_least_0_5pct_on_same_device": false,
+      "adopted_into_production": false,
+      "decision": "只有首轮正收益，尚未证明独立复测稳定性；本轮停止，不追加测试"
+    },
+    {
+      "candidate": "init_coeff_combined_v1",
+      "label": "初始化＋量化系数组合",
+      "case": "C05",
+      "rounds": [
+        {
+          "result": "h131072_b24_s6_init_coeff_combined_v1_result.json",
+          "task_id": "task_20261025_142021_243162524662",
+          "device": 8,
+          "reference_median_us": 1069.24,
+          "candidate_median_us": 1035.31,
+          "reduction_pct": 3.1732819572780735,
+          "paired_windows_faster": 10,
+          "samples_per_side": 10,
+          "exact_eager_graph_post_l1": true
+        }
+      ],
+      "repeated_at_least_0_5pct_on_same_device": false,
+      "adopted_into_production": false,
+      "decision": "只有首轮正收益，尚未证明独立复测稳定性；本轮停止，不追加测试"
+    }
+  ],
+  "state_validation": [
+    {
+      "case": "C04",
+      "task_id": "task_20261025_142020_24306676612",
+      "raw_report": "evidence/h131072_b16_s6_state_init_coeff_combined_v1.json",
+      "passed": true,
+      "metadata_cases": 12,
+      "continuous_steps": 4,
+      "metadata_case_names": [
+        "uniform_s1",
+        "uniform_s6",
+        "uniform_s2",
+        "uniform_s3",
+        "uniform_s4",
+        "uniform_s5",
+        "no_compact_output",
+        "mixed_reverse_owners",
+        "uniform_s1_again",
+        "priority_all_s6",
+        "priority_reverse_owners",
+        "fragmented_pages"
+      ],
+      "output_topk_scores_bit_equal": true,
+      "full_external_cache_state_bytes_equal": true,
+      "readonly_and_guard_checks_passed": true,
+      "same_addresses": true,
+      "internal_observation": {
+        "signal_generation": "not_observed_internal_workspace",
+        "geometry_offsets_counts": "not_observed_internal_workspace",
+        "internal_scratch_redzones": "not_observed_internal_workspace",
+        "protocol_pass_claim": false
+      },
+      "performance_measured": false,
+      "provenance": {
+        "verified_reference_source_commit": "4f9b563133989900a5ca492583eb6bb5ba5f51ac",
+        "source_hashes_match_frozen_manifest": true,
+        "both_sides_match_combined_performance_run": true,
+        "raw_report_inherited_labels": {
+          "reference_commit": "61af469e87ab11ef728ebb977e7cecb47dcf4c8f",
+          "candidate_init_layout": "separate",
+          "uncompared_candidate": true
+        },
+        "note": "原始状态harness沿用了旧reference_commit、separate及uncompared_candidate标签；保留原报文不改写。实际两侧源码hash与本轮组合计时完全一致，reference与4f9b56313冻结清单一致。状态任务未采DFX，不以这些标签推断task数或性能。"
+      }
+    },
+    {
+      "case": "C05",
+      "task_id": "task_20261025_142022_243255617817",
+      "raw_report": "evidence/h131072_b24_s6_state_init_coeff_combined_v1.json",
+      "passed": true,
+      "metadata_cases": 12,
+      "continuous_steps": 4,
+      "metadata_case_names": [
+        "uniform_s1",
+        "uniform_s6",
+        "uniform_s2",
+        "uniform_s3",
+        "uniform_s4",
+        "uniform_s5",
+        "no_compact_output",
+        "mixed_reverse_owners",
+        "uniform_s1_again",
+        "priority_all_s6",
+        "priority_reverse_owners",
+        "fragmented_pages"
+      ],
+      "output_topk_scores_bit_equal": true,
+      "full_external_cache_state_bytes_equal": true,
+      "readonly_and_guard_checks_passed": true,
+      "same_addresses": true,
+      "internal_observation": {
+        "signal_generation": "not_observed_internal_workspace",
+        "geometry_offsets_counts": "not_observed_internal_workspace",
+        "internal_scratch_redzones": "not_observed_internal_workspace",
+        "protocol_pass_claim": false
+      },
+      "performance_measured": false,
+      "provenance": {
+        "verified_reference_source_commit": "4f9b563133989900a5ca492583eb6bb5ba5f51ac",
+        "source_hashes_match_frozen_manifest": true,
+        "both_sides_match_combined_performance_run": true,
+        "raw_report_inherited_labels": {
+          "reference_commit": "61af469e87ab11ef728ebb977e7cecb47dcf4c8f",
+          "candidate_init_layout": "separate",
+          "uncompared_candidate": true
+        },
+        "note": "原始状态harness沿用了旧reference_commit、separate及uncompared_candidate标签；保留原报文不改写。实际两侧源码hash与本轮组合计时完全一致，reference与4f9b56313冻结清单一致。状态任务未采DFX，不以这些标签推断task数或性能。"
+      }
+    }
+  ],
+  "completed_device_tasks": [
+    {
+      "task_id": "task_20261025_141701_231682126434",
+      "case": "C04",
+      "candidate": "fused_signal_init_v3",
+      "attempt": "h131072_b16_s6_fused_signal_init_v3_crossover_r2",
+      "observed_status": "completed (exit=0)",
+      "checked_at_utc": "2026-10-25T06:53:14.557919+00:00"
+    },
+    {
+      "task_id": "task_20261025_141702_232180032604",
+      "case": "C05",
+      "candidate": "fused_signal_init_v3",
+      "attempt": "h131072_b24_s6_fused_signal_init_v3_crossover_r2",
+      "observed_status": "completed (exit=0)",
+      "checked_at_utc": "2026-10-25T06:53:14.557919+00:00"
+    },
+    {
+      "task_id": "task_20261025_141704_23227485654",
+      "case": "C04",
+      "candidate": "score_cross_step_v1",
+      "attempt": "h131072_b16_s6_score_cross_step_v1_crossover_r2",
+      "observed_status": "completed (exit=0)",
+      "checked_at_utc": "2026-10-25T06:53:14.557919+00:00"
+    },
+    {
+      "task_id": "task_20261025_141705_23235213112",
+      "case": "C04",
+      "candidate": "fused_coefficients_current_v2",
+      "attempt": "h131072_b16_s6_fused_coefficients_v2_crossover_r2",
+      "observed_status": "completed (exit=0)",
+      "checked_at_utc": "2026-10-25T06:53:14.557919+00:00"
+    },
+    {
+      "task_id": "task_20261025_141706_232438826715",
+      "case": "C05",
+      "candidate": "fused_coefficients_current_v2",
+      "attempt": "h131072_b24_s6_fused_coefficients_v2_crossover_r2",
+      "observed_status": "completed (exit=0)",
+      "checked_at_utc": "2026-10-25T06:53:14.557919+00:00"
+    },
+    {
+      "task_id": "task_20261025_141707_232535510622",
+      "case": "C05",
+      "candidate": "score_cross_step_v1",
+      "attempt": "h131072_b24_s6_score_cross_step_v1",
+      "observed_status": "completed (exit=0)",
+      "checked_at_utc": "2026-10-25T06:53:14.557919+00:00"
+    },
+    {
+      "task_id": "task_20261025_142019_242981028526",
+      "case": "C04",
+      "candidate": "init_coeff_combined_v1",
+      "attempt": "h131072_b16_s6_init_coeff_combined_v1",
+      "observed_status": "completed (exit=0)",
+      "checked_at_utc": "2026-10-25T06:53:14.557919+00:00"
+    },
+    {
+      "task_id": "task_20261025_142020_24306676612",
+      "case": "C04",
+      "candidate": "init_coeff_combined_v1_state",
+      "attempt": "h131072_b16_s6_state_init_coeff_combined_v1",
+      "observed_status": "completed (exit=0)",
+      "checked_at_utc": "2026-10-25T06:53:14.557919+00:00"
+    },
+    {
+      "task_id": "task_20261025_142021_243162524662",
+      "case": "C05",
+      "candidate": "init_coeff_combined_v1",
+      "attempt": "h131072_b24_s6_init_coeff_combined_v1",
+      "observed_status": "completed (exit=0)",
+      "checked_at_utc": "2026-10-25T06:53:14.557919+00:00"
+    },
+    {
+      "task_id": "task_20261025_142022_243255617817",
+      "case": "C05",
+      "candidate": "init_coeff_combined_v1_state",
+      "attempt": "h131072_b24_s6_state_init_coeff_combined_v1",
+      "observed_status": "completed (exit=0)",
+      "checked_at_utc": "2026-10-25T06:53:14.557919+00:00"
+    }
+  ],
+  "pending_device_tasks": [],
+  "production_operator_changed": false,
+  "adopted_optimizations": [],
+  "retained_experimental_mechanisms": [
+    "fused_signal_init_v3",
+    "fused_coefficients_current_v2"
+  ],
+  "remaining_if_user_resumes": [
+    "组合独立稳定性复测",
+    "组合完整八档性能与正确性回归",
+    "正式入口/服务路径验收",
+    "确认各门禁后集成生产源码并按八档几何平均判定10%目标"
+  ],
+  "remaining_work_scheduled": false,
+  "pushed": false
+}
