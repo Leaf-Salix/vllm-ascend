@@ -3,18 +3,20 @@
   "user_instruction": "好好查内部工作区迁移为何变慢，把性能恢复回来",
   "pending_tasks": [
     {
-      "task_id": "task_20261025_174640_325114713557",
+      "task_id": "task_20261025_183401_46916827267",
       "case": "C04",
-      "attempt": "h131072_b16_s6_cann_l2_r1",
-      "device": 5,
-      "purpose": "CANN L2Cache三侧诊断，原始数据不作为正式L1验收"
+      "attempt": "h131072_b16_s6_vector_init_gate_v1_r1",
+      "candidate": "vector_init_gate_v1",
+      "device": 6,
+      "purpose": "只保留初始化写者AIV全局屏障，再本组通知Cube；三侧完整L1/正确性"
     },
     {
-      "task_id": "task_20261025_175450_343989829738",
-      "case": "C04",
-      "attempt": "h131072_b16_s6_cache_context_r1",
-      "device": 6,
-      "purpose": "不改代码，比较通常重放/紧邻预热/1GiB GM读写扰动，两侧每组合10窗"
+      "task_id": "task_20261025_183402_469934226",
+      "case": "C01",
+      "attempt": "h131072_b1_s6_vector_init_gate_v1_r1",
+      "candidate": "vector_init_gate_v1",
+      "device": 7,
+      "purpose": "B1初始化握手归因与恢复；三侧完整L1/正确性"
     }
   ],
   "adopted_changes": [],
@@ -80,6 +82,73 @@
       "purpose": "全量内部初始化后固定generation=1，三侧完整L1与严格正确性",
       "status": "completed (exit=0)",
       "result": "constant_generation_v1_C04_r1_result.json"
+    },
+    {
+      "task_id": "task_20261025_174640_325114713557",
+      "case": "C04",
+      "attempt": "h131072_b16_s6_cann_l2_r1",
+      "device": 5,
+      "purpose": "CANN L2Cache三侧诊断，原始数据不作为正式L1验收",
+      "status": "completed (exit=0)",
+      "result": "cann_l2_C04_r1_result.json"
+    },
+    {
+      "task_id": "task_20261025_175450_343989829738",
+      "case": "C04",
+      "attempt": "h131072_b16_s6_cache_context_r1",
+      "device": 6,
+      "purpose": "不改代码，比较通常重放/紧邻预热/1GiB GM读写扰动，两侧每组合10窗",
+      "status": "completed (exit=1)",
+      "result": "evidence/cache_context_harness_error_C04_r1.json"
+    },
+    {
+      "task_id": "task_20261025_175706_350133010864",
+      "case": "C04",
+      "attempt": "h131072_b16_s6_cache_context_r2",
+      "device": 6,
+      "status": "completed (exit=0)",
+      "purpose": "三种缓存上下文受控诊断",
+      "result": "cache_context_C04_r2_result.json"
+    },
+    {
+      "task_id": "task_20261025_181150_393483622395",
+      "case": "C04",
+      "attempt": "h131072_b16_s6_init_overlap_rms_v1_r1",
+      "candidate": "init_overlap_rms_v1",
+      "device": 6,
+      "purpose": "独立RMS与完整清零同MIX内重叠，当前f72/旧外部/候选三侧各10窗及严格检查",
+      "status": "completed (exit=0)",
+      "result": "h131072_b16_s6_init_overlap_rms_v1_r1_result.json"
+    },
+    {
+      "task_id": "task_20261025_181745_41463599005",
+      "case": "C01",
+      "attempt": "h131072_b1_s6_init_overlap_rms_v1_r1",
+      "candidate": "init_overlap_rms_v1",
+      "device": 7,
+      "purpose": "检查历史B1差距与初始化重叠边界；同SDK旧外部/current/候选三侧完整L1",
+      "status": "completed (exit=0)",
+      "result": "h131072_b1_s6_init_overlap_rms_v1_r1_result.json"
+    },
+    {
+      "task_id": "task_20261025_182254_1508752689",
+      "case": "C04",
+      "attempt": "h131072_b16_s6_init_overlap_rms_v1_r2",
+      "device": 6,
+      "candidate": "init_overlap_rms_v1",
+      "purpose": "B16反向准备顺序复测稳定收益",
+      "status": "completed (exit=0)",
+      "result": "h131072_b16_s6_init_overlap_rms_v1_r2_result.json"
+    },
+    {
+      "task_id": "task_20261025_182255_1514787738",
+      "case": "C07",
+      "attempt": "h8192_b32_s6_init_overlap_rms_v1_r1",
+      "device": 5,
+      "candidate": "init_overlap_rms_v1",
+      "purpose": "八档检查的最大T192；三侧完整L1及严格正确性",
+      "status": "completed (exit=0)",
+      "result": "h8192_b32_s6_init_overlap_rms_v1_r1_result.json"
     }
   ],
   "initial_comparison": "initial_triple_C04_r1.json",
@@ -90,6 +159,6 @@
     "init_ablation_CPU_gate.json"
   ],
   "original_stop_superseded_by_user_recovery_request": true,
-  "next_analysis": "核对历史采样中未计时reference重放与当前全侧计时的上下文差异；另检查每调用清零后不再需要代际读取的固定generation候选",
+  "next_analysis": "验证vector_init_gate_v1；RMS提前重叠候选未稳定达到0.5%，不采用",
   "user_L2_hypothesis": "检查外部清零/持久地址复用与内部工作区布局是否影响L2；旧代码signal仅构造时zero_，其他scratch empty；尚未证明L2归因"
 }

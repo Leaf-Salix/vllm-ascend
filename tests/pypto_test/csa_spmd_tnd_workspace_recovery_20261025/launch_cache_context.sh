@@ -50,6 +50,6 @@ cd "$repo"
 exec python "$repo/tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py" \
     --workspace-root "$workspace" --shared-toolchain \
     --vllm-root "$workspace/.cache/migration-v0.25.1rc1/vllm" \
-    "$here/frozen_cache_context/run_pto.py" --family tnd --case "$case_name" --candidate "$candidate" \
-    --frozen "$here/frozen_cache_context" --current-control "$here/candidates/internal_single_f72a" --cases "$repo/tests/pypto_test/csa_performance_20261022/cases.json" \
+    "$here/frozen_cache_context_v2/run_pto.py" --family tnd --case "$case_name" --candidate "$candidate" \
+    --frozen "$here/frozen_cache_context_v2" --current-control "$here/candidates/internal_single_f72a" --cases "$repo/tests/pypto_test/csa_performance_20261022/cases.json" \
     --output "$out" --uncompared-candidate --candidate-init-layout "$layout" --prepare-order "$prepare_order" --device "$TASK_DEVICE"

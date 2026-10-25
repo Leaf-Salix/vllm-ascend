@@ -53,9 +53,10 @@ SAMPLER = """                records = []
 
 def main():
     here = Path(__file__).resolve().parent
-    frozen = here / "frozen_cache_context"
+    frozen = here / "frozen_cache_context_v2"
     shutil.copytree(here / "frozen_optimization", frozen, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     runner = (frozen / "run_pto.py").read_text()
+    runner = replace_once(runner, 'control_name = mounted["current"]', 'control_name = mounted.get("current")')
     runner = replace_once(runner, 'return ("candidate", "current", "reference")', 'return ("candidate", "reference")')
     runner = replace_once(runner, 'return ("reference", "current", "candidate")', 'return ("reference", "candidate")')
     start = runner.index("                for sample in range(3):\n")
@@ -85,7 +86,7 @@ def main():
     ast.parse(runner)
     (frozen / "run_pto.py").write_text(runner)
     (here / "launch_cache_context.sh").write_text(
-        (here / "launch_optimization.sh").read_text().replace("frozen_optimization", "frozen_cache_context")
+        (here / "launch_optimization.sh").read_text().replace("frozen_optimization", "frozen_cache_context_v2")
     )
     report = {
         "status": "AST_pass_existing_operators_CPU_gates_reused",
