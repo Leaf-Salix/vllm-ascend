@@ -129,6 +129,9 @@ TOPK = WIN + CMP_TOPK
 
 SPARSE_BLOCKS = 1 + (CMP_TOPK + ATTN_K_TILE - 1) // ATTN_K_TILE
 
+if SPARSE_BLOCKS != 2:
+    raise ValueError("CSA lookahead requires one SWA block and one compressed block")
+
 MASK_LINE_ELEMS = 64 // 4
 
 VALID_BLOCK_MASK_COLS = ((SPARSE_BLOCKS + MASK_LINE_ELEMS - 1) // MASK_LINE_ELEMS) * MASK_LINE_ELEMS
@@ -489,7 +492,7 @@ def sparse_attn_csa(
     transfer_heads = NUM_QK_CORES * H
     transfer_kv_rows = NUM_QK_CORES * 2 * ATTN_K_TILE
     kv_transfer = pl.create_tensor([transfer_kv_rows, HEAD_DIM], dtype=pl.BF16)
-    score_transfer = pl.create_tensor([transfer_heads, ATTN_K_TILE], dtype=pl.FP32)
+    score_transfer = pl.create_tensor([2 * transfer_heads, ATTN_K_TILE], dtype=pl.FP32)
     probability_transfer = pl.create_tensor([transfer_heads, ATTN_K_TILE], dtype=pl.BF16)
     pv_transfer = pl.create_tensor([transfer_heads, HEAD_DIM], dtype=pl.FP32)
     mi_transfer = pl.create_tensor([transfer_heads, 1], dtype=pl.FP32)
@@ -499,6 +502,7 @@ def sparse_attn_csa(
     with pl.spmd(NUM_QK_CORES, name_hint="qk_pv", deps=[qk_plan_tid], allow_early_resolve=True) as qk_tid:
         qk_core = pl.tile.get_block_idx()
         qk_head_base = qk_core * H
+        qk_score_base = qk_core * 2 * H
         pl.system.set_ffts(ffts_workspace)
         # K512 Native math is unchanged. Keep final two K128 KV panels in L1.
         # Slot0 is scratch for parts0/1; slots1/2 retain parts2/3 through PV.
@@ -506,6 +510,10 @@ def sparse_attn_csa(
         for qk_t in pl.range(qk_core, t_dim, NUM_QK_CORES):
             qk_b = pl.max(pl.read(token_request, [qk_t]), 0)
             qk_q = pl.load(q_flat, [qk_t * H, 0], [H, HEAD_DIM], target_memory=pl.MemorySpace.Mat)
+            # Two score slots let QK1 overlap softmax0 without changing K512 math.
+            qk_pair_lookahead = pl.cast(0, pl.INT32)
+            if pl.read(valid_block_mask, [qk_t, 0]) > 0 and pl.read(valid_block_mask, [qk_t, 1]) > 0:
+                qk_pair_lookahead = pl.cast(1, pl.INT32)
             for qk_sb in pl.range(SPARSE_BLOCKS):
                 if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
                     qk_work = ((qk_t - qk_core) // NUM_QK_CORES) * SPARSE_BLOCKS + qk_sb
@@ -527,37 +535,45 @@ def sparse_attn_csa(
                             qk_l1_t = pl.tile.transpose_view(qk_l1)
                             qk_kv_t = pl.tile.slice(qk_l1_t, [HEAD_DIM, ATTN_CUBE_KV_TILE], [0, qk_slot_row])
                             qk_scores = pl.matmul(qk_q, qk_kv_t, out_dtype=pl.FP32)
-                            pl.store(qk_scores, [qk_head_base, qk_col], score_transfer)
+                            pl.store(qk_scores, [qk_score_base + qk_sb * H, qk_col], score_transfer)
                     pl.system.sync_set(
                         QK_SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
                     )
-                    pl.system.sync_wait(QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
-                    # Keep a single FP32 PV accumulator across the Native 512-candidate block.
-                    pv_acc = pl.create_tile([H, HEAD_DIM], dtype=pl.FP32, target_memory=pl.MemorySpace.Acc)
-                    for pv_part in pl.range(ATTN_K_TILE // ATTN_CUBE_KV_TILE):
-                        if qk_sb > 0 or pv_part == 0:
-                            pv_col = pv_part * ATTN_CUBE_KV_TILE
-                            pv_probability = pl.load(
-                                probability_transfer,
-                                [qk_head_base, pv_col],
-                                [H, ATTN_CUBE_KV_TILE],
-                                target_memory=pl.MemorySpace.Mat,
-                            )
-                            pv_slot_row = pl.max(pv_part - 1, 0) * ATTN_CUBE_KV_TILE
-                            if pv_part < 2:
-                                qk_l1 = pl.gather_row(
-                                    qk_l1,
-                                    kv_transfer,
-                                    [pv_slot_row, 0],
-                                    [cube_kv_base + pv_col, 0],
-                                    [ATTN_CUBE_KV_TILE, HEAD_DIM],
+                    pv_begin = qk_sb
+                    pv_count = pl.cast(1, pl.INDEX)
+                    if qk_pair_lookahead > 0:
+                        pv_begin = pl.cast(0, pl.INDEX)
+                        pv_count = qk_sb * 2
+                    for pv_sb in pl.range(pv_begin, pv_begin + pv_count):
+                        pv_work = ((qk_t - qk_core) // NUM_QK_CORES) * SPARSE_BLOCKS + pv_sb
+                        cube_kv_base = (qk_core * 2 + pv_work % 2) * ATTN_K_TILE
+                        pl.system.sync_wait(QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+                        # Keep a single FP32 PV accumulator across the Native 512-candidate block.
+                        pv_acc = pl.create_tile([H, HEAD_DIM], dtype=pl.FP32, target_memory=pl.MemorySpace.Acc)
+                        for pv_part in pl.range(ATTN_K_TILE // ATTN_CUBE_KV_TILE):
+                            if pv_sb > 0 or pv_part == 0:
+                                pv_col = pv_part * ATTN_CUBE_KV_TILE
+                                pv_probability = pl.load(
+                                    probability_transfer,
+                                    [qk_head_base, pv_col],
+                                    [H, ATTN_CUBE_KV_TILE],
+                                    target_memory=pl.MemorySpace.Mat,
                                 )
-                            pv_kv = pl.tile.slice(qk_l1, [ATTN_CUBE_KV_TILE, HEAD_DIM], [pv_slot_row, 0])
-                            pv_acc = pl.matmul_acc(pv_acc, pv_probability, pv_kv, init_cond=(pv_part == 0))
-                    pl.store(pv_acc, [qk_head_base, 0], pv_transfer)
-                    pl.system.sync_set(
-                        QK_PV_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
-                    )
+                                pv_slot_row = pl.max(pv_part - 1, 0) * ATTN_CUBE_KV_TILE
+                                if pv_part < 2:
+                                    qk_l1 = pl.gather_row(
+                                        qk_l1,
+                                        kv_transfer,
+                                        [pv_slot_row, 0],
+                                        [cube_kv_base + pv_col, 0],
+                                        [ATTN_CUBE_KV_TILE, HEAD_DIM],
+                                    )
+                                pv_kv = pl.tile.slice(qk_l1, [ATTN_CUBE_KV_TILE, HEAD_DIM], [pv_slot_row, 0])
+                                pv_acc = pl.matmul_acc(pv_acc, pv_probability, pv_kv, init_cond=(pv_part == 0))
+                        pl.store(pv_acc, [qk_head_base, 0], pv_transfer)
+                        pl.system.sync_set(
+                            QK_PV_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
+                        )
 
             for qk_aiv in pl.split_aiv(2, mode=pl.SplitMode.NONE):
                 pl.system.set_ffts(ffts_workspace)
@@ -643,18 +659,117 @@ def sparse_attn_csa(
                                 QK_KV_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
                             )
                         pl.system.sync_wait(QK_SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
+                        if qk_sb == 0:
+                            # Copy the next independent KV while Cube consumes current probability.
+                            prefetch_t = qk_t
+                            prefetch_sb = qk_sb + 1
+                            if prefetch_sb >= SPARSE_BLOCKS:
+                                prefetch_t = qk_t + NUM_QK_CORES
+                                prefetch_sb = pl.cast(0, pl.INDEX)
+                            if prefetch_t < t_dim:
+                                if pl.read(valid_block_mask, [prefetch_t, prefetch_sb]) > 0:
+                                    prefetch_b = pl.max(pl.read(token_request, [prefetch_t]), 0)
+                                    prefetch_base = (qk_core * 2 + (qk_work_aiv + 1) % 2) * ATTN_K_TILE
+                                    # Gather in 64-row pieces per AIV; a whole 512x512 KV tile would exceed UB.
+                                    for prefetch_part in pl.range(ATTN_K_TILE // ATTN_CUBE_KV_TILE):
+                                        if prefetch_sb > 0 or prefetch_part == 0:
+                                            prefetch_part_row = prefetch_part * ATTN_CUBE_KV_TILE + qk_lane_kv
+                                            prefetch_kv_half = pl.tile.full(
+                                                [ATTN_CUBE_KV_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0
+                                            )
+                                            if prefetch_sb == 0:
+                                                prefetch_pos = pl.cast(pl.read(position_ids, [prefetch_t, 0]), pl.INDEX)
+                                                prefetch_win_len = pl.min(prefetch_pos + 1, WIN)
+                                                prefetch_win_start = prefetch_pos - prefetch_win_len + 1
+                                                prefetch_head = prefetch_win_start % BLOCK_SIZE
+                                                prefetch_rows = pl.min(
+                                                    pl.max(prefetch_win_len - prefetch_part_row, 0),
+                                                    ATTN_CUBE_KV_TILE // 2,
+                                                )
+                                                for prefetch_run in pl.unroll(SWA_RUNS):
+                                                    prefetch_lo = pl.max(
+                                                        prefetch_run * BLOCK_SIZE - prefetch_head - prefetch_part_row, 0
+                                                    )
+                                                    prefetch_hi = pl.min(
+                                                        (prefetch_run + 1) * BLOCK_SIZE
+                                                        - prefetch_head
+                                                        - prefetch_part_row,
+                                                        prefetch_rows,
+                                                    )
+                                                    if prefetch_hi > prefetch_lo:
+                                                        prefetch_absolute = (
+                                                            prefetch_win_start + prefetch_part_row + prefetch_lo
+                                                        )
+                                                        prefetch_raw_page = pl.read(
+                                                            ori_block_table,
+                                                            [prefetch_b, prefetch_absolute // BLOCK_SIZE],
+                                                        )
+                                                        if prefetch_raw_page >= 0:
+                                                            prefetch_raw_row = (
+                                                                pl.cast(prefetch_raw_page, pl.INDEX) * BLOCK_SIZE
+                                                                + prefetch_absolute % BLOCK_SIZE
+                                                            )
+                                                            prefetch_kv_half = pl.gather_row(
+                                                                prefetch_kv_half,
+                                                                ori_kv_flat,
+                                                                [prefetch_lo, 0],
+                                                                [prefetch_raw_row, 0],
+                                                                [ATTN_CUBE_KV_TILE // 2, HEAD_DIM],
+                                                                valid_shape=[prefetch_hi - prefetch_lo, HEAD_DIM],
+                                                            )
+                                            else:
+                                                for prefetch_row in pl.range(ATTN_CUBE_KV_TILE // 2):
+                                                    prefetch_cmp_k = (
+                                                        (prefetch_sb - 1) * ATTN_K_TILE
+                                                        + prefetch_part_row
+                                                        + prefetch_row
+                                                    )
+                                                    if prefetch_cmp_k < CMP_TOPK:
+                                                        prefetch_ridx = pl.read(
+                                                            cmp_sparse_indices, [prefetch_t, prefetch_cmp_k]
+                                                        )
+                                                        if prefetch_ridx >= 0:
+                                                            prefetch_page = pl.cast(
+                                                                pl.read(
+                                                                    cmp_block_table,
+                                                                    [prefetch_b, prefetch_ridx // BLOCK_SIZE],
+                                                                ),
+                                                                pl.INDEX,
+                                                            )
+                                                            if prefetch_page >= 0:
+                                                                prefetch_src = (
+                                                                    prefetch_page * BLOCK_SIZE
+                                                                    + prefetch_ridx % BLOCK_SIZE
+                                                                )
+                                                                prefetch_kv_half = pl.gather_row(
+                                                                    prefetch_kv_half,
+                                                                    cmp_kv_flat,
+                                                                    [prefetch_row, 0],
+                                                                    [prefetch_src, 0],
+                                                                    [1, HEAD_DIM],
+                                                                )
+                                            pl.store(
+                                                prefetch_kv_half, [prefetch_base + prefetch_part_row, 0], kv_transfer
+                                            )
+                                    pl.system.sync_set(
+                                        QK_KV_READY_EVENT,
+                                        pipe=pl.PipeType.MTE3,
+                                        ffts_mode=2,
+                                        core_type=pl.KernelType.AIV,
+                                    )
                         for sm_part in pl.range((H // 2) // SOFTMAX_HEAD_TILE):
                             sm_h = sm_part * SOFTMAX_HEAD_TILE
                             sm_row = qk_head_base + qk_lane_head + sm_h
+                            sm_score_row = qk_score_base + qk_sb * H + qk_lane_head + sm_h
                             if qk_sb == 0:
                                 # Skipped Cube columns are explicit +0, never stale GM/NaN.
-                                sm_live_scores = pl.load(score_transfer, [sm_row, 0], [SOFTMAX_HEAD_TILE, WIN])
+                                sm_live_scores = pl.load(score_transfer, [sm_score_row, 0], [SOFTMAX_HEAD_TILE, WIN])
                                 sm_scores = pl.concat(
                                     sm_live_scores,
                                     pl.tile.full([SOFTMAX_HEAD_TILE, ATTN_K_TILE - WIN], dtype=pl.FP32, value=0.0),
                                 )
                             else:
-                                sm_scores = pl.load(score_transfer, [sm_row, 0], [SOFTMAX_HEAD_TILE, ATTN_K_TILE])
+                                sm_scores = pl.load(score_transfer, [sm_score_row, 0], [SOFTMAX_HEAD_TILE, ATTN_K_TILE])
                             sm_bias = pl.load(sparse_bias, [qk_t, qk_sb * ATTN_K_TILE], [1, ATTN_K_TILE])
                             sm_masked = pl.col_expand_add(pl.mul(sm_scores, SOFTMAX_SCALE), sm_bias)
                             sm_block_max = pl.row_max(sm_masked, qk_reduce_tmp)
@@ -742,91 +857,104 @@ def sparse_attn_csa(
                         pl.system.sync_set(
                             QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
                         )
-                        # Copy the next independent KV while Cube consumes current probability.
-                        prefetch_t = qk_t
-                        prefetch_sb = qk_sb + 1
-                        if prefetch_sb >= SPARSE_BLOCKS:
-                            prefetch_t = qk_t + NUM_QK_CORES
-                            prefetch_sb = pl.cast(0, pl.INDEX)
-                        if prefetch_t < t_dim:
-                            if pl.read(valid_block_mask, [prefetch_t, prefetch_sb]) > 0:
-                                prefetch_b = pl.max(pl.read(token_request, [prefetch_t]), 0)
-                                prefetch_base = (qk_core * 2 + (qk_work_aiv + 1) % 2) * ATTN_K_TILE
-                                # Gather in 64-row pieces per AIV; a whole 512x512 KV tile would exceed UB.
-                                for prefetch_part in pl.range(ATTN_K_TILE // ATTN_CUBE_KV_TILE):
-                                    if prefetch_sb > 0 or prefetch_part == 0:
-                                        prefetch_part_row = prefetch_part * ATTN_CUBE_KV_TILE + qk_lane_kv
-                                        prefetch_kv_half = pl.tile.full(
-                                            [ATTN_CUBE_KV_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0
-                                        )
-                                        if prefetch_sb == 0:
-                                            prefetch_pos = pl.cast(pl.read(position_ids, [prefetch_t, 0]), pl.INDEX)
-                                            prefetch_win_len = pl.min(prefetch_pos + 1, WIN)
-                                            prefetch_win_start = prefetch_pos - prefetch_win_len + 1
-                                            prefetch_head = prefetch_win_start % BLOCK_SIZE
-                                            prefetch_rows = pl.min(
-                                                pl.max(prefetch_win_len - prefetch_part_row, 0), ATTN_CUBE_KV_TILE // 2
+                        if qk_sb > 0:
+                            # Copy the next independent KV while Cube consumes current probability.
+                            prefetch_t = qk_t
+                            prefetch_sb = qk_sb + 1
+                            if prefetch_sb >= SPARSE_BLOCKS:
+                                prefetch_t = qk_t + NUM_QK_CORES
+                                prefetch_sb = pl.cast(0, pl.INDEX)
+                            if prefetch_t < t_dim:
+                                if pl.read(valid_block_mask, [prefetch_t, prefetch_sb]) > 0:
+                                    prefetch_b = pl.max(pl.read(token_request, [prefetch_t]), 0)
+                                    prefetch_base = (qk_core * 2 + (qk_work_aiv + 1) % 2) * ATTN_K_TILE
+                                    # Gather in 64-row pieces per AIV; a whole 512x512 KV tile would exceed UB.
+                                    for prefetch_part in pl.range(ATTN_K_TILE // ATTN_CUBE_KV_TILE):
+                                        if prefetch_sb > 0 or prefetch_part == 0:
+                                            prefetch_part_row = prefetch_part * ATTN_CUBE_KV_TILE + qk_lane_kv
+                                            prefetch_kv_half = pl.tile.full(
+                                                [ATTN_CUBE_KV_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0
                                             )
-                                            for prefetch_run in pl.unroll(SWA_RUNS):
-                                                prefetch_lo = pl.max(
-                                                    prefetch_run * BLOCK_SIZE - prefetch_head - prefetch_part_row, 0
+                                            if prefetch_sb == 0:
+                                                prefetch_pos = pl.cast(pl.read(position_ids, [prefetch_t, 0]), pl.INDEX)
+                                                prefetch_win_len = pl.min(prefetch_pos + 1, WIN)
+                                                prefetch_win_start = prefetch_pos - prefetch_win_len + 1
+                                                prefetch_head = prefetch_win_start % BLOCK_SIZE
+                                                prefetch_rows = pl.min(
+                                                    pl.max(prefetch_win_len - prefetch_part_row, 0),
+                                                    ATTN_CUBE_KV_TILE // 2,
                                                 )
-                                                prefetch_hi = pl.min(
-                                                    (prefetch_run + 1) * BLOCK_SIZE - prefetch_head - prefetch_part_row,
-                                                    prefetch_rows,
-                                                )
-                                                if prefetch_hi > prefetch_lo:
-                                                    prefetch_absolute = (
-                                                        prefetch_win_start + prefetch_part_row + prefetch_lo
+                                                for prefetch_run in pl.unroll(SWA_RUNS):
+                                                    prefetch_lo = pl.max(
+                                                        prefetch_run * BLOCK_SIZE - prefetch_head - prefetch_part_row, 0
                                                     )
-                                                    prefetch_raw_page = pl.read(
-                                                        ori_block_table, [prefetch_b, prefetch_absolute // BLOCK_SIZE]
+                                                    prefetch_hi = pl.min(
+                                                        (prefetch_run + 1) * BLOCK_SIZE
+                                                        - prefetch_head
+                                                        - prefetch_part_row,
+                                                        prefetch_rows,
                                                     )
-                                                    if prefetch_raw_page >= 0:
-                                                        prefetch_raw_row = (
-                                                            pl.cast(prefetch_raw_page, pl.INDEX) * BLOCK_SIZE
-                                                            + prefetch_absolute % BLOCK_SIZE
+                                                    if prefetch_hi > prefetch_lo:
+                                                        prefetch_absolute = (
+                                                            prefetch_win_start + prefetch_part_row + prefetch_lo
                                                         )
-                                                        prefetch_kv_half = pl.gather_row(
-                                                            prefetch_kv_half,
-                                                            ori_kv_flat,
-                                                            [prefetch_lo, 0],
-                                                            [prefetch_raw_row, 0],
-                                                            [ATTN_CUBE_KV_TILE // 2, HEAD_DIM],
-                                                            valid_shape=[prefetch_hi - prefetch_lo, HEAD_DIM],
+                                                        prefetch_raw_page = pl.read(
+                                                            ori_block_table,
+                                                            [prefetch_b, prefetch_absolute // BLOCK_SIZE],
                                                         )
-                                        else:
-                                            for prefetch_row in pl.range(ATTN_CUBE_KV_TILE // 2):
-                                                prefetch_cmp_k = (
-                                                    (prefetch_sb - 1) * ATTN_K_TILE + prefetch_part_row + prefetch_row
-                                                )
-                                                if prefetch_cmp_k < CMP_TOPK:
-                                                    prefetch_ridx = pl.read(
-                                                        cmp_sparse_indices, [prefetch_t, prefetch_cmp_k]
-                                                    )
-                                                    if prefetch_ridx >= 0:
-                                                        prefetch_page = pl.cast(
-                                                            pl.read(
-                                                                cmp_block_table,
-                                                                [prefetch_b, prefetch_ridx // BLOCK_SIZE],
-                                                            ),
-                                                            pl.INDEX,
-                                                        )
-                                                        if prefetch_page >= 0:
-                                                            prefetch_src = (
-                                                                prefetch_page * BLOCK_SIZE + prefetch_ridx % BLOCK_SIZE
+                                                        if prefetch_raw_page >= 0:
+                                                            prefetch_raw_row = (
+                                                                pl.cast(prefetch_raw_page, pl.INDEX) * BLOCK_SIZE
+                                                                + prefetch_absolute % BLOCK_SIZE
                                                             )
                                                             prefetch_kv_half = pl.gather_row(
                                                                 prefetch_kv_half,
-                                                                cmp_kv_flat,
-                                                                [prefetch_row, 0],
-                                                                [prefetch_src, 0],
-                                                                [1, HEAD_DIM],
+                                                                ori_kv_flat,
+                                                                [prefetch_lo, 0],
+                                                                [prefetch_raw_row, 0],
+                                                                [ATTN_CUBE_KV_TILE // 2, HEAD_DIM],
+                                                                valid_shape=[prefetch_hi - prefetch_lo, HEAD_DIM],
                                                             )
-                                        pl.store(prefetch_kv_half, [prefetch_base + prefetch_part_row, 0], kv_transfer)
-                                pl.system.sync_set(
-                                    QK_KV_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
-                                )
+                                            else:
+                                                for prefetch_row in pl.range(ATTN_CUBE_KV_TILE // 2):
+                                                    prefetch_cmp_k = (
+                                                        (prefetch_sb - 1) * ATTN_K_TILE
+                                                        + prefetch_part_row
+                                                        + prefetch_row
+                                                    )
+                                                    if prefetch_cmp_k < CMP_TOPK:
+                                                        prefetch_ridx = pl.read(
+                                                            cmp_sparse_indices, [prefetch_t, prefetch_cmp_k]
+                                                        )
+                                                        if prefetch_ridx >= 0:
+                                                            prefetch_page = pl.cast(
+                                                                pl.read(
+                                                                    cmp_block_table,
+                                                                    [prefetch_b, prefetch_ridx // BLOCK_SIZE],
+                                                                ),
+                                                                pl.INDEX,
+                                                            )
+                                                            if prefetch_page >= 0:
+                                                                prefetch_src = (
+                                                                    prefetch_page * BLOCK_SIZE
+                                                                    + prefetch_ridx % BLOCK_SIZE
+                                                                )
+                                                                prefetch_kv_half = pl.gather_row(
+                                                                    prefetch_kv_half,
+                                                                    cmp_kv_flat,
+                                                                    [prefetch_row, 0],
+                                                                    [prefetch_src, 0],
+                                                                    [1, HEAD_DIM],
+                                                                )
+                                            pl.store(
+                                                prefetch_kv_half, [prefetch_base + prefetch_part_row, 0], kv_transfer
+                                            )
+                                    pl.system.sync_set(
+                                        QK_KV_READY_EVENT,
+                                        pipe=pl.PipeType.MTE3,
+                                        ffts_mode=2,
+                                        core_type=pl.KernelType.AIV,
+                                    )
                         pl.system.sync_wait(QK_PV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
                         pv_row = qk_head_base + qk_lane_head
                         next_m = pl.load(mi_transfer, [pv_row, 0], [H // 2, 1])
