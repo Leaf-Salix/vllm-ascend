@@ -3,7 +3,6 @@
 
 import pypto.language as pl
 
-from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_full_precision.heads import publish_native_heads
 from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision.decode_csa import (
     B_DYN,
     BF16_WEIGHT_LAYOUT,
@@ -44,7 +43,6 @@ from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision.decode_csa import
     STATE_PAGE_ELEMENTS_DYN,
     STATE_TABLE_COLUMNS_DYN,
     T_DYN,
-    T_PAD,
     TP1_CSA_WB_WORKERS,
     WO_A_WEIGHT_LAYOUT,
     D,
@@ -417,8 +415,7 @@ def _full_csa_tnd_prepacked(
 
         # sparse_attn_csa folds the compressed-slot masking + valid-block flags in from the
         # raw indexer topk + position.
-        o_packed_heads = pl.create_tensor([O_GROUPS * T_PAD, O_GROUP_IN], dtype=pl.BF16)
-        o_packed_heads, heads_dep = sparse_attn_csa_tp1(
+        _published_heads, heads_dep = sparse_attn_csa_tp1(
             q,
             kv_cache,
             ori_block_table,
@@ -431,11 +428,9 @@ def _full_csa_tnd_prepacked(
             attn_sink,
             freqs_cos,
             freqs_sin,
-            o_packed_heads,
+            heads,
             32,
         )
-        with pl.scope():
-            _published_heads = publish_native_heads(o_packed_heads, heads, t_dim, heads_dep)
     with pl.scope():
         _fused_result = o_proj_hcpost_entry(
             heads, wo_a, wo_b, wo_b_scale, oproj_start, projected_o, quantized_o, scale_o, x_hc, post, comb, x_out
