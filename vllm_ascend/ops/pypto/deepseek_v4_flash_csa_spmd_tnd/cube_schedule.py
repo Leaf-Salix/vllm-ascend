@@ -140,7 +140,7 @@ def cube_schedule(
     qr_matmul: pl.Tensor[[QR_ROWS, 1024], pl.INT8],
     wq_b: pl.Tensor[[1024, 32768], pl.INT8, QUANT_WEIGHT_LAYOUT],
     q_proj: pl.InOut[pl.Tensor[[QPROJ_ROWS, 32768], pl.INT32]],
-    wkv: pl.Tensor[[4096, 512], pl.BF16],
+    wkv: pl.Tensor[[512, 4096], pl.BF16, BF16_WEIGHT_LAYOUT],
     kv_fp32: pl.InOut[pl.Tensor[[KV_ROWS, 512], pl.FP32]],
     main_wkv: pl.Tensor[[1024, 4096], pl.BF16],
     main_wgate: pl.Tensor[[1024, 4096], pl.BF16],
@@ -160,12 +160,12 @@ def cube_schedule(
     idx_cache: pl.Tensor[[ICACHE_PAGES, ICACHE_BYTES], pl.INT8],
     q_heads: pl.Tensor[[QUERY_HEAD_ROWS, 512], pl.BF16],
     indexer_table: pl.Tensor[[B, INDEXER_COLS], pl.INT32],
-    idx_wq_b: pl.Tensor[[1024, 8192], pl.INT8],
+    idx_wq_b: pl.Tensor[[1024, 8192], pl.INT8, QUANT_WEIGHT_LAYOUT],
     idx_query_acc: pl.InOut[pl.Tensor[[IDX_PROJ_ROWS, 8192], pl.INT32]],
     idx_query_rope_heads: pl.Tensor[[IDX_ROPE_HEAD_ROWS, 128], pl.BF16],
     idx_query_had: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]],
     idx_query_i8: pl.Tensor[[IDX_HEAD_ROWS, 128], pl.INT8],
-    weights_proj: pl.Tensor[[4096, 64], pl.BF16],
+    weights_proj: pl.Tensor[[64, 4096], pl.BF16, BF16_WEIGHT_LAYOUT],
     weights_partial: pl.InOut[pl.Tensor[[WEIGHTS_PARTIAL_ROWS, 64], pl.FP32]],
     group_offsets: pl.Tensor[[GROUP_OFFSET_ROWS], pl.INT32],
     group_plan: pl.Tensor[[8], pl.INT32],
@@ -375,7 +375,7 @@ def cube_schedule(
     else:
         weights_partial = indexer_weights_project_stage(normed, weights_proj, weights_partial, worker, GROUPS)
         signal = publish_phase(signal, PHASE_WEIGHTS_PROJECT, worker, CORES, generation)
-        # normed已经等待HC_NORM；KV与QA读取同一BF16输入，wkv固定ND。
+        # normed已经等待HC_NORM；KV与QA读取同一BF16输入，wkv直接读取Native NZ。
         # 原GM别名显式返回cluster，实际KV写回与通知次序必须另查编译产物。
         kv_fp32 = kv_project_stage(normed, wkv, kv_fp32, worker, GROUPS)
         signal = publish_phase(signal, PHASE_KV_PROJECT, worker, CORES, generation)

@@ -86,11 +86,12 @@ def validate_weight_nz_mode(effective_mode: int) -> None:
         )
 
 
-# 全部作为 cube matmul B 操作数消费的权重。前四张是零拷贝借用 Native 存储的
-# "根权重"；后三张（HCA 的 KV／压缩投影权重）历史上一律按 ND 准备，但它们同样
-# 是 B 操作数，布局也应当由根签名说话，而不是写死在加载期。根签名各不相同
-# （CSA 没有 cmp_wgate），所以只读实际存在的参数。
-B_OPERAND_WEIGHTS = ("wq_a", "wq_b", "wo_a", "wo_b", "wkv", "cmp_wkv", "cmp_wgate")
+# 作为cube matmul B操作数的根权重，由实际入口的布局及矩阵方向决定绑定方式。
+# TND-SPMD/MPMD的wkv、Indexer Q_B及head权重投影也直接借用Native NZ存储。
+# 各入口的参数集合不同，因此只读取实际存在的参数。
+B_OPERAND_WEIGHTS = (
+    "wq_a", "wq_b", "wo_a", "wo_b", "wkv", "idx_wq_b", "weights_proj", "cmp_wkv", "cmp_wgate"
+)
 
 
 def _root_signature(root_function):

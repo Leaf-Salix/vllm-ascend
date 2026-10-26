@@ -15,6 +15,7 @@ import torch
 from ..deepseek_v4_flash_csa.native_adapter import prepare_weights
 from ..deepseek_v4_flash_csa.service import AttentionServiceBase
 from .binding import PreparedDynamicCSA
+from .entry import decode_csa_spmd
 from .graph_contract import TNDGraphContract, compact_metadata_capacity, graph_compact_request, tensor_descriptor
 from .native_adapter import bind_native_inputs, token_capacity_view
 from .policy import select_policy
@@ -61,7 +62,7 @@ def _native_token_views(requests, layer_name, tokens):
 class CSAServiceRuntime(AttentionServiceBase):
     @staticmethod
     def _prepare_weights(attention, layer):
-        return prepare_weights(attention, None, layer)
+        return prepare_weights(attention, None, layer, root_function=decode_csa_spmd)
 
     @staticmethod
     def _select_policy(**descriptors):

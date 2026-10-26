@@ -13,12 +13,12 @@
     decode_indexer.py数学，不导入历史IR，也不包含历史QK/TopK MIX。
 
 二、布局与动态容量
-    QR是INT8[T,1024]，Indexer投影权重是ND INT8[1024,8192]，输出INT32
+    QR是INT8[T,1024]，Indexer投影权重是Native NZ INT8[1024,8192]，输出INT32
     投影至少pad64(T)行。RoPE后的BF16为[pad16(T),8192]，外层还须对同一
     数据建立[pad16(T)*64,128]的GM别名供Hadamard使用；helper不在incore内
     reshape整张GM。Hadamard矩阵为BF16[128,128]，FP32中间量至少T*64行，
     INT8结果和FP32 scale各有独立动态行容量，至少T*64，后续消费者可要求
-    pad16(T)*64。weights分支输入x_normed BF16[T,4096]和ND BF16[4096,64]，
+    pad16(T)*64。weights分支输入x_normed BF16[T,4096]和Native NZ BF16[64,4096]，
     partial至少4*pad16(T)行，输出FP32至少pad16(T)行。
     cos沿用Native交错RoPE布局；sin必须是外层已按偶负奇正乘符号的FP32
     signed_sin，不能直接把未带符号的频率sin传入。
@@ -46,6 +46,8 @@ import pypto.language as pl
 
 from ..deepseek_v4_flash_csa.config import FLASH as M
 from ..deepseek_v4_flash_csa.config import INT8_AMAX_EPS, INT8_SCALE_MAX
+from .qkv_stages import BF16_WEIGHT_LAYOUT
+from .query_projection_stages import QUANT_WEIGHT_LAYOUT
 
 D = M.hidden_size
 Q_LORA = M.q_lora_rank
@@ -81,7 +83,7 @@ WEIGHTS_PARTIAL_ROWS_DYN = pl.dynamic("CSA_INDEX_WEIGHTS_PARTIAL_ROWS")
 @pl.jit.inline(auto_scope=False)
 def indexer_query_project_stage(
     qr: pl.Tensor[[T_DYN, Q_LORA], pl.INT8],
-    wq_b: pl.Tensor[[Q_LORA, IDX_N_HEADS * IDX_HEAD_DIM], pl.INT8],
+    wq_b: pl.Tensor[[Q_LORA, IDX_N_HEADS * IDX_HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
     qr_acc_pad: pl.Tensor[[PROJ_ROWS_DYN, IDX_N_HEADS * IDX_HEAD_DIM], pl.INT32],
     worker_id: pl.Scalar[pl.INDEX],
     WORKERS: pl.constexpr,
@@ -92,7 +94,7 @@ def indexer_query_project_stage(
     qr_proj_worker = worker_id
     # 同一worker负责N256条带的所有M64行块；后继不能只等某一行的假想owner。
     for qr_col in pl.range(qr_proj_worker, IDX_N_HEADS * IDX_HEAD_DIM // QR_MM_N_TILE, WORKERS):
-        o_base = qr_col * QR_MM_N_TILE
+        o_base = pl.max(0, qr_col * QR_MM_N_TILE)
         wq_tile = wq_b[0:Q_LORA, o_base : o_base + QR_MM_N_TILE]
         for qr_rb in pl.range(row_blocks):
             qr_r0 = qr_rb * QR_MM_ROW_TILE
@@ -298,7 +300,7 @@ def indexer_query_quant_stage(
 @pl.jit.inline(auto_scope=False)
 def indexer_weights_project_stage(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
-    weights_proj: pl.Tensor[[D, IDX_N_HEADS], pl.BF16],
+    weights_proj: pl.Tensor[[IDX_N_HEADS, D], pl.BF16, BF16_WEIGHT_LAYOUT],
     weights_partial: pl.Tensor[[WEIGHTS_PARTIAL_ROWS_DYN, IDX_N_HEADS], pl.FP32],
     worker_id: pl.Scalar[pl.INDEX],
     WORKERS: pl.constexpr,
@@ -315,13 +317,14 @@ def indexer_weights_project_stage(
         kb = w_unit - w_rb * WEIGHTS_OK
         w_r0 = w_rb * MM_ROW_TILE
         w_rows = pl.min(MM_ROW_TILE, bs - w_r0)
-        k_base = kb * WEIGHTS_K_TILE
+        # 合法w_unit下kb属于[0,WEIGHTS_OK)，显式提供NZ列偏移所需非负证明。
+        k_base = pl.max(0, kb) * WEIGHTS_K_TILE
         weights_acc = pl.create_tensor([MM_ROW_TILE, IDX_N_HEADS], dtype=pl.FP32)
         for db in pl.range(WEIGHTS_K_TILE // D_TILE):
             d0 = k_base + db * D_TILE
             x_tile = pl.slice(x_flat, [MM_ROW_TILE, D_TILE], [w_r0, d0], valid_shape=[w_rows, D_TILE])
-            weights_proj_tile = weights_proj[d0 : d0 + D_TILE, :]
-            weights_acc = pl.matmul_acc(weights_acc, x_tile, weights_proj_tile, init_cond=db == 0)
+            weights_proj_tile = weights_proj[:, d0 : d0 + D_TILE]
+            weights_acc = pl.matmul_acc(weights_acc, x_tile, weights_proj_tile, b_trans=True, init_cond=db == 0)
         weights_partial[kb * t_pad + w_r0 : kb * t_pad + w_r0 + MM_ROW_TILE, :] = weights_acc
     return weights_partial
 

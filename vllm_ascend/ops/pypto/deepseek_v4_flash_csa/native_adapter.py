@@ -20,7 +20,7 @@ from .decode_csa import (
 )
 from .host_metadata import CSAHostMetadata
 from .native_storage import indexer_storage, physical_pages, table_storage
-from .nz_mode import root_weight_layouts
+from .nz_mode import root_weight_layouts, root_weight_shapes
 
 _NZ_C0_BYTES = 32
 _NZ_FRACTAL_ROWS = 16
@@ -144,6 +144,7 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None, *,
         raise ValueError("PTO attention 要求 C4/C128、TP1、64 个 head 和 8 个输出组")
 
     layouts = root_weight_layouts(root_function)
+    shapes = root_weight_shapes(root_function)
 
     def _recast(name, value, current, target):
         # 声明的布局与 Native 实际存法不符时只能另开一份私有副本。这条路径静默走过
@@ -157,11 +158,10 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None, *,
         )
         return torch_npu.npu_format_cast(value, target)
 
-    def root_weight(name, shape, dtype):
-        # 根矩阵方向与 Native 相同。格式已匹配时借用原存储，禁止解包、转置或重新打包。
-        value = getattr(attention, name).weight.detach()
-        if tuple(value.shape) != shape or value.dtype != dtype or not value.is_contiguous():
-            raise ValueError(f"Unexpected Native {name} weight: {value.shape}/{value.dtype}")
+    def bind_root_storage(name, value):
+        # 形状已由调用方验证；NZ直接借用Native字节，不能先转ND再重新打包。
+        if not value.is_contiguous():
+            raise ValueError(f"Native {name} weight须满足连续存储描述符")
         current = int(torch_npu.get_npu_format(value))
         if layouts[name] == "NZ":
             return value if current == 29 else _recast(name, value, current, 29)
@@ -169,13 +169,29 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None, *,
             return value
         return _recast(name, value, current, _ACL_FORMAT_ND)
 
+    def root_weight(name, shape, dtype):
+        # 根矩阵方向与 Native 相同。格式已匹配时借用原存储，禁止解包、转置或重新打包。
+        value = getattr(attention, name).weight.detach()
+        if tuple(value.shape) != shape or value.dtype != dtype:
+            raise ValueError(f"Unexpected Native {name} weight: {value.shape}/{value.dtype}")
+        return bind_root_storage(name, value)
+
     def weight(module, shape, dtype, transpose=False, layout_name=None):
         value = module.weight.detach()
         if tuple(value.shape) != shape or value.dtype != dtype:
             raise ValueError(f"Unexpected loaded weight: {value.shape}/{value.dtype}; expected {shape}/{dtype}")
+        if layout_name is not None and layout_name in shapes:
+            target_shape = shapes[layout_name]
+            if tuple(value.shape) == target_shape:
+                return bind_root_storage(layout_name, value)
+            transposed_shape = (*value.shape[:-2], value.shape[-1], value.shape[-2])
+            if not transpose or transposed_shape != target_shape:
+                raise ValueError(
+                    f"Native {layout_name}的矩阵方向与root不匹配：{tuple(value.shape)} -> {target_shape}"
+                )
         if torch_npu.get_npu_format(value) not in (_ACL_FORMAT_NCHW, _ACL_FORMAT_ND):
-            # 先统一回 ND，才能按数学方向转置；四张目标权重由 root_weight 独立绑定，
-            # 已有 NZ 存储直接复用，不走这里。
+            # 仅矩阵方向不同或未声明root布局的输入走此路径。
+            # 与Native同方向的NZ根权重已由上面的bind_root_storage直接借用。
             value = torch_npu.npu_format_cast(value, _ACL_FORMAT_ND)
         if transpose:
             value = value.transpose(-1, -2)
@@ -231,9 +247,9 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None, *,
         indexer = attention.indexer
         inner = indexer.compressor
         weights.update({
-            "idx_wq_b": weight(indexer.wq_b, (1024, 8192), int8),
+            "idx_wq_b": weight(indexer.wq_b, (1024, 8192), int8, layout_name="idx_wq_b"),
             "idx_wq_b_scale": scale(indexer.wq_b, 8192),
-            "weights_proj": weight(indexer.weights_proj, (64, 4096), bf16, True),
+            "weights_proj": weight(indexer.weights_proj, (64, 4096), bf16, True, layout_name="weights_proj"),
             **({"hadamard_idx": hadamard.detach().T.to(bf16).contiguous()} if hadamard is not None else {}),
             "inner_wkv": weight(inner.wkv, (256, 4096), bf16),
             "inner_wgate": weight(inner.wgate, (256, 4096), bf16),

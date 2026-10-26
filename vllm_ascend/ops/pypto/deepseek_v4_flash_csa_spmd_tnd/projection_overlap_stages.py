@@ -46,6 +46,7 @@ from .indexer_compressor_output_stages import indexer_compressor_hadamard_stage
 from .indexer_query_stages import indexer_weights_project_stage
 from .kv_stages import kv_project_stage
 from .phase_sync import publish_phase, wait_producer, wait_row_owners
+from .qkv_stages import BF16_WEIGHT_LAYOUT
 from .query_projection_stages import QUANT_WEIGHT_LAYOUT, q_b_stage
 from .runtime_abi import (
     CORES,
@@ -104,7 +105,7 @@ def projection_overlap_stage(
     main_wgate: pl.Tensor[[1024, 4096], pl.BF16],
     main_value: pl.InOut[pl.Tensor[[MPROJ, 1024], pl.FP32]],
     main_score: pl.InOut[pl.Tensor[[MPROJ, 1024], pl.FP32]],
-    weights_proj: pl.Tensor[[4096, 64], pl.BF16],
+    weights_proj: pl.Tensor[[64, 4096], pl.BF16, BF16_WEIGHT_LAYOUT],
     weights_partial: pl.InOut[pl.Tensor[[WEIGHTS_PARTIAL_ROWS, 64], pl.FP32]],
     query_rope: pl.Tensor[[IDX_ROPE_HEAD_ROWS, 128], pl.BF16],
     hadamard: pl.Tensor[[128, 128], pl.BF16],
@@ -116,7 +117,7 @@ def projection_overlap_stage(
     idx_count: pl.Tensor[[1], pl.INT32],
     idx_normed: pl.Tensor[[ICPAD, 128], pl.BF16],
     idx_had: pl.InOut[pl.Tensor[[ICPAD, 128], pl.FP32]],
-    wkv: pl.Tensor[[4096, 512], pl.BF16],
+    wkv: pl.Tensor[[512, 4096], pl.BF16, BF16_WEIGHT_LAYOUT],
     kv_fp32: pl.InOut[pl.Tensor[[KV_ROWS, 512], pl.FP32]],
     signal: pl.InOut[pl.Tensor[[WORDS], pl.INT32]],
     worker: pl.Scalar[pl.INDEX],

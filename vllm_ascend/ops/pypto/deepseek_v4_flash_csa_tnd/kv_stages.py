@@ -8,8 +8,8 @@
 """动态 CSA 的 KV 投影、RMSNorm 与 RoPE：显式分核的核内数学阶段。
 
 输入、输出与布局
-    x 是归一化后的 BF16 [T,4096]；wkv 沿用 Native 的 ND BF16 [4096,512]，
-    不按全局 NZ 开关改写这张权重。gamma_ckv 直接接 Native BF16 [512]，只在
+    x 是归一化后的 BF16 [T,4096]；wkv 沿用 Native 的 BF16 [512,4096]，
+    NZ2下直接借用NZ存储，通过b_trans=True消费。gamma_ckv直接接Native BF16 [512]，只在
     AIV 内转 FP32。投影工作区 kv_fp32 为 FP32 [PAD_ROWS,512]，最终 kv 为
     BF16 [T,512]。cos/signed_sin 是 FP32 [T,64]，swap 是 INT32 [T,64]；
     它们必须采用原 interleaved RoPE 的符号和相邻列交换约定：奇偶列的
@@ -56,6 +56,7 @@ import pypto.language as pl
 
 from ..deepseek_v4_flash_csa.config import FLASH as M
 from ..deepseek_v4_flash_csa.reduction import ATOMIC_ADD
+from .qkv_stages import BF16_WEIGHT_LAYOUT
 
 # 只读取模型配置和纯规约开关，避免导入 nz_mode 的三维权重设备格式探针。
 D = M.hidden_size
@@ -85,7 +86,7 @@ PAD_ROWS_DYN = pl.dynamic("CSA_KV_PAD_ROWS_DYN")
 @pl.jit.inline(auto_scope=False)
 def _kv_project_worker(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
-    wkv: pl.Tensor[[D, HEAD_DIM], pl.BF16],
+    wkv: pl.Tensor[[HEAD_DIM, D], pl.BF16, BF16_WEIGHT_LAYOUT],
     kv_fp32: pl.Tensor[[PAD_ROWS_DYN, HEAD_DIM], pl.FP32],
     tile_base: pl.Scalar[pl.INDEX],
     tile_rows: pl.Scalar[pl.INDEX],
@@ -105,7 +106,7 @@ def _kv_project_worker(
     # logical 的列块/行组拆分与原固定 K 分支一致；只把 task 编号变成核内波次。
     # 512 同时是 M16/M32/M64 的倍数，下一段起点不会切开前一段的物理尾块。
     for logical in pl.range(worker_id, (HEAD_DIM // KV_N_TILE) * kv_m_groups, WORKERS):
-        kv_col0 = (logical // kv_m_groups) * KV_N_TILE
+        kv_col0 = pl.max(0, (logical // kv_m_groups) * KV_N_TILE)
         kv_m_group = logical % kv_m_groups
         # 当前行组以 m_groups 个完整块为步长走自己的条带，不重复覆盖别的组。
         for dense_t0 in pl.range(kv_m_group * DENSE_M, kv_full_rows, kv_m_groups * DENSE_M):
@@ -115,8 +116,8 @@ def _kv_project_worker(
             for dense_k in pl.pipeline(0, D // KV_K_TILE, stage=2):
                 dense_d0 = dense_k * KV_K_TILE
                 dense_x = x[dense_x0 : dense_x0 + DENSE_M, dense_d0 : dense_d0 + KV_K_TILE]
-                dense_w = wkv[dense_d0 : dense_d0 + KV_K_TILE, kv_col0 : kv_col0 + KV_N_TILE]
-                dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, init_cond=(dense_k == 0))
+                dense_w = wkv[kv_col0 : kv_col0 + KV_N_TILE, dense_d0 : dense_d0 + KV_K_TILE]
+                dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, b_trans=True, init_cond=(dense_k == 0))
             kv_fp32 = pl.assemble(kv_fp32, dense_acc, [tile_base + dense_t0, kv_col0])
         # 完整 M32/M64 之后的剩余行继续按 M16 分给相同行组；只有全局最后
         # 一个 M16 块可能不足 16 行。读侧 valid_shape 保留真实行数，写侧可覆盖
@@ -133,8 +134,8 @@ def _kv_project_worker(
                     [x_t0, d0],
                     valid_shape=[kv_rows, KV_K_TILE],
                 )
-                wkv_chunk = wkv[d0 : d0 + KV_K_TILE, kv_col0 : kv_col0 + KV_N_TILE]
-                kv_acc = pl.matmul_acc(kv_acc, kv_x_chunk_bf16, wkv_chunk, init_cond=(db == 0))
+                wkv_chunk = wkv[kv_col0 : kv_col0 + KV_N_TILE, d0 : d0 + KV_K_TILE]
+                kv_acc = pl.matmul_acc(kv_acc, kv_x_chunk_bf16, wkv_chunk, b_trans=True, init_cond=(db == 0))
             kv_fp32 = pl.assemble(kv_fp32, kv_acc, [tile_base + t0, kv_col0])
     return kv_fp32
 
@@ -142,7 +143,7 @@ def _kv_project_worker(
 @pl.jit.inline(auto_scope=False)
 def kv_project_stage(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
-    wkv: pl.Tensor[[D, HEAD_DIM], pl.BF16],
+    wkv: pl.Tensor[[HEAD_DIM, D], pl.BF16, BF16_WEIGHT_LAYOUT],
     kv_fp32: pl.Tensor[[PAD_ROWS_DYN, HEAD_DIM], pl.FP32],
     worker_id: pl.Scalar[pl.INDEX],
     WORKERS: pl.constexpr,

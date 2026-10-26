@@ -122,7 +122,7 @@ class PreparedDynamicCSA:
             value = self.buffers[name]
             if value.shape != (width,) or value.dtype != torch.bfloat16:
                 raise ValueError(f"{name}必须保持Native BF16[{width}]")
-        for name in ("wq_a", "wq_b", "wo_a", "wo_b"):
+        for name in ("wq_a", "wq_b", "wo_a", "wo_b", "wkv", "idx_wq_b", "weights_proj"):
             if device.type == "npu":
                 import torch_npu
 
