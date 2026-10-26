@@ -1,0 +1,66 @@
+# Kernel and Orchestration Configuration
+
+from pathlib import Path
+
+from simpler.task_interface import ArgDirection as _D
+
+_ROOT_DIR = Path(__file__).parent
+
+# Runtime configuration for tensormap_and_ringbuffer.
+# AICPU thread count 0 selects the runtime's architecture default (a2a3: 4; a5: 5).
+RUNTIME_CONFIG = {
+	"runtime": "tensormap_and_ringbuffer",
+	"aicpu_thread_num": 0,
+}
+
+ORCHESTRATION = {
+	"source": str(_ROOT_DIR / "orchestration" / "decode_csa_tnd_debug.cpp"),
+	"function_name": "aicpu_orchestration_entry",
+	"signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT],
+}
+
+KERNELS = [
+	{"func_id": 0, "name": "hc_widen_rms", "source": str(_ROOT_DIR / "kernels" / "aiv" / "hc_widen_rms.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.OUT, _D.OUT, _D.INOUT]},
+	{"func_id": 1, "name": "hc_linear", "source": str(_ROOT_DIR / "kernels" / "aic" / "hc_linear.cpp"), "core_type": "aic", "signature": [_D.IN, _D.OUT, _D.IN]},
+	{"func_id": 2, "name": "hc_reduce", "source": str(_ROOT_DIR / "kernels" / "aiv" / "hc_reduce.cpp"), "core_type": "aiv", "signature": [_D.INOUT, _D.IN]},
+	{"func_id": 3, "name": "hc_pre_gates", "source": str(_ROOT_DIR / "kernels" / "aiv" / "hc_pre_gates.cpp"), "core_type": "aiv", "signature": [_D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT]},
+	{"func_id": 4, "name": "hc_mix_norm", "source": str(_ROOT_DIR / "kernels" / "aiv" / "hc_mix_norm.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.INOUT, _D.INOUT, _D.OUT, _D.IN, _D.IN]},
+	{"func_id": 5, "name": "hc_sinkhorn", "source": str(_ROOT_DIR / "kernels" / "aiv" / "hc_sinkhorn.cpp"), "core_type": "aiv", "signature": [_D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT]},
+	{"func_id": 6, "name": "csa_rope_sign", "source": str(_ROOT_DIR / "kernels" / "aiv" / "csa_rope_sign.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.OUT, _D.OUT]},
+	{"func_id": 7, "name": "csa_inverse_rope", "source": str(_ROOT_DIR / "kernels" / "aiv" / "csa_inverse_rope.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.OUT]},
+	{"func_id": 8, "name": "qproj_a", "source": str(_ROOT_DIR / "kernels" / "aic" / "qproj_a.cpp"), "core_type": "aic", "signature": [_D.IN, _D.OUT, _D.IN]},
+	{"func_id": 9, "name": "indexer_compressor_kv_score", "source": str(_ROOT_DIR / "kernels" / "aic" / "indexer_compressor_kv_score.cpp"), "core_type": "aic", "signature": [_D.IN, _D.OUT, _D.OUT, _D.IN, _D.IN]},
+	{"func_id": 10, "name": "qproj_a_rms_quant", "source": str(_ROOT_DIR / "kernels" / "aiv" / "qproj_a_rms_quant.cpp"), "core_type": "aiv", "signature": [_D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT]},
+	{"func_id": 11, "name": "indexer_compressor_pool", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_compressor_pool.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.OUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 12, "name": "indexer_state_commit", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_state_commit.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 13, "name": "indexer_compressor_norm_rope", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_compressor_norm_rope.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 14, "name": "indexer_compressor_hadamard", "source": str(_ROOT_DIR / "kernels" / "aic" / "indexer_compressor_hadamard.cpp"), "core_type": "aic", "signature": [_D.IN, _D.INOUT, _D.IN]},
+	{"func_id": 15, "name": "indexer_query_proj", "source": str(_ROOT_DIR / "kernels" / "aic" / "indexer_query_proj.cpp"), "core_type": "aic", "signature": [_D.IN, _D.OUT, _D.IN]},
+	{"func_id": 16, "name": "indexer_query_rope", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_query_rope.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.OUT, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 17, "name": "indexer_query_hadamard", "source": str(_ROOT_DIR / "kernels" / "aic" / "indexer_query_hadamard.cpp"), "core_type": "aic", "signature": [_D.IN, _D.OUT, _D.IN]},
+	{"func_id": 18, "name": "indexer_query_quant", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_query_quant.cpp"), "core_type": "aiv", "signature": [_D.OUT, _D.OUT, _D.IN]},
+	{"func_id": 19, "name": "indexer_weights_proj", "source": str(_ROOT_DIR / "kernels" / "aic" / "indexer_weights_proj.cpp"), "core_type": "aic", "signature": [_D.IN, _D.OUT, _D.IN]},
+	{"func_id": 20, "name": "indexer_weights_reduce", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_weights_reduce.cpp"), "core_type": "aiv", "signature": [_D.OUT, _D.IN]},
+	{"func_id": 21, "name": "indexer_head_coefficients", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_head_coefficients.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.OUT, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 22, "name": "indexer_compressor_cache_write", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_compressor_cache_write.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.OUT]},
+	{"func_id": 23, "name": "indexer_scale_page_commit_task", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_scale_page_commit_task.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.INOUT]},
+	{"func_id": 24, "name": "compressor_kv_score", "source": str(_ROOT_DIR / "kernels" / "aic" / "compressor_kv_score.cpp"), "core_type": "aic", "signature": [_D.IN, _D.OUT, _D.OUT, _D.IN, _D.IN]},
+	{"func_id": 25, "name": "compressor_pool", "source": str(_ROOT_DIR / "kernels" / "aiv" / "compressor_pool.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.OUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 26, "name": "compressor_state_commit", "source": str(_ROOT_DIR / "kernels" / "aiv" / "compressor_state_commit.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 27, "name": "compressor_norm_rope_cache", "source": str(_ROOT_DIR / "kernels" / "aiv" / "compressor_norm_rope_cache.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.INOUT, _D.OUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN]},
+	{"func_id": 28, "name": "qproj_b", "source": str(_ROOT_DIR / "kernels" / "aic" / "qproj_b.cpp"), "core_type": "aic", "signature": [_D.OUT, _D.IN, _D.IN]},
+	{"func_id": 29, "name": "qproj_dequant_rms_nope_rope", "source": str(_ROOT_DIR / "kernels" / "aiv" / "qproj_dequant_rms_nope_rope.cpp"), "core_type": "aiv", "signature": [_D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 30, "name": "kv_proj", "source": str(_ROOT_DIR / "kernels" / "aic" / "kv_proj.cpp"), "core_type": "aic", "signature": [_D.IN, _D.OUT, _D.IN]},
+	{"func_id": 31, "name": "kv_norm_rope", "source": str(_ROOT_DIR / "kernels" / "aiv" / "kv_norm_rope.cpp"), "core_type": "aiv", "signature": [_D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 32, "name": "csa_cache_writeback", "source": str(_ROOT_DIR / "kernels" / "aiv" / "csa_cache_writeback.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.INOUT, _D.IN]},
+	{"func_id": 33, "name": "index_score_topk_cube", "source": str(_ROOT_DIR / "kernels" / "aic" / "index_score_topk_cube.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT]},
+	{"func_id": 34, "name": "index_score_topk_vector", "source": str(_ROOT_DIR / "kernels" / "aiv" / "index_score_topk_vector.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT]},
+	{"func_id": 35, "name": "indexer_topk", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_topk.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT]},
+	{"func_id": 36, "name": "csa_attention_plan", "source": str(_ROOT_DIR / "kernels" / "aiv" / "csa_attention_plan.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT]},
+	{"func_id": 37, "name": "sparse_attn_cube", "source": str(_ROOT_DIR / "kernels" / "aic" / "sparse_attn_cube.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT]},
+	{"func_id": 38, "name": "sparse_attn_vector", "source": str(_ROOT_DIR / "kernels" / "aiv" / "sparse_attn_vector.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT]},
+	{"func_id": 39, "name": "o_proj_a", "source": str(_ROOT_DIR / "kernels" / "aic" / "o_proj_a.cpp"), "core_type": "aic", "signature": [_D.IN, _D.OUT, _D.IN]},
+	{"func_id": 40, "name": "o_quant", "source": str(_ROOT_DIR / "kernels" / "aiv" / "o_quant.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.INOUT, _D.INOUT]},
+	{"func_id": 41, "name": "o_b_group_task", "source": str(_ROOT_DIR / "kernels" / "aic" / "o_b_group_task.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.INOUT]},
+	{"func_id": 42, "name": "hc_post", "source": str(_ROOT_DIR / "kernels" / "aiv" / "hc_post.cpp"), "core_type": "aiv", "signature": [_D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN]},
+]

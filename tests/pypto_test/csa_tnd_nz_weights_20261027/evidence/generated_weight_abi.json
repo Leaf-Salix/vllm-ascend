@@ -1,0 +1,153 @@
+{
+  "spmd_B16": {
+    "compiled_meta": "tests/pypto_test/csa_tnd_nz_weights_20261027/runs/cpu_spmd_C04_v2/kernel/compiled_meta.json",
+    "params": {
+      "wkv": {
+        "name": "wkv",
+        "direction": "In",
+        "shape": [
+          512,
+          4096
+        ],
+        "dtype": "bfloat16",
+        "layout": "NZ"
+      },
+      "idx_wq_b": {
+        "name": "idx_wq_b",
+        "direction": "In",
+        "shape": [
+          1024,
+          8192
+        ],
+        "dtype": "int8",
+        "layout": "NZ"
+      },
+      "weights_proj": {
+        "name": "weights_proj",
+        "direction": "In",
+        "shape": [
+          64,
+          4096
+        ],
+        "dtype": "bfloat16",
+        "layout": "NZ"
+      }
+    },
+    "orchestration": "tests/pypto_test/csa_tnd_nz_weights_20261027/runs/cpu_spmd_C04_v2/kernel/orchestration/decode_csa_spmd.cpp",
+    "binding_snippets": [
+      {
+        "line": 43,
+        "text": "    const Tensor& ext_wkv_logical = orch_args.tensor(12).ref();\n    uint32_t ext_wkv_nz_shapes[5] = {1, 256, 32, 16, 16};\n    Tensor ext_wkv = ext_wkv_logical.reshape(ext_wkv_nz_shapes, 5);"
+      },
+      {
+        "line": 80,
+        "text": "    const Tensor& ext_idx_wq_b_logical = orch_args.tensor(47).ref();\n    uint32_t ext_idx_wq_b_nz_shapes[5] = {1, 256, 64, 16, 32};\n    Tensor ext_idx_wq_b = ext_idx_wq_b_logical.reshape(ext_idx_wq_b_nz_shapes, 5);"
+      },
+      {
+        "line": 84,
+        "text": "    const Tensor& ext_weights_proj_logical = orch_args.tensor(49).ref();\n    uint32_t ext_weights_proj_nz_shapes[5] = {1, 256, 4, 16, 16};\n    Tensor ext_weights_proj = ext_weights_proj_logical.reshape(ext_weights_proj_nz_shapes, 5);"
+      }
+    ]
+  },
+  "spmd_B24_joint": {
+    "compiled_meta": "tests/pypto_test/csa_tnd_nz_weights_20261027/runs/cpu_spmd_C05_candidate03/kernel/compiled_meta.json",
+    "params": {
+      "wkv": {
+        "name": "wkv",
+        "direction": "In",
+        "shape": [
+          512,
+          4096
+        ],
+        "dtype": "bfloat16",
+        "layout": "NZ"
+      },
+      "idx_wq_b": {
+        "name": "idx_wq_b",
+        "direction": "In",
+        "shape": [
+          1024,
+          8192
+        ],
+        "dtype": "int8",
+        "layout": "NZ"
+      },
+      "weights_proj": {
+        "name": "weights_proj",
+        "direction": "In",
+        "shape": [
+          64,
+          4096
+        ],
+        "dtype": "bfloat16",
+        "layout": "NZ"
+      }
+    },
+    "orchestration": "tests/pypto_test/csa_tnd_nz_weights_20261027/runs/cpu_spmd_C05_candidate03/kernel/orchestration/decode_csa_spmd.cpp",
+    "binding_snippets": [
+      {
+        "line": 43,
+        "text": "    const Tensor& ext_wkv_logical = orch_args.tensor(12).ref();\n    uint32_t ext_wkv_nz_shapes[5] = {1, 256, 32, 16, 16};\n    Tensor ext_wkv = ext_wkv_logical.reshape(ext_wkv_nz_shapes, 5);"
+      },
+      {
+        "line": 80,
+        "text": "    const Tensor& ext_idx_wq_b_logical = orch_args.tensor(47).ref();\n    uint32_t ext_idx_wq_b_nz_shapes[5] = {1, 256, 64, 16, 32};\n    Tensor ext_idx_wq_b = ext_idx_wq_b_logical.reshape(ext_idx_wq_b_nz_shapes, 5);"
+      },
+      {
+        "line": 84,
+        "text": "    const Tensor& ext_weights_proj_logical = orch_args.tensor(49).ref();\n    uint32_t ext_weights_proj_nz_shapes[5] = {1, 256, 4, 16, 16};\n    Tensor ext_weights_proj = ext_weights_proj_logical.reshape(ext_weights_proj_nz_shapes, 5);"
+      }
+    ]
+  },
+  "mpmd_B16": {
+    "compiled_meta": "tests/pypto_test/csa_tnd_nz_weights_20261027/runs/cpu_mpmd_C04_v2/kernel/compiled_meta.json",
+    "params": {
+      "wkv": {
+        "name": "wkv",
+        "direction": "In",
+        "shape": [
+          512,
+          4096
+        ],
+        "dtype": "bfloat16",
+        "layout": "NZ"
+      },
+      "idx_wq_b": {
+        "name": "idx_wq_b",
+        "direction": "In",
+        "shape": [
+          1024,
+          8192
+        ],
+        "dtype": "int8",
+        "layout": "NZ"
+      },
+      "weights_proj": {
+        "name": "weights_proj",
+        "direction": "In",
+        "shape": [
+          64,
+          4096
+        ],
+        "dtype": "bfloat16",
+        "layout": "NZ"
+      }
+    },
+    "orchestration": "tests/pypto_test/csa_tnd_nz_weights_20261027/runs/cpu_mpmd_C04_v2/kernel/orchestration/decode_csa_tnd.cpp",
+    "binding_snippets": [
+      {
+        "line": 43,
+        "text": "    const Tensor& ext_wkv_logical = orch_args.tensor(12).ref();\n    uint32_t ext_wkv_nz_shapes[5] = {1, 256, 32, 16, 16};\n    Tensor ext_wkv = ext_wkv_logical.reshape(ext_wkv_nz_shapes, 5);"
+      },
+      {
+        "line": 80,
+        "text": "    const Tensor& ext_idx_wq_b_logical = orch_args.tensor(47).ref();\n    uint32_t ext_idx_wq_b_nz_shapes[5] = {1, 256, 64, 16, 32};\n    Tensor ext_idx_wq_b = ext_idx_wq_b_logical.reshape(ext_idx_wq_b_nz_shapes, 5);"
+      },
+      {
+        "line": 84,
+        "text": "    const Tensor& ext_weights_proj_logical = orch_args.tensor(49).ref();\n    uint32_t ext_weights_proj_nz_shapes[5] = {1, 256, 4, 16, 16};\n    Tensor ext_weights_proj = ext_weights_proj_logical.reshape(ext_weights_proj_nz_shapes, 5);"
+      }
+    ]
+  },
+  "interpretation": "生成编排只将同一Native根Tensor解释为NZ物理形状，三张均无ND重排task。完整L1 task/核数由上卡原始记录另验。"
+}
