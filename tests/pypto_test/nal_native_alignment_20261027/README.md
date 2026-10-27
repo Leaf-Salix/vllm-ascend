@@ -281,6 +281,29 @@ T1/17/32/33/48/63 的 Norm/RoPE 也全部与 Native 逐bit一致，FULL/eager和
 后续完整观测新增Q投影INT32与Q Norm/RoPE后BF16两处scratch，根参数为69；
 生产根仍55、debug根57，没有新增生产外部参数。
 
+### KV 接回完整 SPMD：已通过，继续停在 Q 首差
+
+`spmd-production-v8`（`task_20261027_220512_4590348611`，189.3s）
+FULL/eager八边界一致、guards通过。57参数生产debug和69参数观测根均先通过
+无设备编译/ABI加载；观测根新增的两处返回值使用独立after名称，避免重绑Out描述符。
+
+`spmd-observe-v5`（`task_20261027_221106_7533633309`，193.3s）先通过相同
+输入/metadata/cache和16项生产文件SHA门禁，观测与生产八输出逐bit一致，
+自身FULL/eager和保护区均通过；随后取得以下实际Native模块金值结果：
+
+| 边界 | 逐bit不同元素数 |
+| --- | ---: |
+| HC mixed/post/comb、InputNorm | 0 |
+| QA BF16、QR INT8/scale | 0 |
+| WKV BF16、KV Norm+RoPE | **0** |
+| Q投影/Norm/RoPE组合 | **220781 / 786432，首差** |
+
+Q组合max_abs=0.0625。保存了实际Native的Q投影BF16、Q Norm BF16、最终RoPE，
+以及相同生产Q INT32 accumulator、实际/准备后的权重scale。没有继续解释Indexer、
+attention和输出链，没有整模型token或性能结论。该Native参考来自实际W8A8 decode
+分支的 `npu_quant_matmul→DeviceOperator.apply_dsa_q_rms→inplace_partial_rotary_mul`；
+这是模块eager金值，不是Native FULL全层hook。
+
 ## 复现
 
 227 工作区：`/data/pyptouser/yejia/vllm-nal-tnd-native-align-20261027-codex`，
@@ -343,3 +366,24 @@ Native BF16 QA、Native QR/scale 和实际 gamma；无需重新加载整层权�
 | `spmd-production-v1/v2` 使用普通 CSA 的权重准备根 | 按 nalinaly `service.py` 显式传 SPMD `root_function`；不是数值结果 |
 
 这些失败均保留原始目录，不覆盖或算作精度通过。
+
+### WKV / KV 单因素的复现顺序
+
+为重建KV三臂起始保存件，使用KV生产接入前的 `6fa5c09f` 算子快照，测试脚本用本文当前版本（含导入修复）覆盖；在独立目录执行
+生产FULL快照，再用其 `production.pt` 设置 `SPMD_PRODUCTION_REFERENCE` 运行观测。
+这个快照已修WKV，原KV helper仍会在Norm/RoPE处停止并保存 `observation.pt`。
+生产命令沿用上面的环境和task-submit时限，分别用全新label，不覆盖历史输出。
+
+- WKV：设置 `WKV_PROBE_REFERENCE=<观测v3的observation.pt>`，
+  提交 `run_rms.sh <新label> wkv`。该保存件必须来自 `4c521b37` 的生产→观测，
+  含原nalinaly WKV accumulator；设置 `WKV_PROBE_RANGE=small` 可增加runtime分档126点。
+- KV：设置 `KVNORM_PROBE_REFERENCE=<6fa5c09f观测的observation.pt>`，
+  提交 `run_rms.sh <新label> kvnorm`。第一臂要求重现未修KV的生产输出；
+  不能用已经修正KV后的观测件替换这项因果起点。
+- 两组均先用 `compile_rms.py` 的 `wkv-base/natural/paired/dispatch` 或
+  `kvnorm-base/native` 选项做无设备编译、ABI加载，再占卡。
+
+完整Q扩展观测首次启动v7因提前import DeviceOperator发生Native循环导入，
+任务在设备初始化前退出，未产生数值结果。已改为复用实际impl模块选定的operator，
+并新增 `check_probe_imports.py <receipt.json>`，在公共bootstrap下先无设备检查顶层导入。
+该启动失败保留为控制问题，不记作精度失败。

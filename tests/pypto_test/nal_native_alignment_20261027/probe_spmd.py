@@ -25,7 +25,6 @@ from spmd_probe_entry import spmd_stage_probe
 from vllm.engine.arg_utils import EngineArgs
 from vllm.platforms import current_platform
 
-from vllm_ascend.device.device_op import DeviceOperator
 from vllm_ascend.utils import enable_custom_op
 
 nal_adapter = importlib.import_module("nal_alignment.deepseek_v4_flash_csa.native_adapter")
@@ -355,7 +354,12 @@ try:
         ).unflatten(-1, (impl.n_local_heads, impl.head_dim))
         payload["q_projection_native"] = q.cpu()
         payload["q_accumulator"] = observed["q_proj"].cpu()
-        q = DeviceOperator.apply_dsa_q_rms(q, impl.eps, impl.q_norm_without_weight)
+        payload["q_weight_scale_native"] = impl.wq_b.weight_scale.cpu()
+        payload["q_weight_scale_prepared"] = weights["wq_b_scale"].cpu()
+        # Use the operator already selected by this Native implementation. A top-level
+        # device_op import precedes Native ops initialization and creates an import cycle.
+        native_device_operator = sys.modules[type(impl).__module__].DeviceOperator
+        q = native_device_operator.apply_dsa_q_rms(q, impl.eps, impl.q_norm_without_weight)
         payload["q_normalized_native"] = q.cpu()
         torch.ops._C_ascend.inplace_partial_rotary_mul(
             q.unsqueeze(1), cos, sin, rotary_mode="interleave", partial_slice=[impl.nope_head_dim, impl.head_dim]

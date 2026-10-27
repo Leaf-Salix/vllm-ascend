@@ -35,7 +35,7 @@ from .compressor_pool_stages import (
     indexer_compressor_state_commit_stage,
 )
 from .indexer_compressor_output_stages import indexer_compressor_norm_rope_stage
-from .kv_stages import kv_norm_rope_stage
+from .kv_native_norm_stages import kv_native_norm_rope_stage as kv_norm_rope_stage
 from .phase_sync import publish_phase, wait_producer, wait_row_owners
 from .runtime_abi import (
     CACHE_ROWS,
