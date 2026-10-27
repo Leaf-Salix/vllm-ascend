@@ -58,14 +58,15 @@ try:
     scale = torch.empty((tokens, 1), dtype=torch.float32, device="npu")
     padded = torch.empty(((tokens + 127) // 128 * 128, 1024), dtype=torch.int8, device="npu")
     scale_pad = torch.empty(((tokens + 7) // 8 * 8, 1), dtype=torch.float32, device="npu")
-    for name, source in (("unrounded_qa", qa), ("bf16_qa", qa.bfloat16().float())):
-        qr_arm(source, gamma, qr, scale, padded, scale_pad)
+    for name, source in (("unrounded_qa", qa), ("bf16_qa", qa.bfloat16().float()), ("native_order", qa)):
+        native_order = name == "native_order"
+        qr_arm(source, gamma, qr, scale, padded, scale_pad, NATIVE=native_order)
         torch.npu.synchronize()
         eager = (qr.cpu().clone(), scale.cpu().clone())
         graph, stream = torch.npu.NPUGraph(), torch.npu.Stream()
         stream.wait_stream(torch.npu.current_stream())
         with torch.npu.graph(graph, stream=stream):
-            qr_arm(source, gamma, qr, scale, padded, scale_pad)
+            qr_arm(source, gamma, qr, scale, padded, scale_pad, NATIVE=native_order)
         qr.fill_(-37)
         scale.fill_(float("nan"))
         graph.replay()
@@ -81,6 +82,45 @@ try:
             row["production_qr"] = metric(qr, data["q_r_quantized_actual"])
             assert row["production_qr"]["bit_equal"]
         record["arms"][name] = row
+        if native_order:
+            assert row["qr_native"]["bit_equal"] and row["scale_native"]["bit_equal"], "Native QR first difference"
+    record["tail_cases"] = []
+    for tokens in (17, 1):
+        # Exact same row inputs; only runtime T and valid tail stores change.
+        native_qr, native_scale = torch.ops._C_ascend.npu_rms_norm_dynamic_quant(
+            native_qa[:tokens], gamma, epsilon=1e-6
+        )
+        qr_guard = torch.full((tokens + 16, 1024), -37, dtype=torch.int8, device="npu")
+        scale_guard = torch.full((tokens + 16, 1), -37.0, dtype=torch.float32, device="npu")
+        qr, scale = qr_guard[8 : 8 + tokens], scale_guard[8 : 8 + tokens]
+        padded = torch.empty((128, 1024), dtype=torch.int8, device="npu")
+        scale_pad = torch.empty(((tokens + 7) // 8 * 8, 1), dtype=torch.float32, device="npu")
+        qr_arm(qa, gamma, qr, scale, padded, scale_pad, NATIVE=True)
+        torch.npu.synchronize()
+        eager = (qr.cpu().clone(), scale.cpu().clone())
+        graph, stream = torch.npu.NPUGraph(), torch.npu.Stream()
+        stream.wait_stream(torch.npu.current_stream())
+        with torch.npu.graph(graph, stream=stream):
+            qr_arm(qa, gamma, qr, scale, padded, scale_pad, NATIVE=True)
+        qr.fill_(-37)
+        scale.fill_(float("nan"))
+        graph.replay()
+        torch.npu.synchronize()
+        guards = [buffer.cpu() for buffer in (qr_guard, scale_guard)]
+        row = {
+            "tokens": tokens,
+            "qr_native": metric(qr, native_qr),
+            "scale_native": metric(scale, native_scale.reshape(tokens, 1)),
+            "qr_graph_eager": metric(qr, eager[0]),
+            "scale_graph_eager": metric(scale, eager[1]),
+            "guard_ok": all(
+                bool((buffer[:8] == -37).all() and (buffer[8 + tokens :] == -37).all()) for buffer in guards
+            ),
+        }
+        record["tail_cases"].append(row)
+        assert row["guard_ok"] and all(
+            row[name]["bit_equal"] for name in ("qr_native", "scale_native", "qr_graph_eager", "scale_graph_eager")
+        ), "QR tail first difference"
     record["complete"] = True
 except BaseException:
     record["error"] = traceback.format_exc()

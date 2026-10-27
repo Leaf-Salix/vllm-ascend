@@ -36,7 +36,7 @@ out = Path(sys.argv[1])
 record = {
     "complete": False,
     "pass": False,
-    "scope": "complete CSA SPMD execution; Native numerical gates only through QR; not whole-model tokens",
+    "scope": "complete CSA SPMD execution; Native module eager gates through original KV; not whole-model tokens",
     "history": 8192,
     "lengths": [6, 6, 6, 6],
     "precision": {},
@@ -137,6 +137,9 @@ try:
             "hc_input_norm_stages.py",
             "hc_input_rms_stages.py",
             "hc_native_projection_stages.py",
+            "q_native_stages.py",
+            "qkv_stages.py",
+            "kv_stages.py",
         )
     }
     with native_session(config, 0), torch.inference_mode():
@@ -180,12 +183,18 @@ try:
             "qa": (32, 1024),
             "qr": (24, 1024),
             "qr_scale": (24, 1),
+            "kv_fp32": (32, 512),
+            "kv": (24, 512),
         }
         observed = {
             name: torch.full(
                 shape,
                 -37,
-                dtype=torch.int8 if name == "qr" else torch.bfloat16 if name in ("mixed", "normed") else torch.float32,
+                dtype=torch.int8
+                if name == "qr"
+                else torch.bfloat16
+                if name in ("mixed", "normed", "kv")
+                else torch.float32,
                 device="npu",
             )
             for name, shape in shapes.items()
@@ -304,6 +313,22 @@ try:
         payload["qa_accumulator"] = observed["qa"].cpu()
         check("q_r_quantized", observed["qr"], qr)
         check("q_r_scale", observed["qr_scale"], scale.reshape(24, 1))
+        kv_quant, kv_scale = impl.cv_wkv.quantize(normed)
+        kv = impl.cv_wkv.matmul(kv_quant, kv_scale)
+        if isinstance(kv, tuple):
+            kv = kv[0]
+        payload["kv_gamma"] = impl.kv_norm.weight.cpu()
+        payload["kv_accumulator"] = observed["kv_fp32"].cpu()
+        check("wkv_projection_bf16", observed["kv_fp32"][:24].bfloat16(), kv)
+        kv = impl.kv_norm(kv)
+        if isinstance(kv, tuple):
+            kv = kv[0]
+        kv = kv.reshape(24, 1, 512)
+        cos, sin = (f["readonly"]["rope." + name][0] for name in ("cos", "sin"))
+        torch.ops._C_ascend.inplace_partial_rotary_mul(
+            kv.unsqueeze(1), cos, sin, rotary_mode="interleave", partial_slice=[impl.nope_head_dim, impl.head_dim]
+        )
+        check("original_kv_norm_rope", observed["kv"], kv.reshape(24, 512))
         record["pass"] = True
         record["complete"] = True
 except SystemExit as error:

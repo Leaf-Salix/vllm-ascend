@@ -58,3 +58,20 @@ def test_original_cube_weight_cache_policy_indices_are_preserved():
         50: "wo_a",
         53: "wo_b",
     }
+
+
+def test_observation_calls_the_unmodified_production_core():
+    production = ast.parse((SOURCE / "entry.py").read_text())
+    root = next(
+        node for node in production.body if isinstance(node, ast.FunctionDef) and node.name == "decode_csa_spmd_debug"
+    )
+    observed = ast.parse((Path(__file__).parent / "spmd_probe_entry.py").read_text())
+
+    def core_call(tree):
+        return next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_csa_core_group"
+        )
+
+    assert ast.dump(core_call(root)) == ast.dump(core_call(observed))

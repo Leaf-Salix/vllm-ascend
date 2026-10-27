@@ -88,7 +88,7 @@ from .metadata_stages import compact_offsets_and_count_stage
 from .output_projection_a_stages import o_projection_group_quant_stage, o_projection_groups_quant_stage
 from .output_projection_b_stages import o_dequant_hc_post_stage
 from .phase_sync import SIGNAL_SLOT_WORDS, begin_invocation, publish_phase, wait_row_owners
-from .qkv_stages import q_r_stage
+from .q_native_stages import q_r_native_stage
 from .query_projection_stages import q_dequant_rope_stage, q_rope_prepare_stage
 from .runtime_abi import (
     ATTN_PLAN_ROWS,
@@ -576,7 +576,7 @@ def vector_schedule(
     else:
         qa_tasks = 8 * pl.min(3, pl.max(1, tokens // 64))
         signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
-    qr, qr_scale, qr_matmul, qr_scale_pad = q_r_stage(
+    qr, qr_scale, qr_matmul, qr_scale_pad = q_r_native_stage(
         qa,
         gamma_cq,
         qr,

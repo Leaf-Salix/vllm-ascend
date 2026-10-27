@@ -156,8 +156,64 @@ v1 的 QA 参考直接调用 `wq_a`，compact cos/sin 未纳入跨任务身份�
 
 两组 FULL/eager 均逐 bit 一致，未舍入组还精确复现完整生产图的 QR 输出。
 因此 QA 缺少 BF16 边界解释了本组全部 QR INT8 差异，但剩余 scale 仍未对齐。
-这项诊断仅约 14.3 秒。此检查点尚未把 QR 修正合入生产 helper；下一步针对
+这项诊断仅约 14.3 秒。`c69ca959` 检查点尚未把 QR 修正合入生产 helper；下一步针对
 Native 的归约树、normalized amax 和 scalar div 顺序修正 scale，不跳过它。
+
+### QR 的 Native 数值顺序修正
+
+新增 `q_native_stages.py`，保留 nalinaly 的 M8 worker、四个输出及发布/等待顺序，
+只恢复以下数值边界：QA 先落 BF16；1024→512→256→128→64 求和树；
+sqrt 舍入与 scalar reciprocal；先算 `(QA*inverse)*gamma` 再取 amax；
+quant/dequant 两次 scalar div。INT32 rint→FP16→INT8 转换链没有改变。
+helper 全部 inline，不创建子任务，不调用 Native。
+
+`qr-native-v1` 在同一组 QA/gamma 下完成三组对拍，约 26.6 秒：
+
+| QR 实现 | INT8 差异 | scale 差异 | FULL/eager |
+| --- | ---: | ---: | --- |
+| nalinaly 原 helper、原 QA | 1219 | 24 | 一致 |
+| 原 helper、只恢复 QA BF16 | 0 | 14 | 一致 |
+| 新 Native 顺序 helper | **0** | **0** | 一致 |
+
+对应任务 `task_20261027_194850_14909428416`。其中只有 QA BF16 已被单因素证明；
+剩余四类顺序联合消除了 14 行 scale 差异，不能声称它们每一项都已被独立证明必要。
+首两次无设备编译暴露 Tensor/Tile 混用和缺少 Tile reduce scratch，已修复为显式
+Vec load/Tile full/tmp_tile；`cpu-qr-native-v3` 编译、ABI 加载通过，未改 SDK。
+
+完整生产 debug 根 57 参数和扩展观测根 67 参数均通过无设备编译。
+`spmd-production-v5`（`task_20261027_203016_381687129968`）已实际运行：
+FULL/eager 八边界一致、cache 保护通过，耗时约 188.3 秒。生产 Vector 已接入
+新 helper；后续 Native 参考覆盖范围由观测结果单独确认。
+上述秒数均是含首次编译的任务墙钟，不是算子延迟，不能据此比较性能。
+新观测根额外暴露 WKV accumulator 和 Norm/RoPE 后 KV，先做生产等价门禁，
+再按 Native 实际 `cv_wkv.quantize→matmul→kv_norm→inplace_partial_rotary_mul`
+检查首差。最后一项是 Norm+RoPE 组合，不能从失败直接归因于 RoPE。
+
+`spmd-observe-v3`（`task_20261027_203549_720244997`）约 188.7 秒后正常退出。
+生产等价门禁、观测 eager/FULL、保护区均通过；与 Native 模块 eager 的比较为：
+
+| 同输入边界 | 逐 bit 不同元素数 | 最大绝对差 |
+| --- | ---: | ---: |
+| HC mixed / post gate / comb | 0 / 0 / 0 | 0 |
+| InputNorm | 0 | 0 |
+| QA 落 BF16 | 0 | 0 |
+| QR INT8 | 0 | 0 |
+| QR scale FP32 | 0 | 0 |
+| WKV 落 BF16 | **4 / 12288，首差** | **7.6294e-6** |
+| KV Norm+RoPE、Indexer、attention、O-proj、HC-post | 未作 Native 精度验收 | — |
+
+WKV 首差坐标为 `[3,188]`、`[3,444]`、`[14,222]`、`[22,302]`；
+发现后不再比较后续模块，未提交整模型或 128K 任务。
+旧精度版存在按 Native M/N 分档的 K256 累加次序表；当前 nalinaly WKV helper
+采用统一的 K512 次序和 N128 分块。它是下一项需要用同一 Normed 输入、实际权重
+做单因素验证的方向，当前没有把这四处差异仅凭源码推断归因或套用旧表。
+
+本地合同测试现为 7 项，额外检查观测根调用的 `_csa_core_group` 与生产根 AST 相同。
+
+`qr-tail-v1`（`task_20261027_204311_42718926601`）约 12.3 秒正常结束：
+新 QR helper 在 T17、T1 下的 INT8/scale 均与 Native 逐 bit 一致，
+FULL/eager 一致，输出前后保护区未改变。没有把 T 补为 6 的倍数。
+这只是 QR 阶段的短尾行资格，不能替代完整 CSA 的混合请求验收。
 
 ## 复现
 
@@ -197,14 +253,18 @@ task-submit --device auto --max-time 780 \
 完整 SPMD 的 `probe_spmd.py` 分成两个任务：先生产 FULL 图快照，
 再设置 `SPMD_PRODUCTION_REFERENCE=<前项输出>/production.pt` 跑观测图。
 第二项逐字节检查已记录的 hidden、positions、只读 metadata（含 compact cos/sin/slots）、
-初始 cache，以及七个 HC 生产文件的 SHA 一致，
+初始 cache，以及当前十个生产文件的 SHA 一致（七个 HC 文件和 q_native/qkv/kv 文件），
 再比较观测根与生产根的八个外部输出；通过后才解释 HC/Norm/QA/QR 的 Native 首差。
 这样不把两个完整根的首次编译放到同一个占卡任务。
 权重/SDK 通过固定路径、提交和加载参数记录，当前不是全部文件的逐字节身份门禁。
 
-QR 单因素复现时，设置 `QR_PROBE_REFERENCE=<观测输出>/observation.pt`，
+QR 单因素复现时，必须设置
+`QR_PROBE_REFERENCE=<工作区>/results/spmd-observe-v2/observation.pt`，
 提交 `run_rms.sh <新标签> qr`。该文件由观测任务在 QR 首差前保存，包含 QA accumulator、
 Native BF16 QA、Native QR/scale 和实际 gamma；无需重新加载整层权重。
+若保存件不存在，先用 `c69ca959` 检查点的生产→观测两任务重建。当前
+`spmd-observe-v3` 的 QR 已修复，不能用于未修 helper 的 production_qr 门禁。
+历史 v4/v2 检查点只比较七个 HC 文件 SHA；当前 v5/v3 对应上述十个文件。
 
 ## 测试侧问题记录
 

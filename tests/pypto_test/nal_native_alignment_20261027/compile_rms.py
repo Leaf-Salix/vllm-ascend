@@ -21,10 +21,10 @@ out = Path(sys.argv[1])
 out.mkdir(exist_ok=False)
 assert not torch_npu.npu.is_initialized()
 kind = sys.argv[2] if len(sys.argv) > 2 else "rms"
-if kind == "qr":
+if kind in ("qr", "qr-native"):
     from qr_kernels import qr_arm
 
-    program = qr_arm.specialize()
+    program = qr_arm.specialize(NATIVE=kind == "qr-native")
 elif kind == "pack":
     program = pack_pair.specialize()
 elif kind == "rms":
