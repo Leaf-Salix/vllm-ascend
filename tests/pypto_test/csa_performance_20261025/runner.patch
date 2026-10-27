@@ -1,0 +1,65 @@
+--- 20261022/run_pto.py
++++ 20261025/run_pto.py
+@@ -12,0 +13 @@
++import inspect
+@@ -14,0 +16 @@
++import platform
+@@ -137,0 +140 @@
++    parser.add_argument("--measure-sides", nargs="+", choices=("spmd", "mpmd"), default=["mpmd"])
+@@ -223 +226,3 @@
+-            reference_package = "deepseek_v4_flash_csa_spmd_tnd" if args.family == "tnd" else "deepseek_v4_flash_csa_spmd"
++            reference_package = (
++                "deepseek_v4_flash_csa_spmd_tnd" if args.family == "tnd" else "deepseek_v4_flash_csa_spmd"
++            )
+@@ -225 +230,5 @@
+-            candidate_name = mount_package(args.candidate, prefix + "_mpmd_tnd_candidate") if args.family == "tnd" else prefix + "deepseek_v4_flash_csa"
++            candidate_name = (
++                mount_package(args.candidate, prefix + "_mpmd_tnd_candidate")
++                if args.family == "tnd"
++                else prefix + "deepseek_v4_flash_csa"
++            )
+@@ -343,0 +353,13 @@
++            report["shared_toolchain"] = json.loads(Path(os.environ["CSA_SHARED_TOOLCHAIN_MANIFEST"]).read_text())
++            report["sampling"] = dict(warmup=3, l1_windows=10, replays_per_window=1, measured_sides=args.measure_sides)
++            report["environment"] = dict(
++                python=platform.python_version(),
++                torch=torch.__version__,
++                torch_npu=torch_npu.__version__,
++                cann=os.environ.get("ASCEND_HOME_PATH"),
++                device=torch.npu.get_device_name(device_id),
++                deterministic_level=0,
++                atomic_add=0,
++                nz_mode=2,
++                runtime="tensormap_and_ringbuffer",
++            )
+@@ -364,0 +387 @@
++
+@@ -367,3 +390,4 @@
+-                    entries[side] = importlib.import_module(package + ".binding").PreparedDynamicCSA(
+-                        native, max_query_tokens=max_query_tokens,
+-                        max_seq_len=max(case["seq_lens"]), allocator=allocate,
++                    prepared = importlib.import_module(package + ".binding").PreparedDynamicCSA
++                    extra = {"allocator": allocate} if "allocator" in inspect.signature(prepared).parameters else {}
++                    entries[side] = prepared(
++                        native, max_query_tokens=max_query_tokens, max_seq_len=max(case["seq_lens"]), **extra
+@@ -388,0 +413,4 @@
++                    ring_heap=[16 * 1024**2, 256 * 1024**2, 16 * 1024**2, 16 * 1024**2]
++                    if args.family == "tnd"
++                    else None,
++                    ring_task_window=[4096] * 4 if args.family == "tnd" else None,
+@@ -525,0 +554 @@
++                measured_graphs = {side: graphs[side] for side in args.measure_sides}
+@@ -527 +556 @@
+-                    order = list(graphs) if sample % 2 == 0 else list(reversed(graphs))
++                    order = list(measured_graphs) if sample % 2 == 0 else list(reversed(measured_graphs))
+@@ -535 +564 @@
+-                    order = list(graphs) if sample % 2 == 0 else list(reversed(graphs))
++                    order = list(measured_graphs) if sample % 2 == 0 else list(reversed(measured_graphs))
+@@ -559,0 +589 @@
++
+@@ -569 +599 @@
+-            for side in entries:
++            for side in args.measure_sides:
+@@ -578 +608 @@
+-            if "mpmd" in entries:
++            if "mpmd" in report["statistics_us"] and "spmd" in report["statistics_us"]:

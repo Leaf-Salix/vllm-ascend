@@ -1,0 +1,61 @@
+{
+  "source_commit": "10511222c5da57d563687ae59a15cbe3ebd072da",
+  "shared_toolchain": {
+    "release": "csa-shared-20261024-group-dims",
+    "status": "validated",
+    "sessions": [
+      "CSA-SPMD",
+      "CSA-SPMD-TND",
+      "CSA-MPMD-TND"
+    ],
+    "pypto": {
+      "source": ".worktrees/pypto-csa-shared-group-dims-20261024",
+      "commit": "d44925c17d9ff7d7fa8e5067e41c4b4f80bf3063"
+    },
+    "ptoas": {
+      "source": ".worktrees/ptoas-csa-mpmd-upstream-20261021",
+      "build": ".worktrees/ptoas-csa-mpmd-upstream-20261021/build",
+      "commit": "914863ed3d0eb3e92a4433a4a706a86cabf4c91f"
+    },
+    "simpler": {
+      "source": ".worktrees/simpler-csa-core-args-256-20261016",
+      "commit": "57e499238fd4ee3548947ad860be456aaeeb16b5"
+    },
+    "evidence": "../csa_tnd_model_validation_20261023/internal_toolchain_upgrade.json",
+    "published_for_validation_at": "2026-10-24T02:59:40+08:00",
+    "validated_at": "2026-10-24T03:45:54+08:00"
+  },
+  "no_algorithm_changes": true,
+  "tnd": {
+    "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_performance_20261025/sources/tnd/pypto",
+    "ring_heap_mb": [
+      16,
+      256,
+      16,
+      16
+    ],
+    "task_window": 4096,
+    "measure": [
+      "TND-MPMD-L1",
+      "TND-MPMD-AICPU"
+    ],
+    "reference": "f72a1f752;仅正确性，不重复采SPMD性能"
+  },
+  "bsh": {
+    "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_performance_20261025/sources/bsh/pypto",
+    "parent": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_performance_20261022/bsh_short_sources/pypto",
+    "ring": "沿用原默认",
+    "measure": [
+      "BSH-MPMD-L1",
+      "BSH-SPMD"
+    ],
+    "compatibility": "已验收150tick及短历史临时Tile声明；使用csa_compile_constants以保留B1分档"
+  },
+  "native": "复用已有CANN9.2/static/SuperKernel/多流/NZ2合格原始Profiler记录",
+  "tnd_spmd": "复用已采用f72a/init_coeff_single_spmd_v2八档完整L1及同配置合格控制组",
+  "exclusions": [
+    "旧PTO 26e94e056 SDK记录不改标d44925c1",
+    "纯PyTorch复现入口尚无与Native fixture逐项等价证据，不用于本表",
+    "诊断插桩、L2/GM扰动、失败或未采用候选不用于性能表"
+  ]
+}
