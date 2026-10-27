@@ -1,0 +1,49 @@
+{
+  "pass": true,
+  "scope": "CPU generated qualification only, not measured performance or precision acceptance",
+  "manifest_sha256": "7ae2a1289529031885033a48751fe4f7b4a5d2106e7a6efcd977b8766343d018",
+  "root_tensors": 64,
+  "NPU_initialized": false,
+  "common_leaf_binary_SHA_equal_count": 61,
+  "A_normed": "INOUT producer in original private scope",
+  "B_normed": "IN only, no writeback",
+  "QA": "reads A normed reshape, no added explicit B dependency",
+  "KV": "reads B projected_kv; dependency retained",
+  "HC_private_allocations": "same scope depth; wide/packed_flat/mixed_tail not elevated",
+  "all_alloc_calls": 22,
+  "SYNCALL_per_role": {
+    "A": 7,
+    "B": 2
+  },
+  "max_resource_end_bytes": {
+    "HC_ready": {
+      "L1": 24576,
+      "L0A": 18432,
+      "L0B": 10240,
+      "L0C": 8192,
+      "UB": 139520
+    },
+    "projection_tail": {
+      "L1": 49152,
+      "L0A": 32768,
+      "L0B": 16384,
+      "L0C": 8192,
+      "UB": 38144
+    }
+  },
+  "conservative_per_depth_all_branch_alloc_MiB": {
+    "T192": [
+      32.2,
+      81.21,
+      193.23
+    ],
+    "T256": [
+      42.93,
+      92.77,
+      195.6
+    ]
+  },
+  "capacity_caveat": "Conservative static all-branch per-depth bound, not measured peak and not qualification for 128K small-ring configuration",
+  "performance_caveat": "B still MIX24/full occupancy; independent DAG need not imply hardware overlap",
+  "independent_generated_review": true
+}
