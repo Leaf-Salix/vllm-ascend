@@ -1,0 +1,8 @@
+# 源码来源与许可
+
+- 四token Hadamard主体直接取自nalinaly/vllm-ascend提交1685da6914ae6196537d7f1a66e84e09a9c48ae5的`vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd/projection_overlap_stages.py::_query_hadamard_four_tokens`，源文件SHA256 e14cbf389a8034f20da7b97e4d70df1b14cbfc229d1b5e5a39b2d679b7dbbea8。保留Apache-2.0标识，仅变量重命名、原任务封装和短T回退；后续量化为我方原已验实现。
+- HC owner链借鉴nalinaly同提交的`cube_schedule.py`、`vector_schedule.py`及`phase_sync.py`按实际owner衔接思想；HC数学保持我方Native顺序，不声称直接复制了其HC计算。
+- 我方基准源码来自当前Leaf-Salix分支的已验源及前一报告公开快照，冻结helper的SOURCE/binding/manifest记录完整SHA与源路径。正式运行源码没有因此改动。
+- observer的只读布局核对参考固定Simpler57e499238fd4ee3548947ad860be456aaeeb16b5官方源；仅调用已安装SDK的host序列化公开接口，没有修改SDK。
+
+冻结归档保留原版权/许可标识，整个vLLM-Ascend项目许可证仍适用。

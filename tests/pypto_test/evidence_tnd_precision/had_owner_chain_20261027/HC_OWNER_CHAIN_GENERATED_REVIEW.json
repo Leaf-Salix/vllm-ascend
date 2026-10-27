@@ -1,0 +1,31 @@
+{
+  "pass": true,
+  "scope": "CPU qualification only, no NPU performance/precision conclusion",
+  "helper_manifest_sha256": "b5afcc38acc5768217d4b665f3cd379763a8f0f7fb55c5e636fdaf6bfea84176",
+  "CPU64_load_NPUfalse_both": true,
+  "leaf_count": 63,
+  "only_changed_leaves": [
+    "packed_prefix_indexer_cube",
+    "prepacked_prefix_indexer_vector"
+  ],
+  "unchanged_binary_SHA_count": 61,
+  "global_sync_per_role": {
+    "baseline": {
+      "Cube": 9,
+      "Vector": 9
+    },
+    "candidate": {
+      "Cube": 8,
+      "Vector": 8
+    }
+  },
+  "orchestration_strict_alpha_equal": true,
+  "M8_adds": "22 FP32 partials, same ascending split sequence; elementwise independent rows",
+  "owner_mapping": "linear_reduce/rms/pre_post all floor(row/8)%48; padded row writes confined to P16",
+  "local_store_load": "generated TSTORE4218 -> MTE3/MTE2 EVENT7 wait4221 -> PIPE_ALL/DCCI/DSB -> pre_post TLOAD4277; original H3/H5 kept",
+  "native_precision_proven": false,
+  "performance_proven": false,
+  "independent_review": "PASS: same owner and actual local store-load drain; both roles sync9->8; UB unchanged",
+  "UB_static_max_end_bytes_both": 141056,
+  "formal_source_and_SDK_changed": false
+}
