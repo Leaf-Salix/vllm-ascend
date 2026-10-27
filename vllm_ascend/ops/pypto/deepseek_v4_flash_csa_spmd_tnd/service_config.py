@@ -6,6 +6,7 @@ query长度上界是当前DSpark服务配置，不能用它反算请求归属。
 在服务层回退Native，不借较大的max_model_len伪装成已支持。
 """
 
+MAX_NATIVE_HC_TOKENS = 256
 MAX_QUERY_TOKENS = 6
 MIN_SEQUENCE_LENGTH = 8192
 MAX_SEQUENCE_LENGTH = 1048576
@@ -29,7 +30,7 @@ def supported_descriptor(*, tokens, requests, actual_tokens, max_query_tokens, m
         return False
     return (
         1 <= requests <= batch_capacity
-        and 1 <= actual_tokens <= tokens
+        and 1 <= actual_tokens <= tokens <= MAX_NATIVE_HC_TOKENS
         and 1 <= max_query_tokens <= MAX_QUERY_TOKENS
         and actual_tokens <= requests * max_query_tokens
         and MIN_SEQUENCE_LENGTH <= max_seq_len <= MAX_SEQUENCE_LENGTH

@@ -24,6 +24,7 @@ def main():
     parser.add_argument("--simpler-root", type=Path)
     parser.add_argument("--ptoas-root", type=Path)
     parser.add_argument("--vllm-root", type=Path)
+    parser.add_argument("--native-plugin-root", type=Path, help="数值对拍时冻结Native插件源码")
     parser.add_argument("--workspace-root", type=Path)
     parser.add_argument("script", type=Path)
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
@@ -63,7 +64,7 @@ def main():
         "simpler": simpler / "python",
         "simpler_setup": simpler,
         "_task_interface": simpler_site,
-        "vllm_ascend": repo,
+        "vllm_ascend": args.native_plugin_root.resolve() if args.native_plugin_root else repo,
     }
     if args.vllm_root:
         roots["vllm"] = args.vllm_root.resolve()
@@ -106,7 +107,7 @@ def main():
     )
     os.environ["PATH"] = str(ptoas / "bin") + os.pathsep + os.environ.get("PATH", "")
     # vLLM 的模型注册检查会另起进程，继续使用相同的模型及插件源码。
-    child_sources = [str(repo)]
+    child_sources = [str(args.native_plugin_root.resolve() if args.native_plugin_root else repo)]
     if args.shared_toolchain:
         os.environ.update(
             CSA_SHARED_TOOLCHAIN_RELEASE=selected["release"],

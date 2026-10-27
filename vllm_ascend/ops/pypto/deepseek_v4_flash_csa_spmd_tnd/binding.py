@@ -12,6 +12,7 @@ import torch
 from vllm_ascend import envs
 
 from .policy import CSASPMDPolicy, select_policy
+from .service_config import MAX_NATIVE_HC_TOKENS
 
 REQUIRED_CUBE_CORES = 24
 REQUIRED_VECTOR_CORES = 2 * REQUIRED_CUBE_CORES
@@ -43,6 +44,8 @@ class PreparedDynamicCSA:
         hidden = native["x_hc"]
         self.tokens = t = hidden.shape[0]
         self.requests = b = native["kv_seq_lens"].numel()
+        if t > MAX_NATIVE_HC_TOKENS:
+            raise NotImplementedError("Native-order HC当前仅支持T<=256")
         if hidden.shape != (t, 4, 4096) or hidden.dtype != torch.bfloat16 or not hidden.is_contiguous():
             raise ValueError("要求Native BF16连续hidden[T,4,4096]")
         if native["cmp_block_table"].ndim != 2:

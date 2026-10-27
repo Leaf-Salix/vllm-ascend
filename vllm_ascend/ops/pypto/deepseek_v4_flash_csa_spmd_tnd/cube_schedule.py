@@ -37,7 +37,8 @@ import pypto.language as pl
 from .attention_dependencies import wait_attention_plan_rows
 from .attention_stream_stages import attention_qk_pv_cube_stage
 from .compressor_projection_stages import compressor_project_stage, indexer_compressor_project_stage
-from .hc_stages import hc_project_range
+from .hc_input_rms_stages import SQUARE_ROWS, hc_input_square_range
+from .hc_native_projection_stages import hc_linear
 from .indexer_compressor_output_stages import indexer_compressor_hadamard_stage
 from .indexer_query_stages import (
     indexer_query_hadamard_stage,
@@ -186,6 +187,9 @@ def cube_schedule(
     wo_b: pl.Tensor[[8192, 4096], pl.INT8, QUANT_WEIGHT_LAYOUT],
     o_partials: pl.InOut[pl.Tensor[[O_MM_ROWS, 32768], pl.INT32]],
     signal: pl.InOut[pl.Tensor[[WORDS], pl.INT32]],
+    hc_squares: pl.InOut[pl.Tensor[[SQUARE_ROWS, 16], pl.FP32]],
+    hc_packed_input: pl.Tensor[[P16, 32768], pl.BF16],
+    hc_packed_weight: pl.Tensor[[32768, 32], pl.BF16],
     QUERY_GROUP: pl.constexpr,
     QK_PANEL: pl.constexpr,
     SCORE_TILE: pl.constexpr,
@@ -216,6 +220,7 @@ def cube_schedule(
     # TLOAD，不能仅凭此声明认为绕L2已生效；接入缺口见PyPTO#3116。
     # 该声明不改变发布/等待协议，不使用硬编码地址别名绕过runtime契约。
     pl.func_attr({"cache_policy": [(1, 1), (8, 1), (10, 1), (50, 1), (53, 1)]})
+    hc_squares_gm = hc_squares
     partials_gm = partials
     qa_gm = qa
     q_proj_gm = q_proj
@@ -244,32 +249,11 @@ def cube_schedule(
     pl.system.cacheinvalid()
     signal, generation = begin_invocation(signal, worker)
     tokens = pl.tensor.dim(x_fp32, 0)
-    if HC_ROW_DEPENDENCIES:
-        # HC投影task=(M16行块*4+K4096分片)，task=worker+wave*24。
-        # 一个task只消费对应两块M8输入。wave每次把行块推进6，故M8 owner
-        # 推进12；48个AIV的owner周期为4波。超过四波也只等同一批producer
-        # 的整阶段完成信号，不能对同槽逐tile重复发布。尾部不足8/16行按T裁剪。
-        hc_tasks = ((tokens + 15) // 16) * 4
-        hc_waves = (hc_tasks + GROUPS - 1 - worker) // GROUPS
-        for hc_wave in pl.range(pl.min(hc_waves, VECTORS // (2 * (GROUPS // 4)))):
-            hc_first = ((worker + hc_wave * GROUPS) // 4) * 16
-            signal = wait_row_owners(
-                signal, PHASE_INPUT, CORES, generation, hc_first, pl.min(16, tokens - hc_first), 8, VECTORS, GROUPS, 1
-            )
-    else:
-        signal = wait_row_owners(
-            signal,
-            PHASE_INPUT,
-            CORES,
-            generation,
-            0,
-            tokens,
-            8,
-            VECTORS,
-            GROUPS,
-            1,
-        )
-    partials = hc_project_range(x_fp32, hc_fn, partials, worker, GROUPS)
+    # 48个INPUT owner覆盖widen、直接BF16输入打包及HC权重打包。
+    # 22段分工不同于旧4段投影，不能继续套用4份的row-owner公式。
+    signal = wait_row_owners(signal, PHASE_INPUT, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
+    partials = hc_linear(x_fp32, hc_packed_input, hc_packed_weight, partials, worker)
+    hc_squares = hc_input_square_range(x_fp32, hc_squares, worker)
     signal = publish_phase(signal, PHASE_PARTIAL, worker, CORES, generation)
     signal = wait_row_owners(
         signal,
@@ -591,4 +575,5 @@ def cube_schedule(
         o_r_gm,
         o_partials_gm,
         signal_gm,
+        hc_squares_gm,
     )

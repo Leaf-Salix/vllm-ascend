@@ -74,6 +74,7 @@ import pypto.language as pl
 
 from .attention_plan_stages import PHYSICAL_PLAN_COLUMNS
 from .cube_schedule import cube_schedule
+from .hc_input_rms_stages import SQUARE_ROWS
 from .phase_sync import SIGNAL_SLOT_WORDS
 from .qkv_stages import BF16_WEIGHT_LAYOUT
 from .query_projection_stages import QUANT_WEIGHT_LAYOUT
@@ -278,6 +279,10 @@ def _csa_core_group(
     output: pl.InOut[pl.Tensor[[T, 16384], pl.BF16]],
     signal: pl.InOut[pl.Tensor[[WORDS], pl.INT32]],
     signal_init_matrix: pl.InOut[pl.Tensor[[VECTORS, PHASE_COUNT * CORES * SIGNAL_SLOT_WORDS // VECTORS], pl.INT32]],
+    hc_squares: pl.InOut[pl.Tensor[[SQUARE_ROWS, 16], pl.FP32]],
+    hc_packed_input: pl.InOut[pl.Tensor[[P16, 32768], pl.BF16]],
+    hc_packed_weight: pl.InOut[pl.Tensor[[32768, 32], pl.BF16]],
+    hc_norm_rstd: pl.InOut[pl.Tensor[[T, 8], pl.FP32]],
     QUERY_GROUP: pl.constexpr,
     QK_PANEL: pl.constexpr,
     SCORE_TILE: pl.constexpr,
@@ -332,6 +337,7 @@ def _csa_core_group(
             o_r,
             o_partials,
             signal,
+            hc_squares,
         ) = cube_schedule(
             hc_fn,
             wq_a,
@@ -389,6 +395,9 @@ def _csa_core_group(
             wo_b,
             o_partials,
             signal,
+            hc_squares,
+            hc_packed_input,
+            hc_packed_weight,
             QUERY_GROUP,
             QK_PANEL,
             SCORE_TILE,
@@ -473,6 +482,9 @@ def _csa_core_group(
             o_scales,
             output,
             signal,
+            hc_packed_input,
+            hc_packed_weight,
+            hc_norm_rstd,
         ) = vector_schedule(
             x,
             hc_scale,
@@ -590,6 +602,11 @@ def _csa_core_group(
             output,
             signal,
             signal_init_matrix,
+            hc_fn,
+            hc_squares,
+            hc_packed_input,
+            hc_packed_weight,
+            hc_norm_rstd,
             QUERY_GROUP,
             QK_PANEL,
             SCORE_TILE,
@@ -695,6 +712,10 @@ def _csa_core_group(
         o_partials,
         output,
         signal,
+        hc_squares,
+        hc_packed_input,
+        hc_packed_weight,
+        hc_norm_rstd,
     )
 
 
@@ -801,7 +822,11 @@ def decode_csa_spmd_debug(
     x_fp32 = pl.create_tensor([t, 16384], dtype=pl.FP32)
     inv = pl.create_tensor([p16, 1], dtype=pl.FP32)
     widen_tail = pl.create_tensor([8, 16384], dtype=pl.FP32)
-    partials = pl.create_tensor([p16 * 4, 32], dtype=pl.FP32)
+    partials = pl.create_tensor([p16 * 22, 32], dtype=pl.FP32)
+    hc_squares = pl.create_tensor([p16 * 22, 16], dtype=pl.FP32)
+    hc_packed_input = pl.create_tensor([p16, 32768], dtype=pl.BF16)
+    hc_packed_weight = pl.create_tensor([32768, 32], dtype=pl.BF16)
+    hc_norm_rstd = pl.create_tensor([t, 8], dtype=pl.FP32)
     raw = pl.create_tensor([p16, 32], dtype=pl.FP32)
     pre = pl.create_tensor([p16, 8], dtype=pl.FP32)
     post = pl.create_tensor([t, 4], dtype=pl.FP32)
@@ -965,6 +990,10 @@ def decode_csa_spmd_debug(
             o_partials,
             output,
             signal,
+            hc_squares,
+            hc_packed_input,
+            hc_packed_weight,
+            hc_norm_rstd,
         ) = _csa_core_group(
             x,
             hc_fn,
@@ -1099,6 +1128,10 @@ def decode_csa_spmd_debug(
             output,
             signal,
             signal_init_matrix,
+            hc_squares,
+            hc_packed_input,
+            hc_packed_weight,
+            hc_norm_rstd,
             QUERY_GROUP,
             QK_PANEL,
             SCORE_TILE,
@@ -1238,7 +1271,11 @@ def decode_csa_spmd(
     x_fp32 = pl.create_tensor([t, 16384], dtype=pl.FP32)
     inv = pl.create_tensor([p16, 1], dtype=pl.FP32)
     widen_tail = pl.create_tensor([8, 16384], dtype=pl.FP32)
-    partials = pl.create_tensor([p16 * 4, 32], dtype=pl.FP32)
+    partials = pl.create_tensor([p16 * 22, 32], dtype=pl.FP32)
+    hc_squares = pl.create_tensor([p16 * 22, 16], dtype=pl.FP32)
+    hc_packed_input = pl.create_tensor([p16, 32768], dtype=pl.BF16)
+    hc_packed_weight = pl.create_tensor([32768, 32], dtype=pl.BF16)
+    hc_norm_rstd = pl.create_tensor([t, 8], dtype=pl.FP32)
     raw = pl.create_tensor([p16, 32], dtype=pl.FP32)
     pre = pl.create_tensor([p16, 8], dtype=pl.FP32)
     post = pl.create_tensor([t, 4], dtype=pl.FP32)
@@ -1402,6 +1439,10 @@ def decode_csa_spmd(
             o_partials,
             output,
             signal,
+            hc_squares,
+            hc_packed_input,
+            hc_packed_weight,
+            hc_norm_rstd,
         ) = _csa_core_group(
             x,
             hc_fn,
@@ -1536,6 +1577,10 @@ def decode_csa_spmd(
             output,
             signal,
             signal_init_matrix,
+            hc_squares,
+            hc_packed_input,
+            hc_packed_weight,
+            hc_norm_rstd,
             QUERY_GROUP,
             QK_PANEL,
             SCORE_TILE,

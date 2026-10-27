@@ -5,7 +5,12 @@
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
-"""完整动态 CSA 的 HC 核内阶段；保留原算术，不创建独立任务。
+"""动态 CSA 的 HC 门控与混合；保留原投影 helper 供单因素对照。
+
+本分支生产入口用 hc_native_projection_stages/hc_input_rms_stages 的22份
+Native顺序投影和RMS，再调用本文件的门控、左折叠comb/mixed。InputNorm
+由 hc_input_norm_stages 执行。下述四份投影、workspace_contract及消费者
+就地归约描述的是保留的原始对照路径，不是当前生产入口的工作区合同。
 
 输入输出与动态布局
     输入为 Native BF16 残差 x[T,4,4096] 的二维连续视图 [T,16384]，以及
@@ -251,15 +256,30 @@ def hc_projection_piece(
     """
     if CONSUMER_REDUCE:
         rows_per_split = pl.tensor.dim(raw, 0)
-        result = pl.load(partials, [row, COLUMN], [T_TILE, HC_PAD],
-                         valid_shape=[valid_rows, VALID_COLUMNS], target_memory=pl.MemorySpace.Vec)
+        result = pl.load(
+            partials,
+            [row, COLUMN],
+            [T_TILE, HC_PAD],
+            valid_shape=[valid_rows, VALID_COLUMNS],
+            target_memory=pl.MemorySpace.Vec,
+        )
         for split in pl.range(1, LINEAR_OK):
-            piece = pl.load(partials, [split * rows_per_split + row, COLUMN], [T_TILE, HC_PAD],
-                            valid_shape=[valid_rows, VALID_COLUMNS], target_memory=pl.MemorySpace.Vec)
+            piece = pl.load(
+                partials,
+                [split * rows_per_split + row, COLUMN],
+                [T_TILE, HC_PAD],
+                valid_shape=[valid_rows, VALID_COLUMNS],
+                target_memory=pl.MemorySpace.Vec,
+            )
             result = pl.add(result, piece)
     else:
-        result = pl.load(raw, [row, COLUMN], [T_TILE, HC_PAD],
-                         valid_shape=[valid_rows, VALID_COLUMNS], target_memory=pl.MemorySpace.Vec)
+        result = pl.load(
+            raw,
+            [row, COLUMN],
+            [T_TILE, HC_PAD],
+            valid_shape=[valid_rows, VALID_COLUMNS],
+            target_memory=pl.MemorySpace.Vec,
+        )
     return result
 
 
@@ -335,6 +355,7 @@ def hc_comb_range(
     vector_workers: pl.Scalar[pl.INDEX],
     partials: pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32],
     CONSUMER_REDUCE: pl.constexpr,
+    NATIVE_FOLD: pl.constexpr = True,
 ):
     """AIV：CSA 原除法路径的二十轮 Sinkhorn，保持行列归约树。
 
@@ -355,18 +376,10 @@ def hc_comb_range(
             comb_off = HC_MULT * 2
             # 24 个投影值前八项为 pre/post，其后 16 项按 4×4 的行存储。
             # UB 物理列宽为八，但各行只有前四列有效；以下 load 显式保留此边界。
-            mix_g0 = hc_projection_piece(
-                partials, mixes_raw, t0, valid_rows, HC_MULT * 2, HC_MULT, CONSUMER_REDUCE
-            )
-            mix_g1 = hc_projection_piece(
-                partials, mixes_raw, t0, valid_rows, HC_MULT * 3, HC_MULT, CONSUMER_REDUCE
-            )
-            mix_g2 = hc_projection_piece(
-                partials, mixes_raw, t0, valid_rows, HC_MULT * 4, HC_MULT, CONSUMER_REDUCE
-            )
-            mix_g3 = hc_projection_piece(
-                partials, mixes_raw, t0, valid_rows, HC_MULT * 5, HC_MULT, CONSUMER_REDUCE
-            )
+            mix_g0 = hc_projection_piece(partials, mixes_raw, t0, valid_rows, HC_MULT * 2, HC_MULT, CONSUMER_REDUCE)
+            mix_g1 = hc_projection_piece(partials, mixes_raw, t0, valid_rows, HC_MULT * 3, HC_MULT, CONSUMER_REDUCE)
+            mix_g2 = hc_projection_piece(partials, mixes_raw, t0, valid_rows, HC_MULT * 4, HC_MULT, CONSUMER_REDUCE)
+            mix_g3 = hc_projection_piece(partials, mixes_raw, t0, valid_rows, HC_MULT * 5, HC_MULT, CONSUMER_REDUCE)
             cb0 = pl.load(
                 hc_base_2d,
                 [0, comb_off + 0 * HC_MULT],
@@ -432,7 +445,10 @@ def hc_comb_range(
             row2_eff = pl.fillpad(row2_valid, pad_value=pl.PadValue.zero)
             row3_eff = pl.fillpad(row3_valid, pad_value=pl.PadValue.zero)
             row_sum_tmp_iter = pl.create_tile([COMB_T_TILE, HC_PAD], dtype=pl.FP32, target_memory=pl.MemorySpace.Vec)
-            col_sum = pl.add(pl.add(row0_eff, row1_eff), pl.add(row2_eff, row3_eff))
+            if NATIVE_FOLD:
+                col_sum = pl.add(pl.add(pl.add(row0_eff, row1_eff), row2_eff), row3_eff)
+            else:
+                col_sum = pl.add(pl.add(row0_eff, row1_eff), pl.add(row2_eff, row3_eff))
             col_sum = pl.add(col_sum, HC_EPS)
             row0_cur = pl.div(row0_eff, col_sum)
             row1_cur = pl.div(row1_eff, col_sum)
@@ -449,7 +465,10 @@ def hc_comb_range(
                 row1_norm = pl.row_expand_div(row1_cur, row1_rowsum)
                 row2_norm = pl.row_expand_div(row2_cur, row2_rowsum)
                 row3_norm = pl.row_expand_div(row3_cur, row3_rowsum)
-                col_sum = pl.add(pl.add(row0_norm, row1_norm), pl.add(row2_norm, row3_norm))
+                if NATIVE_FOLD:
+                    col_sum = pl.add(pl.add(pl.add(row0_norm, row1_norm), row2_norm), row3_norm)
+                else:
+                    col_sum = pl.add(pl.add(row0_norm, row1_norm), pl.add(row2_norm, row3_norm))
                 col_sum = pl.add(col_sum, HC_EPS)
                 row0_cur = pl.div(row0_norm, col_sum)
                 row1_cur = pl.div(row1_norm, col_sum)
@@ -516,6 +535,8 @@ def hc_mix_norm_range(
     x_normed_tail_store: pl.InOut[pl.Tensor[[T_TILE, D], pl.BF16]],
     vector_worker: pl.Scalar[pl.INDEX],
     vector_workers: pl.Scalar[pl.INDEX],
+    NATIVE_FOLD: pl.constexpr = True,
+    APPLY_NORM: pl.constexpr = True,
 ):
     """AIV：四路混合、BF16 舍入和完整 D4096 RMSNorm，原序不变。
 
@@ -551,38 +572,44 @@ def hc_mix_norm_range(
                 y2 = pl.row_expand_mul(x2, pre2)
                 y3 = pl.row_expand_mul(x3, pre3)
                 y01 = pl.add(y0, y1)
-                y23 = pl.add(y2, y3)
-                y = pl.add(y01, y23)
+                if NATIVE_FOLD:
+                    y012 = pl.add(y01, y2)
+                    y = pl.add(y012, y3)
+                else:
+                    y23 = pl.add(y2, y3)
+                    y = pl.add(y01, y23)
                 y_bf16 = pl.cast(y, pl.BF16, mode="rint")
                 x_mixed[t0 : t0 + T_TILE, d0 : d0 + D_TILE] = y_bf16
-                y_rounded = pl.cast(y_bf16, pl.FP32)
-                y_sq = pl.mul(y_rounded, y_rounded)
-                y_sq_sum = pl.row_sum(y_sq)
-                y_sq_row = pl.reshape(y_sq_sum, [1, T_TILE])
-                sq_sum = pl.add(sq_sum, y_sq_row)
-            norm_sq_sum = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
-            norm_sq_sum[:, :] = sq_sum
-            y_inv = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
-            inverse_result = rms_norm_inverse(norm_sq_sum)
-            y_inv[:, :] = inverse_result
-            # 第二遍：取得全行逆 RMS 后重读 mixed，乘 Native BF16 norm 权重。
-            # 两遍间的数据依赖由本核编译流水保证，不能与跨核阶段信号混淆。
-            for norm_db in pl.pipeline(D // D_TILE, stage=2):
-                d0 = norm_db * D_TILE
-                mixed_input = x_mixed[t0 : t0 + T_TILE, d0 : d0 + D_TILE]
-                norm_w_input = norm_w[d0 : d0 + D_TILE]
-                norm_w_row = pl.reshape(norm_w_input, [1, D_TILE])
-                normed_bf16 = rms_norm_apply(mixed_input, norm_w_row, y_inv)
-                if valid_rows == T_TILE:
-                    x_normed[t0 : t0 + T_TILE, d0 : d0 + D_TILE] = normed_bf16
-                else:
-                    x_normed_tail_store[0:T_TILE, d0 : d0 + D_TILE] = normed_bf16
-                    normed_valid = pl.load(
-                        x_normed_tail_store,
-                        [0, d0],
-                        [T_TILE, D_TILE],
-                        valid_shape=[valid_rows, D_TILE],
-                        target_memory=pl.MemorySpace.Vec,
-                    )
-                    pl.store(normed_valid, [t0, d0], x_normed)
+                if APPLY_NORM:
+                    y_rounded = pl.cast(y_bf16, pl.FP32)
+                    y_sq = pl.mul(y_rounded, y_rounded)
+                    y_sq_sum = pl.row_sum(y_sq)
+                    y_sq_row = pl.reshape(y_sq_sum, [1, T_TILE])
+                    sq_sum = pl.add(sq_sum, y_sq_row)
+            if APPLY_NORM:
+                norm_sq_sum = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
+                norm_sq_sum[:, :] = sq_sum
+                y_inv = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
+                inverse_result = rms_norm_inverse(norm_sq_sum)
+                y_inv[:, :] = inverse_result
+                # 第二遍：取得全行逆 RMS 后重读 mixed，乘 Native BF16 norm 权重。
+                # 两遍间的数据依赖由本核编译流水保证，不能与跨核阶段信号混淆。
+                for norm_db in pl.pipeline(D // D_TILE, stage=2):
+                    d0 = norm_db * D_TILE
+                    mixed_input = x_mixed[t0 : t0 + T_TILE, d0 : d0 + D_TILE]
+                    norm_w_input = norm_w[d0 : d0 + D_TILE]
+                    norm_w_row = pl.reshape(norm_w_input, [1, D_TILE])
+                    normed_bf16 = rms_norm_apply(mixed_input, norm_w_row, y_inv)
+                    if valid_rows == T_TILE:
+                        x_normed[t0 : t0 + T_TILE, d0 : d0 + D_TILE] = normed_bf16
+                    else:
+                        x_normed_tail_store[0:T_TILE, d0 : d0 + D_TILE] = normed_bf16
+                        normed_valid = pl.load(
+                            x_normed_tail_store,
+                            [0, d0],
+                            [T_TILE, D_TILE],
+                            valid_shape=[valid_rows, D_TILE],
+                            target_memory=pl.MemorySpace.Vec,
+                        )
+                        pl.store(normed_valid, [t0, d0], x_normed)
     return x_mixed, x_normed

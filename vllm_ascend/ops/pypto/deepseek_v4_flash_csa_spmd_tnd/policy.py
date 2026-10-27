@@ -26,6 +26,8 @@ LEAF_SCALE_LAYOUT只用于长G6、64<=T容量<=96且压缩长度上界<=6*8192�
 
 from dataclasses import dataclass
 
+from .service_config import MAX_NATIVE_HC_TOKENS
+
 # At most six original 8192-candidate leaves before balancing.
 LEAF_LAYOUT_MAX_CACHE_ROWS = 6 * 8192
 DEFAULT_OA_ROWS = 128
@@ -86,6 +88,8 @@ class CSASPMDPolicy:
     fused_indexer_coeff: bool = False
 
     def constexprs(self) -> dict[str, int | bool]:
+        if self.hc_consumer_reduce:
+            raise ValueError("Native HC 22段路径不支持旧4段consumer_reduce")
         return {
             "QUERY_GROUP": self.query_group,
             "QK_PANEL": self.qk_panel,
@@ -132,6 +136,8 @@ def select_policy(
     values = (tokens, requests, max_query_tokens, max_seq_len)
     if any(type(v) is not int or v <= 0 for v in values):
         raise ValueError("tokens/requests/max_query_tokens/max_seq_len须为已有的正整数描述符")
+    if tokens > MAX_NATIVE_HC_TOKENS:
+        raise NotImplementedError("当前Native-order HC容量限制T<=256；更大容量回退Native")
     if tokens > requests * max_query_tokens:
         raise ValueError("token容量超过请求容量×query上界；请绑定Native同一档描述符")
     cache_rows = max_seq_len // 4
