@@ -215,6 +215,72 @@ WKV 首差坐标为 `[3,188]`、`[3,444]`、`[14,222]`、`[22,302]`；
 FULL/eager 一致，输出前后保护区未改变。没有把 T 补为 6 的倍数。
 这只是 QR 阶段的短尾行资格，不能替代完整 CSA 的混合请求验收。
 
+## WKV 累加次序与完整入口复核
+
+以 `4c521b37` 的观测 v3 保存件为起点。先从正式 safetensors 读取同一层的
+`layers.4.attn.wkv.weight`，在相同 Normed 输入上调用 Native BF16 linear，
+必须逐 bit 重现实际 `cv_wkv` 保存金值；原 helper 的 FP32 accumulator 也必须
+逐 bit 复现完整 SPMD 保存值。两道门禁均通过后才解释以下对比。
+
+| WKV 切片，8K/B4/T24 | BF16 不同元素数 | 最大绝对差 |
+| --- | ---: | ---: |
+| nalinaly 原 N128/K512 自然顺序 | 4 / 12288 | 7.6294e-6 |
+| N32/K256，仍按自然顺序 | 4 / 12288，同四处 | 7.6294e-6 |
+| N32/K256，Native 分列 paired 顺序 | **0** | **0** |
+
+仅更改分块没有消除首差，相同分块下更改 K 次序使差异清零。
+每个原 N128 logical producer 内部顺序处理四个 N32 子块；M32/M64/M16
+条带、physical worker 旋转、phase 发布与等待都保留。新增 helper 不产生任务或信号。
+
+Native 在当前小 M 环境的规律是：M16/32/48 使用自然 K 顺序，其余 M<64 使用
+分列 paired 顺序。M1…63、两种输入共 126 点，先验证 constexpr 两条链；
+随后另用真实生产 runtime dispatcher 复核。输入固定为正式层权重及保存的 Normed
+行重复构造，B 输入为 FP32 `+0.125` 后转 BF16，不是所有权重/输入穷举。
+**M≥64、joint BF16 路径仍保留原实现，未取得新的 Native 数值资格。**
+旧精度版的 whole-model static M6 另有 Native static-package 分档；不能拿本轮 eager
+模块金值证明其静态分档，也不能直接继承其他 CANN/模型形状的 K 次序表。
+
+| 设备任务 | 范围 | 结果 | 墙钟 |
+| --- | --- | --- | ---: |
+| `task_20261027_211041_18132473134` | WKV 三臂 | 4→4→0；FULL/eager、guards 通过 | 38.8 s |
+| `task_20261027_211948_246064613974` | constexpr 小 M | 126/126 通过 | 29.5 s |
+| `task_20261027_214558_366792429085` | 生产 runtime 小 M | 126/126 通过 | 37.0 s |
+| `task_20261027_213416_311589611052` | 生产 SPMD v6 | 八边界 FULL/eager 一致，guards 通过 | 180.2 s |
+| `task_20261027_213838_33167561640` | 观测 v4 | 生产门禁通过；WKV 修正生效 | 182.8 s |
+
+完整57参数 debug入口、67参数观测入口先通过无设备编译/ABI加载。
+观测 v4 中 HC 三输出、InputNorm、QA BF16、QR INT8/scale、WKV BF16 均为0差异。
+新的首差是 **KV Norm+RoPE：3410/12288，max_abs=0.0078125**，发现后停止后续模块。
+这项组合检查尚未区分 Norm 与 RoPE；不能把它直接称为 RoPE 算法错误。
+
+以上为同输入模块 eager Native 金值与完整生产 FULL 的内部观测对比，尚不是
+Native FULL 全层、整模型逐 token 或性能验收。所有任务正常退出、释放设备。
+
+### KV Norm/RoPE：两处 BF16 边界的因果验证
+
+`kvnorm-boundary-v1` 复用观测 v4 的 **同一 paired WKV FP32 accumulator**、
+实际 BF16 gamma 和 Native cos/sin。Native `npu_rms_norm` 及
+`inplace_partial_rotary_mul` 分别先重现保存的实际模块输出；原 nalinaly helper
+也逐 bit 重现生产 KV。只有两端复现通过后才比较三个切片：
+
+| 切片 | NOPE 448 列不同元素数 | 全部 Norm+RoPE 不同元素数 |
+| --- | ---: | ---: |
+| nalinaly 原 helper，直接消费 FP32 WKV | 2816 | 3410 |
+| 只把 WKV accumulator 先落 BF16 | **0** | 422，全部位于 RoPE 列 |
+| 再恢复 Norm→RoPE 的 BF16 边界 | **0** | **0** |
+
+因此，本组 3410 个差异由缺失的中间 BF16 发布边界消除，不需要更改 RMS
+归约树、sqrt/div、RoPE 算法或同步。新增 `kv_native_norm_stages.py` 保留原
+M32所有权、八段K64归约和尾块有效区，仅在六个输入读取点和两个Norm→RoPE点
+恢复BF16往返。独立审查确认：删除这八处转换后，函数体AST与原helper相同。
+
+任务 `task_20261027_214850_381191622910` 约20.4s正常退出。
+T1/17/32/33/48/63 的 Norm/RoPE 也全部与 Native 逐bit一致，FULL/eager和guards通过。
+这些形状测试只验证Norm/RoPE，不额外证明对应M的WKV投影。
+生产接入仅替换 `vector_prefix_stages.py` 的 helper import，等待和发布均不改变。
+后续完整观测新增Q投影INT32与Q Norm/RoPE后BF16两处scratch，根参数为69；
+生产根仍55、debug根57，没有新增生产外部参数。
+
 ## 复现
 
 227 工作区：`/data/pyptouser/yejia/vllm-nal-tnd-native-align-20261027-codex`，
@@ -253,7 +319,7 @@ task-submit --device auto --max-time 780 \
 完整 SPMD 的 `probe_spmd.py` 分成两个任务：先生产 FULL 图快照，
 再设置 `SPMD_PRODUCTION_REFERENCE=<前项输出>/production.pt` 跑观测图。
 第二项逐字节检查已记录的 hidden、positions、只读 metadata（含 compact cos/sin/slots）、
-初始 cache，以及当前十个生产文件的 SHA 一致（七个 HC 文件和 q_native/qkv/kv 文件），
+初始 cache，以及当前十六个生产文件的 SHA 一致（包含 WKV/KV helper、dispatcher、调用点和 Q 消费代码），
 再比较观测根与生产根的八个外部输出；通过后才解释 HC/Norm/QA/QR 的 Native 首差。
 这样不把两个完整根的首次编译放到同一个占卡任务。
 权重/SDK 通过固定路径、提交和加载参数记录，当前不是全部文件的逐字节身份门禁。

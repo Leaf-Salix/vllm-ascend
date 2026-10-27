@@ -7,7 +7,7 @@ export ASCEND_RT_VISIBLE_DEVICES="$TASK_DEVICE"
 label=${1:?}
 probe=${2:?}
 shift 2
-[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|qr)$ ]]
+[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|qr|wkv|kvnorm)$ ]]
 if (( $# )); then [[ $# == 2 && "$1" == --device && "$2" == "$TASK_DEVICE" ]]; fi
 out="$align_root/results/$label"
 test ! -e "$out"

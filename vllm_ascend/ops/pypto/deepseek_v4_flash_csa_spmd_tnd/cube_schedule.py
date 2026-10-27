@@ -47,7 +47,7 @@ from .indexer_query_stages import (
 )
 from .indexer_score_stages import indexer_score_cube_stage
 from .joint_prefix_stages import joint_bf16_prefix_stage
-from .kv_stages import kv_project_stage
+from .kv_precision_dispatch import kv_precision_project_stage as kv_project_stage
 from .output_projection_a_stages import o_projection_a_groups_stage_nz, o_projection_a_stage_nz
 from .output_projection_b_stages import o_b_groups_stage, o_b_stage
 from .phase_sync import begin_invocation, publish_phase, wait_producer, wait_row_owners

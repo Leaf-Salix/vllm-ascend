@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: F403, F405 -- Keep the diagnostic root globals identical to its production source.
-"""从生产debug根仅替换10个内部分配为外部观测缓冲；算术和调度调用相同。
+"""从生产debug根仅替换12个内部分配为外部观测缓冲；算术和调度调用相同。
 
 使用前必须证明该根与未经观测的生产debug根的全部8个外部输出逐字节一致。
 """
@@ -78,6 +78,8 @@ def spmd_stage_probe(
     debug_qr_scale: pl.InOut[pl.Tensor[[T, 1], pl.FP32]],
     debug_kv_fp32: pl.InOut[pl.Tensor[[P16, 512], pl.FP32]],
     debug_kv: pl.InOut[pl.Tensor[[T, 512], pl.BF16]],
+    debug_q_proj: pl.InOut[pl.Tensor[[QPROJ_ROWS, 32768], pl.INT32]],
+    debug_q: pl.InOut[pl.Tensor[[T, 32768], pl.BF16]],
     QUERY_GROUP: pl.constexpr,
     QK_PANEL: pl.constexpr,
     SCORE_TILE: pl.constexpr,
@@ -143,8 +145,8 @@ def spmd_stage_probe(
     qr_scale_pad = pl.create_tensor([p8, 1], dtype=pl.FP32)
     rope_signed = pl.create_tensor([t, 64], dtype=pl.FP32)
     rope_swap = pl.create_tensor([t, 64], dtype=pl.INT32)
-    q_proj = pl.create_tensor([p128, 32768], dtype=pl.INT32)
-    q_flat = pl.create_tensor([t, 32768], dtype=pl.BF16)
+    q_proj = debug_q_proj
+    q_flat = debug_q
     kv_fp32 = debug_kv_fp32
     kv = debug_kv
     main_value = pl.create_tensor([p64, 1024], dtype=pl.FP32)
@@ -233,8 +235,8 @@ def spmd_stage_probe(
             qr_scale_pad,
             rope_signed,
             rope_swap,
-            q_proj,
-            q_flat,
+            q_proj_after,
+            q_flat_after,
             kv_fp32_after,
             kv_after,
             cache_rows,

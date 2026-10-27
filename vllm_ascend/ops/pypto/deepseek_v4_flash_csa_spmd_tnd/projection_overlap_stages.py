@@ -44,7 +44,7 @@ import pypto.language as pl
 from .compressor_projection_stages import compressor_project_stage
 from .indexer_compressor_output_stages import indexer_compressor_hadamard_stage
 from .indexer_query_stages import indexer_weights_project_stage
-from .kv_stages import kv_project_stage
+from .kv_precision_dispatch import kv_precision_project_stage as kv_project_stage
 from .phase_sync import publish_phase, wait_producer, wait_row_owners
 from .qkv_stages import BF16_WEIGHT_LAYOUT
 from .query_projection_stages import QUANT_WEIGHT_LAYOUT, q_b_stage

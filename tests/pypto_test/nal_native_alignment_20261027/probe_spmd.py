@@ -25,6 +25,7 @@ from spmd_probe_entry import spmd_stage_probe
 from vllm.engine.arg_utils import EngineArgs
 from vllm.platforms import current_platform
 
+from vllm_ascend.device.device_op import DeviceOperator
 from vllm_ascend.utils import enable_custom_op
 
 nal_adapter = importlib.import_module("nal_alignment.deepseek_v4_flash_csa.native_adapter")
@@ -36,7 +37,7 @@ out = Path(sys.argv[1])
 record = {
     "complete": False,
     "pass": False,
-    "scope": "complete CSA SPMD execution; Native module eager gates through original KV; not whole-model tokens",
+    "scope": "complete CSA SPMD execution; Native module eager gates through original KV and Q; not whole-model tokens",
     "history": 8192,
     "lengths": [6, 6, 6, 6],
     "precision": {},
@@ -140,6 +141,12 @@ try:
             "q_native_stages.py",
             "qkv_stages.py",
             "kv_stages.py",
+            "kv_native_stages.py",
+            "kv_precision_dispatch.py",
+            "projection_overlap_stages.py",
+            "kv_native_norm_stages.py",
+            "vector_prefix_stages.py",
+            "query_projection_stages.py",
         )
     }
     with native_session(config, 0), torch.inference_mode():
@@ -185,6 +192,8 @@ try:
             "qr_scale": (24, 1),
             "kv_fp32": (32, 512),
             "kv": (24, 512),
+            "q_proj": (128, 32768),
+            "q": (24, 32768),
         }
         observed = {
             name: torch.full(
@@ -192,8 +201,10 @@ try:
                 -37,
                 dtype=torch.int8
                 if name == "qr"
+                else torch.int32
+                if name == "q_proj"
                 else torch.bfloat16
-                if name in ("mixed", "normed", "kv")
+                if name in ("mixed", "normed", "kv", "q")
                 else torch.float32,
                 device="npu",
             )
@@ -323,12 +334,33 @@ try:
         kv = impl.kv_norm(kv)
         if isinstance(kv, tuple):
             kv = kv[0]
+        # Save before the in-place RoPE mutates this Native RMSNorm boundary.
+        payload["kv_normalized_native"] = kv.cpu()
         kv = kv.reshape(24, 1, 512)
         cos, sin = (f["readonly"]["rope." + name][0] for name in ("cos", "sin"))
+        payload["kv_rope_cos"] = cos.cpu()
+        payload["kv_rope_sin"] = sin.cpu()
         torch.ops._C_ascend.inplace_partial_rotary_mul(
             kv.unsqueeze(1), cos, sin, rotary_mode="interleave", partial_slice=[impl.nope_head_dim, impl.head_dim]
         )
         check("original_kv_norm_rope", observed["kv"], kv.reshape(24, 512))
+        # Same W8A8 decode branch as Native _forward_qkv_multistream.
+        q = torch_npu.npu_quant_matmul(
+            qr,
+            impl.wq_b.weight,
+            impl.wq_b.weight_scale,
+            pertoken_scale=scale,
+            bias=impl.wq_b.bias,
+            output_dtype=normed.dtype,
+        ).unflatten(-1, (impl.n_local_heads, impl.head_dim))
+        payload["q_projection_native"] = q.cpu()
+        payload["q_accumulator"] = observed["q_proj"].cpu()
+        q = DeviceOperator.apply_dsa_q_rms(q, impl.eps, impl.q_norm_without_weight)
+        payload["q_normalized_native"] = q.cpu()
+        torch.ops._C_ascend.inplace_partial_rotary_mul(
+            q.unsqueeze(1), cos, sin, rotary_mode="interleave", partial_slice=[impl.nope_head_dim, impl.head_dim]
+        )
+        check("q_norm_rope", observed["q"], q.reshape(24, 32768))
         record["pass"] = True
         record["complete"] = True
 except SystemExit as error:

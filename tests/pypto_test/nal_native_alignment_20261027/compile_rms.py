@@ -21,7 +21,15 @@ out = Path(sys.argv[1])
 out.mkdir(exist_ok=False)
 assert not torch_npu.npu.is_initialized()
 kind = sys.argv[2] if len(sys.argv) > 2 else "rms"
-if kind in ("qr", "qr-native"):
+if kind in ("kvnorm-base", "kvnorm-native"):
+    from kvnorm_kernels import kvnorm_arm
+
+    program = kvnorm_arm.specialize(NATIVE_BOUNDARIES=kind == "kvnorm-native")
+elif kind in ("wkv-base", "wkv-natural", "wkv-paired", "wkv-dispatch"):
+    from wkv_kernels import wkv_arm
+
+    program = wkv_arm.specialize(NARROW=kind != "wkv-base", ORDER=kind == "wkv-paired", DISPATCH=kind == "wkv-dispatch")
+elif kind in ("qr", "qr-native"):
     from qr_kernels import qr_arm
 
     program = qr_arm.specialize(NATIVE=kind == "qr-native")
