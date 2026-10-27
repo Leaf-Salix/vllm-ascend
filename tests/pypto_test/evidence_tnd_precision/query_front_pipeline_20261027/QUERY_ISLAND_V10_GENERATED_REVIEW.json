@@ -1,0 +1,872 @@
+{
+  "pass": true,
+  "scope": "CPU generated review; only 8K default256MiB-per-depth screen, NOT128K smallring qualification",
+  "baseline_leaf_count": 63,
+  "candidate_leaf_count": 59,
+  "common_leaf_sha_equal": 57,
+  "removed": [
+    "idx_qr_dequant_rope",
+    "idx_qr_proj_matmul",
+    "qproj_dequant_rms_nope_rope",
+    "qproj_matmul",
+    "qr_hadamard_matmul",
+    "qr_hadamard_quant"
+  ],
+  "added": [
+    "island_cube",
+    "island_vector"
+  ],
+  "maxT": 256,
+  "maxB": 40,
+  "bound_all_branches_aligned1024_sum_per_depth_MiB": {
+    "0": 43.5576171875,
+    "1": 92.146484375,
+    "2": 134.853515625,
+    "3": 60.75
+  },
+  "allocations": [
+    {
+      "line": 138,
+      "name": "alloc_0",
+      "depth": 0,
+      "aligned1024_bytes": 27713536,
+      "tensors": {
+        "mixed_ci": {
+          "shape": [
+            256,
+            4096
+          ],
+          "dtype": "BFLOAT16",
+          "bytes": 2097152
+        },
+        "post_ci": {
+          "shape": [
+            256,
+            4
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 4096
+        },
+        "comb_ci": {
+          "shape": [
+            256,
+            16
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 16384
+        },
+        "normed_ci": {
+          "shape": [
+            256,
+            4096
+          ],
+          "dtype": "BFLOAT16",
+          "bytes": 2097152
+        },
+        "projected_kv_ci": {
+          "shape": [
+            256,
+            512
+          ],
+          "dtype": "BFLOAT16",
+          "bytes": 262144
+        },
+        "indexer_raw_ci": {
+          "shape": [
+            256,
+            64
+          ],
+          "dtype": "BFLOAT16",
+          "bytes": 32768
+        },
+        "indexer_scaled_ci": {
+          "shape": [
+            256,
+            64
+          ],
+          "dtype": "BFLOAT16",
+          "bytes": 32768
+        },
+        "indexer_weights_ci": {
+          "shape": [
+            256,
+            64
+          ],
+          "dtype": "FLOAT16",
+          "bytes": 32768
+        },
+        "heads_ci": {
+          "shape": [
+            256,
+            32768
+          ],
+          "dtype": "BFLOAT16",
+          "bytes": 16777216
+        },
+        "projected_o_ci": {
+          "shape": [
+            256,
+            8192
+          ],
+          "dtype": "BFLOAT16",
+          "bytes": 4194304
+        },
+        "quantized_o_ci": {
+          "shape": [
+            256,
+            8192
+          ],
+          "dtype": "INT8",
+          "bytes": 2097152
+        },
+        "scale_o_ci": {
+          "shape": [
+            256,
+            1
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 1024
+        },
+        "idx_sin_signed_ci": {
+          "shape": [
+            256,
+            64
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 65536
+        },
+        "cmp_row_offsets_ci": {
+          "shape": [
+            40
+          ],
+          "dtype": "INT32",
+          "bytes": 160
+        },
+        "idx_row_offsets_ci": {
+          "shape": [
+            40
+          ],
+          "dtype": "INT32",
+          "bytes": 160
+        },
+        "token_request_ci": {
+          "shape": [
+            256
+          ],
+          "dtype": "INT32",
+          "bytes": 1024
+        }
+      }
+    },
+    {
+      "line": 171,
+      "name": "alloc_1",
+      "depth": 0,
+      "aligned1024_bytes": 17959936,
+      "tensors": {
+        "q_ci": {
+          "shape": [
+            256,
+            64,
+            512
+          ],
+          "dtype": "BFLOAT16",
+          "bytes": 16777216
+        },
+        "kv_ci": {
+          "shape": [
+            256,
+            512
+          ],
+          "dtype": "BFLOAT16",
+          "bytes": 262144
+        },
+        "qr_ci": {
+          "shape": [
+            256,
+            1024
+          ],
+          "dtype": "INT8",
+          "bytes": 262144
+        },
+        "qr_scale_ci": {
+          "shape": [
+            256,
+            1
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 1024
+        },
+        "island_qr_pad_ci": {
+          "shape": [
+            512,
+            1024
+          ],
+          "dtype": "INT8",
+          "bytes": 524288
+        },
+        "island_scale_pad_ci": {
+          "shape": [
+            512,
+            1
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 2048
+        },
+        "island_signed_ci": {
+          "shape": [
+            256,
+            64
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 65536
+        },
+        "island_swap_ci": {
+          "shape": [
+            256,
+            64
+          ],
+          "dtype": "INT32",
+          "bytes": 65536
+        }
+      }
+    },
+    {
+      "line": 221,
+      "name": "alloc_2",
+      "depth": 1,
+      "aligned1024_bytes": 33619968,
+      "tensors": {
+        "wide_ci": {
+          "shape": [
+            256,
+            16384
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 16777216
+        },
+        "packed_flat_ci": {
+          "shape": [
+            256,
+            32768
+          ],
+          "dtype": "BFLOAT16",
+          "bytes": 16777216
+        },
+        "mixed_tail_ci": {
+          "shape": [
+            8,
+            4096
+          ],
+          "dtype": "BFLOAT16",
+          "bytes": 65536
+        }
+      }
+    },
+    {
+      "line": 340,
+      "name": "alloc_3",
+      "depth": 1,
+      "aligned1024_bytes": 32606208,
+      "tensors": {
+        "cmp_out_ci": {
+          "shape": [
+            256,
+            512
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 524288
+        },
+        "pooled_kv_inline3559_ci": {
+          "shape": [
+            384,
+            512
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 786432
+        },
+        "kv_proj_pad_inline3560_ci": {
+          "shape": [
+            384,
+            1024
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 1572864
+        },
+        "score_proj_pad_inline3561_ci": {
+          "shape": [
+            384,
+            1024
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 1572864
+        },
+        "normed_kv_inline3658_ci": {
+          "shape": [
+            384,
+            512
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 786432
+        },
+        "idx_kv_unused_ci": {
+          "shape": [
+            256,
+            128
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 131072
+        },
+        "normed_kv_inline3707_ci": {
+          "shape": [
+            384,
+            128
+          ],
+          "dtype": "BFLOAT16",
+          "bytes": 98304
+        },
+        "kv_proj_pad_inline3714_ci": {
+          "shape": [
+            384,
+            256
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 393216
+        },
+        "score_proj_pad_inline3715_ci": {
+          "shape": [
+            384,
+            256
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 393216
+        },
+        "pooled_kv_inline3716_ci": {
+          "shape": [
+            384,
+            128
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 196608
+        },
+        "window_values_inline3749_ci": {
+          "shape": [
+            384,
+            128
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 196608
+        },
+        "window_scores_inline3750_ci": {
+          "shape": [
+            384,
+            128
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 196608
+        },
+        "idx_kv_scale_values_inline3849_ci": {
+          "shape": [
+            384,
+            1
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 1536
+        },
+        "kv_final_inline3850_ci": {
+          "shape": [
+            384,
+            128
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 196608
+        },
+        "softmax_copy64_inline5290_ci": {
+          "shape": [
+            1536,
+            64
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 393216
+        },
+        "kv_transfer_inline5364_ci": {
+          "shape": [
+            24576,
+            512
+          ],
+          "dtype": "BFLOAT16",
+          "bytes": 25165824
+        }
+      }
+    },
+    {
+      "line": 371,
+      "name": "alloc_4",
+      "depth": 1,
+      "aligned1024_bytes": 11030528,
+      "tensors": {
+        "score_transfer_inline5365_ci": {
+          "shape": [
+            3072,
+            512
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 6291456
+        },
+        "probability_transfer_inline5366_ci": {
+          "shape": [
+            1536,
+            512
+          ],
+          "dtype": "BFLOAT16",
+          "bytes": 1572864
+        },
+        "pv_transfer_inline5367_ci": {
+          "shape": [
+            1536,
+            512
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 3145728
+        },
+        "mi_transfer_inline5368_ci": {
+          "shape": [
+            1536,
+            1
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 6144
+        },
+        "li_transfer_inline5369_ci": {
+          "shape": [
+            1536,
+            1
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 6144
+        },
+        "alpha_transfer_inline5370_ci": {
+          "shape": [
+            1536,
+            1
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 6144
+        },
+        "ffts_workspace_inline5371_ci": {
+          "shape": [
+            256
+          ],
+          "dtype": "INT64",
+          "bytes": 2048
+        }
+      }
+    },
+    {
+      "line": 417,
+      "name": "alloc_5",
+      "depth": 2,
+      "aligned1024_bytes": 1048576,
+      "tensors": {
+        "qr_fp32_inline3313_ci": {
+          "shape": [
+            256,
+            1024
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 1048576
+        }
+      }
+    },
+    {
+      "line": 535,
+      "name": "alloc_6",
+      "depth": 2,
+      "aligned1024_bytes": 524288,
+      "tensors": {
+        "kv_fp32_inline3481_ci": {
+          "shape": [
+            256,
+            512
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 524288
+        }
+      }
+    },
+    {
+      "line": 910,
+      "name": "alloc_7",
+      "depth": 2,
+      "aligned1024_bytes": 131172352,
+      "tensors": {
+        "qr_hadamard_i8_inline3906_ci": {
+          "shape": [
+            27648,
+            128
+          ],
+          "dtype": "INT8",
+          "bytes": 3538944
+        },
+        "qr_hadamard_scale_dq_inline3907_ci": {
+          "shape": [
+            27648,
+            1
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 110592
+        },
+        "weights_inline3932_ci": {
+          "shape": [
+            432,
+            64
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 110592
+        },
+        "rgroup_row_inline3937_ci": {
+          "shape": [
+            432
+          ],
+          "dtype": "INT32",
+          "bytes": 1728
+        },
+        "rgroup_rows_inline3938_ci": {
+          "shape": [
+            432
+          ],
+          "dtype": "INT32",
+          "bytes": 1728
+        },
+        "rgroup_count_inline3939_ci": {
+          "shape": [
+            1
+          ],
+          "dtype": "INT32",
+          "bytes": 4
+        },
+        "pgroup_row_inline3940_ci": {
+          "shape": [
+            432
+          ],
+          "dtype": "INT32",
+          "bytes": 1728
+        },
+        "pgroup_rows_inline3941_ci": {
+          "shape": [
+            432
+          ],
+          "dtype": "INT32",
+          "bytes": 1728
+        },
+        "pgroup_count_inline3942_ci": {
+          "shape": [
+            1
+          ],
+          "dtype": "INT32",
+          "bytes": 4
+        },
+        "pair_arena_inline3952_ci": {
+          "shape": [
+            27648,
+            1024
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 113246208
+        },
+        "score_arena_inline3953_ci": {
+          "shape": [
+            432,
+            8192
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 14155776
+        }
+      }
+    },
+    {
+      "line": 934,
+      "name": "alloc_8",
+      "depth": 3,
+      "aligned1024_bytes": 63700992,
+      "tensors": {
+        "idx_acc_inline3908_ci": {
+          "shape": [
+            448,
+            8192
+          ],
+          "dtype": "INT32",
+          "bytes": 14680064
+        },
+        "idx_bf_inline3910_ci": {
+          "shape": [
+            27648,
+            128
+          ],
+          "dtype": "BFLOAT16",
+          "bytes": 7077888
+        },
+        "had_acc_inline3913_ci": {
+          "shape": [
+            16384,
+            128
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 8388608
+        },
+        "main_acc_inline3916_ci": {
+          "shape": [
+            256,
+            32768
+          ],
+          "dtype": "INT32",
+          "bytes": 33554432
+        }
+      }
+    },
+    {
+      "line": 1080,
+      "name": "alloc_9",
+      "depth": 2,
+      "aligned1024_bytes": 2066432,
+      "tensors": {
+        "coefficients_inline4216_ci": {
+          "shape": [
+            1152,
+            384
+          ],
+          "dtype": "FLOAT16",
+          "bytes": 884736
+        },
+        "buf_score_transfer_inline4049_ci": {
+          "shape": [
+            288,
+            1024
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 1179648
+        },
+        "buf_score_ffts_inline4050_ci": {
+          "shape": [
+            256
+          ],
+          "dtype": "INT64",
+          "bytes": 2048
+        }
+      }
+    },
+    {
+      "line": 1167,
+      "name": "alloc_10",
+      "depth": 2,
+      "aligned1024_bytes": 1280000,
+      "tensors": {
+        "coefficients_inline4508_ci": {
+          "shape": [
+            3456,
+            128
+          ],
+          "dtype": "FLOAT16",
+          "bytes": 884736
+        },
+        "buf_score_transfer_inline4341_ci": {
+          "shape": [
+            96,
+            1024
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 393216
+        },
+        "buf_score_ffts_inline4342_ci": {
+          "shape": [
+            256
+          ],
+          "dtype": "INT64",
+          "bytes": 2048
+        }
+      }
+    },
+    {
+      "line": 1323,
+      "name": "alloc_11",
+      "depth": 2,
+      "aligned1024_bytes": 1771520,
+      "tensors": {
+        "coefficients_inline4808_ci": {
+          "shape": [
+            1152,
+            384
+          ],
+          "dtype": "FLOAT16",
+          "bytes": 884736
+        },
+        "buf_score_transfer_inline4641_ci": {
+          "shape": [
+            288,
+            768
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 884736
+        },
+        "buf_score_ffts_inline4642_ci": {
+          "shape": [
+            256
+          ],
+          "dtype": "INT64",
+          "bytes": 2048
+        }
+      }
+    },
+    {
+      "line": 1411,
+      "name": "alloc_12",
+      "depth": 2,
+      "aligned1024_bytes": 1181696,
+      "tensors": {
+        "coefficients_inline5100_ci": {
+          "shape": [
+            3456,
+            128
+          ],
+          "dtype": "FLOAT16",
+          "bytes": 884736
+        },
+        "buf_score_transfer_inline4933_ci": {
+          "shape": [
+            96,
+            768
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 294912
+        },
+        "buf_score_ffts_inline4934_ci": {
+          "shape": [
+            256
+          ],
+          "dtype": "INT64",
+          "bytes": 2048
+        }
+      }
+    },
+    {
+      "line": 1503,
+      "name": "alloc_13",
+      "depth": 2,
+      "aligned1024_bytes": 2359296,
+      "tensors": {
+        "gm_pipe_buffer_0_ci": {
+          "shape": [
+            589824
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 2359296
+        }
+      }
+    },
+    {
+      "line": 1590,
+      "name": "alloc_14",
+      "depth": 1,
+      "aligned1024_bytes": 1048576,
+      "tensors": {
+        "sparse_bias_inline5289_ci": {
+          "shape": [
+            256,
+            1024
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 1048576
+        }
+      }
+    },
+    {
+      "line": 1594,
+      "name": "alloc_15",
+      "depth": 1,
+      "aligned1024_bytes": 524288,
+      "tensors": {
+        "cmp_sparse_indices_inline5291_ci": {
+          "shape": [
+            256,
+            512
+          ],
+          "dtype": "INT32",
+          "bytes": 524288
+        }
+      }
+    },
+    {
+      "line": 1598,
+      "name": "alloc_16",
+      "depth": 1,
+      "aligned1024_bytes": 16384,
+      "tensors": {
+        "valid_block_mask_inline5292_ci": {
+          "shape": [
+            256,
+            16
+          ],
+          "dtype": "INT32",
+          "bytes": 16384
+        }
+      }
+    },
+    {
+      "line": 1679,
+      "name": "alloc_17",
+      "depth": 1,
+      "aligned1024_bytes": 12550144,
+      "tensors": {
+        "accum_inline5581_ci": {
+          "shape": [
+            383,
+            8192
+          ],
+          "dtype": "FLOAT32",
+          "bytes": 12550144
+        }
+      }
+    },
+    {
+      "line": 1735,
+      "name": "alloc_18",
+      "depth": 1,
+      "aligned1024_bytes": 5226496,
+      "tensors": {
+        "integer_accum_inline5685_ci": {
+          "shape": [
+            319,
+            4096
+          ],
+          "dtype": "INT32",
+          "bytes": 5226496
+        }
+      }
+    }
+  ],
+  "cpu_archive_sha256": "012da2f6b66a0c938db0990457bb05bb8602540e829bdcbe3d2e8ca6807d8276",
+  "independent_generated_review": {
+    "pass": true,
+    "MIX": [
+      27,
+      28,
+      28
+    ],
+    "groups": 24,
+    "require_sync_start": true,
+    "each_role_syncall": 4,
+    "gm_alias_same_allocation": true,
+    "query_scope_closes_before_score": true,
+    "indexer_scope_closes_before_sparse": true,
+    "external_cache_scale_dependencies_retained": true,
+    "main_QB_L2_bypass_in_actual_PTO": true,
+    "max_resources_bytes": {
+      "L1": 327680,
+      "L0C": 65536,
+      "L0A": 24576,
+      "L0B": 65536,
+      "UB": 116768
+    },
+    "128K_smallring_qualified": false
+  }
+}

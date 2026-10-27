@@ -1,0 +1,29 @@
+{
+  "pass": true,
+  "scope": "independent actual generated-code review; CPU only, permits 8K/B32 performance screen, not precision or 128K qualification",
+  "helper_manifest_sha256": "5b68e590b607ab5e3b0e543d550c19452c7010c82fdc2fd514a1e6e61f252e0e",
+  "root_tensors": 64,
+  "artifact_loaded": true,
+  "npu_initialized": false,
+  "leaf_count": 63,
+  "changed_leaves": [
+    "qproj_matmul"
+  ],
+  "unchanged_leaf_count": 62,
+  "integer_accumulation": "K0 initializes INT32 then K256/K512/K768 each accumulate once; no atomic or GM accumulation reads. Absolute dot bound 1024*128^2=2^24 <2^31.",
+  "valid_rows": "QR TLOAD and output TSTORE use min(T-t0,128); original dequant may read allocated invalid tile rows but no cross-row reduction and only valid row stores. Not all ceil128 scratch rows are initialized.",
+  "nz_offsets": "K offsets 0/8192/16384/24576; N blocks *32768 verified.",
+  "resources_bytes": {
+    "L1": 196608,
+    "L0A": 65536,
+    "L0B": 65536,
+    "L0C": 131072
+  },
+  "ring_conservative_T256_B40_per_depth_MiB": [
+    42.93066,
+    103.77344,
+    195.60352
+  ],
+  "ring_method": "1024B alignment per actual tensor, all mutually exclusive branches and sibling scopes conservatively accumulated; default 256MiB per-depth only, not measured peak",
+  "dependencies": "original QA -> qr_i8 -> q_i32 -> dequant same allocation/scope; generated MTE1/MTE2, M/MTE1 and FIX/M protections verified"
+}
