@@ -1060,3 +1060,60 @@ bootstrap和源码，独立控制780/750+15秒，不并行覆盖源码或输入�
 
 证据：[完整生产快照](evidence/spmd-production-v18/result.json)、
 [同输入Native首差](evidence/spmd-observe-v18/result.json)。
+
+### WO-A首差与同输入累加顺序诊断
+
+本节仍仅覆盖8K/B4/T24、真实layer4权重和合成hidden/history，不代表整模型token。
+新增一个FP32 `o_r`观测缓冲后，82参数观察根通过无设备编译及双AIV检查。
+生产57参数与正式55参数ABI未变。coreGroup调用AST保持相同，返回使用独立
+`o_r_after`变量，避免观察缓冲的符号形状重绑定。
+
+观察v19（`task_20261028_165423_230040516941`）显式使用物理8，执行235.31秒。
+8项生产等价、8项Native详细/最小hook控制、39项跨任务输入相同、全部guard通过。
+原33项Native门禁一直到post-inverse heads均为0；首差是WO-A的BF16发布边界：
+24×8192个元素中39个不同，最大绝对差`6.103515625e-5`，在此停止。
+
+微测试直接使用同次Native heads和真实`wo_b` BF16入口，先验证checkpoint重建的
+Native `npu_transpose_batchmatmul`逐bit复现该入口，再要求原PTO helper逐bit复现
+观察到的FP32 `o_r`。两项控制均为0。只读权重、packed输入和输出保护区均通过。
+
+| 微测试实现 | 与Native的WO-A BF16差异 | 三次NaN覆盖后的FULL/eager |
+| --- | --- | --- |
+| 原M128/N128/K256 | 39 | 全部0 |
+| M16/N128，K256自然累加 | 39 | 全部0 |
+| 同M16/N128，K256半程旋转 | **0** | **全部0** |
+
+后两臂仅改变K起点，仍完整累加16个K256块。令`g`为输出组、`n`为N128块：
+`first_panel=8*((g%2+int(3<=n<6))%2)`，顺序为0…15或8…15、0…7。
+这个起点来自旧精度分支的T24假设，经本次同输入微测试确认；没有将旧的全T标定表
+直接复制为新工具链契约。两段非负`pl.range`保留原旋转顺序，避免NZ环绕索引
+证明失败，不修改SDK或生成C++。结果证明单改M布局不能消除这39差，而起点能在
+本组输入消除；没有测性能，也未证明其它T或完整SPMD接回后的结果。
+
+微测试v1（`task_20261028_171117_321584821667`）因诊断脚本误读不存在的WO-A
+哈希字段退出，未执行矩阵对拍。修正后先做无设备参考件schema检查，再提交v2
+（`task_20261028_171433_338704628719`，物理8，28.20秒），上述三臂全部完成。
+原23项前缀哈希清单不含WO-A；微测试另核验已推送`a57c3cb4`的WO-A文件：
+`bcdc7ec91fcf70c7709a859395396c5250c48b2ab9b8890771fe73dbeca78c29`。
+文件身份与原FP32数值复现是两个独立前置条件。
+
+复现步骤：沿用同一env/bootstrap，CPU selector为`spmd-probe`及`woa-0/1/2`；
+先复用production-v18提交`run_rms.sh <标签> spmd`，取得v19等价的观察件；随后
+显式`--device 8 --max-time 780`提交`run_rms.sh <标签> woa`，另传：
+
+```bash
+--env WOA_PROBE_REFERENCE=<观察目录>/observation.pt
+--env WOA_PROBE_SOURCE_SHA256=bcdc7ec91fcf70c7709a859395396c5250c48b2ab9b8890771fe73dbeca78c29
+```
+
+本节代码提交对应的WO-A正式源仍未改；后续接回必须保留原64个N128任务owner，
+在owner内部拆两块M16，不能直接沿用微测试128任务的分配并误用旧完成信号。
+下一门禁是完整根重新做生产等价和Native WO-A；量化、WO-B和HC-post暂不修改。
+
+证据：[82参数CPU资格](evidence/cpu-woa-observe-v20/receipt.json)、
+[原helper](evidence/cpu-woa-micro-v4-0/receipt.json)、
+[自然M16](evidence/cpu-woa-micro-v4-1/receipt.json)、
+[旋转M16](evidence/cpu-woa-micro-v4-2/receipt.json)、
+[完整根WO-A首差](evidence/spmd-observe-v19/result.json)、
+[v1脚本问题](evidence/woa-micro-v1/result.json)、
+[v2微测试结果](evidence/woa-micro-v2/result.json)。

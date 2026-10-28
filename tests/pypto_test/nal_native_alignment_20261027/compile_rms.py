@@ -22,7 +22,11 @@ out = Path(sys.argv[1])
 out.mkdir(exist_ok=False)
 assert not torch_npu.npu.is_initialized()
 kind = sys.argv[2] if len(sys.argv) > 2 else "rms"
-if kind == "attention-native-spmd":
+if kind.startswith("woa-"):
+    from woa_kernels import woa_arm
+
+    program = woa_arm.specialize(MODE=int(kind.removeprefix("woa-")))
+elif kind == "attention-native-spmd":
     from attention_native_micro import native_attention_arm
 
     program = native_attention_arm.specialize()

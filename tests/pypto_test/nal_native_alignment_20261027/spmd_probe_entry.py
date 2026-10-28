@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: F403, F405 -- Keep the diagnostic root globals identical to its production source.
-"""从生产debug根仅替换24个内部分配为外部观测缓冲；算术和调度调用相同。
+"""从生产debug根仅替换25个内部分配为外部观测缓冲；算术和调度调用相同。
 
 使用前必须证明该根与未经观测的生产debug根的全部8个外部输出逐字节一致。
 """
@@ -92,6 +92,7 @@ def spmd_stage_probe(
     debug_idx_query_had: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]],
     debug_head_weights: pl.InOut[pl.Tensor[[P16, 64], pl.FP32]],
     debug_packed: pl.InOut[pl.Tensor[[PACK_ROWS, 4096], pl.BF16]],
+    debug_o_r: pl.InOut[pl.Tensor[[O_MM_ROWS, 8192], pl.FP32]],
     QUERY_GROUP: pl.constexpr,
     QK_PANEL: pl.constexpr,
     SCORE_TILE: pl.constexpr,
@@ -207,7 +208,7 @@ def spmd_stage_probe(
     li_ring = pl.create_tensor([24 * 4 * 64, 1], dtype=pl.FP32)
     packed = debug_packed
     ffts = pl.create_tensor([256], dtype=pl.INT64)
-    o_r = pl.create_tensor([mm, 8192], dtype=pl.FP32)
+    o_r = debug_o_r
     o_quant = pl.create_tensor([mm, 8192], dtype=pl.INT8)
     o_scales = pl.create_tensor([8, p128], dtype=pl.FP32)
     o_partials = pl.create_tensor([mm, 32768], dtype=pl.INT32)
@@ -299,7 +300,7 @@ def spmd_stage_probe(
             mi_ring,
             li_ring,
             packed,
-            o_r,
+            o_r_after,
             o_quant,
             o_scales,
             o_partials,

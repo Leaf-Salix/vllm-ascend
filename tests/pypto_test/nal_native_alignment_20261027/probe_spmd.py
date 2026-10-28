@@ -212,6 +212,7 @@ try:
             "idx_query_had": (1536, 128),
             "head_weights": (32, 64),
             "packed": (1024, 4096),
+            "o_r": (128, 8192),
         }
         observed = {
             name: torch.full(
@@ -308,7 +309,7 @@ try:
         def observed_domain(name, value):
             if name == "packed":
                 return value.reshape(8, value.shape[0] // 8, 8, 512)[:, :24]
-            if name in ("idx_query_acc", "idx_query_rope", "head_weights"):
+            if name in ("idx_query_acc", "idx_query_rope", "head_weights", "o_r"):
                 return value[:24]
             if name in ("idx_normed", "idx_had", "idx_scales"):
                 return value[: idx_slots_for_domain.shape[0]][valid_compact]
@@ -648,6 +649,7 @@ try:
         payload["native_indexer_query_stages"] = query_stages
         payload["native_indexer_weight_stages"] = weight_stages
         payload["native_output_stages"] = output_stages
+        payload["observed_o_r"] = observed["o_r"][:24].cpu()
         payload["indexer_query_weight_scale_native"] = impl.inderxer_wq_b.weight_scale.cpu()
         payload["indexer_query_weight_scale_prepared"] = prepared.buffers["idx_wq_b_scale"].cpu()
         for name in ("idx_query_acc", "idx_query_rope", "idx_query_had", "head_weights"):
@@ -676,6 +678,7 @@ try:
         packed = observed["packed"].reshape(8, 128, 8, 512)[:, :24]
         heads = packed.permute(1, 0, 2, 3).reshape(24, 64, 512)
         check("attention_heads_after_inverse_rope", heads.reshape_as(output_stages["heads"]), output_stages["heads"])
+        check("wo_a_bf16", observed["o_r"][:24].bfloat16(), output_stages["wo_a"].reshape(24, 8192))
         check("native_full_output", replay["x_out"].reshape_as(native_states[1]["x_out"]), native_states[1]["x_out"])
         record["pass"] = True
         record["complete"] = True
