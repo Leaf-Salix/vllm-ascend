@@ -24,6 +24,7 @@ from .indexer_query_stages import (
     IDX_NOPE_HEAD_DIM,
     INT8_AMAX_EPS,
     INT8_SCALE_MAX,
+    MM_ROW_TILE,
     PROJ_ROWS_DYN,
     QH_HEAD_DIM_TILE,
     QH_QUANT_TILE,
@@ -32,6 +33,10 @@ from .indexer_query_stages import (
     ROPE_ROWS_DYN,
     SCALE_ROWS_DYN,
     T_DYN,
+    WEIGHTS_OK,
+    WEIGHTS_PARTIAL_ROWS_DYN,
+    WEIGHTS_ROWS_DYN,
+    WEIGHTS_SCALE,
 )
 
 
@@ -239,3 +244,28 @@ def native_indexer_query_quant_stage(
         qh_i8 = pl.cast(qh_q_half, target_type=pl.INT8, mode="trunc")
         qr_hadamard_i8[o0 : o0 + QH_QUANT_TILE, 0:IDX_HEAD_DIM] = qh_i8
     return qr_hadamard_i8, qr_hadamard_scale_dq
+
+
+@pl.jit.inline(auto_scope=False)
+def native_indexer_weights_reduce_stage(
+    weights_partial: pl.Tensor[[WEIGHTS_PARTIAL_ROWS_DYN, IDX_N_HEADS], pl.FP32],
+    weights: pl.Tensor[[WEIGHTS_ROWS_DYN, IDX_N_HEADS], pl.FP32],
+    tokens: pl.Scalar[pl.INDEX],
+    worker_id: pl.Scalar[pl.INDEX],
+    WORKERS: pl.constexpr,
+):
+    """AIV：等当前M16的四个投影split，原左折叠后乘模型scale，保持FP32给score消费。"""
+    row_blocks = (tokens + MM_ROW_TILE - 1) // MM_ROW_TILE
+    t_pad = row_blocks * MM_ROW_TILE
+    for w_rb in pl.range(worker_id, row_blocks, WORKERS):
+        w_r0 = w_rb * MM_ROW_TILE
+        w_sum = weights_partial[w_r0 : w_r0 + MM_ROW_TILE, :]
+        # 与原核相同的((p0+p1)+p2)+p3；不把四项改成树形归约。
+        for kb in pl.unroll(1, WEIGHTS_OK):
+            partial_r0 = kb * t_pad + w_r0
+            w_sum = pl.add(w_sum, weights_partial[partial_r0 : partial_r0 + MM_ROW_TILE, :])
+        # Native线性层与随后乘系数各自输出BF16；保留原四split左折叠。
+        linear = pl.cast(pl.cast(w_sum, pl.BF16, mode="rint"), pl.FP32)
+        scaled = pl.cast(pl.mul(linear, WEIGHTS_SCALE), pl.BF16, mode="rint")
+        weights[w_r0 : w_r0 + MM_ROW_TILE, :] = pl.cast(scaled, pl.FP32)
+    return weights

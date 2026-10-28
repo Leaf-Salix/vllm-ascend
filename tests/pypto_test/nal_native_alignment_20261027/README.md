@@ -831,7 +831,7 @@ amax、scale、reciprocal、rint、输出dtype及外围phase等待/发布不变�
 
 接入后57参数生产根和80参数观测根均无设备编译、ABI加载通过；
 生产v14（`task_20261028_130611_356197120433`，205.61秒）完成，8边界FULL/eager为0，
-37项guards通过。Native观测v14（`task_20261028_131107_37720968718`）已提交等待设备，
+37项guards通过。在`a9220849`提交时，Native观测v14（`task_20261028_131107_37720968718`）仍等待设备，
 尚不把普通query量化的单因素结果推广为完整流水通过。
 
 详细Native控制臂新增只读权重hook：实际`weights_proj`的输入/输出，以及实际
@@ -840,3 +840,76 @@ amax、scale、reciprocal、rint、输出dtype及外围phase等待/发布不变�
 最小控制臂与详细臂的8个外部边界及guards仍必须通过。
 该观测仅保存真实Native中间值，不通过除系数反推投影，也尚未单独验收PTO原始权重投影。
 证据见[evidence/spmd-production-v14/result.json](evidence/spmd-production-v14/result.json)。
+
+### 普通query量化完整接入复核及下一首差
+
+观测v14（`task_20261028_131107_37720968718`，208.48秒）已完成并释放设备。
+21项源码、同输入、生产8边界等价、FULL/eager、guards及Native详细hook控制全部通过。
+
+| 同一8K/B4/T24边界 | 修正前不同元素 | 完整接入后不同元素 |
+| --- | ---: | ---: |
+| query RoPE BF16 | 31209 | **0** |
+| query Hadamard线性BF16 | 首差前未知 | **0** |
+| QLI query INT8 | 18496 | **0** |
+| QLI query scale FP16 | 1377（独立原臂） | **0** |
+| 原有24个前缀／完整cache检查点 | 0 | **0** |
+| 权重投影输入 | 新增观测 | **0** |
+| actual prepare consumer与QLI kwargs | 新增控制 | **0** |
+| QLI weights FP16 | 首差后未验收 | **1360** |
+
+权重FP16首差的最大绝对差为`0.00018310546875`。当前未继续验收TopK和最终输出，
+更没有宣称该新分支整模型token通过。Native权重projection/scaled/consumer真实中间值
+已保存在v14保存件；下一步仅对同输入、正式权重的原四split投影做正向导出，
+先验证sum落BF16，再测试两次BF16边界。投影先差则停止，不反除系数、不同时改K次序。
+证据见[evidence/spmd-observe-v14/result.json](evidence/spmd-observe-v14/result.json)。
+
+### 权重投影／舍入单因素
+
+`weightproj-boundaries-v1`（`task_20261028_133215_5755179003`，32.01秒）通过。
+两个ABI5根先无设备编译。正式权重
+`layers.4.attn.indexer.weights_proj.weight`的原始BF16 SHA256为
+`b46991cf5a8a032ec111ede4af54fe7df5e54fa32d167bedc315fca869d44a5e`。
+同一真实hook输入配合该权重，NZ29 `F.linear`重放先逐bit复现实际Native投影、
+乘模型系数后的BF16、最终FP16三组金值，才开始PTO对拍。
+
+| 保持原四份K1024、原FP32左折叠 | 投影落BF16差异 | 最终FP16权重差异 |
+| --- | ---: | ---: |
+| 原路径；同时必须复现生产FP32 head_weights | **0** | 1360 |
+| 补投影及乘系数输出的两次BF16 | **0** | **0** |
+
+修正臂缩放BF16也与真实Native prepare输入逐bit一致；FULL/eager、回放前poison以及
+partials/raw/weights三个owner的guards均通过。原始投影是正向导出的sum，
+没有用除系数反推。投影一旦首差，本脚本会在原臂立即停止，不能用后续cast掩盖它。
+本次投影已经通过，因此**没有引入旧精度分支的Native K次序改写**。
+
+复现使用`compile_rms.py`的`weightproj-0/1`及
+`--env WEIGHTPROJ_PROBE_REFERENCE=<v14-equivalent>/observation.pt`，
+`run_rms.sh <新标签> weightproj`；固定实际T24、同一正式层权重及观测输入。
+结果目录`projection.pt`保存原始partial、正向投影sum、scaled与Native金值。
+证据见[evidence/weightproj-boundaries-v1/result.json](evidence/weightproj-boundaries-v1/result.json)。
+
+生产接入仅以新Native reduce替换一处调用，保留原四split投影、左折叠、phase owner、
+等待与发布，以及55/57外部接口、80参数观测入口。该权重producer位于普通/fused分支之前，
+两类后继会读到新权重；当前只验收普通query路径，不能宣称fused整体精度已通过。
+接入后的完整生产/Native结果另行追加，单因素结果不代替完整流水验收。
+
+### 权重完整接入结果：TopK已对齐，继续定位输出
+
+生产v15（`task_20261028_134150_95071215393`，201.56秒）完成，8个外部边界
+FULL/eager逐bit一致，37项guards通过。Native观测v15
+（`task_20261028_134604_112067922027`，212.17秒）完成并释放设备：
+21项源码、同输入、生产等价、FULL/eager及最小/详细Native hook控制均通过。
+
+| 8K/B4/T24实际Native消费边界 | 不同元素 |
+| --- | ---: |
+| 前缀、六组完整cache、query及其消费者FP16 scale | **0** |
+| QLI weights FP16 | **0**（此前1360） |
+| QLI TopK | **0** |
+| 完整HC-post输出 | **44712** |
+
+最终输出最大绝对差`0.015625`，因此本轮精度仍未通过。当前证据已排除这组输入下的
+TopK选点差异，下一步只读抓取实际Native O-proj入口heads及输出，
+与PTO内部packed heads对拍，先区分attention与输出投影，不扩大配置或宣称整模型token一致。
+以上是单层正式权重、合成hidden/history的定位结果，不能作为新分支整模型交付验收。
+证据见[evidence/spmd-observe-v15/result.json](evidence/spmd-observe-v15/result.json)
+及[evidence/spmd-production-v15/result.json](evidence/spmd-production-v15/result.json)。

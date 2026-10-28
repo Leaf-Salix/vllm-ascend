@@ -75,11 +75,12 @@ from .hc_native_projection_stages import hc_linear_reduce, hc_pack_input_from_bf
 from .hc_stages import hc_comb_range, hc_gates_range, hc_mix_norm_range, hc_widen_rms_range
 from .indexer_cache_stages import indexer_compact_quant_cache_stage
 from .indexer_group_stages import indexer_group_plan_stage, indexer_head_coefficients_stage
-from .indexer_native_query_stages import native_indexer_query_dequant_rope_stage, native_indexer_query_quant_stage
-from .indexer_publish_stages import indexer_pair_publish_stage
-from .indexer_query_stages import (
-    indexer_weights_reduce_stage,
+from .indexer_native_query_stages import (
+    native_indexer_query_dequant_rope_stage,
+    native_indexer_query_quant_stage,
+    native_indexer_weights_reduce_stage,
 )
+from .indexer_publish_stages import indexer_pair_publish_stage
 from .indexer_scale_layout_stages import indexer_scale_layout_plan_stage
 from .indexer_scale_plan_stages import indexer_scale_page_commit_stage, indexer_scale_page_plan_stage
 from .indexer_score_stages import indexer_score_vector_lane_stage
@@ -681,7 +682,7 @@ def vector_schedule(
     signal = publish_phase(signal, PHASE_IDX_QUERY_ROPE, core, CORES, generation)
     weights_tasks = ((tokens + 15) // 16) * 4
     signal = wait_row_owners(signal, PHASE_WEIGHTS_PROJECT, CORES, generation, 0, weights_tasks, 1, GROUPS, 0, 1)
-    head_weights = indexer_weights_reduce_stage(weights_partial, head_weights, tokens, worker, VECTORS)
+    head_weights = native_indexer_weights_reduce_stage(weights_partial, head_weights, tokens, worker, VECTORS)
     signal = publish_phase(signal, PHASE_WEIGHTS, core, CORES, generation)
     if COOPERATIVE_PREFIX:
         main_pooled, main_state, main_normed, main_debug, main_cache, signal = main_compressor_vector_stage(
