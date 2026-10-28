@@ -695,3 +695,21 @@ Native完整共享cache allocation重复一致，逐次guards通过。至此18�
 **尚未比较后续Indexer query、权重系数、TopK、sparse attention、O-proj、HC-post，
 不能宣称整个新CSA或整模型token已验收，也没有本分支的新性能结论。**
 证据见[evidence/spmd-observe-v10/result.json](evidence/spmd-observe-v10/result.json)。
+
+### 实际Native QLI消费者的首差（2026-10-28）
+
+`42dc9ca7`的生产算术不变，观测根新增query INT8和FP32 scale两个scratch，
+76参数CPU编译及ABI加载通过。观测v11
+（`task_20261028_114355_35221432436`，207.24秒）实际执行Native完整attention半层：
+
+- 最小hook只取QLI返回TopK；详细hook在实际消费者前clone全部kwargs。
+- 两遍都恢复相同cache，QLI参数和`return_value=False`原样传递，finally恢复op。
+- Native控制/详细hook的8个外部输出逐bit一致，guards通过。
+- 不调用PTO service，wrapper runtime明确要求None。
+- 原18项模块边界通过后，实际Native full-forward的6类cache与PTO replay也全部逐bit一致。
+
+随后首差为实际QLI的query INT8：**23155个元素不同**。Native消费者FP16 scale
+尚未比较，权重、TopK及整层输出不继续验收。累计24个前缀/cache检查点已通过；
+该任务不能作为新分支完整CSA或整模型token通过证据。
+下一步只对该query链hook实际投影落BF16、原地RoPE前后、Hadamard线性BF16及缩放BF16，
+与PTO accumulator/RoPE/Had逐级比较，先定位最早舍入差异。

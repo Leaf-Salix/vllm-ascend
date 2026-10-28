@@ -36,7 +36,7 @@ out = Path(sys.argv[1])
 record = {
     "complete": False,
     "pass": False,
-    "scope": "complete SPMD; Native eager prefix/Indexer norm/Hadamard/cache; not whole-model tokens",
+    "scope": "complete SPMD; Native eager prefix/cache/actual QLI query; not whole-model tokens",
     "history": 8192,
     "lengths": [6, 6, 6, 6],
     "precision": {},
@@ -202,13 +202,15 @@ try:
             "idx_had": (32, 128),
             "idx_scales": (32, 1),
             "idx_debug": (24, 128),
+            "idx_query_i8": (1536, 128),
+            "idx_query_scale": (1536, 1),
         }
         observed = {
             name: torch.full(
                 shape,
                 -37,
                 dtype=torch.int8
-                if name == "qr"
+                if name in ("qr", "idx_query_i8")
                 else torch.int32
                 if name == "q_proj"
                 else torch.bfloat16
@@ -616,6 +618,32 @@ try:
         assert record["indexer_native_scatter_repeat"]["bit_equal"]
         check("indexer_key_cache", replay["indexer.0"], idx_views[1][0])
         check("indexer_scale_cache", replay["indexer.1"], idx_views[1][1])
+        # Native gold now comes from the actual full forward consumer. Keep the
+        # diagnostic import after Native initialization, as with device_op above.
+        from native_qli_capture import capture_native_qli
+
+        native_states, native_guards, qli_inputs = capture_native_qli(layer, f, config)
+        record["native_qli_guards"] = native_guards
+        record["native_qli_hook_control"] = {
+            name: metric(value, native_states[0][name]) for name, value in native_states[1].items()
+        }
+        record["native_qli_options"] = {
+            name: value for name, value in qli_inputs.items() if not isinstance(value, torch.Tensor)
+        }
+        payload["native_qli_inputs"] = qli_inputs
+        payload["native_full_output"] = native_states[1]["x_out"]
+        payload["native_full_topk"] = native_states[1]["idx_topk"]
+        payload["observed_idx_query_i8"] = observed["idx_query_i8"].cpu()
+        payload["observed_idx_query_scale"] = observed["idx_query_scale"].cpu()
+        save()
+        assert all(row["status"] == "PASS" for group in native_guards for row in group.values())
+        assert all(row["bit_equal"] for row in record["native_qli_hook_control"].values())
+        for name in ("swa.0", "state.0", "compressed.0", "indexer_state.0", "indexer.0", "indexer.1"):
+            check("native_forward_" + name, replay[name], native_states[1][name])
+        qli_query, qli_scale = qli_inputs["query"], qli_inputs["query_dequant_scale"]
+        assert qli_query.dtype == torch.int8 and qli_scale.dtype == torch.float16
+        check("qli_query_int8", observed["idx_query_i8"].reshape_as(qli_query), qli_query)
+        check("qli_query_scale_fp16", observed["idx_query_scale"].half().reshape_as(qli_scale), qli_scale)
         record["pass"] = True
         record["complete"] = True
 except SystemExit as error:
