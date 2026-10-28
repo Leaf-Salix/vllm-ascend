@@ -21,7 +21,15 @@ out = Path(sys.argv[1])
 out.mkdir(exist_ok=False)
 assert not torch_npu.npu.is_initialized()
 kind = sys.argv[2] if len(sys.argv) > 2 else "rms"
-if kind.startswith("indexproj-"):
+if kind.startswith("idxquery-rope-"):
+    from idxquery_kernels import idxquery_rope_arm
+
+    program = idxquery_rope_arm.specialize(MODE=int(kind.removeprefix("idxquery-rope-")))
+elif kind.startswith("idxquery-dequant-"):
+    from idxquery_kernels import idxquery_dequant_arm
+
+    program = idxquery_dequant_arm.specialize(COMBINED=bool(int(kind.removeprefix("idxquery-dequant-"))))
+elif kind.startswith("indexproj-"):
     from indexproj_kernels import indexproj_arm
 
     program = indexproj_arm.specialize(MODE=int(kind.removeprefix("indexproj-")))

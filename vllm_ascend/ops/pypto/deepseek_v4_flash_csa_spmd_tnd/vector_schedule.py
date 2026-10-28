@@ -75,9 +75,9 @@ from .hc_native_projection_stages import hc_linear_reduce, hc_pack_input_from_bf
 from .hc_stages import hc_comb_range, hc_gates_range, hc_mix_norm_range, hc_widen_rms_range
 from .indexer_cache_stages import indexer_compact_quant_cache_stage
 from .indexer_group_stages import indexer_group_plan_stage, indexer_head_coefficients_stage
+from .indexer_native_query_stages import native_indexer_query_dequant_rope_stage
 from .indexer_publish_stages import indexer_pair_publish_stage
 from .indexer_query_stages import (
-    indexer_query_dequant_rope_stage,
     indexer_query_quant_stage,
     indexer_weights_reduce_stage,
 )
@@ -668,7 +668,7 @@ def vector_schedule(
         )
     # 前段QR及RoPE已等待过；Indexer INT8投影按32个N256列块归24个AIC。
     signal = wait_row_owners(signal, PHASE_IDX_QUERY_PROJECT, CORES, generation, 0, 32, 1, GROUPS, 0, 1)
-    idx_query_rope = indexer_query_dequant_rope_stage(
+    idx_query_rope = native_indexer_query_dequant_rope_stage(
         qr_scale,
         idx_wq_b_scale,
         rope_cos,
@@ -677,6 +677,7 @@ def vector_schedule(
         idx_query_rope,
         worker,
         VECTORS,
+        2,
     )
     signal = publish_phase(signal, PHASE_IDX_QUERY_ROPE, core, CORES, generation)
     weights_tasks = ((tokens + 15) // 16) * 4

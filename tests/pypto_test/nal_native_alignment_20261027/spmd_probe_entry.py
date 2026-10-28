@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: F403, F405 -- Keep the diagnostic root globals identical to its production source.
-"""从生产debug根仅替换19个内部分配为外部观测缓冲；算术和调度调用相同。
+"""从生产debug根仅替换22个内部分配为外部观测缓冲；算术和调度调用相同。
 
 使用前必须证明该根与未经观测的生产debug根的全部8个外部输出逐字节一致。
 """
@@ -87,6 +87,9 @@ def spmd_stage_probe(
     debug_idx_debug: pl.InOut[pl.Tensor[[T, 128], pl.FP32]],
     debug_idx_query_i8: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.INT8]],
     debug_idx_query_scale: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 1], pl.FP32]],
+    debug_idx_query_acc: pl.InOut[pl.Tensor[[IDX_PROJ_ROWS, 8192], pl.INT32]],
+    debug_idx_query_rope: pl.InOut[pl.Tensor[[IDX_ROPE_ROWS, 8192], pl.BF16]],
+    debug_idx_query_had: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]],
     QUERY_GROUP: pl.constexpr,
     QK_PANEL: pl.constexpr,
     SCORE_TILE: pl.constexpr,
@@ -172,9 +175,9 @@ def spmd_stage_probe(
     idx_had = debug_idx_had
     idx_scales = debug_idx_scales
     idx_debug = debug_idx_debug
-    idx_query_acc = pl.create_tensor([p64, 8192], dtype=pl.INT32)
-    idx_query_rope = pl.create_tensor([p16, 8192], dtype=pl.BF16)
-    idx_query_had = pl.create_tensor([t * 64, 128], dtype=pl.FP32)
+    idx_query_acc = debug_idx_query_acc
+    idx_query_rope = debug_idx_query_rope
+    idx_query_had = debug_idx_query_had
     idx_query_i8 = debug_idx_query_i8
     idx_query_scale = debug_idx_query_scale
     weights_partial = pl.create_tensor([p16 * 4, 64], dtype=pl.FP32)
@@ -267,9 +270,9 @@ def spmd_stage_probe(
             idx_scales_after,
             idx_debug_after,
             idx_cache,
-            idx_query_acc,
-            idx_query_rope,
-            idx_query_had,
+            idx_query_acc_after,
+            idx_query_rope_after,
+            idx_query_had_after,
             idx_query_i8_after,
             idx_query_scale_after,
             weights_partial,

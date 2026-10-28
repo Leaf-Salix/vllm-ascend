@@ -36,7 +36,7 @@ out = Path(sys.argv[1])
 record = {
     "complete": False,
     "pass": False,
-    "scope": "complete SPMD; Native eager prefix/cache/actual QLI query; not whole-model tokens",
+    "scope": "complete SPMD; Native eager prefix/cache/actual indexer query stages; not whole-model tokens",
     "history": 8192,
     "lengths": [6, 6, 6, 6],
     "precision": {},
@@ -150,6 +150,7 @@ try:
             "main_native_projection_stages.py",
             "indexer_native_projection_stages.py",
             "indexer_cache_stages.py",
+            "indexer_native_query_stages.py",
         )
     }
     with native_session(config, 0), torch.inference_mode():
@@ -204,6 +205,9 @@ try:
             "idx_debug": (24, 128),
             "idx_query_i8": (1536, 128),
             "idx_query_scale": (1536, 1),
+            "idx_query_acc": (64, 8192),
+            "idx_query_rope": (32, 8192),
+            "idx_query_had": (1536, 128),
         }
         observed = {
             name: torch.full(
@@ -212,9 +216,9 @@ try:
                 dtype=torch.int8
                 if name in ("qr", "idx_query_i8")
                 else torch.int32
-                if name == "q_proj"
+                if name in ("q_proj", "idx_query_acc")
                 else torch.bfloat16
-                if name in ("mixed", "normed", "kv", "q", "idx_normed")
+                if name in ("mixed", "normed", "kv", "q", "idx_normed", "idx_query_rope")
                 else torch.float32,
                 device="npu",
             )
@@ -298,6 +302,8 @@ try:
         }
 
         def observed_domain(name, value):
+            if name in ("idx_query_acc", "idx_query_rope"):
+                return value[:24]
             if name in ("idx_normed", "idx_had", "idx_scales"):
                 return value[: idx_slots_for_domain.shape[0]][valid_compact]
             if name in ("idx_pooled", "idx_debug"):
@@ -622,7 +628,7 @@ try:
         # diagnostic import after Native initialization, as with device_op above.
         from native_qli_capture import capture_native_qli
 
-        native_states, native_guards, qli_inputs = capture_native_qli(layer, f, config)
+        native_states, native_guards, qli_inputs, query_stages = capture_native_qli(layer, f, config)
         record["native_qli_guards"] = native_guards
         record["native_qli_hook_control"] = {
             name: metric(value, native_states[0][name]) for name, value in native_states[1].items()
@@ -631,6 +637,11 @@ try:
             name: value for name, value in qli_inputs.items() if not isinstance(value, torch.Tensor)
         }
         payload["native_qli_inputs"] = qli_inputs
+        payload["native_indexer_query_stages"] = query_stages
+        payload["indexer_query_weight_scale_native"] = impl.inderxer_wq_b.weight_scale.cpu()
+        payload["indexer_query_weight_scale_prepared"] = prepared.buffers["idx_wq_b_scale"].cpu()
+        for name in ("idx_query_acc", "idx_query_rope", "idx_query_had"):
+            payload["observed_" + name] = observed[name].cpu()
         payload["native_full_output"] = native_states[1]["x_out"]
         payload["native_full_topk"] = native_states[1]["idx_topk"]
         payload["observed_idx_query_i8"] = observed["idx_query_i8"].cpu()
@@ -640,6 +651,10 @@ try:
         assert all(row["bit_equal"] for row in record["native_qli_hook_control"].values())
         for name in ("swa.0", "state.0", "compressed.0", "indexer_state.0", "indexer.0", "indexer.1"):
             check("native_forward_" + name, replay[name], native_states[1][name])
+        check(
+            "indexer_query_rope", observed["idx_query_rope"][:24].reshape_as(query_stages["rope"]), query_stages["rope"]
+        )
+        check("indexer_query_hadamard_bf16", observed["idx_query_had"].bfloat16(), query_stages["hadamard_linear"])
         qli_query, qli_scale = qli_inputs["query"], qli_inputs["query_dequant_scale"]
         assert qli_query.dtype == torch.int8 and qli_scale.dtype == torch.float16
         check("qli_query_int8", observed["idx_query_i8"].reshape_as(qli_query), qli_query)

@@ -713,3 +713,60 @@ Native完整共享cache allocation重复一致，逐次guards通过。至此18�
 该任务不能作为新分支完整CSA或整模型token通过证据。
 下一步只对该query链hook实际投影落BF16、原地RoPE前后、Hadamard线性BF16及缩放BF16，
 与PTO accumulator/RoPE/Had逐级比较，先定位最早舍入差异。
+
+### Indexer query 内部首差：反量化及 RoPE（2026-10-28）
+
+79参数观测v12（`task_20261028_115939_26307930749`，201.76秒）保持生产算术不变，
+先通过前24个检查点和Native hook控制，再取得实际Native投影BF16、原地RoPE前后、
+Hadamard线性BF16及缩放BF16。首差前移至query RoPE：31209个BF16元素不同，
+其中NoPE区1个、旋转区31208个；后续边界不继续验收。
+
+同一保存的INT32 accumulator、逐行scale及无损加宽的Native通道scale在CPU复核：
+
+| 投影落BF16的表达式 | 与实际Native投影不同元素数 |
+| --- | ---: |
+| `(acc.float() * row_scale) * channel_scale` | 1 |
+| `acc.float() * (row_scale * channel_scale)` | 0 |
+
+此外，实际Native的量化投影在RoPE前已输出BF16，原PTO helper在FP32上直接做RoPE，
+直到RoPE后才舍入。这一阶段建立独立候选，保持原M8、四head、pipeline、尾行有效域、
+RoPE公式及外围发布/等待，只隔离scale结合顺序和RoPE前BF16边界。
+CPU保存件分析不替代NPU候选验收；必须依次满足原臂复现生产、实际Native RoPE重跑一致、
+FULL/eager一致、guards通过以及修正臂与Native逐bit一致后，才接入生产调用点。
+证据见[evidence/spmd-observe-v12/result.json](evidence/spmd-observe-v12/result.json)及
+[evidence/query-dequant-cpu-order-v1/result.json](evidence/query-dequant-cpu-order-v1/result.json)。
+
+### query 单因素设备验证与接入
+
+`idxquery-boundaries-v1`（`task_20261028_122311_134649612792`，35.23秒）通过。
+使用v12保存的实际Native query投影及同一INT32 accumulator，先重跑实际Native
+`inplace_partial_rotary_mul`确认金值0差异，再运行以下FULL graph单因素：
+
+| 同一query算术切片 | 投影BF16不同元素 | RoPE后BF16不同元素 |
+| --- | ---: | ---: |
+| 原连续乘scale | 1 | 31209 |
+| 只先合并scale | 0 | 31208 |
+| 合并scale，且RoPE前先落BF16 | 0 | **0** |
+
+原RoPE臂与生产保存件逐bit一致，排除独立入口改变误差的假象。全部臂FULL/eager及
+输出guards通过。T1/17/23/32/33/48/63的保存有效行重复域也全部0差异；
+这些额外形状只验证逐元素处理和尾块，不代表新GEMM形状或整层真实TND资格。
+证据见[evidence/idxquery-boundaries-v1/result.json](evidence/idxquery-boundaries-v1/result.json)。
+
+复现：先以当前79参数观测脚本在修正前生产算术（`42dc9ca7`）取得v12等价保存件；
+随后source既定env，使用公共bootstrap分别运行`compile_rms.py`的
+`idxquery-dequant-0/1`、`idxquery-rope-0/1/2`，输出必须为新目录，ABI分别4/6且不初始化NPU。
+再提交原限时单卡命令，增加
+`--env IDXQUERY_PROBE_REFERENCE=<v12-equivalent>/observation.pt`，
+`run_rms.sh <新标签> idxquery`。脚本会复用实际Native BF16输入和原地RoPE，不使用手写数学金值。
+
+接入仅改`vector_schedule`一个调用点，固定新helper的MODE2；原先query投影等待、
+RoPE发布、M8/四head、pipeline、所有尾有效域和55/57外部ABI不变。
+新增helper加入生产/观测SHA清单，现为21项。无设备编译和完整生产/Native复核另行记录，
+单因素结果不代替后续Hadamard、量化或完整CSA精度。
+
+接入后的57参数生产根、79参数观测根均已无设备编译并加载ABI，NPU未初始化；
+凭据位于`evidence/cpu-query-spmd-debug-v13`及`evidence/cpu-query-spmd-probe-v13`。
+完整生产复测`task_20261028_122941_161574916148`已提交，当前等待设备；
+因此本次提交只确认单因素数值修正和完整入口可编译，**尚不把接入后完整流水记为通过**。
+结果回来后会追加生产/观测证据，不覆盖历史记录。
