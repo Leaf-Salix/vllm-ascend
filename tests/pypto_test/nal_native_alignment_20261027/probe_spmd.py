@@ -154,6 +154,7 @@ try:
             "attention_native_stream_stages.py",
             "attention_plan_stages.py",
             "output_projection_a_stages.py",
+            "output_projection_b_stages.py",
         )
     }
     with native_session(config, 0), torch.inference_mode():

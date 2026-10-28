@@ -56,7 +56,7 @@
 Native数值资格
     T24、M128/N128路径按已对拍的group/N128半程起点累加16个K256块。
     保留原64个logical任务及owner、原动态packed步长和全部完成信号；
-    其它T及布局继续原路径。这里只修WO-A累加顺序，不改后续分组量化。
+    其它T及布局继续原路径。T24后续恢复BF16边界及全8192列量化；其它T继续原分组量化。
 """
 
 import pypto.language as pl
@@ -343,6 +343,51 @@ def o_projection_a_stage_nz(
 
 
 @pl.jit.inline(auto_scope=False)
+def _native_t24_output_quant_groups(
+    o_r_pad: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32],
+    o_r_i8_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.INT8]],
+    act_scale_dq: pl.InOut[pl.Tensor[[O_GROUPS, SCALE_ROWS_DYN], pl.FP32]],
+    worker_id: pl.Scalar[pl.INDEX],
+    WORKERS: pl.constexpr,
+    ROW_TILE: pl.constexpr,
+    group_begin: pl.Scalar[pl.INDEX],
+    group_end: pl.Scalar[pl.INDEX],
+):
+    """已资格T24：先等全组O_A；整行BF16量化，保留原group任务writer。"""
+    for group in pl.range(worker_id, O_GROUPS, WORKERS):
+        if group >= group_begin and group < group_end:
+            for row in pl.range(0, 24, QUANT_TOKEN_TILE):
+                first = pl.cast(pl.cast(pl.load(o_r_pad, [row, 0], [8, O_LORA]), pl.BF16, mode="rint"), pl.FP32)
+                amax = pl.row_max(pl.abs(first), pl.create_tile([8, O_LORA], dtype=pl.FP32))
+                for source_group in pl.range(1, O_GROUPS):
+                    chunk = pl.cast(
+                        pl.cast(pl.load(o_r_pad, [row, source_group * O_LORA], [8, O_LORA]), pl.BF16, mode="rint"),
+                        pl.FP32,
+                    )
+                    amax = pl.maximum(amax, pl.row_max(pl.abs(chunk), pl.create_tile([8, O_LORA], dtype=pl.FP32)))
+                dequant = pl.mul(amax, 1.0 / INT8_SCALE_MAX)
+                denominator = pl.add(amax, 0.0)
+                for lane in pl.range(8):
+                    if pl.read(denominator, [lane, 0]) == 0.0:
+                        pl.write(denominator, [lane, 0], 1.0)
+                multiplier = pl.div(pl.add(pl.mul(amax, 0.0), INT8_SCALE_MAX), denominator)
+                source = pl.cast(
+                    pl.cast(pl.load(o_r_pad, [row, group * O_LORA], [8, O_LORA]), pl.BF16, mode="rint"), pl.FP32
+                )
+                integer = pl.cast(pl.row_expand_mul(source, multiplier), pl.INT32, mode="rint")
+                half = pl.cast(integer, pl.FP16, mode="round")
+                pl.store(pl.cast(half, pl.INT8, mode="trunc"), [row, group * O_LORA], o_r_i8_pad)
+                pl.store(pl.reshape(dequant, [1, 8]), [group, row], act_scale_dq)
+            padded_rows = (24 + ROW_TILE - 1) // ROW_TILE * ROW_TILE
+            for row in pl.range(24, padded_rows, QUANT_TOKEN_TILE):
+                zero = pl.cast(pl.tile.full([8, O_LORA], dtype=pl.FP16, value=0.0), pl.INT8, mode="trunc")
+                pl.store(
+                    pl.set_validshape(zero, pl.min(8, padded_rows - row), O_LORA), [row, group * O_LORA], o_r_i8_pad
+                )
+    return o_r_i8_pad, act_scale_dq
+
+
+@pl.jit.inline(auto_scope=False)
 def o_projection_groups_quant_stage(
     o_r_pad: pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32],
     o_r_i8_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.INT8]],
@@ -354,53 +399,60 @@ def o_projection_groups_quant_stage(
     group_begin: pl.Scalar[pl.INDEX],
     group_end: pl.Scalar[pl.INDEX],
 ):
-    """量化动态组区间；尾零属于该组的最后活动块，必须先于本组通知完成。"""
-    task_rows = (tokens + QUANT_TASK_T_TILE - 1) // QUANT_TASK_T_TILE
-    padded_rows = (tokens + ROW_TILE - 1) // ROW_TILE * ROW_TILE
-    # T=0时循环为空，不计算负尾owner；每个group的活动行及padding各只有一个写者。
-    group_first = group_begin * task_rows
-    group_limit = group_end * task_rows
-    first = worker_id + ((group_first + WORKERS - 1 - worker_id) // WORKERS) * WORKERS
-    for logical in pl.range(first, group_limit, WORKERS):
-        g = logical // task_rows
-        block = logical % task_rows
-        col_g = g * O_LORA
-        quant_start = block * QUANT_TASK_T_TILE
-        # 保留原32行任务内部的8行双级流水，不跨组取amax；尾行不读FP32 pad。
-        for qt in pl.pipeline(quant_start, pl.min(quant_start + QUANT_TASK_T_TILE, tokens), QUANT_TOKEN_TILE, stage=2):
-            rows = pl.min(QUANT_TOKEN_TILE, tokens - qt)
-            oc_amax = pl.load(o_r_pad, [qt, col_g], [QUANT_TOKEN_TILE, O_LORA], valid_shape=[rows, O_LORA])
-            reduce_tmp = pl.tile.create([QUANT_TOKEN_TILE, O_LORA], dtype=pl.FP32)
-            g_row_max = pl.reshape(
-                pl.set_validshape(pl.row_max(pl.abs(oc_amax), reduce_tmp), rows, 1), [1, QUANT_TOKEN_TILE]
-            )
-            # row_max转行后，所有常数与算术结果均保留[1,rows]，不能恢复成8个有效值。
-            g_amax_floor = pl.set_validshape(
-                pl.tile.full([1, QUANT_TOKEN_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS), 1, rows
-            )
-            g_amax = pl.set_validshape(pl.maximum(g_amax_floor, g_row_max), 1, rows)
-            g_scale_num = pl.set_validshape(
-                pl.tile.full([1, QUANT_TOKEN_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX), 1, rows
-            )
-            g_sq_row = pl.set_validshape(pl.div(g_scale_num, g_amax), 1, rows)
-            # 与canonical一致：dequant尺度为amax乘1/127，不改成recip(127/amax)。
-            dequant_scale = pl.set_validshape(pl.mul(g_amax, 1.0 / INT8_SCALE_MAX), 1, rows)
-            pl.store(dequant_scale, [g, qt], act_scale_dq)
-            g_sq_col = pl.reshape(g_sq_row, [QUANT_TOKEN_TILE, 1])
-            oc_q = pl.load(o_r_pad, [qt, col_g], [QUANT_TOKEN_TILE, O_LORA], valid_shape=[rows, O_LORA])
-            oq_scaled = pl.set_validshape(pl.row_expand_mul(oc_q, g_sq_col), rows, O_LORA)
-            oq_i32 = pl.set_validshape(pl.cast(oq_scaled, target_type=pl.INT32, mode="rint"), rows, O_LORA)
-            oq_half = pl.set_validshape(pl.cast(oq_i32, target_type=pl.FP16, mode="round"), rows, O_LORA)
-            oq_i8 = pl.set_validshape(pl.cast(oq_half, target_type=pl.INT8, mode="trunc"), rows, O_LORA)
-            pl.store(oq_i8, [qt, col_g], o_r_i8_pad)
-        # 只最后活动32行块有权填本组尾零。零填不读o_r_pad，不写scale尾部，
-        # 并在同一阶段发布之前完成；O_B整RB读取不可仅依赖实际行的quant完成。
-        if quant_start + QUANT_TASK_T_TILE >= tokens:
-            for zt in pl.range(tokens, padded_rows, QUANT_TOKEN_TILE):
-                zero_half = pl.tile.full([QUANT_TOKEN_TILE, O_LORA], dtype=pl.FP16, value=0.0)
-                zero_i8 = pl.cast(zero_half, target_type=pl.INT8, mode="trunc")
-                zero_rows = pl.min(QUANT_TOKEN_TILE, padded_rows - zt)
-                pl.store(pl.set_validshape(zero_i8, zero_rows, O_LORA), [zt, col_g], o_r_i8_pad)
+    """T24全行BF16量化；其它T保留按组量化。调用方按分支等待足够O_A列。"""
+    if tokens == 24:
+        o_r_i8_pad, act_scale_dq = _native_t24_output_quant_groups(
+            o_r_pad, o_r_i8_pad, act_scale_dq, worker_id, WORKERS, ROW_TILE, group_begin, group_end
+        )
+    else:
+        task_rows = (tokens + QUANT_TASK_T_TILE - 1) // QUANT_TASK_T_TILE
+        padded_rows = (tokens + ROW_TILE - 1) // ROW_TILE * ROW_TILE
+        # T=0时循环为空，不计算负尾owner；每个group的活动行及padding各只有一个写者。
+        group_first = group_begin * task_rows
+        group_limit = group_end * task_rows
+        first = worker_id + ((group_first + WORKERS - 1 - worker_id) // WORKERS) * WORKERS
+        for logical in pl.range(first, group_limit, WORKERS):
+            g = logical // task_rows
+            block = logical % task_rows
+            col_g = g * O_LORA
+            quant_start = block * QUANT_TASK_T_TILE
+            # 保留原32行任务内部的8行双级流水，不跨组取amax；尾行不读FP32 pad。
+            for qt in pl.pipeline(
+                quant_start, pl.min(quant_start + QUANT_TASK_T_TILE, tokens), QUANT_TOKEN_TILE, stage=2
+            ):
+                rows = pl.min(QUANT_TOKEN_TILE, tokens - qt)
+                oc_amax = pl.load(o_r_pad, [qt, col_g], [QUANT_TOKEN_TILE, O_LORA], valid_shape=[rows, O_LORA])
+                reduce_tmp = pl.tile.create([QUANT_TOKEN_TILE, O_LORA], dtype=pl.FP32)
+                g_row_max = pl.reshape(
+                    pl.set_validshape(pl.row_max(pl.abs(oc_amax), reduce_tmp), rows, 1), [1, QUANT_TOKEN_TILE]
+                )
+                # row_max转行后，所有常数与算术结果均保留[1,rows]，不能恢复成8个有效值。
+                g_amax_floor = pl.set_validshape(
+                    pl.tile.full([1, QUANT_TOKEN_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS), 1, rows
+                )
+                g_amax = pl.set_validshape(pl.maximum(g_amax_floor, g_row_max), 1, rows)
+                g_scale_num = pl.set_validshape(
+                    pl.tile.full([1, QUANT_TOKEN_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX), 1, rows
+                )
+                g_sq_row = pl.set_validshape(pl.div(g_scale_num, g_amax), 1, rows)
+                # 与canonical一致：dequant尺度为amax乘1/127，不改成recip(127/amax)。
+                dequant_scale = pl.set_validshape(pl.mul(g_amax, 1.0 / INT8_SCALE_MAX), 1, rows)
+                pl.store(dequant_scale, [g, qt], act_scale_dq)
+                g_sq_col = pl.reshape(g_sq_row, [QUANT_TOKEN_TILE, 1])
+                oc_q = pl.load(o_r_pad, [qt, col_g], [QUANT_TOKEN_TILE, O_LORA], valid_shape=[rows, O_LORA])
+                oq_scaled = pl.set_validshape(pl.row_expand_mul(oc_q, g_sq_col), rows, O_LORA)
+                oq_i32 = pl.set_validshape(pl.cast(oq_scaled, target_type=pl.INT32, mode="rint"), rows, O_LORA)
+                oq_half = pl.set_validshape(pl.cast(oq_i32, target_type=pl.FP16, mode="round"), rows, O_LORA)
+                oq_i8 = pl.set_validshape(pl.cast(oq_half, target_type=pl.INT8, mode="trunc"), rows, O_LORA)
+                pl.store(oq_i8, [qt, col_g], o_r_i8_pad)
+            # 只最后活动32行块有权填本组尾零。零填不读o_r_pad，不写scale尾部，
+            # 并在同一阶段发布之前完成；O_B整RB读取不可仅依赖实际行的quant完成。
+            if quant_start + QUANT_TASK_T_TILE >= tokens:
+                for zt in pl.range(tokens, padded_rows, QUANT_TOKEN_TILE):
+                    zero_half = pl.tile.full([QUANT_TOKEN_TILE, O_LORA], dtype=pl.FP16, value=0.0)
+                    zero_i8 = pl.cast(zero_half, target_type=pl.INT8, mode="trunc")
+                    zero_rows = pl.min(QUANT_TOKEN_TILE, padded_rows - zt)
+                    pl.store(pl.set_validshape(zero_i8, zero_rows, O_LORA), [zt, col_g], o_r_i8_pad)
     return o_r_i8_pad, act_scale_dq
 
 

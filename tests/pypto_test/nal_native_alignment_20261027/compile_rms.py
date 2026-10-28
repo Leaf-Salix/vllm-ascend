@@ -22,7 +22,11 @@ out = Path(sys.argv[1])
 out.mkdir(exist_ok=False)
 assert not torch_npu.npu.is_initialized()
 kind = sys.argv[2] if len(sys.argv) > 2 else "rms"
-if kind.startswith("woa-"):
+if kind in ("oproj-quant", "oproj-b"):
+    from oproj_suffix_kernels import output_b_arm, output_quant_arm
+
+    program = (output_quant_arm if kind == "oproj-quant" else output_b_arm).specialize()
+elif kind.startswith("woa-"):
     from woa_kernels import woa_arm
 
     woa_mode = int(kind.removeprefix("woa-"))
@@ -108,6 +112,8 @@ else:
         DIRECT_PACK=kind == "hc-norm",
     )
 abi = kernel_abi_for_program(program, platform="a2a3", runtime="tensormap_and_ringbuffer")
+if kind in ("oproj-quant", "oproj-b"):
+    assert len(abi.parameters) == (3 if kind == "oproj-quant" else 6), "wrong O-proj diagnostic root"
 _compile_impl(program, output_dir=str(out / "kernel"), platform="a2a3", skip_ptoas=False, _kernel_abi=abi)
 artifact = KernelArtifact(out / "kernel", abi)
 artifact.load()
@@ -126,6 +132,7 @@ if kind in ("attention-native-spmd", "spmd", "spmd-debug", "spmd-probe"):
     json.dumps(
         {
             "pass": True,
+            "selector": kind,
             "npu_initialized": False,
             "root_tensors": len(abi.parameters),
             "artifact_identity": artifact.identity().hex(),

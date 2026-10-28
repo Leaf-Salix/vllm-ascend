@@ -1026,20 +1026,37 @@ def vector_schedule(
             quant_first = quant_group * quant_per_group
             quant_owned = worker + ((quant_first + VECTORS - 1 - worker) // VECTORS) * VECTORS
             if quant_owned < quant_first + quant_per_group:
-                # amax需要本行的全部1024列。首版按整组所有行的真实O_A owner
-                # 获取数据，已比等待全八组更细；不声称做到逐行块最小依赖。
-                signal = wait_row_owners(
-                    signal,
-                    PHASE_OA_GROUP_BASE + quant_group,
-                    CORES,
-                    generation,
-                    quant_group * oa_per_group,
-                    oa_per_group,
-                    1,
-                    GROUPS,
-                    0,
-                    1,
-                )
+                if tokens == 24:
+                    # Native整行amax读取全部8192列。仅本核有quant任务时，
+                    # 等八组实际O_A owner；Cube在任何quant等待前已发布自身全部O_A。
+                    for source_group in pl.range(8):
+                        signal = wait_row_owners(
+                            signal,
+                            PHASE_OA_GROUP_BASE + source_group,
+                            CORES,
+                            generation,
+                            source_group * oa_per_group,
+                            oa_per_group,
+                            1,
+                            GROUPS,
+                            0,
+                            1,
+                        )
+                else:
+                    # amax需要本行的全部1024列。首版按整组所有行的真实O_A owner
+                    # 获取数据，已比等待全八组更细；不声称做到逐行块最小依赖。
+                    signal = wait_row_owners(
+                        signal,
+                        PHASE_OA_GROUP_BASE + quant_group,
+                        CORES,
+                        generation,
+                        quant_group * oa_per_group,
+                        oa_per_group,
+                        1,
+                        GROUPS,
+                        0,
+                        1,
+                    )
                 o_quant, o_scales = o_projection_groups_quant_stage(
                     o_r, o_quant, o_scales, tokens, worker, VECTORS, OB_ROWS, quant_group, quant_group + 1
                 )

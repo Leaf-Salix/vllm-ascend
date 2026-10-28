@@ -57,7 +57,7 @@
     不重叠；alias、容量、合法 ROW_TILE 和正 WORKERS 由捕获前统一验证。
 
 数值边界与当前范围
-    保留同仓 decode_o_proj.py 的 INT32 累加与八组 FP32 左折叠顺序，以及
+    T24先INT32合并八组，再FP32联合scale；其它T保留八组FP32左折叠。保留
     hc_post.py 的逐项残差加法。先 BF16 舍入 O 投影输出再进入 HC post，不能
     合并这次舍入；也不能先求 comb*residual 的和再加 post*x 改变求和树。
     本模块只补齐完整 CSA 的输出后段；没有 attention、O_A/量化和阶段同步，
@@ -163,17 +163,24 @@ def _o_b_nz_groups_stage(
                 for tb in pl.range(proj_b_t_rows):
                     t0 = tb * ROW_TILE
                     activation_l1 = pl.load(
-                        o_r_i8_pad, [t0, col_g], [ROW_TILE, O_LORA], target_memory=pl.MemorySpace.Mat,
+                        o_r_i8_pad,
+                        [t0, col_g],
+                        [ROW_TILE, O_LORA],
+                        target_memory=pl.MemorySpace.Mat,
                     )
                     for nf in pl.range(PROJ_B_D_TILE // PROJ_B_MM_N_TILE):
                         n0 = d0 + nf * PROJ_B_MM_N_TILE
-                        acc_b = pl.create_tile([ROW_TILE, PROJ_B_MM_N_TILE], dtype=pl.INT32,
-                                               target_memory=pl.MemorySpace.Acc)
+                        acc_b = pl.create_tile(
+                            [ROW_TILE, PROJ_B_MM_N_TILE], dtype=pl.INT32, target_memory=pl.MemorySpace.Acc
+                        )
                         for kb in pl.pipeline(0, O_LORA // B_K_TILE, stage=2):
                             k0 = kb * B_K_TILE
                             wk0 = pl.max(g, 0) * O_LORA + k0
                             b_weight_l1 = pl.load(
-                                wo_b, [wk0, n0], [B_K_TILE, PROJ_B_MM_N_TILE], target_memory=pl.MemorySpace.Mat,
+                                wo_b,
+                                [wk0, n0],
+                                [B_K_TILE, PROJ_B_MM_N_TILE],
+                                target_memory=pl.MemorySpace.Mat,
                             )
                             b_act_l1 = pl.tile.slice(activation_l1, [ROW_TILE, B_K_TILE], [0, k0])
                             # 两操作数仍是Mat，保留后端原K128 L0交错lowering，不强改L0操作。
@@ -192,7 +199,9 @@ def _o_b_nz_groups_stage(
                         # ND activation允许动态有效M；NZ权重的K/N范围没有变化。
                         active_rows = pl.min(ROW_TILE, tokens - t0)
                         b_act_full = pl.slice(
-                            o_r_i8_pad, [ROW_TILE, O_LORA], [t0, col_g],
+                            o_r_i8_pad,
+                            [ROW_TILE, O_LORA],
+                            [t0, col_g],
                             valid_shape=[active_rows, O_LORA],
                         )
                         full_acc = pl.matmul(b_act_full, weight_resident, out_dtype=pl.INT32)
@@ -217,9 +226,7 @@ def o_b_stage(
     ROW_TILE: pl.constexpr,
 ):
     """全八组兼容入口；与组就绪分支共用数学和动态行循环。"""
-    partials = o_b_groups_stage(
-        o_r_i8_pad, wo_b, partials, tokens, worker_id, WORKERS, ROW_TILE, 0, O_GROUPS
-    )
+    partials = o_b_groups_stage(o_r_i8_pad, wo_b, partials, tokens, worker_id, WORKERS, ROW_TILE, 0, O_GROUPS)
     return partials
 
 
@@ -280,15 +287,25 @@ def o_dequant_hc_post_stage(
     wb_scale = pl.load(wo_b_scale, [0], [D])
     wb_scale_chunk = pl.reshape(wb_scale, [1, D])
     for b_tb in pl.range(worker_id, tokens, WORKERS):
-        # 保留每token1x4096、group递增stage=2流水；仅变更独立token的owner。
-        acc = pl.tile.full([1, D], dtype=pl.FP32, value=0.0)
-        for act_g in pl.pipeline(O_GROUPS, stage=2):
-            p_col0 = act_g * D
-            p_g = pl.load(partials, [b_tb, p_col0], [1, D])
-            g_scale_scalar = pl.read(act_scale_dq, [act_g, b_tb])
-            p_g_f32 = pl.cast(p_g, target_type=pl.FP32, mode="none")
-            acc = pl.add(acc, pl.mul(p_g_f32, g_scale_scalar))
-        out_t = pl.col_expand_mul(acc, wb_scale_chunk)
+        if tokens == 24:
+            # Native INT8 matmul先完成全K8192整数点积，再做一次FP32反量化。
+            # 8192*128*128 < 2**31；八组INT32先相加不会溢出。
+            integer = pl.load(partials, [b_tb, 0], [1, D])
+            for group in pl.range(1, O_GROUPS):
+                integer = pl.add(integer, pl.load(partials, [b_tb, group * D], [1, D]))
+            token_scale = pl.read(act_scale_dq, [0, b_tb])
+            joint_scale = pl.mul(wb_scale_chunk, token_scale)
+            out_t = pl.mul(pl.cast(integer, pl.FP32), joint_scale)
+        else:
+            # 保留每token1x4096、group递增stage=2流水；仅变更独立token的owner。
+            acc = pl.tile.full([1, D], dtype=pl.FP32, value=0.0)
+            for act_g in pl.pipeline(O_GROUPS, stage=2):
+                p_col0 = act_g * D
+                p_g = pl.load(partials, [b_tb, p_col0], [1, D])
+                g_scale_scalar = pl.read(act_scale_dq, [act_g, b_tb])
+                p_g_f32 = pl.cast(p_g, target_type=pl.FP32, mode="none")
+                acc = pl.add(acc, pl.mul(p_g_f32, g_scale_scalar))
+            out_t = pl.col_expand_mul(acc, wb_scale_chunk)
         # 声明仅供inline参数的Tensor元数据追踪，随后的cast覆盖它；不要求GM临时。
         # 这次BF16舍入是原HCpost输入的数值边界，不可与最后一次BF16合并。
         out_bf16 = pl.create_tensor([1, D], dtype=pl.BF16)

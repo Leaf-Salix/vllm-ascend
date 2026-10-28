@@ -1165,3 +1165,105 @@ v26正式55、debug57、观察82参数根全部通过编译、load和真实双AI
 [服务55资格](evidence/cpu-woa-integrated-v26-spmd/receipt.json)、
 [生产v20](evidence/spmd-production-v20/result.json)、
 [观察v20](evidence/spmd-observe-v20/result.json)。
+
+### WO-B后缀的两处Native数值边界
+
+在完整SPMD v20的WO-A已归零后，独立微测试从同一次Native的真实
+`wo_b` BF16入口出发，读取checkpoint正式layer4的INT8 WO-B、FP32 scale和全0
+量化offset。先用同版本`npu_dynamic_quant → npu_quant_matmul`复现实际hook捕获的
+Native projection，逐bit为0，避免用自建参考链代替真实金值。
+
+与本分支修正前的继承实现相比，Native在这里有两处不同：
+
+1. WO-A FP32结果先舍入BF16，然后在完整8192列上做每token动态量化；继承实现
+   从FP32直接做每1024列独立量化，既改变舍入边界，也改变量化尺度。
+2. Native先完成8192维INT32点积，再一次转FP32；先计算`weight_scale*token_scale`，
+   再与点积相乘并舍入BF16。继承实现逐1024组转FP32、乘不同scale后相加，数值边界不同。
+
+独立诊断用纯DSL复现上述Native顺序，复用原WO-B的INT32 partial生产者；
+八组INT32先合并，最坏范围`8192*128*128 < 2^31`，不会溢出。
+
+| 8K/B4/T24后缀微测试 | 相对同次Native的逐bit差异 |
+| --- | ---: |
+| Native重放实际projection控制 | 0 |
+| DSL整行INT8量化、FP32 scale | 0 |
+| DSL WO-B BF16输出 | 0 |
+| 三次毒化后的FULL replay/eager | 全部0 |
+| INT8 matrix padding、保护区、只读输入/权重/scale | 全部通过 |
+
+任务`task_20261028_201347_32824666272`显式物理8，诊断26.60秒，已完成exit0。
+该结果只证明此T24实际边界输入下的后缀，不自动授予完整SPMD、其它T、整模型
+逐token或性能资格。完整接回仍须重新验证原owner/发布、生产/观察等价和最终输出。
+
+复现：先取得WO-A归零的完整观察件，沿用本目录env/bootstrap；无设备执行
+`compile_rms.py <新目录> oproj-quant`与`oproj-b`，核对ABI分别为3/6，且不初始化NPU。
+再按既定时限显式物理8提交`run_rms.sh <新标签> oproj`，另传：
+
+```bash
+--env OPROJ_PROBE_REFERENCE=<完整观察目录>/observation.pt
+```
+
+`probe_oproj.py`先校验观察件的WO-A、生产等价、Native hook控制和同输入门禁，
+然后逐门检查Native重放、量化、WO-B；首差立即停止并保存实际值/金值及partial。
+正式接回时保留这份微测试和原精度基准，不能覆盖历史结果。
+
+证据：[量化CPU根](evidence/cpu-oproj-suffix-v1-oproj-quant/receipt.json)、
+[WO-B CPU根](evidence/cpu-oproj-suffix-v1-oproj-b/receipt.json)、
+[后缀NPU微测试](evidence/oproj-suffix-v1/result.json)。
+
+### 完整SPMD接回：T24最终输出首次全部逐bit一致
+
+正式修正保留单入口、单MIX、真正TND的原数据流和55/57参数公开接口，计算全部
+使用DSL。没有修改SDK、runtime或生成的C++。修正只在`T==24`启用，其它T保留
+此前实现，不能将本节结果扩展为所有T已通过。
+
+- 量化仍用原`(group,32行块)%48`的owner；T24仅worker0…7各写自己的1024列、
+  自己的scale与原INT8尾零。每个owner重复读取全8192列计算BF16 amax，保留原
+  writer/发布合同。此处优先完成精度闭环，尚未优化重复搬运。
+- 全行amax前，只有实际有量化任务的AIV等待八组WO-A的真实Cube owner。Cube仍
+  先完成并发布本核所有WO-A，再进入任何量化等待，因此没有新增等待环。
+- 各组scale逐bit相同；全0行scale仍为0，只把分母副本改为1，不沿用旧EPS floor。
+- WO-B仍复用原INT32 partial生产者，最后先整数归并八组，再一次FP32联合scale、
+  BF16舍入，最后执行原HC-post顺序。其它T的按组量化、FP32归并和等待保持原样。
+
+无设备资格：55服务根、57生产debug根、82观察根均完成compile/load，未初始化NPU，
+并检查实际`MixedKernels={0,1,1}`双AIV。独立生成物审查确认全组等待和发布、
+amax/dequant/denominator的Tile生命周期、整数carry与scale互不覆盖；Vec静态峰值
+仍163872字节，未增加原Cube资源上限。生成物仅用于审查，不作为手写算子源码。
+
+| 8K/B4/T24完整接回门禁 | 结果 |
+| --- | --- |
+| 生产v21：FULL/eager八个输出与cache/state | 全部逐bit一致 |
+| 观察v21：与生产八状态、39项同输入、25份源码SHA | 全部一致 |
+| 观察根FULL/eager：八外部状态、25项阶段观察 | 全部逐bit一致 |
+| Native详细hook/最小hook八状态控制 | 全部逐bit一致 |
+| HC-pre至WO-A的原34项Native门禁 | 全部逐bit一致 |
+| **最终HC-post输出，相对Native** | **41858 → 0差异，max_abs=0** |
+| **全部35项Native门禁** | **全部逐bit一致** |
+| 只读metadata/cache保护区 | 全部通过 |
+
+生产`task_20261028_202510_345251811023`用时208.00秒；
+观察`task_20261028_202931_352249218285`用时215.42秒。两项均显式物理8、780秒外层/
+750秒内层时限，没有使用其它卡。生产JSON的`pass:false`表示没有执行Native验收，
+须与其`phase=production`及八状态结果一起阅读；最终观察JSON为`complete:true, pass:true`。
+
+**验收范围：**真实checkpoint第4层权重、合成hidden/history、8K上下文、B4/T24；
+同一输入下完整HC-pre至HC-post替换，包含TopK与六类cache/state。不是整模型
+192-token验收；也未证明其它T、短/混合query、其它层/seed或128K精度。
+本轮没有测延迟，不能将任务总用时当CSA性能，也不能声称已追平nalinaly。
+旧精度分支及本分支修正前的提交保留，可正常revert。
+
+复现完整接回：沿用固定env/bootstrap，依次无设备运行`compile_rms.py <新目录>`的
+`spmd-debug`、`spmd-probe`、`spmd`三个selector，核对57/82/55 ABI及双AIV回执。
+随后按本文相同`task-submit --device 8 --max-time 780`和env参数：
+
+1. `run_rms.sh <新生产标签> spmd`，取得新`production.pt`，核对八状态和guards。
+2. 新任务传`--env SPMD_PRODUCTION_REFERENCE=<新生产目录>/production.pt`，执行
+   `run_rms.sh <新观察标签> spmd`。必须检查25源码SHA和39项同输入后，才解释35项Native门禁。
+3. 任一首差即停止后续配置，保存JSON和`observation.pt`供定位，不弱化逐bit断言。
+
+证据：[55参数CPU](evidence/cpu-oproj-integrated-v1-spmd/receipt.json)、
+[57参数CPU](evidence/cpu-oproj-integrated-v1-spmd-debug/receipt.json)、
+[82参数CPU](evidence/cpu-oproj-integrated-v1-spmd-probe/receipt.json)、
+[生产v21](evidence/spmd-production-v21/result.json)、
+[Native完整对拍v21](evidence/spmd-observe-v21/result.json)。
