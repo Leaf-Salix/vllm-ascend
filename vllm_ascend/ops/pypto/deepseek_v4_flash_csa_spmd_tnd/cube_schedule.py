@@ -36,10 +36,10 @@ import pypto.language as pl
 
 from .attention_dependencies import wait_attention_plan_rows
 from .attention_stream_stages import attention_qk_pv_cube_stage
-from .compressor_projection_stages import indexer_compressor_project_stage
 from .hc_input_rms_stages import SQUARE_ROWS, hc_input_square_range
 from .hc_native_projection_stages import hc_linear
 from .indexer_compressor_output_stages import indexer_compressor_hadamard_stage
+from .indexer_native_projection_stages import indexer_native_projection_stage
 from .indexer_query_stages import (
     indexer_query_hadamard_stage,
     indexer_query_project_stage,
@@ -277,14 +277,17 @@ def cube_schedule(
     # 先准备Indexer压缩，再做Indexer query；这两条链决定长历史Score何时可启动。
     # 独立KV投影填在等待query RoPE之前，随后发Hadamard，再做主Q_B。
     # AIV在Q_B期间可完成Indexer量化/系数；所有K链、owner和权重保持不变。
-    idx_value, idx_score = indexer_compressor_project_stage(
+    idx_value, idx_score = indexer_native_projection_stage(
         normed,
         idx_wkv,
         idx_wgate,
+        main_bounds,
         idx_value,
         idx_score,
         worker,
         GROUPS,
+        128,
+        True,
     )
     signal = publish_phase(signal, PHASE_IDX_PROJECT, worker, CORES, generation)
     signal = wait_row_owners(

@@ -36,7 +36,7 @@ out = Path(sys.argv[1])
 record = {
     "complete": False,
     "pass": False,
-    "scope": "complete CSA SPMD; Native eager gates through Q/main compressor/Indexer state; not whole-model tokens",
+    "scope": "complete CSA SPMD; Native eager gates through Q/main compressor/Indexer cache; not whole-model tokens",
     "history": 8192,
     "lengths": [6, 6, 6, 6],
     "precision": {},
@@ -148,6 +148,7 @@ try:
             "query_projection_stages.py",
             "q_native_output_stages.py",
             "main_native_projection_stages.py",
+            "indexer_native_projection_stages.py",
         )
     }
     with native_session(config, 0), torch.inference_mode():
@@ -534,6 +535,34 @@ try:
         save()
         assert all(row["bit_equal"] for row in record["indexer_native_repeat"].values())
         check("indexer_compressor_state", replay["indexer_state.0"], idx_state_b)
+        # Reuse the actual Native Hadamard and A3 quant/scatter primitives. Keep
+        # unpublished/negative slots unchanged; establish their full-allocation
+        # repeatability before comparing either PTO cache view.
+        idx_outer = f["metadata"][f["groups"]["indexer"]["prefix"]]
+        idx_key_cache, idx_scale_cache = f["groups"]["indexer"]["views"]
+        native_module = sys.modules[type(impl).__module__]
+        idx_raw, idx_views = [], []
+        record["indexer_native_scatter_guards"] = []
+        for _ in range(2):
+            _, idx_kv = native_indexer_compressor()
+            assert idx_kv.numel() > 0
+            if impl.indexcom_rotate:
+                idx_kv = native_module.rotate_activation(idx_kv, idx_outer.hadamard)
+            _, idx_scale = native_device_operator.indexer_quant_scatter_part1(idx_kv, idx_key_cache, None, idx_slots)
+            assert idx_scale is not None, "this A3 test expects separate scale scatter"
+            native_device_operator.dsa_indexer_scatter_scale_part3(idx_scale, idx_scale_cache, idx_slots)
+            torch.npu.synchronize()
+            guards = guard_checks(f)
+            record["indexer_native_scatter_guards"].append(guards)
+            save()
+            assert all(row["status"] == "PASS" for row in guards.values())
+            idx_raw.append(f["groups"]["indexer"]["allocation"].cpu())
+            idx_views.append([view.cpu() for view in (idx_key_cache, idx_scale_cache)])
+        record["indexer_native_scatter_repeat"] = metric(idx_raw[0], idx_raw[1])
+        save()
+        assert record["indexer_native_scatter_repeat"]["bit_equal"]
+        check("indexer_key_cache", replay["indexer.0"], idx_views[1][0])
+        check("indexer_scale_cache", replay["indexer.1"], idx_views[1][1])
         record["pass"] = True
         record["complete"] = True
 except SystemExit as error:

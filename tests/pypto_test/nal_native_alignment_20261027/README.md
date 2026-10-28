@@ -1,6 +1,6 @@
 # 基于 nalinaly TND SPMD 的 Native 数值对齐
 
-日期：2026-10-27；Q完整接入复核更新于2026-10-28。
+日期：2026-10-27；Indexer完整接入复核更新于2026-10-28。
 
 ## 分支和目标
 
@@ -568,3 +568,58 @@ state当作MODE0要求复现的历史生产输出。
 观测保存件须包含真实initial view及stride/offset，微任务先从原raw重建并逐bit核验，
 MODE0再重现历史完整生产state。四切片均做FULL/eager、投影有效区及guards检查。
 测试固定T24，不包含新batch/变长分档、完整Native FULL或整模型token验收。
+
+### Indexer Compressor投影/state的单因素定位（2026-10-28）
+
+主Compressor state/cache通过后，`spmd-observe-v7`的下一首差为Indexer state：
+9585个FP32元素，最大绝对差`9.5367431640625e-7`。Native state和有效输出重复一致，
+不以未发布的`[-1,31]`输出尾行作为逐bit金值。继续复用同次T24的Norm、真实权重、
+初始state和完整Native metadata，不重造输入。
+
+| 单因素实现 | 对Native完整逻辑state不同元素数 |
+| --- | ---: |
+| MODE0：原M16/N32、K512自然顺序 | 9585 |
+| MODE1：内部拆N16，K512自然顺序 | 9585 |
+| MODE2：N16、K128自然顺序 | 9585 |
+| MODE3：N16、K128、Native按列组偏移K起点 | **0** |
+
+任务`task_20261028_101348_282810818448`，实际占卡10:31:21–10:32:03（42秒），
+脚本31.77秒，四臂FULL/eager、投影有效区与guards全部通过。
+MODE0先逐bit重现原完整生产state，初始state先按实际NPU stride/offset从原始allocation
+重建核验，再在独立compact逻辑view做微测试。因此该表证明当前输入的投影顺序原因，
+**尚不能替代完整生产物理布局与Indexer cache验收**。
+
+列组来自设备端真实请求边界：当前均匀T24按每128列的8组、每组16列，
+K起点`(column % 128 // group) * 256`，随后按K128循环遍历4096维。
+ragged路径保留Native的group64选择，但本轮未验收新形状。
+生产接入保留原M16/N32逻辑owner、state提交、PHASE_IDX_PROJECT发布和等待位置；
+复用Native实际传入Compressor的`main_bounds`，不增加根入口参数。
+
+复现微测试需先保留`e185a126`生产算子快照并使用当前测试脚本：
+先生成生产→观测v7等价保存件，再设置`INDEXPROJ_PROBE_REFERENCE=<观测>/observation.pt`
+与`SPMD_PRODUCTION_REFERENCE=<配对生产>/production.pt`。
+先用`compile_rms.py`的`indexproj-0`至`indexproj-3`逐根做无设备编译/ABI加载，
+再提交`run_rms.sh <新label> indexproj`。不要用已修正的state作为MODE0历史起点。
+证据见[evidence/indexproj-order-v1.json](evidence/indexproj-order-v1.json)。
+
+### Indexer投影接回完整SPMD（2026-10-28）
+
+57/69参数根均先无设备编译和ABI加载通过。生产快照v11
+（`task_20261028_104318_120810726`，196.03秒）FULL/eager八个外部输出全部逐bit一致，
+cache、metadata保护通过。观测v8（`task_20261028_104735_31014230576`，202.13秒）
+先通过同输入、19项源码SHA、生产等价、观测FULL/eager及guards门禁，再得到：
+
+| Native同输入模块边界 | 逐bit不同元素数 |
+| --- | ---: |
+| 前12项，含HC、Q/KV、主state与cache | 0 |
+| Indexer完整物理state | **0** |
+| Indexer INT8 key cache | **32，首差** |
+| Indexer FP16 scale及其后 | 首差后停止，未验收 |
+
+Native Indexer compressor的state/已发布输出重复一致；再运行原生
+`rotate_activation→indexer_quant_scatter_part1→dsa_indexer_scatter_scale_part3`，
+两次都恢复初始cache，完整共享allocation逐bit一致，逐次guards通过。
+负槽和未发布输出尾部原样传给实际Native函数，未人为过滤。
+当前32个key元素均最大相差1，仅证明剩余差异在state之后，尚未归因于具体后缀模块。
+下一步导出PTO压缩后Norm/RoPE、Hadamard及量化输入，与实际Native中间结果对拍。
+两个NPU任务均完成并释放设备；本轮未做整模型token或性能验收。

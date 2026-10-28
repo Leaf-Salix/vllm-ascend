@@ -21,7 +21,11 @@ out = Path(sys.argv[1])
 out.mkdir(exist_ok=False)
 assert not torch_npu.npu.is_initialized()
 kind = sys.argv[2] if len(sys.argv) > 2 else "rms"
-if kind.startswith("mainproj-"):
+if kind.startswith("indexproj-"):
+    from indexproj_kernels import indexproj_arm
+
+    program = indexproj_arm.specialize(MODE=int(kind.removeprefix("indexproj-")))
+elif kind.startswith("mainproj-"):
     from mainproj_kernels import mainproj_arm
 
     program = mainproj_arm.specialize(MODE=int(kind.removeprefix("mainproj-")))
