@@ -25,7 +25,8 @@ kind = sys.argv[2] if len(sys.argv) > 2 else "rms"
 if kind.startswith("woa-"):
     from woa_kernels import woa_arm
 
-    program = woa_arm.specialize(MODE=int(kind.removeprefix("woa-")))
+    woa_mode = int(kind.removeprefix("woa-"))
+    program = woa_arm.specialize(MODE=2 if woa_mode == 3 else woa_mode, ROW_TILE=128 if woa_mode == 3 else 16)
 elif kind == "attention-native-spmd":
     from attention_native_micro import native_attention_arm
 

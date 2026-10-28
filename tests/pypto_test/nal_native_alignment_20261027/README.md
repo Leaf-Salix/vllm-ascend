@@ -1117,3 +1117,51 @@ Native `npu_transpose_batchmatmul`逐bit复现该入口，再要求原PTO helper
 [完整根WO-A首差](evidence/spmd-observe-v19/result.json)、
 [v1脚本问题](evidence/woa-micro-v1/result.json)、
 [v2微测试结果](evidence/woa-micro-v2/result.json)。
+
+### WO-A完整接回：维持M128并消除39差
+
+四臂微测试v3（`task_20261028_172347_40032144471`，物理8，29.57秒）补测
+M128/N128半程旋转：Native BF16差异同样为0，三次NaN FULL回放、guards与只读检查
+通过。因此正式修正继续使用M128，保留原64个N128任务owner，没有拆M16。
+这仅证明数值与布局资格，没有测新延迟，不能据此声称性能提升。
+
+正式helper仅在`T==24 && A_COL_TILE==128 && A_ROW_TILE==128`启用；其它T/布局
+保留原路径。packed步长仍取真实容量轴，写回24行，工作区padding不作为精度对象。
+量化与WO-B均未修改。按组通知仍在本owner整块完成和原release之后发布。
+
+接回的无设备v22–v25在NZ偏移证明处失败，没有占卡。检查失败前IR后确认：局部
+`column_blocks=8`会以Scalar别名出现在商余除数中，而NZ非负证明直接要求常量除数。
+商余改为编译期表达式`O_LORA//128`后，v26通过。另将K起点写成constexpr 0/8，
+并由物理worker枚举全局条带后过滤组区间，避免含减法的动态起点源链；独立枚举
+24个worker×45个组区间，所执行的logical序列与原公式逐项一致。前序`max`会被
+优化删除，不能把加`max`当作修复。没有修改SDK、生成代码或绕过NZ验证。
+
+v26正式55、debug57、观察82参数根全部通过编译、load和真实双AIV分派检查。
+独立生成物审查确认K0/2048起点、16个K256块的原累加次序、有效24行和原发布规则。
+静态资源最高端为Vec163872、Mat475136、L0A/L0B各65536、L0C131072字节，均未超限。
+
+| 完整接回验证 | 结果 |
+| --- | --- |
+| 生产v20 FULL/eager八状态、guards | 全部通过 |
+| 观察v20与生产八状态、同输入及24个源码SHA | 全部通过 |
+| Native详细/最小hook控制八状态 | 全部0差异 |
+| 原HC-pre至post-inverse heads的33项门禁 | 全部0差异 |
+| **WO-A BF16** | **39 → 0差异** |
+| 最终输出 | **41858差**，最大绝对差0.015625，首差即停 |
+
+生产v20为`task_20261028_175322_144460319103`（220.57秒），观察v20为
+`task_20261028_175930_176488129919`（217.98秒），均显式物理8且已退出。
+生产使用已完成资格的57根时，82/55在无设备环境继续编译；观察提交前82资格已通过。
+复现采用新生产`production.pt`，不能复用23项源身份的旧快照。
+
+本轮只证明8K/B4/T24单层的WO-A修正，没有证明完整CSA/整模型token一致。
+最终输出仍不通过；下一步基于同次Native WO-A BF16入口及实际O-proj输出，分别
+测试整行动态量化、八组INT32先合并后反量化，保持首差停止和每任务15分钟内。
+
+证据：[M128微根CPU](evidence/cpu-woa-m128-v1/receipt.json)、
+[四臂微测试](evidence/woa-micro-v3/result.json)、
+[完整57资格](evidence/cpu-woa-integrated-v26-spmd-debug/receipt.json)、
+[观察82资格](evidence/cpu-woa-integrated-v26-spmd-probe/receipt.json)、
+[服务55资格](evidence/cpu-woa-integrated-v26-spmd/receipt.json)、
+[生产v20](evidence/spmd-production-v20/result.json)、
+[观察v20](evidence/spmd-observe-v20/result.json)。

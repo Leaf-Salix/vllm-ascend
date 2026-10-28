@@ -104,10 +104,15 @@ try:
     record["sdk_release"] = os.environ["CSA_SHARED_TOOLCHAIN_RELEASE"]
     record["native_source"] = os.environ["SOURCE_ROOT"]
     pypto.torch.init()
-    for name, mode in (("production", 0), ("m16_n128_natural", 1), ("historical_half_rotate", 2)):
+    for name, mode in (
+        ("production", 0),
+        ("m16_n128_natural", 1),
+        ("historical_half_rotate", 2),
+        ("historical_half_rotate_m128", 3),
+    ):
         owner = torch.full((160, 8192), -37.0, dtype=torch.float32, device="npu")
         projected = owner[16:144]
-        woa_arm(packed, weight, projected, MODE=mode)
+        woa_arm(packed, weight, projected, MODE=2 if mode == 3 else mode, ROW_TILE=128 if mode == 3 else 16)
         torch.npu.synchronize()
         eager = projected[:24].cpu().clone()
         row = {"bf16_native": metric(projected[:24].bfloat16(), gold), "replays": []}
@@ -119,7 +124,7 @@ try:
         graph, stream = torch.npu.NPUGraph(), torch.npu.Stream()
         stream.wait_stream(torch.npu.current_stream())
         with torch.npu.graph(graph, stream=stream):
-            woa_arm(packed, weight, projected, MODE=mode)
+            woa_arm(packed, weight, projected, MODE=2 if mode == 3 else mode, ROW_TILE=128 if mode == 3 else 16)
         for _ in range(3):
             projected.fill_(float("nan"))
             graph.replay()
@@ -138,7 +143,10 @@ try:
     record["readonly"] = {"packed": metric(packed, before["packed"]), "weight": metric(weight, before["weight"])}
     assert all(row["bit_equal"] for row in record["readonly"].values())
     record["complete"] = True
-    record["pass"] = record["arms"]["historical_half_rotate"]["bf16_native"]["bit_equal"]
+    record["pass"] = all(
+        record["arms"][name]["bf16_native"]["bit_equal"]
+        for name in ("historical_half_rotate", "historical_half_rotate_m128")
+    )
     if not record["pass"]:
         record["first_difference"] = "wo_a_bf16"
 except BaseException:

@@ -52,6 +52,11 @@
     不得复用GM。工作区标InOut保留未写区，P_USED以后的INT8和T以后的scale
     不承诺初始化。BYPASS策略如需使用，须在外层spmd直属设置。
     当前是源级阶段迁移；CPU编译不等于整层设备精度、同步或性能已通过。
+
+Native数值资格
+    T24、M128/N128路径按已对拍的group/N128半程起点累加16个K256块。
+    保留原64个logical任务及owner、原动态packed步长和全部完成信号；
+    其它T及布局继续原路径。这里只修WO-A累加顺序，不改后续分组量化。
 """
 
 import pypto.language as pl
@@ -220,6 +225,73 @@ def _original_o_projection_a_groups_stage_nz(
 
 
 @pl.jit.inline(auto_scope=False)
+def _native_t24_o_projection_a_tile_nz(
+    o_packed: pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16],
+    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, pl.NZ],
+    o_r_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]],
+    tokens: pl.Scalar[pl.INDEX],
+    g: pl.Scalar[pl.INDEX],
+    n0: pl.Scalar[pl.INDEX],
+    FIRST_PANEL: pl.constexpr,
+):
+    pack_stride = pl.tensor.dim(o_packed, 0) // O_GROUPS
+    # 合法n0由非负logical的列编号产生，范围0..896。
+    column0 = pl.max(0, n0)
+    first_k = FIRST_PANEL * A_K_TILE
+    first_x = pl.slice(o_packed, [128, A_K_TILE], [g * pack_stride, first_k], valid_shape=[tokens, A_K_TILE])
+    first_w = wo_a[g : g + 1, first_k : first_k + A_K_TILE, column0 : column0 + 128]
+    acc = pl.matmul(first_x, first_w, out_dtype=pl.FP32)
+    for panel in pl.range(FIRST_PANEL + 1, O_GROUP_IN // A_K_TILE):
+        k = panel * A_K_TILE
+        chunk_x = pl.slice(o_packed, [128, A_K_TILE], [g * pack_stride, k], valid_shape=[tokens, A_K_TILE])
+        chunk_w = wo_a[g : g + 1, k : k + A_K_TILE, column0 : column0 + 128]
+        acc = pl.matmul_acc(acc, chunk_x, chunk_w)
+    for wrapped_panel in pl.range(FIRST_PANEL):
+        wrapped_k = wrapped_panel * A_K_TILE
+        wrapped_x = pl.slice(o_packed, [128, A_K_TILE], [g * pack_stride, wrapped_k], valid_shape=[tokens, A_K_TILE])
+        wrapped_w = wo_a[g : g + 1, wrapped_k : wrapped_k + A_K_TILE, column0 : column0 + 128]
+        acc = pl.matmul_acc(acc, wrapped_x, wrapped_w)
+    o_r_pad = pl.assemble(o_r_pad, acc, [0, g * O_LORA + n0])
+    return o_r_pad
+
+
+@pl.jit.inline(auto_scope=False)
+def _native_t24_o_projection_a_groups_stage_nz(
+    o_packed: pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16],
+    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, pl.NZ],
+    o_r_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]],
+    tokens: pl.Scalar[pl.INDEX],
+    worker_id: pl.Scalar[pl.INDEX],
+    WORKERS: pl.constexpr,
+    group_begin: pl.Scalar[pl.INDEX],
+    group_end: pl.Scalar[pl.INDEX],
+):
+    """仅T24/N128已验收起点；每个原owner完整发布本列24行后才返回。"""
+    column_blocks = O_LORA // 128
+    group_first = group_begin * column_blocks
+    group_limit = group_end * column_blocks
+    # 全局条带从非负物理worker起步，再过滤组区间。所执行的logical与原
+    # 向上取整起点公式相同，但NZ证明不必穿过含减法的起点表达式。
+    for logical in pl.range(worker_id, O_GROUPS * column_blocks, WORKERS):
+        if logical >= group_first:
+            if logical < group_limit:
+                # NZ符号证明需要直接的常量除数，不能经局部Scalar别名。
+                g = logical // (O_LORA // 128)
+                column = logical % (O_LORA // 128)
+                n0 = column * 128
+                band = 0
+                if column >= 3:
+                    if column < 6:
+                        band = 1
+                # 两个静态起点确保完整内联后NZ偏移仍可证明非负；不改旋转顺序。
+                if (g % 2 + band) % 2 == 1:
+                    o_r_pad = _native_t24_o_projection_a_tile_nz(o_packed, wo_a, o_r_pad, tokens, g, n0, 8)
+                else:
+                    o_r_pad = _native_t24_o_projection_a_tile_nz(o_packed, wo_a, o_r_pad, tokens, g, n0, 0)
+    return o_r_pad
+
+
+@pl.jit.inline(auto_scope=False)
 def o_projection_a_groups_stage_nz(
     o_packed: pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16],
     wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, pl.NZ],
@@ -232,7 +304,16 @@ def o_projection_a_groups_stage_nz(
     group_begin: pl.Scalar[pl.INDEX],
     group_end: pl.Scalar[pl.INDEX],
 ):
-    if A_COL_TILE == 192:
+    if A_COL_TILE == 128 and A_ROW_TILE == 128:
+        if tokens == 24:
+            o_r_pad = _native_t24_o_projection_a_groups_stage_nz(
+                o_packed, wo_a, o_r_pad, tokens, worker_id, WORKERS, group_begin, group_end
+            )
+        else:
+            o_r_pad = _original_o_projection_a_groups_stage_nz(
+                o_packed, wo_a, o_r_pad, tokens, worker_id, WORKERS, A_COL_TILE, A_ROW_TILE, group_begin, group_end
+            )
+    elif A_COL_TILE == 192:
         o_r_pad = _rectangle_o_projection_a_groups_stage_nz(
             o_packed, wo_a, o_r_pad, tokens, worker_id, WORKERS, A_COL_TILE, A_ROW_TILE, group_begin, group_end
         )
