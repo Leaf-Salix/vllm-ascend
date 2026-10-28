@@ -88,8 +88,9 @@ from .metadata_stages import compact_offsets_and_count_stage
 from .output_projection_a_stages import o_projection_group_quant_stage, o_projection_groups_quant_stage
 from .output_projection_b_stages import o_dequant_hc_post_stage
 from .phase_sync import SIGNAL_SLOT_WORDS, begin_invocation, publish_phase, wait_row_owners
+from .q_native_output_stages import q_native_dequant_rope_stage
 from .q_native_stages import q_r_native_stage
-from .query_projection_stages import q_dequant_rope_stage, q_rope_prepare_stage
+from .query_projection_stages import q_rope_prepare_stage
 from .runtime_abi import (
     ATTN_PLAN_ROWS,
     CACHE_ROWS,
@@ -189,6 +190,8 @@ from .vector_prefix_stages import (
     main_compressor_vector_stage,
     original_kv_vector_stage,
 )
+
+Q_NATIVE_BOUNDARY_MODE = 5  # scale合乘、两个BF16边界、Native归约树与尾rsqrt。
 
 
 @pl.jit.incore
@@ -836,7 +839,7 @@ def vector_schedule(
 
     # 每个head占两个NZ N256列块。首版等全部128列块的24个真实owner。
     signal = wait_row_owners(signal, PHASE_QB, CORES, generation, 0, 128, 1, GROUPS, 0, 1)
-    q_flat = q_dequant_rope_stage(
+    q_flat = q_native_dequant_rope_stage(
         wq_b_scale,
         rope_cos,
         rope_signed,
@@ -846,6 +849,7 @@ def vector_schedule(
         q_proj,
         worker,
         VECTORS,
+        Q_NATIVE_BOUNDARY_MODE,
     )
     signal = publish_phase(signal, PHASE_QUERY, core, CORES, generation)
 

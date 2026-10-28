@@ -1,6 +1,6 @@
 # 基于 nalinaly TND SPMD 的 Native 数值对齐
 
-日期：2026-10-27。
+日期：2026-10-27；Q完整接入复核更新于2026-10-28。
 
 ## 分支和目标
 
@@ -304,6 +304,66 @@ attention和输出链，没有整模型token或性能结论。该Native参考来
 分支的 `npu_quant_matmul→DeviceOperator.apply_dsa_q_rms→inplace_partial_rotary_mul`；
 这是模块eager金值，不是Native FULL全层hook。
 
+## Q 反量化、Norm 与 RoPE 的单因素结果
+
+同一完整SPMD保存的INT32 accumulator、Native BF16投影、Norm及最终RoPE作为金值。
+先重现Native Norm/RoPE，再核对反量化；Native的BF16 channel scale在adapter中
+无损加宽为FP32，数值与往返均须逐bit一致，不把两种dtype的原始字节直接比较。
+
+| Q切片（累计增加） | 最终Q不同元素数 | NOPE列不同元素数 |
+| --- | ---: | ---: |
+| 0：nalinaly原helper | 220781 | 181119 |
+| 1：先合乘activation/channel scale，再乘INT32 accumulator | 220775 | 181112 |
+| 2：再恢复投影BF16发布边界 | 31049，全部在RoPE列 | **0** |
+| 3：再恢复Norm→RoPE前BF16发布边界 | **0** | **0** |
+| 4：再按Native折叠512→256→128→64 | **0** | **0** |
+| 5：再将尾recip(sqrt)改为高精度rsqrt | **0** | **0** |
+
+反量化独立PTO根进一步确认：原两次乘法在Native BF16投影处有5个差异，
+最大2.4414e-4；先合乘scale后为0。因此小的scale顺序差异确实存在，
+本组Q主要误差仍来自越过两处BF16发布边界。MODE0逐bit复现生产原Q输出。
+所有切片FULL/eager一致、输出毒化与guards通过。
+
+任务 `task_20261027_224839_279287331096` 约50.1s完成。MODE5又在
+T1/17/23/32/33/48/63全部与新计算的Native Norm/RoPE逐bit一致，FULL/eager和guards通过。
+这些短T用保存的T24投影/scale等行重复构造，只验证Q反量化/Norm/RoPE，
+不额外证明新M的Q GEMM或真实请求metadata。T24整除8，不走尾路径；
+不能由它单独证明步骤4/5必要。完整块原本已有高精度rsqrt，没有把它记作新修正。
+
+CPU的反量化根4Tensor、完整helper根7Tensor全部编译/ABI加载通过。
+最初两次CPU编译发现分支变量及Tile有效区类型重绑定，改为独立SSA名字后通过，
+未改工具链。第一次微任务 `task_20261027_223757_218194014320` 在dtype门禁退出，
+约7.5s、未开始PTO对拍；修复后保持0bit门禁，独立审查确认没有放宽阈值。
+
+从最终AllocateMemoryAddr dump统计静态Vec MemRef的最大addr+extent：
+原helper106592 bytes，MODE5为77920 bytes，均低于192KiB。
+这不是完整SPMD峰值或性能数据；硬件结果也未包含计时验收。
+微任务后只更新了候选说明文字，去掉docstrings/comments/location后的AST完全相同，
+凭证见 `evidence/q_micro_to_production_ast.json`。
+
+生产采用MODE5；只替换Vector的Q消费helper，保留head分组、owner和QUERY发布前后的等待。
+完整生产根55、debug57、观测69的外部ABI保持；17项生产源码SHA参与跨任务门禁。
+
+### Q接回完整SPMD：前缀十个检查点全部逐bit一致
+
+`spmd-production-v9`（`task_20261028_091433_390899927444`，192.9s）
+通过完整生产debug入口FULL/eager八输出一致及guards检查。
+`spmd-observe-v6`（`task_20261028_092001_416617828439`，190.7s）
+通过相同输入/metadata/cache、17项生产SHA、观测与生产八输出、内部FULL/eager及guards门禁。
+
+| 同输入Native模块边界 | 逐bit不同元素数 |
+| --- | ---: |
+| HC mixed/post/comb（三项） | 0 |
+| InputNorm | 0 |
+| QA BF16、QR INT8/FP32 scale（三项） | 0 |
+| WKV BF16、KV Norm/RoPE（两项） | 0 |
+| Q Norm/RoPE | **0** |
+
+57/69参数完整根先通过无设备编译与ABI加载，凭证已归档。
+观测v6到Q为止，没有取得主/Indexer Compressor、TopK、attention、O-proj或HC-post的
+Native精度资格；也没有整模型逐token或性能结论。此前f22cb314基准保留，可独立revert本次Q提交。
+以上两个任务均正常退出、释放设备；不能用模块通过推定完整CSA已对齐。
+
 ## 复现
 
 227 工作区：`/data/pyptouser/yejia/vllm-nal-tnd-native-align-20261027-codex`，
@@ -387,3 +447,10 @@ Native BF16 QA、Native QR/scale 和实际 gamma；无需重新加载整层权�
 任务在设备初始化前退出，未产生数值结果。已改为复用实际impl模块选定的operator，
 并新增 `check_probe_imports.py <receipt.json>`，在公共bootstrap下先无设备检查顶层导入。
 该启动失败保留为控制问题，不记作精度失败。
+
+Q单因素复现：在 `f22cb314` 算子快照上配合当前测试脚本，先生产→观测得到Q首差
+保存件；设置 `QOUTPUT_PROBE_REFERENCE=<该observation.pt>`，提交
+`run_rms.sh <新label> qoutput`。先运行 `check_q_native_imports.py <receipt>`，
+再用 `qdequant-base/combined` 和 `qoutput-0…5` 做CPU编译、ABI加载。
+该快照尚未接Q修正，故MODE0可复现原生产Q。所有运行仍使用公共bootstrap、固定Native源码、
+确定性开关及780/750+15s时限。Native2、128K和整模型扩展仍未运行。

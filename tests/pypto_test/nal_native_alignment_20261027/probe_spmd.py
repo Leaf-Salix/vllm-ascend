@@ -146,6 +146,7 @@ try:
             "kv_native_norm_stages.py",
             "vector_prefix_stages.py",
             "query_projection_stages.py",
+            "q_native_output_stages.py",
         )
     }
     with native_session(config, 0), torch.inference_mode():

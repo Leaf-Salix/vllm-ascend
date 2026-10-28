@@ -21,7 +21,15 @@ out = Path(sys.argv[1])
 out.mkdir(exist_ok=False)
 assert not torch_npu.npu.is_initialized()
 kind = sys.argv[2] if len(sys.argv) > 2 else "rms"
-if kind in ("kvnorm-base", "kvnorm-native"):
+if kind.startswith("qoutput-"):
+    from qoutput_kernels import qoutput_arm
+
+    program = qoutput_arm.specialize(MODE=int(kind.removeprefix("qoutput-")))
+elif kind in ("qdequant-base", "qdequant-combined"):
+    from qoutput_kernels import qdequant_arm
+
+    program = qdequant_arm.specialize(COMBINED=kind == "qdequant-combined")
+elif kind in ("kvnorm-base", "kvnorm-native"):
     from kvnorm_kernels import kvnorm_arm
 
     program = kvnorm_arm.specialize(NATIVE_BOUNDARIES=kind == "kvnorm-native")
