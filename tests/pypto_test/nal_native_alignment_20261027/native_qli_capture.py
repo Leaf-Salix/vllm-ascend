@@ -3,6 +3,7 @@
 
 import sys
 from contextlib import contextmanager, nullcontext
+from unittest.mock import patch
 
 import torch
 from dsv4_csa_single_layer import collect_state, guard_checks, restore
@@ -53,6 +54,39 @@ def query_stage_capture(impl, tokens):
         module.hadamard_linear, module.hadamard_scale = original_linear, original_scale
 
 
+@contextmanager
+def weight_stage_capture(impl):
+    """观测实际权重投影及prepare输入，保留静态方法描述符并自动恢复。"""
+    module = sys.modules[type(impl).__module__]
+    operator = module.DeviceOperator
+    original_prepare = operator.prepare_dsa_indexer_weights
+    stages = {}
+
+    def save(name, value):
+        assert name not in stages
+        assert isinstance(value, torch.Tensor)
+        stages[name] = value.detach().clone()
+
+    def record_projection(_layer, inputs, result):
+        assert len(inputs) == 1
+        save("input", inputs[0])
+        save("projection", result)
+        # None preserves the actual forward result object.
+
+    def record_prepare(value, *args, **kwargs):
+        save("scaled", value)
+        result = original_prepare(value, *args, **kwargs)
+        save("consumer", result)
+        return result
+
+    handle = impl.weights_proj.register_forward_hook(record_projection)
+    try:
+        with patch.object(operator, "prepare_dsa_indexer_weights", new=staticmethod(record_prepare)):
+            yield stages
+    finally:
+        handle.remove()
+
+
 def capture_native_qli(layer, fixture, config):
     # Native ops/model initialization must precede these imports to avoid the
     # circular device_op initialization observed by the earlier Q probe.
@@ -62,7 +96,7 @@ def capture_native_qli(layer, fixture, config):
     wrapper = layer.self_attn.dsa_attn
     assert getattr(wrapper, "_pto_csa_runtime", None) is None, "Native control must not dispatch to a PTO service"
     original = torch.ops._C_ascend.npu_vllm_quant_lightning_indexer
-    states, guards, detail, detailed_stages = [], [], {}, {}
+    states, guards, detail, detailed_stages, detailed_weights = [], [], {}, {}, {}
     for detailed in (False, True):
         restore(fixture)
         output = torch.full_like(fixture["hidden"], float("nan"))
@@ -87,8 +121,10 @@ def capture_native_qli(layer, fixture, config):
         try:
             impl = wrapper.dsa_attn.impl
             stage_context = query_stage_capture(impl, fixture["tokens"]) if detailed else nullcontext({})
+            weight_context = weight_stage_capture(impl) if detailed else nullcontext({})
             with (
                 stage_context as stages,
+                weight_context as weights,
                 set_ascend_forward_context(
                     fixture["metadata"], config, num_tokens=fixture["tokens"], num_actual_tokens=fixture["tokens"]
                 ),
@@ -102,10 +138,14 @@ def capture_native_qli(layer, fixture, config):
                 assert set(stages) == {"projection", "rope", "hadamard_linear", "scaled"}
                 assert all(value.dtype == torch.bfloat16 for value in stages.values())
                 detailed_stages = {name: value.cpu() for name, value in stages.items()}
+                assert set(weights) == {"input", "projection", "scaled", "consumer"}
+                assert all(weights[name].dtype == torch.bfloat16 for name in ("input", "projection", "scaled"))
+                assert weights["consumer"].dtype == torch.float16
+                detailed_weights = {name: value.cpu() for name, value in weights.items()}
                 detail = {
                     name: value.cpu() if isinstance(value, torch.Tensor) else value
                     for name, value in captured["inputs"].items()
                 }
         finally:
             torch.ops._C_ascend.npu_vllm_quant_lightning_indexer = original
-    return states, guards, detail, detailed_stages
+    return states, guards, detail, detailed_stages, detailed_weights

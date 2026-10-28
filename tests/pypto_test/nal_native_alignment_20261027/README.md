@@ -767,6 +767,76 @@ RoPE发布、M8/四head、pipeline、所有尾有效域和55/57外部ABI不变�
 
 接入后的57参数生产根、79参数观测根均已无设备编译并加载ABI，NPU未初始化；
 凭据位于`evidence/cpu-query-spmd-debug-v13`及`evidence/cpu-query-spmd-probe-v13`。
-完整生产复测`task_20261028_122941_161574916148`已提交，当前等待设备；
+在`31d92bcc`提交时，完整生产复测`task_20261028_122941_161574916148`仍等待设备；
 因此本次提交只确认单因素数值修正和完整入口可编译，**尚不把接入后完整流水记为通过**。
 结果回来后会追加生产/观测证据，不覆盖历史记录。
+
+### query RoPE 完整接入复核
+
+生产v13（`task_20261028_122941_161574916148`，204.48秒）及观测v13
+（`task_20261028_124948_283953124444`，204.58秒）均已完成、释放设备。
+前者8个外部边界FULL/eager逐bit一致、37项guards通过；后者先通过21项源码身份、
+同输入、生产观测等价及Native hook控制，得到：
+
+| 同一8K/B4/T24检查点 | query修正前不同元素 | 修正后不同元素 |
+| --- | ---: | ---: |
+| Indexer query RoPE BF16 | 31209 | **0** |
+| Indexer query Hadamard线性落BF16 | 首差后未验收 | **0** |
+| QLI实际INT8 query | 23155（更早v11） | **18496** |
+| 其他24个已验收前缀／cache检查点 | 0 | **0** |
+
+累计26个检查点通过，当前首差仍为query量化，因此没有继续验收scale、权重、TopK或
+后续attention/输出，也没有开展新分支整模型token或性能测试。
+当前T24策略的`FUSED_INDEXER_COEFF=false`，不能把该结果推广到融合系数路径。
+下一步只对同一已保存的Hadamard accumulator和实际Native量化输入做单因素；
+不混入新的GEMM形状、长序列或请求配置。
+证据见[evidence/spmd-production-v13/result.json](evidence/spmd-production-v13/result.json)及
+[evidence/spmd-observe-v13/result.json](evidence/spmd-observe-v13/result.json)。
+
+### query Hadamard 与动态量化单因素
+
+`idxquant-boundaries-v1`（`task_20261028_125635_315822823876`，18.29秒）通过。
+三个ABI3微根先无设备编译。固定v13的同一FP32 Hadamard accumulator，
+其落BF16后已与实际Native线性输出逐bit一致。先对保存的Native scaled BF16以原始
+`[24,64,128]`形状直接重跑`torch_npu.npu_dynamic_quant`：INT8 query、消费者FP16 scale
+均逐bit复现QLI hook，输入未改变，同时保存Native返回的原始FP32 scale。
+
+| 同一Hadamard accumulator的切片 | INT8 query不同元素 | 消费者FP16 scale不同元素 |
+| --- | ---: | ---: |
+| 原路径 | 18496 | 1377 |
+| 只补线性输出BF16 | 12977 | 1351 |
+| 再补缩放输出BF16 | **0** | **0** |
+
+原臂的INT8及完整FP32 scale逐bit复现生产，全部臂FULL/eager、poison重写与两种输出
+owner guards通过。修正臂原始FP32 scale还有540个不同元素，最大绝对差为
+`2.3283064365386963e-10`；Native在QLI前转FP16，当前PTO系数消费者也先转FP16，
+这一消费边界差异为0。这里明确没有宣称原始FP32中间值全部逐bit相同。
+CPU使用相同输入及表面相同表达式曾得到147个临界INT8差异，但NPU实际DSL修正臂为0；
+不能用CPU浮点结果替代设备舍入验收，也没有据此更换round或提高精度参数。
+
+复现时增加`--env IDXQUANT_PROBE_REFERENCE=<v13-equivalent>/observation.pt`，
+使用`run_rms.sh <新标签> idxquant`；三根无设备入口为`compile_rms.py`的
+`idxquant-0/1/2`。Native重放控制先于全部PTO臂，MODE0必须复现生产，
+MODE2在query或消费者FP16 scale出现首差时保存`quantization.pt`后停止。
+输入FP32 accumulator、Native BF16 scaled、Native INT8及原始FP32 scale会保存在
+结果目录的该文件中。该诊断只覆盖当前普通量化路径及T24，不覆盖fused或新形状。
+证据见[evidence/idxquant-boundaries-v1/result.json](evidence/idxquant-boundaries-v1/result.json)。
+
+生产接入在已有Native query helper文件中增加普通量化实现，仅恢复上述两次cast，
+amax、scale、reciprocal、rint、输出dtype及外围phase等待/发布不变；
+旧helper保留用于历史复现。`FUSED_INDEXER_COEFF=true`路径未改动、尚未验收。
+80参数观测根再把`head_weights`的内部分配换为外部scratch，比较有效24行；
+在query INT8及FP16 scale门禁后依次检查Native消费的FP16 weights、TopK和最终输出，
+仍然首差停止。最终输出仅统一逻辑reshape后对比，不把存储维度不同记作数值误差。
+
+接入后57参数生产根和80参数观测根均无设备编译、ABI加载通过；
+生产v14（`task_20261028_130611_356197120433`，205.61秒）完成，8边界FULL/eager为0，
+37项guards通过。Native观测v14（`task_20261028_131107_37720968718`）已提交等待设备，
+尚不把普通query量化的单因素结果推广为完整流水通过。
+
+详细Native控制臂新增只读权重hook：实际`weights_proj`的输入/输出，以及实际
+`prepare_dsa_indexer_weights`的乘系数后输入与FP16返回值；forward hook不替换结果，
+静态方法描述符由上下文恢复，finally移除hook，统一同步后才复制CPU快照。
+最小控制臂与详细臂的8个外部边界及guards仍必须通过。
+该观测仅保存真实Native中间值，不通过除系数反推投影，也尚未单独验收PTO原始权重投影。
+证据见[evidence/spmd-production-v14/result.json](evidence/spmd-production-v14/result.json)。

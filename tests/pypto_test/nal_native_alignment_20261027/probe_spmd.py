@@ -36,7 +36,7 @@ out = Path(sys.argv[1])
 record = {
     "complete": False,
     "pass": False,
-    "scope": "complete SPMD; Native eager prefix/cache/actual indexer query stages; not whole-model tokens",
+    "scope": "complete SPMD; Native eager prefix/cache/query/weights/TopK/output stages; not whole-model tokens",
     "history": 8192,
     "lengths": [6, 6, 6, 6],
     "precision": {},
@@ -208,6 +208,7 @@ try:
             "idx_query_acc": (64, 8192),
             "idx_query_rope": (32, 8192),
             "idx_query_had": (1536, 128),
+            "head_weights": (32, 64),
         }
         observed = {
             name: torch.full(
@@ -302,7 +303,7 @@ try:
         }
 
         def observed_domain(name, value):
-            if name in ("idx_query_acc", "idx_query_rope"):
+            if name in ("idx_query_acc", "idx_query_rope", "head_weights"):
                 return value[:24]
             if name in ("idx_normed", "idx_had", "idx_scales"):
                 return value[: idx_slots_for_domain.shape[0]][valid_compact]
@@ -628,7 +629,7 @@ try:
         # diagnostic import after Native initialization, as with device_op above.
         from native_qli_capture import capture_native_qli
 
-        native_states, native_guards, qli_inputs, query_stages = capture_native_qli(layer, f, config)
+        native_states, native_guards, qli_inputs, query_stages, weight_stages = capture_native_qli(layer, f, config)
         record["native_qli_guards"] = native_guards
         record["native_qli_hook_control"] = {
             name: metric(value, native_states[0][name]) for name, value in native_states[1].items()
@@ -638,9 +639,10 @@ try:
         }
         payload["native_qli_inputs"] = qli_inputs
         payload["native_indexer_query_stages"] = query_stages
+        payload["native_indexer_weight_stages"] = weight_stages
         payload["indexer_query_weight_scale_native"] = impl.inderxer_wq_b.weight_scale.cpu()
         payload["indexer_query_weight_scale_prepared"] = prepared.buffers["idx_wq_b_scale"].cpu()
-        for name in ("idx_query_acc", "idx_query_rope", "idx_query_had"):
+        for name in ("idx_query_acc", "idx_query_rope", "idx_query_had", "head_weights"):
             payload["observed_" + name] = observed[name].cpu()
         payload["native_full_output"] = native_states[1]["x_out"]
         payload["native_full_topk"] = native_states[1]["idx_topk"]
@@ -659,6 +661,11 @@ try:
         assert qli_query.dtype == torch.int8 and qli_scale.dtype == torch.float16
         check("qli_query_int8", observed["idx_query_i8"].reshape_as(qli_query), qli_query)
         check("qli_query_scale_fp16", observed["idx_query_scale"].half().reshape_as(qli_scale), qli_scale)
+        check("weights_projection_input", observed["normed"], weight_stages["input"])
+        check("weights_prepare_repeat", weight_stages["consumer"], qli_inputs["weights"])
+        check("qli_weights_fp16", observed["head_weights"][:24].half(), qli_inputs["weights"])
+        check("qli_topk", replay["idx_topk"].reshape_as(native_states[1]["idx_topk"]), native_states[1]["idx_topk"])
+        check("native_full_output", replay["x_out"].reshape_as(native_states[1]["x_out"]), native_states[1]["x_out"])
         record["pass"] = True
         record["complete"] = True
 except SystemExit as error:

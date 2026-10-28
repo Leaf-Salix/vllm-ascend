@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: F403, F405 -- Keep the diagnostic root globals identical to its production source.
-"""从生产debug根仅替换22个内部分配为外部观测缓冲；算术和调度调用相同。
+"""从生产debug根仅替换23个内部分配为外部观测缓冲；算术和调度调用相同。
 
 使用前必须证明该根与未经观测的生产debug根的全部8个外部输出逐字节一致。
 """
@@ -90,6 +90,7 @@ def spmd_stage_probe(
     debug_idx_query_acc: pl.InOut[pl.Tensor[[IDX_PROJ_ROWS, 8192], pl.INT32]],
     debug_idx_query_rope: pl.InOut[pl.Tensor[[IDX_ROPE_ROWS, 8192], pl.BF16]],
     debug_idx_query_had: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]],
+    debug_head_weights: pl.InOut[pl.Tensor[[P16, 64], pl.FP32]],
     QUERY_GROUP: pl.constexpr,
     QK_PANEL: pl.constexpr,
     SCORE_TILE: pl.constexpr,
@@ -181,7 +182,7 @@ def spmd_stage_probe(
     idx_query_i8 = debug_idx_query_i8
     idx_query_scale = debug_idx_query_scale
     weights_partial = pl.create_tensor([p16 * 4, 64], dtype=pl.FP32)
-    head_weights = pl.create_tensor([p16, 64], dtype=pl.FP32)
+    head_weights = debug_head_weights
     # 原分区及其偏移不变；仅融合域在内部offset尾追加T个INT32映射。
     group_offset_words = ((b + 1 + 16 - 1) // 16 * 16 + 4 * t + 16 - 1) // 16 * 16 + 48 + 4 * t + 2 * b
     if FUSED_INDEXER_COEFF:
@@ -276,7 +277,7 @@ def spmd_stage_probe(
             idx_query_i8_after,
             idx_query_scale_after,
             weights_partial,
-            head_weights,
+            head_weights_after,
             group_offsets,
             group_plan,
             coefficients,

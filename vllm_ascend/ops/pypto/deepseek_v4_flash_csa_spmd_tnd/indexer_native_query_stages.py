@@ -5,9 +5,10 @@
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
-"""同一Indexer M8/四head条带，隔离Native scale结合顺序及RoPE前BF16边界。
+"""对齐Native Indexer query的投影、RoPE及Hadamard量化舍入边界。
 
 生产固定MODE2；MODE0原反量化、1仅合并scale保留用于单因素复现。
+普通query量化恢复Hadamard线性及缩放后的BF16边界；融合系数路径尚未接入。
 不改RoPE公式、工作划分、尾行有效域或外部发布/等待。
 """
 
@@ -16,12 +17,20 @@ import pypto.language as pl
 from .indexer_query_stages import (
     DEQUANT_T_TILE,
     DQ_ROPE_H_TILE,
+    HADAMARD_ROWS_DYN,
+    HADAMARD_SCALE,
     IDX_HEAD_DIM,
     IDX_N_HEADS,
     IDX_NOPE_HEAD_DIM,
+    INT8_AMAX_EPS,
+    INT8_SCALE_MAX,
     PROJ_ROWS_DYN,
+    QH_HEAD_DIM_TILE,
+    QH_QUANT_TILE,
+    QUANT_ROWS_DYN,
     ROPE_HEAD_DIM,
     ROPE_ROWS_DYN,
+    SCALE_ROWS_DYN,
     T_DYN,
 )
 
@@ -190,3 +199,43 @@ def native_indexer_query_dequant_rope_stage(
                     pl.store(tail_tile_qr_nope_bf16, [dq_t0, tail_tile_h0], qr_bf16_2d)
                     pl.store(tail_tile_rope_bf16, [dq_t0, tail_tile_h0 + IDX_NOPE_HEAD_DIM], qr_bf16_2d)
     return qr_bf16_2d
+
+
+@pl.jit.inline(auto_scope=False)
+def native_indexer_query_quant_stage(
+    qh_acc_gm: pl.Tensor[[HADAMARD_ROWS_DYN, IDX_HEAD_DIM], pl.FP32],
+    qr_hadamard_i8: pl.Tensor[[QUANT_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+    qr_hadamard_scale_dq: pl.Tensor[[SCALE_ROWS_DYN, 1], pl.FP32],
+    tokens: pl.Scalar[pl.INDEX],
+    worker_id: pl.Scalar[pl.INDEX],
+    WORKERS: pl.constexpr,
+):
+    """AIV：先等Hadamard FP32，逐64head行归一比例并量化；输出INT8与独立FP32 scale。"""
+    bs_heads = tokens * IDX_N_HEADS
+    qh_quant_worker = worker_id
+    for idx in pl.range(qh_quant_worker, bs_heads // QH_QUANT_TILE, WORKERS):
+        o0 = idx * QH_QUANT_TILE
+        qh_full_f32 = qh_acc_gm[o0 : o0 + QH_QUANT_TILE, 0:IDX_HEAD_DIM]
+        # Native先输出BF16 Hadamard线性结果，再单独做BF16缩放。
+        qh_full_f32 = pl.cast(pl.cast(qh_full_f32, pl.BF16, mode="rint"), pl.FP32)
+        qh_full_f32 = pl.cast(pl.cast(pl.mul(qh_full_f32, HADAMARD_SCALE), pl.BF16, mode="rint"), pl.FP32)
+        qh_amax = pl.full([1, QH_QUANT_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS)
+        for h0 in pl.range(0, IDX_HEAD_DIM, QH_HEAD_DIM_TILE):
+            qh_a_f32 = qh_full_f32[:, h0 : h0 + QH_HEAD_DIM_TILE]
+            qh_a_neg = pl.neg(qh_a_f32)
+            qh_a_abs = pl.maximum(qh_a_f32, qh_a_neg)
+            qh_a_max_col = pl.row_max(qh_a_abs)
+            qh_a_max = pl.reshape(qh_a_max_col, [1, QH_QUANT_TILE])
+            qh_amax = pl.maximum(qh_amax, qh_a_max)
+        qh_scale_numerator = pl.full([1, QH_QUANT_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX)
+        qh_scale_quant_row = pl.div(qh_scale_numerator, qh_amax)
+        qh_scale_recip = pl.recip(qh_scale_quant_row)
+        qh_scale_dq = pl.reshape(qh_scale_recip, [QH_QUANT_TILE, 1])
+        qr_hadamard_scale_dq[o0 : o0 + QH_QUANT_TILE, :] = qh_scale_dq
+        qh_scale_quant = pl.reshape(qh_scale_quant_row, [QH_QUANT_TILE, 1])
+        qh_q_scaled = pl.row_expand_mul(qh_full_f32, qh_scale_quant)
+        qh_q_i32 = pl.cast(qh_q_scaled, target_type=pl.INT32, mode="rint")
+        qh_q_half = pl.cast(qh_q_i32, target_type=pl.FP16, mode="round")
+        qh_i8 = pl.cast(qh_q_half, target_type=pl.INT8, mode="trunc")
+        qr_hadamard_i8[o0 : o0 + QH_QUANT_TILE, 0:IDX_HEAD_DIM] = qh_i8
+    return qr_hadamard_i8, qr_hadamard_scale_dq
