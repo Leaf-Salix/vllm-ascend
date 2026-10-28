@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: F403, F405 -- Keep the diagnostic root globals identical to its production source.
-"""从生产debug根仅替换12个内部分配为外部观测缓冲；算术和调度调用相同。
+"""从生产debug根仅替换17个内部分配为外部观测缓冲；算术和调度调用相同。
 
 使用前必须证明该根与未经观测的生产debug根的全部8个外部输出逐字节一致。
 """
@@ -80,6 +80,11 @@ def spmd_stage_probe(
     debug_kv: pl.InOut[pl.Tensor[[T, 512], pl.BF16]],
     debug_q_proj: pl.InOut[pl.Tensor[[QPROJ_ROWS, 32768], pl.INT32]],
     debug_q: pl.InOut[pl.Tensor[[T, 32768], pl.BF16]],
+    debug_idx_pooled: pl.InOut[pl.Tensor[[T, 128], pl.FP32]],
+    debug_idx_normed: pl.InOut[pl.Tensor[[P16, 128], pl.BF16]],
+    debug_idx_had: pl.InOut[pl.Tensor[[P16, 128], pl.FP32]],
+    debug_idx_scales: pl.InOut[pl.Tensor[[P16, 1], pl.FP32]],
+    debug_idx_debug: pl.InOut[pl.Tensor[[T, 128], pl.FP32]],
     QUERY_GROUP: pl.constexpr,
     QK_PANEL: pl.constexpr,
     SCORE_TILE: pl.constexpr,
@@ -158,13 +163,13 @@ def spmd_stage_probe(
     main_debug = pl.create_tensor([t, 512], dtype=pl.FP32)
     idx_value = pl.create_tensor([p16, 256], dtype=pl.FP32)
     idx_score = pl.create_tensor([p16, 256], dtype=pl.FP32)
-    idx_pooled = pl.create_tensor([t, 128], dtype=pl.FP32)
+    idx_pooled = debug_idx_pooled
     idx_offsets = pl.create_tensor([b], dtype=pl.INT32)
     idx_count = pl.create_tensor([1], dtype=pl.INT32)
-    idx_normed = pl.create_tensor([p16, 128], dtype=pl.BF16)
-    idx_had = pl.create_tensor([p16, 128], dtype=pl.FP32)
-    idx_scales = pl.create_tensor([p16, 1], dtype=pl.FP32)
-    idx_debug = pl.create_tensor([t, 128], dtype=pl.FP32)
+    idx_normed = debug_idx_normed
+    idx_had = debug_idx_had
+    idx_scales = debug_idx_scales
+    idx_debug = debug_idx_debug
     idx_query_acc = pl.create_tensor([p64, 8192], dtype=pl.INT32)
     idx_query_rope = pl.create_tensor([p16, 8192], dtype=pl.BF16)
     idx_query_had = pl.create_tensor([t * 64, 128], dtype=pl.FP32)
@@ -252,13 +257,13 @@ def spmd_stage_probe(
             idx_value,
             idx_score,
             idx_state,
-            idx_pooled,
+            idx_pooled_after,
             idx_offsets,
             idx_count,
-            idx_normed,
-            idx_had,
-            idx_scales,
-            idx_debug,
+            idx_normed_after,
+            idx_had_after,
+            idx_scales_after,
+            idx_debug_after,
             idx_cache,
             idx_query_acc,
             idx_query_rope,

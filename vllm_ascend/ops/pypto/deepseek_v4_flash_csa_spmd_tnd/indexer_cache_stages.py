@@ -34,9 +34,9 @@
     代际；return只有GM别名语义。完整 Indexer 读取需等待key与scale均可见。
 
 数值顺序与边界
-    保留当前canonical顺序：FP32→BF16(rint)→FP32，再乘128**(-0.5)，
+    保留当前canonical顺序：FP32→BF16(rint)→FP32，再乘128**(-0.5)，落BF16后再加宽FP32，
     row_max(abs)→amax下限→127/amax→recip；INT8经INT32(rint)、FP16(round)、
-    INT8(trunc)转换。不能把BF16舍入挪到缩放后。scale最后按原Scalar cast
+    INT8(trunc)转换。分别保留matmul及缩放的两次BF16边界。scale最后按原Scalar cast
     转FP16存入Native页；邻近历史scale通过单写者64B RMW保持。
     request_bounds先排除dummy，再枚举真实关闭token并核对causal position。
     compact行上下界先于slot读取，page/offset和页字节容量先于cache写入。
@@ -96,7 +96,12 @@ def indexer_compact_quant_cache_stage(
                         rows = pl.min(ROW_TILE, count - local_first)
                         raw = pl.load(values, [first, 0], [ROW_TILE, HEAD_DIM], valid_shape=[rows, HEAD_DIM])
                         kv_f32 = pl.cast(pl.cast(raw, target_type=pl.BF16, mode="rint"), target_type=pl.FP32)
-                        kv_f32 = pl.mul(kv_f32, HADAMARD_SCALE)
+                        # Native rotate_activation multiplies a BF16 linear
+                        # result and returns BF16 before dynamic quantization.
+                        kv_f32 = pl.cast(
+                            pl.cast(pl.mul(kv_f32, HADAMARD_SCALE), target_type=pl.BF16, mode="rint"),
+                            target_type=pl.FP32,
+                        )
                         # 显式Tile归约需UB暂存，仍是同一次128列row_max，未拆归约树。
                         reduce_tmp = pl.create_tile([ROW_TILE, HEAD_DIM], dtype=pl.FP32)
                         amax = pl.reshape(pl.row_max(pl.abs(kv_f32), reduce_tmp), [1, ROW_TILE])

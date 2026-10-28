@@ -36,7 +36,7 @@ out = Path(sys.argv[1])
 record = {
     "complete": False,
     "pass": False,
-    "scope": "complete CSA SPMD; Native eager gates through Q/main compressor/Indexer cache; not whole-model tokens",
+    "scope": "complete SPMD; Native eager prefix/Indexer norm/Hadamard/cache; not whole-model tokens",
     "history": 8192,
     "lengths": [6, 6, 6, 6],
     "precision": {},
@@ -149,6 +149,7 @@ try:
             "q_native_output_stages.py",
             "main_native_projection_stages.py",
             "indexer_native_projection_stages.py",
+            "indexer_cache_stages.py",
         )
     }
     with native_session(config, 0), torch.inference_mode():
@@ -196,6 +197,11 @@ try:
             "kv": (24, 512),
             "q_proj": (128, 32768),
             "q": (24, 32768),
+            "idx_pooled": (24, 128),
+            "idx_normed": (32, 128),
+            "idx_had": (32, 128),
+            "idx_scales": (32, 1),
+            "idx_debug": (24, 128),
         }
         observed = {
             name: torch.full(
@@ -206,7 +212,7 @@ try:
                 else torch.int32
                 if name == "q_proj"
                 else torch.bfloat16
-                if name in ("mixed", "normed", "kv", "q")
+                if name in ("mixed", "normed", "kv", "q", "idx_normed")
                 else torch.float32,
                 device="npu",
             )
@@ -277,7 +283,26 @@ try:
         assert all(row["bit_equal"] for row in record["observation_gate"].values()), (
             "observed root changes production external outputs"
         )
-        eager_stages = {name: value.cpu().clone() for name, value in observed.items()}
+        # These new compact scratches have unpublished rows. Compare only the
+        # real closed-token/valid-slot domain in both eager and FULL; the whole
+        # production output/cache and guards are checked separately above/below.
+        idx_slots_for_domain = f["compact"]["indexer"][2]
+        valid_compact = (idx_slots_for_domain >= 0).all(dim=-1)
+        closed_tokens = ((f["positions"] + 1) % 4) == 0
+        assert int(closed_tokens.sum()) == int(valid_compact.sum()) == 4
+        record["indexer_observation_domain"] = {
+            "compact_rows": valid_compact.nonzero().flatten().cpu().tolist(),
+            "token_rows": closed_tokens.nonzero().flatten().cpu().tolist(),
+        }
+
+        def observed_domain(name, value):
+            if name in ("idx_normed", "idx_had", "idx_scales"):
+                return value[: idx_slots_for_domain.shape[0]][valid_compact]
+            if name in ("idx_pooled", "idx_debug"):
+                return value[closed_tokens]
+            return value
+
+        eager_stages = {name: observed_domain(name, value).cpu().clone() for name, value in observed.items()}
         restore(f)
         stream = torch.npu.Stream()
         stream.wait_stream(torch.npu.current_stream())
@@ -293,7 +318,9 @@ try:
         torch.npu.synchronize()
         replay = collect_state(f, output, topk)
         record["replay_eager"] = {name: metric(value, diagnostic[name]) for name, value in replay.items()}
-        record["stage_replay_eager"] = {name: metric(value, eager_stages[name]) for name, value in observed.items()}
+        record["stage_replay_eager"] = {
+            name: metric(observed_domain(name, value), eager_stages[name]) for name, value in observed.items()
+        }
         record["guards"] = guard_checks(f)
         save()
         assert all(row["bit_equal"] for row in record["replay_eager"].values())
@@ -541,6 +568,32 @@ try:
         idx_outer = f["metadata"][f["groups"]["indexer"]["prefix"]]
         idx_key_cache, idx_scale_cache = f["groups"]["indexer"]["views"]
         native_module = sys.modules[type(impl).__module__]
+        assert impl.indexcom_rotate, "this diagnostic qualifies the active Hadamard path"
+        idx_linear, idx_shape, idx_dim = native_module.hadamard_linear(idx_compressed_b, idx_outer.hadamard)
+        idx_scaled = native_module.hadamard_scale(idx_linear, idx_shape, idx_dim, scale=idx_dim**-0.5)
+        idx_rotated = native_module.rotate_activation(idx_compressed_b, idx_outer.hadamard)
+        record["indexer_native_hadamard_split_repeat"] = metric(idx_scaled[valid_idx_rows], idx_rotated[valid_idx_rows])
+        assert record["indexer_native_hadamard_split_repeat"]["bit_equal"]
+        payload["indexer_compact_slots"] = idx_slots.cpu()
+        payload["indexer_hadamard_weight_native"] = idx_outer.hadamard.cpu()
+        payload["indexer_hadamard_linear_native"] = idx_linear.cpu()
+        payload["indexer_hadamard_scaled_native"] = idx_scaled.cpu()
+        for name in ("idx_pooled", "idx_normed", "idx_had", "idx_scales", "idx_debug"):
+            payload["observed_" + name] = observed[name].cpu()
+        save()
+        check(
+            "indexer_norm_rope", observed_domain("idx_normed", observed["idx_normed"]), idx_compressed_b[valid_idx_rows]
+        )
+        check(
+            "indexer_hadamard_linear_bf16",
+            observed_domain("idx_had", observed["idx_had"]).bfloat16(),
+            idx_linear[valid_idx_rows],
+        )
+        check(
+            "indexer_hadamard_scaled",
+            observed_domain("idx_debug", observed["idx_debug"]),
+            idx_scaled[valid_idx_rows].float(),
+        )
         idx_raw, idx_views = [], []
         record["indexer_native_scatter_guards"] = []
         for _ in range(2):

@@ -623,3 +623,75 @@ Native Indexer compressor的state/已发布输出重复一致；再运行原生
 当前32个key元素均最大相差1，仅证明剩余差异在state之后，尚未归因于具体后缀模块。
 下一步导出PTO压缩后Norm/RoPE、Hadamard及量化输入，与实际Native中间结果对拍。
 两个NPU任务均完成并释放设备；本轮未做整模型token或性能验收。
+
+### Indexer key首差继续拆解：Hadamard缩放边界
+
+扩展观测根，仅将5个内部scratch改为外部可见：池化结果、Norm/RoPE BF16结果、
+Hadamard FP32 accumulator、FP32 scale、量化前FP32值。生产`_csa_core_group`调用AST
+完全相同；debug生产根仍57参数，观测根扩为74参数。
+新增scratch只比较真实关闭token`[3,9,15,21]`及有效compact`[0,1,2,3]`，
+外部8边界、完整cache与guards仍全量验证。池化/scale scratch当前仅验证图稳定性，
+不能列为已经直接对拍Native。
+
+首次无设备编译因`idx_normed`动态维度返回别名重绑定退出，未占卡；
+5个LHS改为独立`_after`别名后编译与ABI加载通过。没有修改SDK。
+观测v9（`task_20261028_110119_12563384556`，202.27秒）通过生产等价、
+FULL/eager、guards及前13项Native门禁后：
+
+| 同输入边界 | 对Native逐bit不同元素数 |
+| --- | ---: |
+| Indexer压缩Norm/RoPE的BF16输出 | **0** |
+| Hadamard FP32 accumulator落BF16，对Native BF16 linear | **0** |
+| 乘`128**(-0.5)`后，对Native BF16输出无损加宽 | **512/512，首差** |
+
+缩放最大绝对差`0.006908893585205078`。
+Native实际`hadamard_linear→hadamard_scale`与`rotate_activation`在有效行逐bit一致，
+先证明拆分观测没有改变Native金值。
+再只读同一保存件，在CPU执行`actual.bfloat16().float()`后512个差异全部清零。
+这项CPU证据仅解释缩放首差，不代替NPU cache验收。
+证据为[evidence/spmd-observe-v9/result.json](evidence/spmd-observe-v9/result.json)和
+[evidence/indexer-scale-cpu-round-v1/result.json](evidence/indexer-scale-cpu-round-v1/result.json)。
+
+候选只在Hadamard缩放后恢复Native的BF16舍入，再无损加宽给原量化流程；
+已有matmul BF16边界、amax、INT8转换链、key/scale提交、owner和等待全部不变。
+独立AST审查确认，移除这两层新增cast后整个helper与修正前逐AST相同。
+该helper新增到跨生产/观测源码身份列表，合计20项。
+
+复现缩放首差：在`8957f04a`生产算子上配合当前74参数观测脚本，先生成生产快照，
+再以该快照运行观测，取得v9等价的`observation.pt`。新增5scratch只改变可见性，
+必须通过完整生产8边界等价门禁。CPU可用下列语句验证同一输入的舍入因果：
+
+```python
+import torch
+
+saved = torch.load("<v9-equivalent>/observation.pt", map_location="cpu", weights_only=True)
+actual = saved["indexer_hadamard_scaled_actual"]
+native = saved["indexer_hadamard_scaled_native"]
+assert int((actual.view(torch.int32) != native.view(torch.int32)).sum()) == 512
+assert torch.equal(actual.bfloat16().float().view(torch.int32), native.view(torch.int32))
+```
+
+修正后的当前版本需要重新生成生产快照，不能继续引用修正前19项SHA的v11。
+先分别以`compile_rms.py`的`spmd-debug`和`spmd-probe`编译57/74参数根，
+再按前述780/750+15s时限提交生产→观测两项任务。观测通过20项源码身份和输入门禁后，
+依次验收Norm/RoPE、Had线性BF16、缩放输出、完整key cache及scale cache。
+
+### 缩放舍入接入后的完整设备验收
+
+57/74参数根无设备编译、ABI加载通过，生产v12
+（`task_20261028_111445_188908717115`，202.86秒）及观测v10
+（`task_20261028_113007_28471475857`，198.78秒）均已完成并释放设备。
+观测先通过20项源码身份、同输入、生产8边界等价、FULL/eager与guards，再验证：
+
+| 当前8K/B4/T24的边界 | 修正前不同元素数 | 修正后不同元素数 |
+| --- | ---: | ---: |
+| Indexer缩放输出 | 512 | **0** |
+| Indexer完整INT8 key cache | 32 | **0** |
+| Indexer完整FP16 scale cache | 首差后未验收 | **0** |
+| 其余已验收前缀 | 0 | **0** |
+
+Native完整共享cache allocation重复一致，逐次guards通过。至此18个Native模块检查点
+全部逐bit一致，当前任务`complete/pass=true`的范围仅到Indexer cache。
+**尚未比较后续Indexer query、权重系数、TopK、sparse attention、O-proj、HC-post，
+不能宣称整个新CSA或整模型token已验收，也没有本分支的新性能结论。**
+证据见[evidence/spmd-observe-v10/result.json](evidence/spmd-observe-v10/result.json)。
