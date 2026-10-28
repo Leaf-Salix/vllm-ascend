@@ -364,6 +364,95 @@ CPU的反量化根4Tensor、完整helper根7Tensor全部编译/ABI加载通过�
 Native精度资格；也没有整模型逐token或性能结论。此前f22cb314基准保留，可独立revert本次Q提交。
 以上两个任务均正常退出、释放设备；不能用模块通过推定完整CSA已对齐。
 
+## 主Compressor：先修正观测，再定位state首差
+
+沿用v9相同初始输入、metadata/cache、真实权重与归一化输入。Q十检查点通过后，
+严格调用冻结Native `_forward_decode` 内的主Compressor算子和原参数：
+Native state页视图、state页表、compressed完整B+1 query bounds/start_pos、
+compact sin/cos、主wkv/wgate/APE/gamma，以及原ratio/coff/eps/mode。
+每次恢复初态并同步，记录每次Native guards；没有修改生产算术或Native参考。
+
+首项 `spmd-main-compressor-v1`（`task_20261028_092620_35450513147`，33.1s）
+在Native自身全输出重复检查退出。物理输出为10×512，但本次只有4个有效压缩行，
+其余6个槽为`[-1,31]`。Native使用empty分配物理输出，未发布的尾部不作为数值金值。
+该失败的完整JSON保留，不计作PTO精度失败。
+
+第二项 `spmd-main-compressor-v2`（`task_20261028_093128_6516408760`，34.2s）
+保存两份Native物理输出、slots和逐行bit差异，确认差异仅在6个无效行；
+完整state及4个有效输出仍要求逐bit自重复，均为0差异，guards均通过。
+未放宽有效数据的比较阈值，也没有过滤Native scatter的负槽。
+
+| 边界 | 不同元素数 | max_abs |
+| --- | ---: | ---: |
+| 前缀至Q的十个检查点 | 0 | 0 |
+| 主Compressor完整state | **41005** | **9.5367431640625e-7** |
+
+首差坐标从`[6,0,0,32]`开始。发现state首差后立即停止，未执行scatter，
+因此没有主压缩cache或后续模块的精度结论。下一步只验证投影的N/K切分和累加顺序，
+保持原state写回不变。
+
+### 主投影单因素：因果确认列组K起点
+
+`spmd-main-compressor-v3`（`task_20261028_094410_132217610232`，35.0s）
+额外保存实际Native初始state view和物理布局。其NPU stride为
+`[8192,2048,2048,1]`，storage offset=128 bytes；`.cpu()`后的逻辑紧凑副本不能
+代替NPU物理stride。原始allocation有1212672 bytes，而逻辑view为606208 bytes。
+
+第一次投影微任务在初态容量断言处退出0.9s，未执行候选；没有通过“除2”修补布局。
+修正后从原allocation按实测stride/offset重建CPU view，与保存Native初态逐bit核验。
+独立数学根随后使用紧凑逻辑state及双侧128-byte保护，不宣称它就是生产物理布局。
+
+`mainproj-order-v2`（`task_20261028_094814_159105129159`，20.0s）：
+
+| 累计切片 | Native完整逻辑state不同元素数 |
+| --- | ---: |
+| 0：原nalinaly M64/N64/K512、自然K顺序 | 41005 |
+| 1：同一N64逻辑owner内部拆成两个N32 | 41005 |
+| 2：再改K128，自然顺序 | 41005 |
+| 3：再按Native列组循环偏移K起点 | **0** |
+
+MODE0必须逐bit复现原完整生产state，已通过；所有切片的state/真实24行投影
+FULL/eager和guards也通过。由本组因果对拍可确定，**列组K起点是这41005项
+state差异的来源**；不能把仅缩小N/K切片记作有效精度修正。
+
+列组规则参考Native arch32 Compressor：uniform且容量内每head16组，其余8组，
+由device query bounds实时选择；每组起点偏移256，半head重置，K128顺序累加。
+不从T/S推B，不要求每请求S6，不修改APE、state commit或池化数学。
+当前硬件资格仅限这组T24；其它TND/tiling分档需要后续独立验证。
+
+非joint生产路径接入时，Cube末尾追加既有`main_bounds`，保留原权重cache策略参数
+索引及N64逻辑owner/信号发布位置；cooperative与普通两处同时替换。
+生产根55、debug57、观测69外部参数不变，`JOINT_BF16_PREFIX`仍走旧路径，未获本修复资格。
+接入完整SPMD的物理stride与前缀回归结果单独记录，不以微任务替代。
+
+### 主投影完整接入：state/cache通过，停在Indexer state
+
+完整57/69参数根无设备编译和ABI加载通过，原cache策略参数索引未变。
+`spmd-production-v10`（`task_20261028_095854_2120717567`，203.97s）
+通过完整生产FULL/eager八输出及guards检查；任务实际09:58:55至10:02:37，正常释放卡。
+
+`spmd-observe-v7`（`task_20261028_100412_23586879960`，197.34s）
+先通过18项源码SHA、输入/metadata/cache、观测/生产八输出、内部FULL/eager与guards门禁。
+前缀至Q的十个Native检查点保持0差异。随后结果为：
+
+| Native模块边界 | 逐bit不同元素数 |
+| --- | ---: |
+| 主Compressor完整state | **0** |
+| 主压缩cache完整view | **0** |
+| Indexer Compressor完整state | **9585，首差** |
+
+主cache还补了独立控制：两份Native物理输出分别从相同初态原样scatter，
+包括6个无效尾行，不过滤负槽；**整个backing allocation逐bit重复一致**，每次guards通过。
+因此本组未发布尾部没有干扰cache金值。主pool数学虽然与Native不同，
+本组主cache没有首差，暂不修改，不能由此宣称其它输入下内部pool数值逐bit一致。
+
+Indexer调用严格用Native indexcom权重/APE/gamma、其state页表和compact metadata；
+`cu_seqlens`按真实调用链来自主compressed metadata，未替换成形状相同的Indexer bounds。
+Native完整Indexer state及有效压缩输出先通过自重复、每次guards通过，
+再发现`9585`项差异，max_abs=`9.5367431640625e-7`，首坐标`[6,0,0,16]`。
+已保存初态、实际NPU布局、权重和输出，首差后停止；未比较Indexer Hadamard/量化/cache、
+TopK、attention、O-proj或HC-post。没有整模型token或性能验收结论。
+
 ## 复现
 
 227 工作区：`/data/pyptouser/yejia/vllm-nal-tnd-native-align-20261027-codex`，
@@ -402,8 +491,8 @@ task-submit --device auto --max-time 780 \
 完整 SPMD 的 `probe_spmd.py` 分成两个任务：先生产 FULL 图快照，
 再设置 `SPMD_PRODUCTION_REFERENCE=<前项输出>/production.pt` 跑观测图。
 第二项逐字节检查已记录的 hidden、positions、只读 metadata（含 compact cos/sin/slots）、
-初始 cache，以及当前十六个生产文件的 SHA 一致（包含 WKV/KV helper、dispatcher、调用点和 Q 消费代码），
-再比较观测根与生产根的八个外部输出；通过后才解释 HC/Norm/QA/QR 的 Native 首差。
+初始 cache，以及当前十八个生产文件的 SHA 一致（包含 WKV/KV/Q/主投影helper与调用点），
+再比较观测根与生产根的八个外部输出；通过后才解释各Native模块首差。
 这样不把两个完整根的首次编译放到同一个占卡任务。
 权重/SDK 通过固定路径、提交和加载参数记录，当前不是全部文件的逐字节身份门禁。
 
@@ -454,3 +543,28 @@ Q单因素复现：在 `f22cb314` 算子快照上配合当前测试脚本，先�
 再用 `qdequant-base/combined` 和 `qoutput-0…5` 做CPU编译、ABI加载。
 该快照尚未接Q修正，故MODE0可复现原生产Q。所有运行仍使用公共bootstrap、固定Native源码、
 确定性开关及780/750+15s时限。Native2、128K和整模型扩展仍未运行。
+
+### 主Compressor当前版本复核与历史单因素复现
+
+当前checkout先用`compile_rms.py`的`spmd-debug`、`spmd-probe`选项分别编译57/69参数根。
+使用上述`task-submit`环境，按以下顺序运行，每项使用新的label：
+
+1. `run_rms.sh <production-label> spmd`，取得完整生产`production.pt`。
+2. 设置`--env SPMD_PRODUCTION_REFERENCE=<该生产目录>/production.pt`，
+   运行`run_rms.sh <observe-label> spmd`。全部源/输入/生产一致性门禁通过后，
+   逐项比对Native至主state/cache；首差自动停止。
+
+要重建本轮**修正前41005项首差**，使用`a4d97e63`的生产算子快照，
+测试目录覆盖为当前版本；补齐诊断引用的新增helper文件，但不覆盖历史生产调用点或已有实现。
+先按同样两项流程生成生产和观测保存件。当前版本已经接入主投影修正，不能拿修正后的
+state当作MODE0要求复现的历史生产输出。
+
+四个微根先分别用`compile_rms.py <新输出目录> mainproj-0`至`mainproj-3`做无设备编译。
+再提交一项`run_rms.sh <新label> mainproj`，额外传入：
+
+- `--env MAINPROJ_PROBE_REFERENCE=<上述修正前观测>/observation.pt`
+- `--env SPMD_PRODUCTION_REFERENCE=<其配对生产>/production.pt`
+
+观测保存件须包含真实initial view及stride/offset，微任务先从原raw重建并逐bit核验，
+MODE0再重现历史完整生产state。四切片均做FULL/eager、投影有效区及guards检查。
+测试固定T24，不包含新batch/变长分档、完整Native FULL或整模型token验收。

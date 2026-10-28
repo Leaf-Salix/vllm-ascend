@@ -36,7 +36,7 @@ out = Path(sys.argv[1])
 record = {
     "complete": False,
     "pass": False,
-    "scope": "complete CSA SPMD execution; Native module eager gates through original KV and Q; not whole-model tokens",
+    "scope": "complete CSA SPMD; Native eager gates through Q/main compressor/Indexer state; not whole-model tokens",
     "history": 8192,
     "lengths": [6, 6, 6, 6],
     "precision": {},
@@ -147,6 +147,7 @@ try:
             "vector_prefix_stages.py",
             "query_projection_stages.py",
             "q_native_output_stages.py",
+            "main_native_projection_stages.py",
         )
     }
     with native_session(config, 0), torch.inference_mode():
@@ -366,6 +367,173 @@ try:
             q.unsqueeze(1), cos, sin, rotary_mode="interleave", partial_slice=[impl.nope_head_dim, impl.head_dim]
         )
         check("q_norm_rope", observed["q"], q.reshape(24, 32768))
+        # Only advance once every preceding Native module boundary is bit-exact.
+        # This calls the frozen Native compressor, not a reconstructed Python golden.
+        main_metadata = f["metadata"][f["groups"]["compressed"]["prefix"]].decode
+        state_metadata = f["metadata"][f["groups"]["state"]["prefix"]].decode
+        main_state = f["groups"]["state"]["views"][0]
+        main_cos, main_sin, main_slots = f["compact"]["compressed"]
+        record["main_compressor_contract"] = {
+            "state_shape": list(main_state.shape),
+            "state_stride": list(main_state.stride()),
+            "state_storage_offset_bytes": main_state.storage_offset() * main_state.element_size(),
+            "allocation_bytes": f["groups"]["state"]["allocation"].numel(),
+            "bounds": main_metadata.query_start_loc.cpu().tolist(),
+            "start_pos": main_metadata.start_pos.cpu().tolist(),
+            "compact_slots_shape": list(main_slots.shape),
+            "negative_slot_rows": int((main_slots < 0).any(dim=-1).sum().cpu()),
+            "norm_dtype": str(impl.compressor_norm.weight.dtype),
+            "coff": 2 if impl.compressor_overlap else 1,
+        }
+        record["native_compressor_guards"] = []
+
+        def native_main_compressor():
+            restore(f)
+            torch.npu.synchronize()
+            payload["main_state_initial"] = main_state.cpu()
+            compressed = torch.ops._C_ascend.compressor(
+                normed,
+                impl.compressor_wkv.weight,
+                impl.compressor_wgate.weight,
+                main_state.squeeze(-2),
+                impl.compressor_ape,
+                impl.compressor_norm.weight,
+                main_sin.view(-1, main_sin.shape[-1]),
+                main_cos.view(-1, main_cos.shape[-1]),
+                state_block_table=state_metadata.block_table,
+                cu_seqlens=main_metadata.query_start_loc,
+                seqused=None,
+                start_pos=main_metadata.start_pos,
+                rope_head_dim=impl.rope_head_dim,
+                cmp_ratio=impl.compress_ratio,
+                coff=2 if impl.compressor_overlap else 1,
+                norm_eps=impl.compressor_norm_eps,
+                rotary_mode=2,
+                cache_mode=1,
+            )
+            torch.npu.synchronize()
+            guards = guard_checks(f)
+            record["native_compressor_guards"].append(guards)
+            save()
+            assert all(row["status"] == "PASS" for row in guards.values())
+            return main_state.cpu(), compressed
+
+        state_a, compressed_a = native_main_compressor()
+        state_b, compressed_b = native_main_compressor()
+        assert compressed_a.shape == compressed_b.shape == (main_slots.shape[0], 512)
+        valid_main_rows = (main_slots >= 0).all(dim=-1)
+        # Native only publishes compact rows with valid slots. Keep the full-buffer
+        # bit evidence, including unpublished rows, without treating padding as gold.
+        output_row_differences = (
+            compressed_a.cpu().contiguous().view(torch.int16) != compressed_b.cpu().contiguous().view(torch.int16)
+        ).sum(dim=-1)
+        record["main_native_output_rows"] = {
+            "slots": main_slots.cpu().tolist(),
+            "different_elements": output_row_differences.tolist(),
+            "valid_rows": valid_main_rows.cpu().tolist(),
+        }
+        record["main_native_repeat"] = {
+            "state": metric(state_a, state_b),
+            "published_output": metric(compressed_a[valid_main_rows], compressed_b[valid_main_rows]),
+        }
+        payload["main_state_native"] = state_b
+        payload["main_compressed_native_repeat_a"] = compressed_a.cpu()
+        payload["main_compressed_native"] = compressed_b.cpu()
+        payload["main_compact_slots"] = main_slots.cpu()
+        payload["main_wkv_native"] = impl.compressor_wkv.weight.cpu()
+        payload["main_wgate_native"] = impl.compressor_wgate.weight.cpu()
+        payload["main_ape_native"] = impl.compressor_ape.cpu()
+        payload["main_gamma_native"] = impl.compressor_norm.weight.cpu()
+        record["main_compressor_contract"]["output_shape"] = list(compressed_b.shape)
+        save()
+        assert all(row["bit_equal"] for row in record["main_native_repeat"].values())
+        check("main_compressor_state", replay["state.0"], state_b)
+        # Match Native scatter unchanged. Its two full outputs differ in padding;
+        # prove those rows do not affect the entire backing cache or its guards.
+        scatter_raw, scatter_views = [], []
+        record["native_scatter_guards"] = []
+        for compressed in (compressed_a, compressed_b):
+            restore(f)
+            if compressed.shape[0] > 0:
+                native_device_operator.dsa_kv_compress_scatter(
+                    f["groups"]["compressed"]["views"][0], compressed, main_slots
+                )
+            torch.npu.synchronize()
+            guards = guard_checks(f)
+            record["native_scatter_guards"].append(guards)
+            save()
+            assert all(row["status"] == "PASS" for row in guards.values())
+            scatter_raw.append(f["groups"]["compressed"]["allocation"].cpu())
+            scatter_views.append(f["groups"]["compressed"]["views"][0].cpu())
+        record["main_native_scatter_repeat"] = metric(scatter_raw[0], scatter_raw[1])
+        save()
+        assert record["main_native_scatter_repeat"]["bit_equal"]
+        check("main_compressed_cache", replay["compressed.0"], scatter_views[1])
+        # Indexer is independent of the main compressor. Advance only after both
+        # main state and cache pass; do not mix Hadamard/quantization into this gate.
+        idx_metadata = f["metadata"][f["groups"]["indexer"]["prefix"]].decode
+        idx_state_metadata = f["metadata"][f["groups"]["indexer_state"]["prefix"]].decode
+        idx_state = f["groups"]["indexer_state"]["views"][0]
+        idx_cos, idx_sin, idx_slots = f["compact"]["indexer"]
+        record["indexer_compressor_contract"] = {
+            "state_shape": list(idx_state.shape),
+            "state_stride": list(idx_state.stride()),
+            "state_storage_offset_bytes": idx_state.storage_offset() * idx_state.element_size(),
+            "allocation_bytes": f["groups"]["indexer_state"]["allocation"].numel(),
+            "bounds_source": "compressed.decode.query_start_loc, as forwarded by Native",
+            "bounds": main_metadata.query_start_loc.cpu().tolist(),
+            "start_pos": idx_metadata.start_pos.cpu().tolist(),
+            "slots": idx_slots.cpu().tolist(),
+        }
+        record["indexer_native_guards"] = []
+
+        def native_indexer_compressor():
+            restore(f)
+            torch.npu.synchronize()
+            payload["indexer_state_initial"] = idx_state.cpu()
+            compressed = torch.ops._C_ascend.compressor(
+                normed,
+                impl.indexcom_wkv.weight,
+                impl.indexcom_wgate.weight,
+                idx_state.squeeze(-2),
+                impl.indexcom_ape,
+                impl.indexcom_norm.weight,
+                idx_sin.view(-1, idx_sin.shape[-1]),
+                idx_cos.view(-1, idx_cos.shape[-1]),
+                state_block_table=idx_state_metadata.block_table,
+                cu_seqlens=main_metadata.query_start_loc,
+                seqused=None,
+                start_pos=idx_metadata.start_pos,
+                rope_head_dim=impl.rope_head_dim,
+                cmp_ratio=impl.compress_ratio,
+                coff=2 if impl.compressor_overlap else 1,
+                norm_eps=impl.compressor_norm_eps,
+                rotary_mode=2,
+                cache_mode=1,
+            )
+            torch.npu.synchronize()
+            guards = guard_checks(f)
+            record["indexer_native_guards"].append(guards)
+            save()
+            assert all(row["status"] == "PASS" for row in guards.values())
+            return idx_state.cpu(), compressed
+
+        idx_state_a, idx_compressed_a = native_indexer_compressor()
+        idx_state_b, idx_compressed_b = native_indexer_compressor()
+        assert idx_compressed_a.shape == idx_compressed_b.shape == (idx_slots.shape[0], 128)
+        valid_idx_rows = (idx_slots >= 0).all(dim=-1)
+        record["indexer_native_repeat"] = {
+            "state": metric(idx_state_a, idx_state_b),
+            "published_output": metric(idx_compressed_a[valid_idx_rows], idx_compressed_b[valid_idx_rows]),
+        }
+        payload["indexer_compressed_native"] = idx_compressed_b.cpu()
+        payload["indexer_wkv_native"] = impl.indexcom_wkv.weight.cpu()
+        payload["indexer_wgate_native"] = impl.indexcom_wgate.weight.cpu()
+        payload["indexer_ape_native"] = impl.indexcom_ape.cpu()
+        payload["indexer_gamma_native"] = impl.indexcom_norm.weight.cpu()
+        save()
+        assert all(row["bit_equal"] for row in record["indexer_native_repeat"].values())
+        check("indexer_compressor_state", replay["indexer_state.0"], idx_state_b)
         record["pass"] = True
         record["complete"] = True
 except SystemExit as error:

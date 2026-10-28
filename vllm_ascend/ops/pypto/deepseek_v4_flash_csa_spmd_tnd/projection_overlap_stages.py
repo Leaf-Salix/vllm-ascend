@@ -41,10 +41,10 @@
 
 import pypto.language as pl
 
-from .compressor_projection_stages import compressor_project_stage
 from .indexer_compressor_output_stages import indexer_compressor_hadamard_stage
 from .indexer_query_stages import indexer_weights_project_stage
 from .kv_precision_dispatch import kv_precision_project_stage as kv_project_stage
+from .main_native_projection_stages import main_native_projection_stage
 from .phase_sync import publish_phase, wait_producer, wait_row_owners
 from .qkv_stages import BF16_WEIGHT_LAYOUT
 from .query_projection_stages import QUANT_WEIGHT_LAYOUT, q_b_stage
@@ -56,6 +56,7 @@ from .runtime_abi import (
     IDX_ROPE_HEAD_ROWS,
     KV_ROWS,
     MPROJ,
+    MQ,
     PHASE_IDX_HADAMARD,
     PHASE_IDX_NORM,
     PHASE_IDX_QUERY_HAD,
@@ -103,6 +104,7 @@ def projection_overlap_stage(
     normed: pl.Tensor[[T, 4096], pl.BF16],
     main_wkv: pl.Tensor[[1024, 4096], pl.BF16],
     main_wgate: pl.Tensor[[1024, 4096], pl.BF16],
+    main_bounds: pl.Tensor[[MQ], pl.INT32],
     main_value: pl.InOut[pl.Tensor[[MPROJ, 1024], pl.FP32]],
     main_score: pl.InOut[pl.Tensor[[MPROJ, 1024], pl.FP32]],
     weights_proj: pl.Tensor[[64, 4096], pl.BF16, BF16_WEIGHT_LAYOUT],
@@ -129,10 +131,10 @@ def projection_overlap_stage(
     """0<R<24；Host只选择R，动态行数及所有输入依赖仍留在核内。"""
     tokens = pl.tensor.dim(normed, 0)
     # 主压缩只依赖normed，提早发布可让其AIV消费者与后续Q_B重叠。
-    # 保留原M64/N64和完整K归约，各核只发布自己的结果，不等待其它AIC。
+    # 保留原M64/N64生产者；内部N32按Native K顺序归约，发布协议不变。
     if not JOINT_BF16_PREFIX:
-        main_value, main_score = compressor_project_stage(
-            normed, main_wkv, main_wgate, main_value, main_score, worker, GROUPS
+        main_value, main_score = main_native_projection_stage(
+            normed, main_wkv, main_wgate, main_bounds, main_value, main_score, worker, GROUPS, 128, True
         )
         signal = publish_phase(signal, PHASE_MAIN_PROJECT, worker, CORES, generation)
     weights_partial = indexer_weights_project_stage(normed, weights_proj, weights_partial, worker, GROUPS)

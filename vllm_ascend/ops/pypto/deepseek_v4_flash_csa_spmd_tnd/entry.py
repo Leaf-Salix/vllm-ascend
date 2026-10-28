@@ -398,6 +398,7 @@ def _csa_core_group(
             hc_squares,
             hc_packed_input,
             hc_packed_weight,
+            main_bounds,
             QUERY_GROUP,
             QK_PANEL,
             SCORE_TILE,

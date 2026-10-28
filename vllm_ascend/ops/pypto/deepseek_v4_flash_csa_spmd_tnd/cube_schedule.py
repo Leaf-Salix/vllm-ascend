@@ -36,7 +36,7 @@ import pypto.language as pl
 
 from .attention_dependencies import wait_attention_plan_rows
 from .attention_stream_stages import attention_qk_pv_cube_stage
-from .compressor_projection_stages import compressor_project_stage, indexer_compressor_project_stage
+from .compressor_projection_stages import indexer_compressor_project_stage
 from .hc_input_rms_stages import SQUARE_ROWS, hc_input_square_range
 from .hc_native_projection_stages import hc_linear
 from .indexer_compressor_output_stages import indexer_compressor_hadamard_stage
@@ -48,6 +48,7 @@ from .indexer_query_stages import (
 from .indexer_score_stages import indexer_score_cube_stage
 from .joint_prefix_stages import joint_bf16_prefix_stage
 from .kv_precision_dispatch import kv_precision_project_stage as kv_project_stage
+from .main_native_projection_stages import main_native_projection_stage
 from .output_projection_a_stages import o_projection_a_groups_stage_nz, o_projection_a_stage_nz
 from .output_projection_b_stages import o_b_groups_stage, o_b_stage
 from .phase_sync import begin_invocation, publish_phase, wait_producer, wait_row_owners
@@ -78,6 +79,7 @@ from .runtime_abi import (
     KV_RING_ROWS,
     KV_ROWS,
     MPROJ,
+    MQ,
     O_MM_ROWS,
     P16,
     PACK_ROWS,
@@ -190,6 +192,7 @@ def cube_schedule(
     hc_squares: pl.InOut[pl.Tensor[[SQUARE_ROWS, 16], pl.FP32]],
     hc_packed_input: pl.Tensor[[P16, 32768], pl.BF16],
     hc_packed_weight: pl.Tensor[[32768, 32], pl.BF16],
+    main_bounds: pl.Tensor[[MQ], pl.INT32],
     QUERY_GROUP: pl.constexpr,
     QK_PANEL: pl.constexpr,
     SCORE_TILE: pl.constexpr,
@@ -333,6 +336,7 @@ def cube_schedule(
             normed,
             main_wkv,
             main_wgate,
+            main_bounds,
             main_value,
             main_score,
             weights_proj,
@@ -401,16 +405,19 @@ def cube_schedule(
         signal = publish_phase(signal, PHASE_IDX_HADAMARD, worker, CORES, generation)
 
         # compact Hadamard已发布；AIV可在这段主压缩投影期间量化并提交Indexer
-        # cache/scale。主压缩的数学、owner和累加顺序均不变。若别的形状下
+        # cache/scale。主压缩保留owner，按Native列组顺序累加。若别的形状下
         # IDX_NORM较晚，前移的等待可能抵消收益，因此必须实测，不能假定免费。
-        main_value, main_score = compressor_project_stage(
+        main_value, main_score = main_native_projection_stage(
             normed,
             main_wkv,
             main_wgate,
+            main_bounds,
             main_value,
             main_score,
             worker,
             GROUPS,
+            128,
+            True,
         )
         signal = publish_phase(signal, PHASE_MAIN_PROJECT, worker, CORES, generation)
 
