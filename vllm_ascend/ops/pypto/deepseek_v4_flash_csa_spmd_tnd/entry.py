@@ -54,7 +54,7 @@
     group_plan固定8项；系数至少16*T行、
     QUERY_GROUP*64列。Indexer双槽transfer/score至少24*2*QUERY_GROUP行，
     transfer列为SCORE_TILE，pair至少T*64行。计划容量覆盖pad8(T)。
-    Attention的KV_RING_ROWS>=24*3*128、HEAD_RING_ROWS>=24*3*64；packed
+    Attention的KV_RING_ROWS>=24*4*128、HEAD_RING_ROWS>=24*4*64；score/prob固定[24*64,512]；packed
     为8组，PACK_ROWS可被8整除且PACK_ROWS/8>=T。O_MM_ROWS至少
     max(pad128(T),pad_OB_ROWS(T))，O_SCALE_ROWS>=T。各缓冲除上述明确的
     只读别名外不得互相覆盖；hidden/post/comb保留到HCpost完成。
@@ -262,8 +262,8 @@ def _csa_core_group(
     inverse_sin: pl.InOut[pl.Tensor[[T, 64], pl.FP32]],
     attn_sink: pl.Tensor[[64, 1], pl.FP32],
     kv_ring: pl.InOut[pl.Tensor[[KV_RING_ROWS, 512], pl.BF16]],
-    score_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 128], pl.FP32]],
-    probability_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 128], pl.BF16]],
+    score_ring: pl.InOut[pl.Tensor[[24 * 64, 512], pl.FP32]],
+    probability_ring: pl.InOut[pl.Tensor[[24 * 64, 512], pl.BF16]],
     pv_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 512], pl.FP32]],
     mi_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]],
     li_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]],
@@ -283,6 +283,7 @@ def _csa_core_group(
     hc_packed_input: pl.InOut[pl.Tensor[[P16, 32768], pl.BF16]],
     hc_packed_weight: pl.InOut[pl.Tensor[[32768, 32], pl.BF16]],
     hc_norm_rstd: pl.InOut[pl.Tensor[[T, 8], pl.FP32]],
+    attention_copy64: pl.InOut[pl.Tensor[[24 * 64, 64], pl.FP32]],
     QUERY_GROUP: pl.constexpr,
     QK_PANEL: pl.constexpr,
     SCORE_TILE: pl.constexpr,
@@ -486,6 +487,7 @@ def _csa_core_group(
             hc_packed_input,
             hc_packed_weight,
             hc_norm_rstd,
+            attention_copy64,
         ) = vector_schedule(
             x,
             hc_scale,
@@ -608,6 +610,7 @@ def _csa_core_group(
             hc_packed_input,
             hc_packed_weight,
             hc_norm_rstd,
+            attention_copy64,
             QUERY_GROUP,
             QK_PANEL,
             SCORE_TILE,
@@ -717,6 +720,7 @@ def _csa_core_group(
         hc_packed_input,
         hc_packed_weight,
         hc_norm_rstd,
+        attention_copy64,
     )
 
 
@@ -828,6 +832,7 @@ def decode_csa_spmd_debug(
     hc_packed_input = pl.create_tensor([p16, 32768], dtype=pl.BF16)
     hc_packed_weight = pl.create_tensor([32768, 32], dtype=pl.BF16)
     hc_norm_rstd = pl.create_tensor([t, 8], dtype=pl.FP32)
+    attention_copy64 = pl.create_tensor([24 * 64, 64], dtype=pl.FP32)
     raw = pl.create_tensor([p16, 32], dtype=pl.FP32)
     pre = pl.create_tensor([p16, 8], dtype=pl.FP32)
     post = pl.create_tensor([t, 4], dtype=pl.FP32)
@@ -885,12 +890,12 @@ def decode_csa_spmd_debug(
     attention_bias = pl.create_tensor([p8, 640], dtype=pl.FP32)
     attention_mask = pl.create_tensor([p8, 16], dtype=pl.INT32)
     inverse_sin = pl.create_tensor([t, 64], dtype=pl.FP32)
-    kv_ring = pl.create_tensor([24 * 3 * 128, 512], dtype=pl.BF16)
-    score_ring = pl.create_tensor([24 * 3 * 64, 128], dtype=pl.FP32)
-    probability_ring = pl.create_tensor([24 * 3 * 64, 128], dtype=pl.BF16)
-    pv_ring = pl.create_tensor([24 * 3 * 64, 512], dtype=pl.FP32)
-    mi_ring = pl.create_tensor([24 * 3 * 64, 1], dtype=pl.FP32)
-    li_ring = pl.create_tensor([24 * 3 * 64, 1], dtype=pl.FP32)
+    kv_ring = pl.create_tensor([24 * 4 * 128, 512], dtype=pl.BF16)
+    score_ring = pl.create_tensor([24 * 64, 512], dtype=pl.FP32)
+    probability_ring = pl.create_tensor([24 * 64, 512], dtype=pl.BF16)
+    pv_ring = pl.create_tensor([24 * 4 * 64, 512], dtype=pl.FP32)
+    mi_ring = pl.create_tensor([24 * 4 * 64, 1], dtype=pl.FP32)
+    li_ring = pl.create_tensor([24 * 4 * 64, 1], dtype=pl.FP32)
     packed = pl.create_tensor([8 * p128, 4096], dtype=pl.BF16)
     ffts = pl.create_tensor([256], dtype=pl.INT64)
     o_r = pl.create_tensor([mm, 8192], dtype=pl.FP32)
@@ -995,6 +1000,7 @@ def decode_csa_spmd_debug(
             hc_packed_input,
             hc_packed_weight,
             hc_norm_rstd,
+            attention_copy64,
         ) = _csa_core_group(
             x,
             hc_fn,
@@ -1133,6 +1139,7 @@ def decode_csa_spmd_debug(
             hc_packed_input,
             hc_packed_weight,
             hc_norm_rstd,
+            attention_copy64,
             QUERY_GROUP,
             QK_PANEL,
             SCORE_TILE,
@@ -1277,6 +1284,7 @@ def decode_csa_spmd(
     hc_packed_input = pl.create_tensor([p16, 32768], dtype=pl.BF16)
     hc_packed_weight = pl.create_tensor([32768, 32], dtype=pl.BF16)
     hc_norm_rstd = pl.create_tensor([t, 8], dtype=pl.FP32)
+    attention_copy64 = pl.create_tensor([24 * 64, 64], dtype=pl.FP32)
     raw = pl.create_tensor([p16, 32], dtype=pl.FP32)
     pre = pl.create_tensor([p16, 8], dtype=pl.FP32)
     post = pl.create_tensor([t, 4], dtype=pl.FP32)
@@ -1334,12 +1342,12 @@ def decode_csa_spmd(
     attention_bias = pl.create_tensor([p8, 640], dtype=pl.FP32)
     attention_mask = pl.create_tensor([p8, 16], dtype=pl.INT32)
     inverse_sin = pl.create_tensor([t, 64], dtype=pl.FP32)
-    kv_ring = pl.create_tensor([24 * 3 * 128, 512], dtype=pl.BF16)
-    score_ring = pl.create_tensor([24 * 3 * 64, 128], dtype=pl.FP32)
-    probability_ring = pl.create_tensor([24 * 3 * 64, 128], dtype=pl.BF16)
-    pv_ring = pl.create_tensor([24 * 3 * 64, 512], dtype=pl.FP32)
-    mi_ring = pl.create_tensor([24 * 3 * 64, 1], dtype=pl.FP32)
-    li_ring = pl.create_tensor([24 * 3 * 64, 1], dtype=pl.FP32)
+    kv_ring = pl.create_tensor([24 * 4 * 128, 512], dtype=pl.BF16)
+    score_ring = pl.create_tensor([24 * 64, 512], dtype=pl.FP32)
+    probability_ring = pl.create_tensor([24 * 64, 512], dtype=pl.BF16)
+    pv_ring = pl.create_tensor([24 * 4 * 64, 512], dtype=pl.FP32)
+    mi_ring = pl.create_tensor([24 * 4 * 64, 1], dtype=pl.FP32)
+    li_ring = pl.create_tensor([24 * 4 * 64, 1], dtype=pl.FP32)
     packed = pl.create_tensor([8 * p128, 4096], dtype=pl.BF16)
     ffts = pl.create_tensor([256], dtype=pl.INT64)
     o_r = pl.create_tensor([mm, 8192], dtype=pl.FP32)
@@ -1444,6 +1452,7 @@ def decode_csa_spmd(
             hc_packed_input,
             hc_packed_weight,
             hc_norm_rstd,
+            attention_copy64,
         ) = _csa_core_group(
             x,
             hc_fn,
@@ -1582,6 +1591,7 @@ def decode_csa_spmd(
             hc_packed_input,
             hc_packed_weight,
             hc_norm_rstd,
+            attention_copy64,
             QUERY_GROUP,
             QK_PANEL,
             SCORE_TILE,

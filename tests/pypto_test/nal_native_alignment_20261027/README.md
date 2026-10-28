@@ -1,6 +1,6 @@
 # 基于 nalinaly TND SPMD 的 Native 数值对齐
 
-日期：2026-10-27；Indexer完整接入复核更新于2026-10-28。
+日期：2026-10-27；Indexer及attention完整接入复核更新于2026-10-28。
 
 ## 分支和目标
 
@@ -19,6 +19,7 @@
 | 项目 | 值 |
 | --- | --- |
 | 服务器 | 227，独立的 yejia 工作区 |
+| 新增选卡规则 | 后续任务仅限物理8–15；本单卡示例显式`--device 8`；启动器也校验卡号 |
 | 权重 | `DeepSeek-V4-Flash-0731-w8a8`，正式编号 4 层 HC/Norm 权重 |
 | 模块输入 | CPU seed=1048，BF16 `randn([24,4,4096])`；B 输入为 `A+0.125` |
 | FULL 图 | 实际 T=24；不做请求 S6 补行；P16/P8 仅为内部 tile 容量 |
@@ -34,6 +35,9 @@
 checkpoint 中 `attn_norm.weight` 是 FP32；Native 构造的 RMSNorm 参数是 BF16，
 加载时 `copy_` 到该参数。模块测试复现同一个加载边界，不把 FP32 checkpoint
 直接当作根入口的 BF16 参数。权重 key、原始字节 SHA 和加载 dtype 在 JSON 中记录。
+
+上述选卡限制自2026-10-28用户新增规则起生效；历史任务证据保留当时的实际卡号。
+新任务不使用无设备范围限制的`--device auto`。需要16卡时必须另获明确批准。
 
 三个工具链提交与 nalinaly 的共用 manifest 相同；本分支仅把 manifest 中的
 PTOAS 构建目录名由 `build` 绑定到现有的 `build-native`，没有修改工具链源码。
@@ -478,7 +482,7 @@ python "$BOOTSTRAP" --shared-toolchain --native-plugin-root "$SOURCE_ROOT" \
   "$TEST_DIR/compile_rms.py" "$PWD/cpu-reproduce-hc" hc-norm
 
 # 完整四个切片及布局验证；只在首差模块上诊断，不跑大模型矩阵。
-task-submit --device auto --max-time 780 \
+task-submit --device 8 --max-time 780 \
   --env PYTHONNOUSERSITE=1 --env HCCL_DETERMINISTIC=true \
   --env PTOAS_ROOT --env ASCEND_HOME_PATH \
   "bash $TEST_DIR/run_rms.sh reproduce-hc hc"
@@ -913,3 +917,146 @@ TopK选点差异，下一步只读抓取实际Native O-proj入口heads及输出�
 以上是单层正式权重、合成hidden/history的定位结果，不能作为新分支整模型交付验收。
 证据见[evidence/spmd-observe-v15/result.json](evidence/spmd-observe-v15/result.json)
 及[evidence/spmd-production-v15/result.json](evidence/spmd-production-v15/result.json)。
+
+### 输出后缀的最小观测
+
+生产源码保持v15；观测根仅把已有BF16 packed heads内部分配换成外部缓冲，
+ABI由80增至81，核心算术/调度调用相同。CPU编译及ABI加载通过。
+按8组各128物理行恢复有效24行，再还原`[24,64,512]`，不比较未发布padding。
+独立CPU索引验证、双wrapper正常/异常恢复控制及7项契约测试通过。
+
+Native详细臂只读包裹实际`_forward_decode`与`_forward_o_proj`：
+保存实际attention返回BF16、逆RoPE后的O-proj入口BF16、实际projection输出BF16，
+调用原绑定方法并原样返回原对象。context退出恢复实例属性，统一同步后复制CPU。
+最小/详细Native的8个外部输出与guards仍是前置门禁。
+先验收post-inverse heads，首差停止；另外两组快照只用于后续定位，不计为已通过。
+此观测不增加模型算子替换、SDK改动或Native数学重构。
+
+观测v16（`task_20261028_135701_162382027691`，210.59秒）已完成并释放设备。
+生产等价、FULL/eager、Native详细hook控制及此前32个精度门禁全部通过；
+首差在post-inverse heads，339127个元素不同。CPU只读分析进一步区分：
+
+| 同一次真实forward快照 | 不同元素 | 最大绝对差 |
+| --- | ---: | ---: |
+| Native attention返回与O-proj入口的NoPE | **0** | 0 |
+| PTO NoPE与Native attention返回的NoPE | **291048** | 0.00048828125 |
+| PTO RoPE与Native O-proj入口的RoPE | 48079 | 0.0009765625 |
+
+NoPE没有逆RoPE运算，因此**attention在逆RoPE前已经不同**；不能仅修逆旋转BF16就
+宣称解决attention。下一步先抓取实际Sparse算子的完整消费输入，以同Q/cache/TopK/metadata
+做独立Native重放与旧Native512精度算法复核，再逐因素定位。
+CPU复现用同env解释器运行`analyze_heads.py <v16结果目录> <不存在的输出json>`，
+它只读取快照并按BF16位比较，不初始化设备、不反向推断旋转前值。
+证据：[v16原始结果](evidence/spmd-observe-v16/result.json)、
+[heads分域分析](evidence/spmd-observe-v16/heads_analysis.json)。
+
+### 同输入Native Sparse及旧K512参考复核
+
+v17（`task_20261028_141205_245202121516`，38.96秒，已有编译缓存命中）
+只新增真实Sparse消费者只读捕获，原生产仍为v15。完整前缀、TopK及观测等价门禁
+继续通过，heads首差保持339127；这次耗时不是性能测量。
+真实Sparse返回与`_forward_decode`返回逐bit一致，query、cache、TopK、页表、
+query bounds、seq lengths、sink、metadata及标量选项均保存。
+
+`attention-reference-v1`（`task_20261028_142323_292186016811`，25.38秒）通过：
+
+| 同一8K/B4/T24实际消费输入 | 不同元素 |
+| --- | ---: |
+| 实际Sparse Q与此前Native Q前缀 | **0** |
+| 实际Sparse TopK与QLI输出 | **0** |
+| bounds/seq lengths/两页表与生产fixture | **0** |
+| 原Native Sparse全参数重放 | **0** |
+| 原Native inverse RoPE重放 | **0** |
+| 旧K512参考的pre-inverse BF16 heads | **0** |
+| 旧K512参考的post-inverse BF16 heads | **0** |
+
+FULL/eager、回放前NaN覆盖、输入输出guards和输入逐bit只读检查全部通过。
+positions另按实际Native bounds/seq lengths逐token重建并核对，没有用token//6。
+参考数学来自旧精度提交`7472fb9a66e23d1b0998a20e7b89cfbd472395a3`，
+原`decode_sparse_attn_csa.py` SHA256为
+`dafd595cacf0bad5978776b07594ea9f8ae25f6fb22ea15d2545180ced47c434`。
+复制仅调整相同config/layout的导入、固定诊断T24输出容量、root/Out标注及直接导出
+`n_bf16`；数学没有借用Native模型算子。最初无设备编译因原Tensor输出标注被降低为Out
+触发ABI门禁，改成显式Out后14参数编译/加载通过，没有修改SDK或放宽检查。
+
+独立复现为`compile_rms.py <新目录> attention-reference`，再提交
+`run_rms.sh <新标签> attention`，传入
+`ATTENTION_PROBE_REFERENCE=<v17-equivalent>/observation.pt`和
+`ATTENTION_PROBE_FIXTURE=<v15-equivalent>/production.pt`。
+启动复用本文env/bootstrap，外780秒、内750+15秒；结果保存两个输入件SHA，
+只对同形同权重快照有效。本次没有接回生产SPMD、没有整模型token或新性能结论。
+证据：[v17](evidence/spmd-observe-v17/result.json)、
+[独立K512](evidence/attention-reference-v1/result.json)、
+[无设备ABI](evidence/cpu-attention-reference-v2/receipt.json)。
+
+### Native K512数学接回单SPMD
+
+独立参考通过后，将相同数学拆成同一MIX内的Cube与双Vector角色，保留
+K512概率与PV累加边界、实际K求和树、sink初始权重、概率CAST_ROUND、
+BF16发布后再inverse RoPE。没有调用Native attention完成候选计算，也没有
+改SDK、runtime或生成C++。本小节仍只验证8K/B4/T24的实际同输入。
+
+| 微测试 | 结果 | 处理 |
+| --- | --- | --- |
+| v1 | 首次候选执行停滞，约60秒释放设备 | micro漏声明双AIV，编排第三kernel ID为空；补`split_aiv=True` |
+| v2/v3 | FULL/eager有925/957个不同元素 | 保留首差快照，未继续下游或宣称精度通过 |
+| v3 CPU定位 | 与Native各830差，全部在head0/32首32个BF16 | 实际生成的死`next_m`读取与PV-left同UB起点，重叠128B |
+| **v4** | **pre/post inverse均逐bit对齐Native** | **FULL/eager及额外3次NaN覆盖回放全部0差异** |
+
+v4任务`task_20261028_155621_331511711767`测试主体28.09秒，占卡约39秒并已退出。
+v4相对于发生漂移的候选，仅删除不参与计算的local max循环传递及其读取：真正的
+`sm_old_m`仍从原GM状态读取，sink初始化、max写回、softmax、PV与舍入均保留。
+这证明该删除解决了本微测试的运行漂移；没有据此认定SDK内部具体哪条指令有bug。
+编译资格额外硬检查真实生成的`MixedKernels`，要求两条AIV均被调度，避免只审
+Cube/Vector二进制而漏掉实际launch合同。
+
+完整接入候选另补原plan已有的table列/cache页数保护，并使用独立393216字节
+copy64工作区，不复用O-proj缓冲。score/prob从根开始分配为`[1536,512]`；
+保留原raw TopK、Native请求边界、cache依赖和ATTNVEC后才能执行O_A的规则。
+正常55参数、debug 57参数与81参数观察根均已通过无设备编译和双AIV检查；资源与同步
+独立审查通过。正式根仍是一个PTO顶层入口和一个完整MIX SPMD。
+
+微测试复现沿用上一小节命令，增加`ATTENTION_PROBE_VARIANT=native-spmd`，
+CPU selector为`attention-native-spmd`。生产完整接回需要重新生成快照及观察，
+不能复用旧21项source SHA或把微测试收据当作整层验收。
+当前没有新增整模型token一致性、混合短query或性能结论。
+
+证据：[v1执行故障](evidence/attention-native-spmd-v1/result.json)、
+[v2图间首差](evidence/attention-native-spmd-v2/result.json)、
+[v3分域定位](evidence/attention-native-spmd-v3/drift_analysis.json)、
+[v4逐位通过](evidence/attention-native-spmd-v4/result.json)、
+[完整根CPU资格](evidence/cpu-full-attn-native-v21/receipt.json)、
+[观察根CPU资格](evidence/cpu-observe-attn-native-v21/receipt.json)、
+[正常服务根CPU资格](evidence/cpu-normal-attn-native-v21/receipt.json)。
+
+### 完整CSA接回结果：首差推进到O-proj之后
+
+生产快照v18（`task_20261028_161715_3025584033`，204.51秒）与观察v18
+（`task_20261028_162321_7374823997`，211.95秒）均已退出。
+仍为真实layer4权重、合成hidden/history、8K/B4/T24，未测整模型token。
+
+| 完整接入门禁 | 结果 |
+| --- | --- |
+| 生产FULL/eager八个外部状态 | 全部逐bit一致 |
+| 观察根与原生产根八个外部状态 | 全部逐bit一致 |
+| 跨任务同输入与23个source SHA | 通过 |
+| Native详细/最小hook控制八个外部状态 | 全部逐bit一致 |
+| HC-pre至TopK的原32项Native门禁 | 全部0差异 |
+| **attention post-inverse heads** | **0差异**，此前339127差已消除 |
+| 最终HC-post输出 | **41859差**，最大绝对差0.015625，首差在此停止 |
+
+这证明Native heads已在完整SPMD里对齐，剩余首差位于O-proj/HC-post链路。
+尚未将其唯一归因为某一量化或矩阵步骤，下一步以实际Native `wo_b`的BF16输入
+（本轮只读保存为`native_output_stages.wo_a`）继续拆分WO-A、量化和WO-B。
+不能把当前版本标为完整CSA精度通过，也没有新增性能结论。
+生产快照JSON的`pass=false`表示没有执行Native精度判定；其`phase=production`、
+`pass_kind`及八个自一致门禁用于区分该用途，不能按退出0直接判定精度。
+
+复现先提交`run_rms.sh <新生产标签> spmd`生成`production.pt`；再提交
+`run_rms.sh <新观察标签> spmd`，显式传
+`SPMD_PRODUCTION_REFERENCE=<新生产目录>/production.pt`。两个任务共享同env、
+bootstrap和源码，独立控制780/750+15秒，不并行覆盖源码或输入件。
+观察必须按顺序通过等价/guards、原前缀门禁、heads，才能比较最终输出。
+
+证据：[完整生产快照](evidence/spmd-production-v18/result.json)、
+[同输入Native首差](evidence/spmd-observe-v18/result.json)。

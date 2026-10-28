@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 : "${TASK_DEVICE:?task-submit required}"
+case "$TASK_DEVICE" in
+  8|9|10|11|12|13|14|15) ;;
+  *) printf 'This single-card probe requires physical device 8-15.\n' >&2; exit 2 ;;
+esac
 job_here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$job_here/env.sh"
 export ASCEND_RT_VISIBLE_DEVICES="$TASK_DEVICE"
 label=${1:?}
 probe=${2:?}
 shift 2
-[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|qr|wkv|kvnorm|qoutput|mainproj|indexproj|idxquery|idxquant|weightproj)$ ]]
+[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|qr|wkv|kvnorm|qoutput|mainproj|indexproj|idxquery|idxquant|weightproj|attention)$ ]]
 if (( $# )); then [[ $# == 2 && "$1" == --device && "$2" == "$TASK_DEVICE" ]]; fi
 out="$align_root/results/$label"
 test ! -e "$out"

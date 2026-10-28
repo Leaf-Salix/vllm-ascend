@@ -61,13 +61,13 @@ attention_geometry_prepare_stage在QR之后、ROPE发布之前计算本轮只读
 import pypto.language as pl
 
 from .attention_dependencies import wait_attention_plan_rows
+from .attention_native_stream_stages import native_attention_vector
 from .attention_plan_stages import (
     PHYSICAL_PLAN_COLUMNS,
     attention_geometry_prepare_stage,
     attention_inverse_rope_sign_stage,
     attention_slot_plan_stage,
 )
-from .attention_stream_stages import attention_qk_pv_vector_lane_stage
 from .fused_coefficients import indexer_query_quant_coeff_stage, prepare_fused_query_coefficients
 from .hc_input_norm_stages import hc_input_norm_rows
 from .hc_input_rms_stages import SQUARE_ROWS, hc_input_rms_range
@@ -297,8 +297,8 @@ def vector_schedule(
     inverse_sin: pl.InOut[pl.Tensor[[T, 64], pl.FP32]],
     attn_sink: pl.Tensor[[64, 1], pl.FP32],
     kv_ring: pl.InOut[pl.Tensor[[KV_RING_ROWS, 512], pl.BF16]],
-    score_ring: pl.Tensor[[HEAD_RING_ROWS, 128], pl.FP32],
-    probability_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 128], pl.BF16]],
+    score_ring: pl.Tensor[[24 * 64, 512], pl.FP32],
+    probability_ring: pl.InOut[pl.Tensor[[24 * 64, 512], pl.BF16]],
     pv_ring: pl.Tensor[[HEAD_RING_ROWS, 512], pl.FP32],
     mi_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]],
     li_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 1], pl.FP32]],
@@ -317,6 +317,7 @@ def vector_schedule(
     hc_packed_input: pl.InOut[pl.Tensor[[P16, 32768], pl.BF16]],
     hc_packed_weight: pl.InOut[pl.Tensor[[32768, 32], pl.BF16]],
     hc_norm_rstd: pl.InOut[pl.Tensor[[T, 8], pl.FP32]],
+    attention_copy64: pl.InOut[pl.Tensor[[24 * 64, 64], pl.FP32]],
     QUERY_GROUP: pl.constexpr,
     QK_PANEL: pl.constexpr,
     SCORE_TILE: pl.constexpr,
@@ -348,6 +349,7 @@ def vector_schedule(
     hc_packed_input_gm = hc_packed_input
     hc_packed_weight_gm = hc_packed_weight
     hc_norm_rstd_gm = hc_norm_rstd
+    attention_copy64_gm = attention_copy64
     x_fp32_gm = x_fp32
     inv_gm = inv
     widen_tail_gm = widen_tail
@@ -982,9 +984,9 @@ def vector_schedule(
     signal = wait_row_owners(signal, PHASE_ORIGINAL_CACHE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)
     signal = wait_row_owners(signal, PHASE_MAIN_OUTPUT, CORES, generation, 0, main_requests, 1, VECTORS, GROUPS, 1)
     signal = wait_row_owners(signal, PHASE_ROPE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)
-    # 事件2..5用于Attention三槽流水，和Indexer的0/1分开。publish完成phase
-    # 不能代替这些逐槽READY/ACK；每个helper返回前均需排空自己的末尾在途项。
-    kv_ring, probability_ring, mi_ring, li_ring, packed = attention_qk_pv_vector_lane_stage(
+    # Native K512数值更新；保留外层owner等待及事件2..5双AIV握手。
+    # 原始TopK供helper执行Native pair规则；plan索引可能已物理化，不能二次转换。
+    kv_ring, probability_ring, mi_ring, li_ring, packed = native_attention_vector(
         cache_rows,
         main_cache,
         original_table,
@@ -992,7 +994,7 @@ def vector_schedule(
         idx_bounds,
         idx_lengths,
         positions,
-        attention_indices,
+        topk_indices,
         attention_bias,
         attention_mask,
         attn_sink,
@@ -1006,14 +1008,13 @@ def vector_schedule(
         li_ring,
         packed,
         ffts,
+        attention_copy64,
+        packed,
         pl.tile.get_block_idx(),
         pl.tile.get_subblock_idx(),
         GROUPS,
         2,
-        ATTENTION_QUERY_METADATA,
-        LOCAL_ATTENTION_STATS,
-        PLAN_PHYSICAL_ROWS,
-        PLAN_TABLE_COLUMNS=PLAN_TABLE_COLUMNS,
+        False,
     )
     signal = publish_phase(signal, PHASE_ATTN_VECTOR, core, CORES, generation)
     if OUTPUT_GROUP_PIPELINE:
@@ -1129,4 +1130,5 @@ def vector_schedule(
         hc_packed_input_gm,
         hc_packed_weight_gm,
         hc_norm_rstd_gm,
+        attention_copy64_gm,
     )

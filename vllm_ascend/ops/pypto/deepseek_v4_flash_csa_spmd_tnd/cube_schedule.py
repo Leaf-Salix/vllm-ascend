@@ -35,7 +35,7 @@ Score与Attention内部还有组内环槽READY/ACK，必须让双AIV同时推进
 import pypto.language as pl
 
 from .attention_dependencies import wait_attention_plan_rows
-from .attention_stream_stages import attention_qk_pv_cube_stage
+from .attention_native_stream_stages import native_attention_cube
 from .hc_input_rms_stages import SQUARE_ROWS, hc_input_square_range
 from .hc_native_projection_stages import hc_linear
 from .indexer_compressor_output_stages import indexer_compressor_hadamard_stage
@@ -178,8 +178,8 @@ def cube_schedule(
     indexer_transfer: pl.InOut[pl.Tensor[[INDEX_TRANSFER_ROWS, INDEX_TRANSFER_COLS], pl.FP32]],
     attention_mask: pl.Tensor[[ATTN_PLAN_ROWS, 16], pl.INT32],
     kv_ring: pl.Tensor[[KV_RING_ROWS, 512], pl.BF16],
-    score_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 128], pl.FP32]],
-    probability_ring: pl.Tensor[[HEAD_RING_ROWS, 128], pl.BF16],
+    score_ring: pl.InOut[pl.Tensor[[24 * 64, 512], pl.FP32]],
+    probability_ring: pl.Tensor[[24 * 64, 512], pl.BF16],
     pv_ring: pl.InOut[pl.Tensor[[HEAD_RING_ROWS, 512], pl.FP32]],
     packed: pl.Tensor[[PACK_ROWS, 4096], pl.BF16],
     ffts: pl.Tensor[[256], pl.INT64],
@@ -463,7 +463,7 @@ def cube_schedule(
     signal = wait_attention_plan_rows(signal, tokens, worker, generation)
     # query反量化head分组随T变化，首版等待48个明确发布的角色完成；没有猜测tile公式。
     signal = wait_row_owners(signal, PHASE_QUERY, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
-    score_ring, pv_ring = attention_qk_pv_cube_stage(
+    score_ring, pv_ring = native_attention_cube(
         q_heads,
         attention_mask,
         kv_ring,

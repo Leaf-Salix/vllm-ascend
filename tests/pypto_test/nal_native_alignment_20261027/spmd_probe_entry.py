@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: F403, F405 -- Keep the diagnostic root globals identical to its production source.
-"""从生产debug根仅替换23个内部分配为外部观测缓冲；算术和调度调用相同。
+"""从生产debug根仅替换24个内部分配为外部观测缓冲；算术和调度调用相同。
 
 使用前必须证明该根与未经观测的生产debug根的全部8个外部输出逐字节一致。
 """
@@ -91,6 +91,7 @@ def spmd_stage_probe(
     debug_idx_query_rope: pl.InOut[pl.Tensor[[IDX_ROPE_ROWS, 8192], pl.BF16]],
     debug_idx_query_had: pl.InOut[pl.Tensor[[IDX_HEAD_ROWS, 128], pl.FP32]],
     debug_head_weights: pl.InOut[pl.Tensor[[P16, 64], pl.FP32]],
+    debug_packed: pl.InOut[pl.Tensor[[PACK_ROWS, 4096], pl.BF16]],
     QUERY_GROUP: pl.constexpr,
     QK_PANEL: pl.constexpr,
     SCORE_TILE: pl.constexpr,
@@ -140,6 +141,7 @@ def spmd_stage_probe(
     hc_packed_input = pl.create_tensor([p16, 32768], dtype=pl.BF16)
     hc_packed_weight = pl.create_tensor([32768, 32], dtype=pl.BF16)
     hc_norm_rstd = pl.create_tensor([t, 8], dtype=pl.FP32)
+    attention_copy64 = pl.create_tensor([24 * 64, 64], dtype=pl.FP32)
     raw = pl.create_tensor([p16, 32], dtype=pl.FP32)
     pre = pl.create_tensor([p16, 8], dtype=pl.FP32)
     post = debug_post
@@ -197,13 +199,13 @@ def spmd_stage_probe(
     attention_bias = pl.create_tensor([p8, 640], dtype=pl.FP32)
     attention_mask = pl.create_tensor([p8, 16], dtype=pl.INT32)
     inverse_sin = pl.create_tensor([t, 64], dtype=pl.FP32)
-    kv_ring = pl.create_tensor([24 * 3 * 128, 512], dtype=pl.BF16)
-    score_ring = pl.create_tensor([24 * 3 * 64, 128], dtype=pl.FP32)
-    probability_ring = pl.create_tensor([24 * 3 * 64, 128], dtype=pl.BF16)
-    pv_ring = pl.create_tensor([24 * 3 * 64, 512], dtype=pl.FP32)
-    mi_ring = pl.create_tensor([24 * 3 * 64, 1], dtype=pl.FP32)
-    li_ring = pl.create_tensor([24 * 3 * 64, 1], dtype=pl.FP32)
-    packed = pl.create_tensor([8 * p128, 4096], dtype=pl.BF16)
+    kv_ring = pl.create_tensor([24 * 4 * 128, 512], dtype=pl.BF16)
+    score_ring = pl.create_tensor([24 * 64, 512], dtype=pl.FP32)
+    probability_ring = pl.create_tensor([24 * 64, 512], dtype=pl.BF16)
+    pv_ring = pl.create_tensor([24 * 4 * 64, 512], dtype=pl.FP32)
+    mi_ring = pl.create_tensor([24 * 4 * 64, 1], dtype=pl.FP32)
+    li_ring = pl.create_tensor([24 * 4 * 64, 1], dtype=pl.FP32)
+    packed = debug_packed
     ffts = pl.create_tensor([256], dtype=pl.INT64)
     o_r = pl.create_tensor([mm, 8192], dtype=pl.FP32)
     o_quant = pl.create_tensor([mm, 8192], dtype=pl.INT8)
@@ -307,6 +309,7 @@ def spmd_stage_probe(
             hc_packed_input,
             hc_packed_weight,
             hc_norm_rstd,
+            attention_copy64,
         ) = _csa_core_group(
             x,
             hc_fn,
@@ -445,6 +448,7 @@ def spmd_stage_probe(
             hc_packed_input,
             hc_packed_weight,
             hc_norm_rstd,
+            attention_copy64,
             QUERY_GROUP,
             QK_PANEL,
             SCORE_TILE,

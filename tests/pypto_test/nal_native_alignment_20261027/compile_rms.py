@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 
+import regex as re
 from bind_package import bind
 
 bind()
@@ -21,7 +22,15 @@ out = Path(sys.argv[1])
 out.mkdir(exist_ok=False)
 assert not torch_npu.npu.is_initialized()
 kind = sys.argv[2] if len(sys.argv) > 2 else "rms"
-if kind.startswith("weightproj-"):
+if kind == "attention-native-spmd":
+    from attention_native_micro import native_attention_arm
+
+    program = native_attention_arm.specialize()
+elif kind == "attention-reference":
+    from attention_reference import attention_reference_arm
+
+    program = attention_reference_arm.specialize()
+elif kind.startswith("weightproj-"):
     from weightproj_kernels import weightproj_arm
 
     program = weightproj_arm.specialize(MODE=int(kind.removeprefix("weightproj-")))
@@ -98,6 +107,16 @@ _compile_impl(program, output_dir=str(out / "kernel"), platform="a2a3", skip_pto
 artifact = KernelArtifact(out / "kernel", abi)
 artifact.load()
 assert not torch_npu.npu.is_initialized()
+dual_aiv_dispatch = None
+if kind in ("attention-native-spmd", "spmd", "spmd-debug", "spmd-probe"):
+    orchestration = list((out / "kernel/orchestration").glob("*.cpp"))
+    assert len(orchestration) == 1
+    mixed = re.findall(
+        r"MixedKernels\s+mixed_\d+\s*=\s*\{\s*(\d+),\s*(\d+),\s*(\d+)\s*\};",
+        orchestration[0].read_text(),
+    )
+    assert len(mixed) == 1 and mixed[0][1] == mixed[0][2], "both AIV lanes must be dispatched"
+    dual_aiv_dispatch = True
 (out / "receipt.json").write_text(
     json.dumps(
         {
@@ -105,6 +124,7 @@ assert not torch_npu.npu.is_initialized()
             "npu_initialized": False,
             "root_tensors": len(abi.parameters),
             "artifact_identity": artifact.identity().hex(),
+            "dual_aiv_dispatch": dual_aiv_dispatch,
         },
         indent=2,
     )

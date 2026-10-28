@@ -151,6 +151,8 @@ try:
             "indexer_native_projection_stages.py",
             "indexer_cache_stages.py",
             "indexer_native_query_stages.py",
+            "attention_native_stream_stages.py",
+            "attention_plan_stages.py",
         )
     }
     with native_session(config, 0), torch.inference_mode():
@@ -209,6 +211,7 @@ try:
             "idx_query_rope": (32, 8192),
             "idx_query_had": (1536, 128),
             "head_weights": (32, 64),
+            "packed": (1024, 4096),
         }
         observed = {
             name: torch.full(
@@ -219,7 +222,7 @@ try:
                 else torch.int32
                 if name in ("q_proj", "idx_query_acc")
                 else torch.bfloat16
-                if name in ("mixed", "normed", "kv", "q", "idx_normed", "idx_query_rope")
+                if name in ("mixed", "normed", "kv", "q", "idx_normed", "idx_query_rope", "packed")
                 else torch.float32,
                 device="npu",
             )
@@ -303,6 +306,8 @@ try:
         }
 
         def observed_domain(name, value):
+            if name == "packed":
+                return value.reshape(8, value.shape[0] // 8, 8, 512)[:, :24]
             if name in ("idx_query_acc", "idx_query_rope", "head_weights"):
                 return value[:24]
             if name in ("idx_normed", "idx_had", "idx_scales"):
@@ -629,7 +634,9 @@ try:
         # diagnostic import after Native initialization, as with device_op above.
         from native_qli_capture import capture_native_qli
 
-        native_states, native_guards, qli_inputs, query_stages, weight_stages = capture_native_qli(layer, f, config)
+        native_states, native_guards, qli_inputs, query_stages, weight_stages, output_stages = capture_native_qli(
+            layer, f, config
+        )
         record["native_qli_guards"] = native_guards
         record["native_qli_hook_control"] = {
             name: metric(value, native_states[0][name]) for name, value in native_states[1].items()
@@ -640,6 +647,7 @@ try:
         payload["native_qli_inputs"] = qli_inputs
         payload["native_indexer_query_stages"] = query_stages
         payload["native_indexer_weight_stages"] = weight_stages
+        payload["native_output_stages"] = output_stages
         payload["indexer_query_weight_scale_native"] = impl.inderxer_wq_b.weight_scale.cpu()
         payload["indexer_query_weight_scale_prepared"] = prepared.buffers["idx_wq_b_scale"].cpu()
         for name in ("idx_query_acc", "idx_query_rope", "idx_query_had", "head_weights"):
@@ -665,6 +673,9 @@ try:
         check("weights_prepare_repeat", weight_stages["consumer"], qli_inputs["weights"])
         check("qli_weights_fp16", observed["head_weights"][:24].half(), qli_inputs["weights"])
         check("qli_topk", replay["idx_topk"].reshape_as(native_states[1]["idx_topk"]), native_states[1]["idx_topk"])
+        packed = observed["packed"].reshape(8, 128, 8, 512)[:, :24]
+        heads = packed.permute(1, 0, 2, 3).reshape(24, 64, 512)
+        check("attention_heads_after_inverse_rope", heads.reshape_as(output_stages["heads"]), output_stages["heads"])
         check("native_full_output", replay["x_out"].reshape_as(native_states[1]["x_out"]), native_states[1]["x_out"])
         record["pass"] = True
         record["complete"] = True
