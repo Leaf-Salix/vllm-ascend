@@ -10,8 +10,8 @@
 整体思路与阅读顺序
     1. compressor_pool_stage 为主 CSA 的 512 列 KV 做八位置交错 softmax；
        indexer_compressor_pool_stage 为 Indexer 的 128 列 KV 做相同窗口计算。
-       主分支按Native交错8行、先归一化再加权求和，一次处理512列；Indexer仍在线递推并
-       分两次处理 64 列。函数分开写，便于直接核对各自原代码的数值顺序。
+       两分支按Native交错8行、先归一化再加权求和；主分支一次处理512列，Indexer
+       分两次处理64列。函数分开写，便于直接核对各自数值顺序。
     2. 主/Indexer 的 state_commit_stage 把本轮投影直接写回 Native state。
        它们必须在所有 pool 的历史读取完成后执行，不能合并进请求内循环。
        其他请求可能共享历史页，局部请求读完不代表整层已经不再读该物理页。
@@ -46,7 +46,7 @@
     异常位置解释为整个请求失活；合法请求仍须满足全段causal合同。
     主分支按state_index%4*2+state_index//4交错八行，max/sum均用8→4→2→1树。
     先exp(score-max)、除sum得到概率，再value*prob并按同树求和；不以online
-    oi/li替代。Indexer仍保持原在线递推，未与主分支打包修改数值边界。
+    oi/li替代。Indexer使用相同归约树，同时保留原两个64列片。
     历史位置通过 Native 页表读 state；本轮位置直接读投影并加 APE。负历史
     位置使用 value=0/score=负无穷；负页保持原 gather 的 value=0/score=0。
     新增容量检查仅防止非法 metadata 越界，非法页不是已支持的有效数学输入。
@@ -163,7 +163,7 @@ def indexer_compressor_pool_stage(
     worker_id: pl.Scalar[pl.INDEX],
     WORKERS: pl.constexpr,
 ):
-    """AIV Indexer 压缩：补齐 Q/L 活动判定，保留两个 64 列窗口的数值顺序。"""
+    """AIV Indexer压缩：保留Q/L与两个64列片，按Native八行概率优先树归约。"""
     for request in pl.range(worker_id, pl.tensor.dim(lengths, 0), WORKERS):
         begin, end, active = request_bounds(bounds, lengths, request, pl.tensor.dim(positions, 0))
         if active != 0:
@@ -173,16 +173,11 @@ def indexer_compressor_pool_stage(
                 position = pl.cast(pl.read(positions, [token]), pl.INDEX)
                 if position == first_position + token - begin and (position + 1) % COMPRESS_RATIO == 0:
                     window_start = position - STATE_LEN + 1
-                    # 每次完整执行一个列片的七次在线归并；这是原128列算法的分块。
+                    # 只替换列片内归约；请求owner、历史/本轮寻址与后续commit不变。
                     for h0 in pl.range(0, IDX_HEAD_DIM, IDX_HEAD_TILE):
-                        last_ape = position % COMPRESS_RATIO
-                        mi = pl.add(
-                            pl.load(score_proj, [token, IDX_HEAD_DIM + h0], [1, IDX_HEAD_TILE]),
-                            pl.load(ape, [last_ape, IDX_HEAD_DIM + h0], [1, IDX_HEAD_TILE]),
-                        )
-                        li = pl.exp(pl.sub(mi, mi))
-                        oi = pl.load(kv_proj, [token, IDX_HEAD_DIM + h0], [1, IDX_HEAD_TILE])
-                        for state_index in pl.range(STATE_LEN - 1):
+                        window_values = pl.tile.full([STATE_LEN, IDX_HEAD_TILE], dtype=pl.FP32, value=0.0)
+                        window_scores = pl.tile.full([STATE_LEN, IDX_HEAD_TILE], dtype=pl.FP32, value=FP32_NEG_INF)
+                        for state_index in pl.range(STATE_LEN):
                             logical_position = window_start + state_index
                             value = pl.tile.full([1, IDX_HEAD_TILE], dtype=pl.FP32, value=0.0)
                             score = pl.tile.full([1, IDX_HEAD_TILE], dtype=pl.FP32, value=FP32_NEG_INF)
@@ -207,13 +202,22 @@ def indexer_compressor_pool_stage(
                                     pl.load(score_proj, [overlay_token, half + h0], [1, IDX_HEAD_TILE]),
                                     pl.load(ape, [ape_row, half + h0], [1, IDX_HEAD_TILE]),
                                 )
-                            mi_next = pl.maximum(mi, score)
-                            alpha = pl.exp(pl.sub(mi, mi_next))
-                            beta = pl.exp(pl.sub(score, mi_next))
-                            li = pl.add(pl.mul(alpha, li), beta)
-                            oi = pl.add(pl.mul(oi, alpha), pl.mul(value, beta))
-                            mi = mi_next
-                        pl.store(pl.div(oi, li), [token, h0], pooled)
+                            native_row = state_index % COMPRESS_RATIO * 2 + state_index // COMPRESS_RATIO
+                            window_values = pl.tile.assemble(window_values, value, [native_row, 0])
+                            window_scores = pl.tile.assemble(window_scores, score, [native_row, 0])
+                        max4 = pl.maximum(window_scores[:4, :], window_scores[4:8, :])
+                        max2 = pl.maximum(max4[:2, :], max4[2:4, :])
+                        maximum = pl.maximum(max2[:1, :], max2[1:2, :])
+                        probability = pl.exp(pl.col_expand_sub(window_scores, maximum))
+                        sum4 = pl.add(probability[:4, :], probability[4:8, :])
+                        sum2 = pl.add(sum4[:2, :], sum4[2:4, :])
+                        total = pl.add(sum2[:1, :], sum2[1:2, :])
+                        probability = pl.col_expand_div(probability, total)
+                        weighted = pl.mul(window_values, probability)
+                        weighted4 = pl.add(weighted[:4, :], weighted[4:8, :])
+                        weighted2 = pl.add(weighted4[:2, :], weighted4[2:4, :])
+                        result = pl.add(weighted2[:1, :], weighted2[1:2, :])
+                        pl.store(result, [token, h0], pooled)
     return pooled
 
 

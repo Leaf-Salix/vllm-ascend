@@ -121,7 +121,8 @@ T18设备结果：生产203.38秒，观察206.08秒；8项FULL/eager输出/状�
 | 8K/B6/T21 | 1,2,3,4,5,6 | 35/35全部一致 | 33.49 / 39.15秒 |
 | 8K/B6/T32 | 2,6,6,6,6,6 | 35/35全部一致 | 35.14 / 39.85秒 |
 
-表中用时包含首次编译和诊断，不是CSA性能计时。每请求padding均为0。
+表中用时取`result.elapsed_s`，包含首次编译和诊断，不含启动器环境准备，不是CSA性能计时。
+每请求padding均为0，外层任务日志也均未超过15分钟。
 七组使用完全相同的27项正式源码SHA，生产与观察输入、源码均成对核验；
 检查点`6a2d1a60`的四个正式修改文件与这组已验SHA一致；后续T33修正单独验收。
 T33切换OB_ROWS=96策略，后续已发现WO-A首差，见下节；不把上述七个点推成T1～256全域验收。
@@ -188,9 +189,34 @@ state里的score已经含APE，不再重复添加。原online臂必须先复现�
 输出，并保留相对Native的同一`[7,82]`首差；仅改pool树后相对实际融合Native的BF16
 不同元素数变成0。两臂各三次NaN FULL/eager、guards及只读全部通过。
 因此此次T48首差有pool单因素因果证据；尚不能把微根通过等同于完整CSA修正通过。
-接回正式pool前先保留当前WO-A修正检查点；随后须重新配对生产/观察，回归旧点。
-微根必须使用当前T48观察时的27项源码，修改正式pool后旧快照会被身份门禁拒绝。
+接回正式pool前已保留并推送WO-A修正检查点`c6c8fdce`；随后须重新配对生产/观察，回归旧点。
+微根须在`c6c8fdce`的27项正式源码上运行；修改正式pool后旧快照会被身份门禁拒绝。
 无设备v1/v2仅诊断临时变量shape重名失败，变量分名后v3两臂ABI7/load通过，未修改SDK。
+
+正式候选随后只将Indexer的两个64列片改成相同八行交错概率优先树；请求owner、
+历史/本轮寻址、负页、causal、APE、state commit及Norm/RoPE均保持。
+已通过7项CPU合同测试、静态检查和独立源级审查。完整55/57/85根均编译/load通过，
+双AIV分派通过；生成物独立审查确认全Vector静态UB高水位155872B，pool发布及
+全部owner等待后commit的顺序保留。T48新生产204.61秒，八状态FULL/eager与全部
+保护区通过；Native观察227.62秒，**35/35边界全部逐bit一致**，最终CSA输出一致。
+
+| 新Indexer pool版本 | 实际query长度 | Native逐bit门禁 | 生产 / 观察任务用时 |
+| --- | --- | --- | --- |
+| T48，修复点 | 6,6,6,6,6,6,6,6 | 35/35全部一致 | 204.61 / 227.62秒 |
+| T18，混合回归 | 1,5,6,6 | 35/35全部一致 | 207.53 / 207.69秒 |
+| T21，混合1～6行 | 1,2,3,4,5,6 | 35/35全部一致 | 32.58 / 39.95秒 |
+| T24，原全S6基准 | 6,6,6,6 | 35/35全部一致 | 32.35 / 38.90秒 |
+| T33，WO-A修复点回归 | 3,6,6,6,6,6 | 35/35全部一致 | 33.18 / 40.12秒 |
+| T47，混合尾行 | 5,6,6,6,6,6,6,6 | 35/35全部一致 | 34.01 / 42.80秒 |
+
+T48生产/观察的27项正式源码SHA一致，也逐项匹配当前pool修正；原T48首差证据保持。
+T18、T21、T24、T33、T47回归全部通过；每项都重新生成配对生产快照。
+六组使用相同27项正式源码SHA，逐项匹配本次Indexer pool修正。35项逐bit精度、
+八个生产FULL/eager状态、八个观察/生产等价状态、28个阶段FULL/eager、39个同输入
+及保护区检查均通过。T47真实行数47，短请求为5行，不补成6行。
+这些任务均用物理15且已结束，最长诊断227.62秒；数字含编译和观测，不含启动器准备，
+对应外层任务日志约4分5秒，不是算子延迟。
+本轮结论限于表中六组单层真实权重、8K合成history/hidden；不外推全T、全输入或整模型token。
 
 ### 整模型前的未验收项
 
@@ -224,6 +250,24 @@ task-submit --device 8 --max-time 780 \
 RMS微测试无设备selector为`compressor-norm`、ABI4；显式传
 `--env COMPRESSOR_NORM_REFERENCE=<三中间量观察目录>/observation.pt`，执行
 `run_rms.sh <新标签> compnorm`。先复现实际NoPE FP32，再解释两臂结果。
+
+Indexer pool单因素复现：在`c6c8fdce`独立源码目录，使用同次T48的生产/观察快照：
+
+```bash
+python "$BOOTSTRAP" --shared-toolchain --native-plugin-root "$SOURCE_ROOT" \
+  "$TEST_DIR/compile_rms.py" <新CPU原臂目录> indexpool-0
+python "$BOOTSTRAP" --shared-toolchain --native-plugin-root "$SOURCE_ROOT" \
+  "$TEST_DIR/compile_rms.py" <新CPU树形臂目录> indexpool-1
+
+task-submit --device 15 --max-time 780 \
+  --env PYTHONNOUSERSITE=1 --env HCCL_DETERMINISTIC=true \
+  --env PTOAS_ROOT --env ASCEND_HOME_PATH \
+  --env INDEXPOOL_PROBE_REFERENCE=<four-start-t48观察目录>/observation.pt \
+  --env SPMD_PRODUCTION_REFERENCE=<four-start-t48生产目录>/production.pt \
+  "bash $TEST_DIR/run_rms.sh <新标签> indexpool"
+```
+
+必须先满足原臂FP32及BF16复现，再检查候选Native差异；不能修改expected SHA跳过身份。
 
 ## 原始证据
 
@@ -263,4 +307,12 @@ RMS微测试无设备selector为`compressor-norm`、ABI4；显式传
 [T48首差](evidence/four-start-t48-observe-v1/result.json)、
 [Indexer pool CPU原臂](evidence/cpu-indexpool-t48-v3-0/receipt.json)、
 [Indexer pool CPU树形臂](evidence/cpu-indexpool-t48-v3-1/receipt.json)、
-[Indexer pool单因素通过](evidence/indexpool-t48-v1/result.json)。
+[Indexer pool单因素通过](evidence/indexpool-t48-v1/result.json)、
+[接回完整根CPU55](evidence/cpu-native-indexpool-t48-v1-spmd/receipt.json)、
+[接回T48生产](evidence/native-indexpool-t48-production-v1/result.json)、
+[接回T48完整35门禁通过](evidence/native-indexpool-t48-observe-v1/result.json)、
+[接回T18回归](evidence/native-indexpool-t18-observe-v1/result.json)、
+[接回T21回归](evidence/native-indexpool-t21-observe-v1/result.json)、
+[接回T24基准回归](evidence/native-indexpool-t24-observe-v1/result.json)、
+[接回T33回归](evidence/native-indexpool-t33-observe-v1/result.json)、
+[接回T47不等长通过](evidence/native-indexpool-t47-observe-v1/result.json)。
