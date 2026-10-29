@@ -46,6 +46,7 @@ if [[ "$probe" == spmd || "$probe" == padding || "$probe" == topktie ]]; then
   ASCEND_OPP_PATH=$(python "$SOURCE_ROOT/tests/pypto_test/dsv4_hca_prepare_opp.py" --destination "$out/opp-env")
 fi
 printf 'TASK_RUN_START %s\n' "$(date -Iseconds)"
+printf 'TASK_PHYSICAL_DEVICE %s\n' "$TASK_DEVICE"
 trap 'printf "TASK_RUN_END %s\n" "$(date -Iseconds)"' EXIT
 phase_args=()
 if [[ -n ${HC_PROBE_PHASE:-} ]]; then

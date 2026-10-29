@@ -57,6 +57,7 @@ Native数值资格
     M128/N128路径在17≤T≤32按group/N128选择两种半程起点；
     33≤T≤48选择四种K256起点。每族资格均由具体T实测给出，不外推整段。
     保留原64个logical任务及owner、原动态packed步长和全部完成信号；
+    T240/M128/N256保留64个父任务，内部两N128按Native24核的八个K256起点累加。
     其它T或tiling的WO-A继续原路径；后续量化统一恢复BF16边界及全8192列amax。
 """
 
@@ -305,6 +306,91 @@ def _native_small_o_projection_a_groups_stage_nz(
 
 
 @pl.jit.inline(auto_scope=False)
+def _native_t240_o_projection_a_tile_nz(
+    o_packed: pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16],
+    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, pl.NZ],
+    o_r_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]],
+    group: pl.Scalar[pl.INDEX],
+    row: pl.Scalar[pl.INDEX],
+    valid: pl.Scalar[pl.INDEX],
+    column: pl.Scalar[pl.INDEX],
+    FIRST_PANEL: pl.constexpr,
+):
+    """静态K起点与既有小T helper相同，避免NZ证明依赖跨分支的Scalar定义。"""
+    pack_stride = pl.tensor.dim(o_packed, 0) // O_GROUPS
+    n0 = pl.max(0, column) * 128
+    first_k = FIRST_PANEL * A_K_TILE
+    a = pl.slice(o_packed, [128, A_K_TILE], [group * pack_stride + row, first_k], valid_shape=[valid, A_K_TILE])
+    b = wo_a[group : group + 1, first_k : first_k + A_K_TILE, n0 : n0 + 128]
+    acc = pl.matmul(a, b, out_dtype=pl.FP32)
+    for panel in pl.range(FIRST_PANEL + 1, 16):
+        k = panel * A_K_TILE
+        chunk_a = pl.slice(o_packed, [128, A_K_TILE], [group * pack_stride + row, k], valid_shape=[valid, A_K_TILE])
+        chunk_b = wo_a[group : group + 1, k : k + A_K_TILE, n0 : n0 + 128]
+        acc = pl.matmul_acc(acc, chunk_a, chunk_b)
+    for wrapped in pl.range(FIRST_PANEL):
+        k_wrap = wrapped * A_K_TILE
+        wrap_a = pl.slice(o_packed, [128, A_K_TILE], [group * pack_stride + row, k_wrap], valid_shape=[valid, A_K_TILE])
+        wrap_b = wo_a[group : group + 1, k_wrap : k_wrap + A_K_TILE, n0 : n0 + 128]
+        acc = pl.matmul_acc(acc, wrap_a, wrap_b)
+    o_r_pad = pl.assemble(o_r_pad, acc, [row, group * O_LORA + n0])
+    return o_r_pad
+
+
+@pl.jit.inline(auto_scope=False)
+def _native_t240_o_projection_a_groups_stage_nz(
+    o_packed: pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16],
+    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, pl.NZ],
+    o_r_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]],
+    tokens: pl.Scalar[pl.INDEX],
+    worker_id: pl.Scalar[pl.INDEX],
+    WORKERS: pl.constexpr,
+    group_begin: pl.Scalar[pl.INDEX],
+    group_end: pl.Scalar[pl.INDEX],
+):
+    """T240：保持M128/N256父任务owner及原按组通知，只改内部N/K分块。"""
+    group_first = group_begin * 8
+    group_limit = group_end * 8
+    # 固定64父任务再过滤组范围；避免NZ偏移证明穿过动态条带起点的除法。
+    for logical in pl.range(worker_id, 64, WORKERS):
+        if logical >= group_first and logical < group_limit:
+            group = logical // 8
+            row = logical // 4 % 2 * 128
+            valid = pl.min(128, tokens - row)
+            for sub in pl.unroll(2):
+                column = logical % 4 * 2 + sub
+                native_logical = group * 8 + column
+                native_owner = native_logical // 3
+                if native_logical >= 48:
+                    native_owner = 16 + (native_logical - 48) // 2
+                # Native M240 BMM的64个N128项：前16核各3项，后8核各2项。
+                kind = native_owner % 8
+                if kind == 0:
+                    o_r_pad = _native_t240_o_projection_a_tile_nz(o_packed, wo_a, o_r_pad, group, row, valid, column, 0)
+                elif kind == 1:
+                    o_r_pad = _native_t240_o_projection_a_tile_nz(o_packed, wo_a, o_r_pad, group, row, valid, column, 2)
+                elif kind == 2:
+                    o_r_pad = _native_t240_o_projection_a_tile_nz(o_packed, wo_a, o_r_pad, group, row, valid, column, 4)
+                elif kind == 3:
+                    o_r_pad = _native_t240_o_projection_a_tile_nz(o_packed, wo_a, o_r_pad, group, row, valid, column, 6)
+                elif kind == 4:
+                    o_r_pad = _native_t240_o_projection_a_tile_nz(o_packed, wo_a, o_r_pad, group, row, valid, column, 8)
+                elif kind == 5:
+                    o_r_pad = _native_t240_o_projection_a_tile_nz(
+                        o_packed, wo_a, o_r_pad, group, row, valid, column, 10
+                    )
+                elif kind == 6:
+                    o_r_pad = _native_t240_o_projection_a_tile_nz(
+                        o_packed, wo_a, o_r_pad, group, row, valid, column, 12
+                    )
+                else:
+                    o_r_pad = _native_t240_o_projection_a_tile_nz(
+                        o_packed, wo_a, o_r_pad, group, row, valid, column, 14
+                    )
+    return o_r_pad
+
+
+@pl.jit.inline(auto_scope=False)
 def o_projection_a_groups_stage_nz(
     o_packed: pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16],
     wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, pl.NZ],
@@ -317,7 +403,11 @@ def o_projection_a_groups_stage_nz(
     group_begin: pl.Scalar[pl.INDEX],
     group_end: pl.Scalar[pl.INDEX],
 ):
-    if A_COL_TILE == 128 and A_ROW_TILE == 128:
+    if A_COL_TILE == 256 and A_ROW_TILE == 128 and tokens == 240:
+        o_r_pad = _native_t240_o_projection_a_groups_stage_nz(
+            o_packed, wo_a, o_r_pad, tokens, worker_id, WORKERS, group_begin, group_end
+        )
+    elif A_COL_TILE == 128 and A_ROW_TILE == 128:
         if tokens > 16 and tokens <= 48:
             o_r_pad = _native_small_o_projection_a_groups_stage_nz(
                 o_packed, wo_a, o_r_pad, tokens, worker_id, WORKERS, group_begin, group_end

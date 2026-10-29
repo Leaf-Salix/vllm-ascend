@@ -45,6 +45,7 @@ record = {
     "complete": False,
     "pass": False,
     "scope": "single-layer raw FULL replay and TND service contract",
+    "physical_device": int(os.environ["TASK_DEVICE"]),
     "steps": [],
 }
 payload = {}
@@ -123,18 +124,31 @@ def descriptors(inputs):
 
 
 try:
-    previous = json.loads((out.parent / "native-indexpool-t18-observe-v1/result.json").read_text())
+    stage_reference = Path(
+        os.environ.get("PADDING_STAGE_REFERENCE", out.parent / "native-indexpool-t18-observe-v1/result.json")
+    )
+    previous = json.loads(stage_reference.read_text())
+    record["stage_reference"] = str(stage_reference)
     record["stage_source_sha256"] = {
         name: hashlib.sha256((source / "deepseek_v4_flash_csa_spmd_tnd" / name).read_bytes()).hexdigest()
         for name in previous["stage_source_sha256"]
     }
-    assert len(record["stage_source_sha256"]) == 27
     trim_sources = {
         "main_native_projection_stages.py": "7dd653b5c1d0256a9e0a6ddbbef0064d675a7dee648a8bc9e8281fae8106b433",
         "indexer_native_projection_stages.py": "eb3562260703304a11c1db5ddc8cd0fd9666ff7b6dcf1099666f0ea80d1b8f25",
     }
     trim_expected = {**previous["stage_source_sha256"], **trim_sources}
-    assert previous["pass"] and record["stage_source_sha256"] in (previous["stage_source_sha256"], trim_expected)
+    if "PADDING_STAGE_REFERENCE" in os.environ:
+        # 新候选必须绑定明确通过的同版本分模块记录，不继承旧版本的两文件例外。
+        assert previous["complete"] and previous["pass"] and not previous.get("error")
+        assert {"output_projection_a_stages.py", "indexer_topk_stages.py", "kv_native_stages.py"}.issubset(
+            record["stage_source_sha256"]
+        )
+        assert record["stage_source_sha256"] == previous["stage_source_sha256"]
+    else:
+        # 保留旧检查点的复现入口；其历史允许变动范围不扩张。
+        assert len(record["stage_source_sha256"]) == 27
+        assert previous["pass"] and record["stage_source_sha256"] in (previous["stage_source_sha256"], trim_expected)
     record["tail_zero_projection_fix"] = record["stage_source_sha256"] == trim_expected
     record["harness_sha256"] = {
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()
