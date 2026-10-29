@@ -31,8 +31,14 @@ def main_native_projection_stage(
         # Native arch32 SetBaseSize: uniform requests select 16 groups/head
         # at this capacity; ragged requests retain 8. Read live TND bounds.
         first = pl.read(bounds, [1]) - pl.read(bounds, [0])
+        # Native Init trims only trailing zero-span requests before SetBaseSize.
+        # Interior zero spans still participate; L=0 with a nonzero Q span does too.
+        live_requests = pl.cast(0, pl.INDEX)
+        for request in pl.range(pl.tensor.dim(bounds, 0) - 1):
+            if pl.read(bounds, [request + 1]) > pl.read(bounds, [request]):
+                live_requests = request + 1
         deviation = pl.cast(0, pl.INT32)
-        for request in pl.range(1, pl.tensor.dim(bounds, 0) - 1):
+        for request in pl.range(1, live_requests):
             delta = pl.read(bounds, [request + 1]) - pl.read(bounds, [request]) - first
             deviation = deviation + delta * delta
         if deviation == 0 and tokens <= 384:

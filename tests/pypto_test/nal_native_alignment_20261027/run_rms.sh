@@ -11,10 +11,16 @@ export ASCEND_RT_VISIBLE_DEVICES="$TASK_DEVICE"
 label=${1:?}
 probe=${2:?}
 shift 2
-[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|qr|wkv|kvnorm|qoutput|mainproj|indexproj|indexpool|idxquery|idxquant|weightproj|attention|woa|woatnd|oproj|compnorm)$ ]]
+[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|padding|qr|wkv|kvnorm|qoutput|mainproj|indexproj|indexpool|idxquery|idxquant|weightproj|attention|woa|woatnd|oproj|compnorm)$ ]]
 probe_args=()
 while (( $# )); do
   case "$1" in
+    --mixed|--projection)
+      [[ "$probe" == padding && ${#probe_args[@]} -eq 0 ]]
+      probe_args=("$1")
+      shift
+      continue
+      ;;
     --lengths)
       [[ "$probe" == spmd && $# -ge 2 && ${#probe_args[@]} -eq 0 ]]
       [[ "$2" =~ ^[1-6](,[1-6]){0,39}$ ]]
@@ -30,7 +36,7 @@ test ! -e "$out"
 mkdir -p "$out"
 export ASCEND_CACHE_PATH="$out/ascend-cache" ASCEND_PROCESS_LOG_PATH="$out/ascend-log"
 mkdir -p "$ASCEND_CACHE_PATH" "$ASCEND_PROCESS_LOG_PATH"
-if [[ "$probe" == spmd ]]; then
+if [[ "$probe" == spmd || "$probe" == padding ]]; then
   export ASCEND_OPP_PATH
   ASCEND_OPP_PATH=$(python "$SOURCE_ROOT/tests/pypto_test/dsv4_hca_prepare_opp.py" --destination "$out/opp-env")
 fi
