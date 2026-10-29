@@ -136,8 +136,7 @@ def _q_a_worker(
             for k_block in pl.pipeline(D // QR_K_TILE, stage=2):
                 k0 = k_block * QR_K_TILE
                 valid_rows = pl.min(QR_M_TILE, tokens - row)
-                tail_x = pl.slice(x, [QR_M_TILE, QR_K_TILE], [row, k0],
-                                   valid_shape=[valid_rows, QR_K_TILE])
+                tail_x = pl.slice(x, [QR_M_TILE, QR_K_TILE], [row, k0], valid_shape=[valid_rows, QR_K_TILE])
                 tail_weight = wq_a[column : column + QR_N_TILE, k0 : k0 + QR_K_TILE]
                 tail_acc = pl.matmul_acc(tail_acc, tail_x, tail_weight, b_trans=True, init_cond=(k_block == 0))
             qa_fp32 = pl.assemble(qa_fp32, tail_acc, [row, column])
@@ -168,12 +167,58 @@ def _q_a_m16_parallel_worker(
         for k_block in pl.pipeline(D // QR_K_TILE, stage=2):
             k0 = k_block * QR_K_TILE
             valid_rows = pl.min(QR_M_TILE, tokens - row)
-            m16_x = pl.slice(x, [QR_M_TILE, QR_K_TILE], [row, k0],
-                             valid_shape=[valid_rows, QR_K_TILE])
+            m16_x = pl.slice(x, [QR_M_TILE, QR_K_TILE], [row, k0], valid_shape=[valid_rows, QR_K_TILE])
             m16_weight = wq_a[column : column + QR_N_TILE, k0 : k0 + QR_K_TILE]
             m16_acc = pl.matmul_acc(m16_acc, m16_x, m16_weight, b_trans=True, init_cond=(k_block == 0))
         qa_fp32 = pl.assemble(qa_fp32, m16_acc, [row, column])
     return qa_fp32
+
+
+@pl.jit.inline(auto_scope=False)
+def _q_a_t240_k_block(column: pl.Scalar[pl.INDEX], step: pl.Scalar[pl.INDEX]):
+    # Qualified for the current Native T240 tiling only. N32 subdivides each
+    # original N128 owner without crossing Native's 96-column K-order groups.
+    block = step
+    group = column // 96
+    if group < 9:
+        direction = step
+        if group % 2 == 1:
+            direction = 15 - step
+        block = (group // 2 * 3 + direction) % 16
+    return block
+
+
+@pl.jit.inline(auto_scope=False)
+def _q_a_t240_worker(
+    x: pl.Tensor[[T_DYN, D], pl.BF16],
+    weight: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
+    projected: pl.InOut[pl.Tensor[[QA_ROWS_DYN, Q_LORA], pl.FP32]],
+    worker: pl.Scalar[pl.INDEX],
+    WORKERS: pl.constexpr,
+):
+    # Keep the existing three M64/N128 owners and their M16 tails. Each owner
+    # completes all four N32 pieces before the caller publishes its ready signal.
+    for logical in pl.range(pl.max(worker, 0), QR_N_BLOCKS * QR_FIXED_M_GROUPS, WORKERS):
+        col128 = logical % QR_N_BLOCKS * QR_N_TILE
+        m_group = logical // QR_N_BLOCKS
+        for sub in pl.range(4):
+            col = col128 + sub * 32
+            acc = pl.create_tensor([64, 32], dtype=pl.FP32)
+            for step in pl.pipeline(16, stage=2):
+                k = pl.max(_q_a_t240_k_block(col, step), 0) * QR_K_TILE
+                a = x[m_group * 64 : m_group * 64 + 64, k : k + QR_K_TILE]
+                b = weight[col : col + 32, k : k + QR_K_TILE]
+                acc = pl.matmul_acc(acc, a, b, b_trans=True, init_cond=(step == 0))
+            projected = pl.assemble(projected, acc, [m_group * 64, col])
+            row = 192 + m_group * QR_M_TILE
+            tail = pl.create_tensor([QR_M_TILE, 32], dtype=pl.FP32)
+            for tail_step in pl.pipeline(16, stage=2):
+                tail_k = pl.max(_q_a_t240_k_block(col, tail_step), 0) * QR_K_TILE
+                tail_a = x[row : row + QR_M_TILE, tail_k : tail_k + QR_K_TILE]
+                tail_b = weight[col : col + 32, tail_k : tail_k + QR_K_TILE]
+                tail = pl.matmul_acc(tail, tail_a, tail_b, b_trans=True, init_cond=(tail_step == 0))
+            projected = pl.assemble(projected, tail, [row, col])
+    return projected
 
 
 @pl.jit.inline(auto_scope=False)
@@ -187,7 +232,9 @@ def q_a_stage(
 ):
     """由外层 AIC 调用；按实际 T 选 M32/M64，不按固定 batch 生成入口。"""
     tokens = pl.tensor.dim(x, 0)
-    if QA_M16_PARALLEL:
+    if tokens == 240:
+        qa_fp32 = _q_a_t240_worker(x, wq_a, qa_fp32, worker_id, WORKERS)
+    elif QA_M16_PARALLEL:
         qa_fp32 = _q_a_m16_parallel_worker(x, wq_a, qa_fp32, worker_id, WORKERS)
     elif tokens < QR_FIXED_SMALL_ROWS:
         qa_fp32 = _q_a_worker(x, wq_a, qa_fp32, worker_id, WORKERS, QR_FIXED_SMALL_M_TILE)
@@ -233,14 +280,21 @@ def q_r_stage(
             tg = tile_index * T_TILE
             valid_rows = pl.min(T_TILE, tokens - tg)
             qr_input_ub = pl.load(
-                qa_fp32, [tg, 0], [T_TILE, Q_LORA], target_memory=pl.MemorySpace.Vec,
+                qa_fp32,
+                [tg, 0],
+                [T_TILE, Q_LORA],
+                target_memory=pl.MemorySpace.Vec,
             )
             qr_sq_sum = pl.tile.full([1, T_TILE], dtype=pl.FP32, value=0.0)
             qr_amax_g = pl.tile.full([1, T_TILE], dtype=pl.FP32, value=0.0)
             # 依序处理 0/256/512/768 四段，不改为全行规约或其它结合次序。
             for qr_rms_col0 in pl.pipeline(0, Q_LORA, Q_LORA_TILE, stage=2):
                 qr_rms_chunk = pl.tile.extract(
-                    qr_input_ub, 0, qr_rms_col0, [T_TILE, Q_LORA_TILE], target_memory=pl.MemorySpace.Vec,
+                    qr_input_ub,
+                    0,
+                    qr_rms_col0,
+                    [T_TILE, Q_LORA_TILE],
+                    target_memory=pl.MemorySpace.Vec,
                 )
                 qr_rms_sq = pl.mul(qr_rms_chunk, qr_rms_chunk)
                 qr_rms_row_sum = pl.reshape(
@@ -249,7 +303,11 @@ def q_r_stage(
                 )
                 qr_sq_sum = pl.add(qr_sq_sum, qr_rms_row_sum)
                 gamma_rms_chunk = pl.tile.extract(
-                    qr_gamma_ub, 0, qr_rms_col0, [1, Q_LORA_TILE], target_memory=pl.MemorySpace.Vec,
+                    qr_gamma_ub,
+                    0,
+                    qr_rms_col0,
+                    [1, Q_LORA_TILE],
+                    target_memory=pl.MemorySpace.Vec,
                 )
                 qr_g = pl.col_expand_mul(qr_rms_chunk, gamma_rms_chunk)
                 qr_g_row_max = pl.reshape(
@@ -279,10 +337,18 @@ def q_r_stage(
             # 保留 INT32 rint→FP16 round→INT8 trunc 的原转换链。
             for qa in pl.pipeline(0, Q_LORA, QUANT_TILE, stage=2):
                 qr_chunk = pl.tile.extract(
-                    qr_input_ub, 0, qa, [T_TILE, QUANT_TILE], target_memory=pl.MemorySpace.Vec,
+                    qr_input_ub,
+                    0,
+                    qa,
+                    [T_TILE, QUANT_TILE],
+                    target_memory=pl.MemorySpace.Vec,
                 )
                 gamma_q_chunk = pl.tile.extract(
-                    qr_gamma_ub, 0, qa, [1, QUANT_TILE], target_memory=pl.MemorySpace.Vec,
+                    qr_gamma_ub,
+                    0,
+                    qa,
+                    [1, QUANT_TILE],
+                    target_memory=pl.MemorySpace.Vec,
                 )
                 qr_q_normed = pl.col_expand_mul(pl.row_expand_mul(qr_chunk, qr_inv_rms_t), gamma_q_chunk)
                 qr_q_scaled = pl.row_expand_mul(qr_q_normed, qr_scale_quant_t)

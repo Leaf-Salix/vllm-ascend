@@ -11,10 +11,15 @@ export ASCEND_RT_VISIBLE_DEVICES="$TASK_DEVICE"
 label=${1:?}
 probe=${2:?}
 shift 2
-[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|padding|qr|wkv|kvnorm|qoutput|mainproj|indexproj|indexpool|idxquery|idxquant|weightproj|attention|woa|woatnd|oproj|compnorm)$ ]]
+[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|padding|qr|qa240|wkv|kvnorm|qoutput|mainproj|indexproj|indexpool|idxquery|idxquant|weightproj|attention|woa|woatnd|oproj|compnorm)$ ]]
 probe_args=()
 while (( $# )); do
   case "$1" in
+    --full-batch)
+      [[ "$probe" == padding && $# -ge 2 && ${#probe_args[@]} -eq 0 ]]
+      [[ "$2" == 1 || "$2" == 40 ]]
+      probe_args=(--full-batch "$2")
+      ;;
     --mixed|--projection)
       [[ "$probe" == padding && ${#probe_args[@]} -eq 0 ]]
       probe_args=("$1")

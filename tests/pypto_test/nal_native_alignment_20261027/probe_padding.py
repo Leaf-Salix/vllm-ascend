@@ -2,6 +2,7 @@
 # ruff: noqa: E402 -- Bind the candidate independently from the frozen Native control.
 """生产55入口的bucket/dummy FULL资格；先满档控制，首差停止。"""
 
+import argparse
 import hashlib
 import importlib
 import json
@@ -31,10 +32,15 @@ from vllm_ascend.utils import enable_custom_op
 
 fixture_module = load_fixture_module()
 service_module = importlib.import_module("nal_alignment.deepseek_v4_flash_csa_spmd_tnd.service")
-out = Path(sys.argv[1])
-mixed_requested = sys.argv[2:] == ["--mixed"]
-projection_requested = sys.argv[2:] == ["--projection"]
-assert not sys.argv[2:] or mixed_requested or projection_requested
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("output", type=Path)
+mode = parser.add_mutually_exclusive_group()
+mode.add_argument("--mixed", action="store_true")
+mode.add_argument("--projection", action="store_true")
+mode.add_argument("--full-batch", type=int, choices=(1, 40))
+options = parser.parse_args()
+out = options.output
+mixed_requested, projection_requested = options.mixed, options.projection
 record = {
     "complete": False,
     "pass": False,
@@ -43,7 +49,11 @@ record = {
 }
 payload = {}
 start = time.monotonic()
-HISTORY, TOKEN_CAPACITY, REQUEST_CAPACITY = 8192, 24, 5
+HISTORY = 8192
+ACTIVE_REQUESTS = options.full_batch or 4
+TOKEN_CAPACITY = ACTIVE_REQUESTS * 6
+REQUEST_CAPACITY = options.full_batch or 5
+record["full_batch"] = options.full_batch
 EXTERNAL_ORDER = ("swa.0", "state.0", "compressed.0", "indexer_state.0", "indexer.0", "indexer.1", "x_out")
 
 
@@ -181,11 +191,11 @@ try:
         f = fixture_module.make_fixture(
             config,
             layer.self_attn,
-            4,
+            ACTIVE_REQUESTS,
             HISTORY,
             1024,
             torch.device("npu:0"),
-            query_lengths=[6] * 4,
+            query_lengths=[6] * ACTIVE_REQUESTS,
             token_capacity=TOKEN_CAPACITY,
             request_capacity=REQUEST_CAPACITY,
         )
@@ -215,12 +225,15 @@ try:
             }
             for name, group in f["groups"].items()
         }
+        expected_bounds = [i * 6 for i in range(ACTIVE_REQUESTS + 1)] + [TOKEN_CAPACITY] * (
+            REQUEST_CAPACITY - ACTIVE_REQUESTS
+        )
         assert all(
-            row["bounds"] == [0, 6, 12, 18, 24, 24]
-            and row["lengths"] == [8198] * 4 + [0]
-            and row["num_reqs_actual"] == 4
-            and row["num_decode_tokens"] == 24
-            and row["num_decodes"] == 5
+            row["bounds"] == expected_bounds
+            and row["lengths"] == [8198] * ACTIVE_REQUESTS + [0] * (REQUEST_CAPACITY - ACTIVE_REQUESTS)
+            and row["num_reqs_actual"] == ACTIVE_REQUESTS
+            and row["num_decode_tokens"] == TOKEN_CAPACITY
+            and row["num_decodes"] == REQUEST_CAPACITY
             for row in record["initial_geometry"].values()
         )
         payload.update(
@@ -319,7 +332,12 @@ try:
             record.update(complete=True, **{"pass": True}, projection_only=True, mixed_replay_validated=False)
             raise SystemExit(0)
 
-        pypto.torch.init()
+        # T240's production live set exceeds the default 256 MiB on scope ring 1.
+        # Use the public runtime capacity option; leave all other rings unchanged.
+        ring_heap = (256 << 20, 512 << 20, 256 << 20, 256 << 20)
+        record["runtime_ring_heap_bytes"] = ring_heap
+        save()
+        pypto.torch.init(ring_heap=ring_heap)
         runtime = service_module.CSAServiceRuntime(layer.self_attn, None, REQUEST_CAPACITY, layer=layer)
         wrapper._pto_csa_runtime = runtime
         record["runtime_source"] = service_module.__file__
@@ -359,7 +377,7 @@ try:
         with torch.npu.graph(pto_graph, stream=pto_stream):
             contract = pto_call(capturing=True)
         submitted = runtime.submissions
-        step = {"state": "A_full24_capacity5", "comparisons": {}, "full_eager": {}}
+        step = {"state": f"A_full{TOKEN_CAPACITY}_capacity{REQUEST_CAPACITY}", "comparisons": {}, "full_eager": {}}
         record["steps"].append(step)
         for repeat in range(2):
             reset()

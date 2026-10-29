@@ -138,8 +138,8 @@ def select_policy(
         raise ValueError("tokens/requests/max_query_tokens/max_seq_len须为已有的正整数描述符")
     if tokens > MAX_NATIVE_HC_TOKENS:
         raise NotImplementedError("当前Native-order HC容量限制T<=256；更大容量回退Native")
-    if tokens > requests * max_query_tokens:
-        raise ValueError("token容量超过请求容量×query上界；请绑定Native同一档描述符")
+    # tokens is graph capacity; Native may place all padding in an inactive
+    # request. Real token/query bounds remain checked by supported_descriptor.
     cache_rows = max_seq_len // 4
     if cache_rows < 2048:
         raise NotImplementedError("完整动态SPMD的小历史Vector Score路径尚未接入")

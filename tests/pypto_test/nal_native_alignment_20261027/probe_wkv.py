@@ -17,6 +17,7 @@ from bind_package import bind
 from safetensors import safe_open
 
 source = bind()
+from wkv240_kernels import wkv240_arm
 from wkv_kernels import wkv_arm
 
 from vllm_ascend.utils import enable_custom_op
@@ -68,7 +69,9 @@ try:
     data = torch.load(reference, map_location="cpu", weights_only=True)
     x = data["input_norm_native"].to("npu")
     tokens = x.shape[0]
-    assert tokens == 24, "this diagnostic only qualifies the observed T24 first difference"
+    assert tokens in (24, 240), "only observed T24/T240 first differences are qualified"
+    record["tokens"] = tokens
+    record["scope"] = f"isolated WKV T{tokens}; same Normed input and formal layer 4 weight"
     checkpoint = Path("/data/model/DeepSeek-V4-Flash-0731-w8a8")
     key = "layers.4.attn.wkv.weight"
     index = json.loads((checkpoint / "quant_model_weights.safetensors.index.json").read_text())["weight_map"]
@@ -90,18 +93,28 @@ try:
     p16 = (tokens + 15) // 16 * 16
     owner = torch.full((p16 + 32, 512), -37.0, dtype=torch.float32, device="npu")
     projected = owner[16 : 16 + p16]
-    for name, narrow, order in (
+    arms = (
         ("nal", False, False),
         ("n32_k256_natural", True, False),
         ("n32_k256_paired", True, True),
-    ):
-        wkv_arm(x, weight, projected, NARROW=narrow, ORDER=order)
+    )
+    if tokens == 240:
+        arms = (("nal", False, False), ("n32_k256_natural", True, False), ("n32_k256_column_order", True, True))
+    for arm_index, (name, narrow, order) in enumerate(arms):
+
+        def run(arm_index=arm_index, narrow=narrow, order=order):
+            if tokens == 240:
+                wkv240_arm(x, weight, projected, MODE=arm_index)
+            else:
+                wkv_arm(x, weight, projected, NARROW=narrow, ORDER=order)
+
+        run()
         torch.npu.synchronize()
         eager = projected[:tokens].cpu().clone()
         graph, stream = torch.npu.NPUGraph(), torch.npu.Stream()
         stream.wait_stream(torch.npu.current_stream())
         with torch.npu.graph(graph, stream=stream):
-            wkv_arm(x, weight, projected, NARROW=narrow, ORDER=order)
+            run()
         projected.fill_(float("nan"))
         graph.replay()
         torch.npu.synchronize()
@@ -109,8 +122,11 @@ try:
             "bf16_native": metric(projected[:tokens].bfloat16(), native),
             "graph_eager": metric(projected[:tokens], eager),
             "guard_ok": bool((owner[:16].cpu() == -37).all() and (owner[16 + p16 :].cpu() == -37).all()),
+            "input_readonly": metric(x, data["input_norm_native"]),
+            "weight_readonly": metric(weight, stored),
         }
         assert row["graph_eager"]["bit_equal"] and row["guard_ok"]
+        assert row["input_readonly"]["bit_equal"] and row["weight_readonly"]["bit_equal"]
         if name == "nal":
             row["production_accumulator"] = metric(projected[:tokens], data["kv_accumulator"][:tokens])
             assert row["production_accumulator"]["bit_equal"], "isolated Nal does not reproduce production"

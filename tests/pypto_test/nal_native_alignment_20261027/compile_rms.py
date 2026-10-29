@@ -22,7 +22,11 @@ out = Path(sys.argv[1])
 out.mkdir(exist_ok=False)
 assert not torch_npu.npu.is_initialized()
 kind = sys.argv[2] if len(sys.argv) > 2 else "rms"
-if kind == "compressor-norm":
+if kind.startswith("qa240-"):
+    from qa240_kernels import qa240_arm
+
+    program = qa240_arm.specialize(MODE=int(kind.removeprefix("qa240-")))
+elif kind == "compressor-norm":
     from compressor_norm_kernels import compressor_norm_pair
 
     program = compressor_norm_pair.specialize(EPS=1e-6)

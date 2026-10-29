@@ -253,7 +253,9 @@ try:
             )
             for name, shape in shapes.items()
         }
-        pypto.torch.init()
+        ring_heap = (256 << 20, 512 << 20, 256 << 20, 256 << 20)
+        record["runtime_ring_heap_bytes"] = ring_heap
+        pypto.torch.init(ring_heap=ring_heap)
         initial = {
             "hidden": f["hidden"].cpu(),
             "positions": f["positions"].cpu(),
@@ -385,6 +387,7 @@ try:
         qa = impl.cv_wq_a.matmul(q_quant, q_scale)
         if isinstance(qa, tuple):
             qa = qa[0]
+        payload["qa_accumulator"] = observed["qa"].cpu()
         check("q_a_projection_bf16", observed["qa"][:tokens].to(torch.bfloat16), qa)
         qr, scale = torch.ops._C_ascend.npu_rms_norm_dynamic_quant(qa, impl.q_norm.weight, epsilon=impl.eps)
         payload["qr_gamma"] = impl.q_norm.weight.cpu()

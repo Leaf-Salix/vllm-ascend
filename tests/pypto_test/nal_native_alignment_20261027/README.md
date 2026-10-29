@@ -16,6 +16,8 @@
 
 不同T及不等长请求的逐bit推广见[2026-10-29记录](TND_GENERALIZATION_20261029.md)。
 全局bucket、dummy请求的首差修正与同图FULL对拍见[padding记录](GLOBAL_PADDING_20261029.md)。
+8K/B40三方整模型测试的前置门禁、T240 Q-A修正和尚未通过的WKV结果，
+见[2026-10-29三方记录](../csa_threeway_20261029/RESULTS.md)；目前不能称整模型已通过。
 
 ## 固定测试条件
 
