@@ -10,7 +10,8 @@ import subprocess
 import tarfile
 from pathlib import Path
 
-NAL = "41ba392f482bf88f7b6a797e2542443c81497338"
+COMMON_FRAMEWORK = "41ba392f482bf88f7b6a797e2542443c81497338"
+NAL = "79ea6d3c8460338a172cb5570d14999d5a544262"
 PACKAGE = "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd"
 
 
@@ -35,7 +36,9 @@ def main():
         ["git", "-C", str(repo), "rev-parse", "--verify", args.ours + "^{commit}"], text=True
     ).strip()
     args.output.mkdir(parents=True, exist_ok=False)
-    tracked = subprocess.check_output(["git", "-C", str(repo), "ls-tree", "-r", "--name-only", NAL], text=True)
+    tracked = subprocess.check_output(
+        ["git", "-C", str(repo), "ls-tree", "-r", "--name-only", COMMON_FRAMEWORK], text=True
+    )
     paths = []
     for name in tracked.splitlines():
         if name.startswith("vllm_ascend/") and name.endswith((".py", ".json", ".yaml")):
@@ -56,7 +59,7 @@ def main():
     ]
     for arm in ("native", "ours", "nalinaly"):
         source = args.output / arm / "source"
-        export(repo, NAL, sorted(set(paths)), source)
+        export(repo, COMMON_FRAMEWORK, sorted(set(paths)), source)
         # Our validated test bootstrap adds explicit Native-source selection;
         # the public Nal bootstrap lacks --native-plugin-root. Share this test
         # helper across all arms without changing the common model framework.
@@ -64,6 +67,9 @@ def main():
         if arm == "ours":
             shutil.rmtree(source / PACKAGE)
             export(repo, ours, [PACKAGE], source)
+        elif arm == "nalinaly":
+            shutil.rmtree(source / PACKAGE)
+            export(repo, NAL, [PACKAGE], source)
         helper = source / "tests/pypto_test/csa_threeway_20261029"
         helper.mkdir(parents=True)
         for file in here.iterdir():
@@ -121,10 +127,11 @@ def main():
         }
         manifest = {
             "arm": arm,
-            "common_framework": NAL,
+            "common_framework": COMMON_FRAMEWORK,
             "test_bootstrap_source": ours,
-            "csa_source": ours if arm == "ours" else NAL,
-            "math_overlay": PACKAGE if arm == "ours" else None,
+            "csa_source": ours if arm == "ours" else NAL if arm == "nalinaly" else COMMON_FRAMEWORK,
+            "math_overlay": PACKAGE if arm != "native" else None,
+            "nalinaly_reference": NAL,
             "backend": "native" if arm == "native" else "pto",
             "pto_variant": "spmd_tnd",
             "pto_backend": "python",

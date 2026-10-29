@@ -2,6 +2,7 @@
 """仅管理本次自有进程组；首差或720秒时终止，并保留退出状态。"""
 
 import argparse
+import hashlib
 import json
 import os
 import signal
@@ -10,6 +11,8 @@ import sys
 import time
 from contextlib import suppress
 from pathlib import Path
+
+from postflight import validate
 
 
 def stop_group(process, grace=5):
@@ -39,6 +42,7 @@ def main():
     manifest = json.loads((source.parent / "manifest.json").read_text())
     if manifest["arm"] != "native":
         assert args.reference is not None
+        assert json.loads((args.reference / "postflight.json").read_text())["passed"]
         for rank in range(16):
             row = json.loads((args.reference / f"rank{rank}.mixed.json").read_text())
             assert len(row["requests"]) == 40 and all(len(r["output_token_ids"]) == 192 for r in row["requests"])
@@ -63,6 +67,10 @@ def main():
         "atomic_add": False,
         "capture_sizes": [6, 240],
         "task_device": os.environ["TASK_DEVICE"],
+        "parent_harness_sha256": {
+            name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+            for name in ("launch.py", "postflight.py", "run_case.sh")
+        },
     }
     (output / "experiment.json").write_text(json.dumps(experiment, indent=2) + "\n")
     command = [
@@ -118,8 +126,12 @@ def main():
             code = stop_group(process)
     status = {"exit_code": code, "reason": reason, "elapsed_s": time.monotonic() - start}
     (output / "exit.json").write_text(json.dumps(status, indent=2) + "\n")
+    if not reason and code == 0:
+        result = validate(source, output, args.bank, manifest["arm"], args.reference)
+        status["postflight_passed"] = result["passed"]
+        (output / "exit.json").write_text(json.dumps(status, indent=2) + "\n")
     print(json.dumps(status), flush=True)
-    raise SystemExit(1 if reason or code else 0)
+    raise SystemExit(1 if reason or code or not status.get("postflight_passed") else 0)
 
 
 if __name__ == "__main__":
