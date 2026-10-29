@@ -22,7 +22,11 @@ out = Path(sys.argv[1])
 out.mkdir(exist_ok=False)
 assert not torch_npu.npu.is_initialized()
 kind = sys.argv[2] if len(sys.argv) > 2 else "rms"
-if kind in ("oproj-quant", "oproj-b"):
+if kind == "compressor-norm":
+    from compressor_norm_kernels import compressor_norm_pair
+
+    program = compressor_norm_pair.specialize(EPS=1e-6)
+elif kind in ("oproj-quant", "oproj-b"):
     from oproj_suffix_kernels import output_b_arm, output_quant_arm
 
     program = (output_quant_arm if kind == "oproj-quant" else output_b_arm).specialize()
@@ -91,7 +95,11 @@ elif kind in ("spmd", "spmd-debug", "spmd-probe"):
     from nal_alignment.deepseek_v4_flash_csa_spmd_tnd.entry import decode_csa_spmd, decode_csa_spmd_debug
     from nal_alignment.deepseek_v4_flash_csa_spmd_tnd.policy import select_policy
 
-    policy = select_policy(tokens=24, requests=4, max_query_tokens=6, max_seq_len=8198)
+    lengths = [int(value) for value in (sys.argv[3] if len(sys.argv) > 3 else "6,6,6,6").split(",")]
+    assert 1 <= len(lengths) <= 40 and all(1 <= value <= 6 for value in lengths) and sum(lengths) <= 256
+    policy = select_policy(
+        tokens=sum(lengths), requests=len(lengths), max_query_tokens=max(lengths), max_seq_len=8192 + max(lengths)
+    )
     if kind == "spmd-probe":
         from spmd_probe_entry import spmd_stage_probe
 
@@ -112,6 +120,8 @@ else:
         DIRECT_PACK=kind == "hc-norm",
     )
 abi = kernel_abi_for_program(program, platform="a2a3", runtime="tensormap_and_ringbuffer")
+if kind == "compressor-norm":
+    assert len(abi.parameters) == 4, "wrong compressor Norm diagnostic root"
 if kind in ("oproj-quant", "oproj-b"):
     assert len(abi.parameters) == (3 if kind == "oproj-quant" else 6), "wrong O-proj diagnostic root"
 _compile_impl(program, output_dir=str(out / "kernel"), platform="a2a3", skip_ptoas=False, _kernel_abi=abi)

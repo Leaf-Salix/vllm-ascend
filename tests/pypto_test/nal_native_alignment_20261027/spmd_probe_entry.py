@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: F403, F405 -- Keep the diagnostic root globals identical to its production source.
-"""从生产debug根仅替换25个内部分配为外部观测缓冲；算术和调度调用相同。
+"""从生产debug根仅替换28个内部分配为外部观测缓冲；算术和调度调用相同。
 
 使用前必须证明该根与未经观测的生产debug根的全部8个外部输出逐字节一致。
 """
@@ -93,6 +93,9 @@ def spmd_stage_probe(
     debug_head_weights: pl.InOut[pl.Tensor[[P16, 64], pl.FP32]],
     debug_packed: pl.InOut[pl.Tensor[[PACK_ROWS, 4096], pl.BF16]],
     debug_o_r: pl.InOut[pl.Tensor[[O_MM_ROWS, 8192], pl.FP32]],
+    debug_main_pooled: pl.InOut[pl.Tensor[[T, 512], pl.FP32]],
+    debug_main_normed: pl.InOut[pl.Tensor[[T, 512], pl.FP32]],
+    debug_main_debug: pl.InOut[pl.Tensor[[T, 512], pl.FP32]],
     QUERY_GROUP: pl.constexpr,
     QK_PANEL: pl.constexpr,
     SCORE_TILE: pl.constexpr,
@@ -165,11 +168,11 @@ def spmd_stage_probe(
     kv = debug_kv
     main_value = pl.create_tensor([p64, 1024], dtype=pl.FP32)
     main_score = pl.create_tensor([p64, 1024], dtype=pl.FP32)
-    main_pooled = pl.create_tensor([t, 512], dtype=pl.FP32)
+    main_pooled = debug_main_pooled
     main_offsets = pl.create_tensor([b], dtype=pl.INT32)
     main_count = pl.create_tensor([1], dtype=pl.INT32)
-    main_normed = pl.create_tensor([t, 512], dtype=pl.FP32)
-    main_debug = pl.create_tensor([t, 512], dtype=pl.FP32)
+    main_normed = debug_main_normed
+    main_debug = debug_main_debug
     idx_value = pl.create_tensor([p16, 256], dtype=pl.FP32)
     idx_score = pl.create_tensor([p16, 256], dtype=pl.FP32)
     idx_pooled = debug_idx_pooled

@@ -11,8 +11,20 @@ export ASCEND_RT_VISIBLE_DEVICES="$TASK_DEVICE"
 label=${1:?}
 probe=${2:?}
 shift 2
-[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|qr|wkv|kvnorm|qoutput|mainproj|indexproj|idxquery|idxquant|weightproj|attention|woa|oproj)$ ]]
-if (( $# )); then [[ $# == 2 && "$1" == --device && "$2" == "$TASK_DEVICE" ]]; fi
+[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|qr|wkv|kvnorm|qoutput|mainproj|indexproj|idxquery|idxquant|weightproj|attention|woa|oproj|compnorm)$ ]]
+probe_args=()
+while (( $# )); do
+  case "$1" in
+    --lengths)
+      [[ "$probe" == spmd && $# -ge 2 && ${#probe_args[@]} -eq 0 ]]
+      [[ "$2" =~ ^[1-6](,[1-6]){0,39}$ ]]
+      probe_args=(--lengths "$2")
+      ;;
+    --device) [[ $# -ge 2 && "$2" == "$TASK_DEVICE" ]] ;;
+    *) exit 2 ;;
+  esac
+  shift 2
+done
 out="$align_root/results/$label"
 test ! -e "$out"
 mkdir -p "$out"
@@ -32,4 +44,4 @@ fi
 timeout --signal=TERM --kill-after=15s 750s python \
   "$align_root/src/tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py" \
   --shared-toolchain --native-plugin-root "$SOURCE_ROOT" \
-  "$job_here/probe_$probe.py" "$out" "${phase_args[@]}" > "$out/run.log" 2>&1
+  "$job_here/probe_$probe.py" "$out" "${phase_args[@]}" "${probe_args[@]}" > "$out/run.log" 2>&1

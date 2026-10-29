@@ -3,9 +3,12 @@
 
 import ast
 import json
+import os
 import sys
 from pathlib import Path
 
+import pypto
+import simpler
 import torch_npu
 
 assert not torch_npu.npu.is_initialized()
@@ -21,4 +24,19 @@ for statement in tree.body:
 scope = {"__name__": "probe_import_check", "__file__": str(target)}
 exec(compile(ast.Module(body=prefix, type_ignores=[]), str(target), "exec"), scope)
 assert not torch_npu.npu.is_initialized()
-Path(sys.argv[1]).write_text(json.dumps({"pass": True, "npu_initialized": False}) + "\n")
+for module, key in ((pypto, "CSA_SHARED_PYPTO_ROOT"), (simpler, "CSA_SHARED_SIMPLER_ROOT")):
+    assert Path(module.__file__).is_relative_to(Path(os.environ[key]))
+assert os.environ["PTOAS_ROOT"] == os.environ["CSA_SHARED_PTOAS_ROOT"] and os.environ["ASCEND_HOME_PATH"]
+Path(sys.argv[1]).write_text(
+    json.dumps(
+        {
+            "pass": True,
+            "npu_initialized": False,
+            "pypto": pypto.__file__,
+            "simpler": simpler.__file__,
+            "PTOAS_ROOT": os.environ["PTOAS_ROOT"],
+            "ASCEND_HOME_PATH": os.environ["ASCEND_HOME_PATH"],
+        }
+    )
+    + "\n"
+)

@@ -13,13 +13,13 @@
     NZ 大 M128 路径只计算真实 T 内的行：每个 activation 切片显式带
     min(128,T-t0) 有效行，matmul 和 partial 写回沿用这一动态范围。
     T 内的 dummy/inactive 行仍完整计算，不按请求 metadata 跳算。
-    权重驻留、K1024 整数点积、N256 和八组 FP32 反量化顺序保持不变。
+    权重驻留、K1024整数点积、N256保持不变；八组先INT32归并再FP32反量化。
     工作区容量和上游 INT8 补零合同保留；HC post 本来就只读取 T 行。
     上游 O_A/按组量化产生 INT8 activation[P_MM,8192] 和 FP32 scale[8,P_SCALE]。
     先阅读 o_b_stage 所选择的 ND/NZ AIC helper，再阅读末尾的 AIV
     o_dequant_hc_post_stage；其中 hc_post_row_block 是最后一步的单行数学。
     O_B 写 INT32 partials[P_MM,32768]，每个组独占4096列；AIV 依组号顺序
-    反量化求和、乘权重 scale、舍入到 BF16，再完成四路 HC 残差组合。
+    整数求和，再乘FP32联合scale、舍入到BF16，最后完成四路HC残差组合。
 
 输入输出、动态变量和布局
     实际 T 从输出 flat Tensor 的动态行数取得；O_B 的 tokens 参数由外层
@@ -57,7 +57,7 @@
     不重叠；alias、容量、合法 ROW_TILE 和正 WORKERS 由捕获前统一验证。
 
 数值边界与当前范围
-    T24先INT32合并八组，再FP32联合scale；其它T保留八组FP32左折叠。保留
+    先INT32合并八组，再FP32联合scale。保留
     hc_post.py 的逐项残差加法。先 BF16 舍入 O 投影输出再进入 HC post，不能
     合并这次舍入；也不能先求 comb*residual 的和再加 post*x 改变求和树。
     本模块只补齐完整 CSA 的输出后段；没有 attention、O_A/量化和阶段同步，
@@ -287,25 +287,14 @@ def o_dequant_hc_post_stage(
     wb_scale = pl.load(wo_b_scale, [0], [D])
     wb_scale_chunk = pl.reshape(wb_scale, [1, D])
     for b_tb in pl.range(worker_id, tokens, WORKERS):
-        if tokens == 24:
-            # Native INT8 matmul先完成全K8192整数点积，再做一次FP32反量化。
-            # 8192*128*128 < 2**31；八组INT32先相加不会溢出。
-            integer = pl.load(partials, [b_tb, 0], [1, D])
-            for group in pl.range(1, O_GROUPS):
-                integer = pl.add(integer, pl.load(partials, [b_tb, group * D], [1, D]))
-            token_scale = pl.read(act_scale_dq, [0, b_tb])
-            joint_scale = pl.mul(wb_scale_chunk, token_scale)
-            out_t = pl.mul(pl.cast(integer, pl.FP32), joint_scale)
-        else:
-            # 保留每token1x4096、group递增stage=2流水；仅变更独立token的owner。
-            acc = pl.tile.full([1, D], dtype=pl.FP32, value=0.0)
-            for act_g in pl.pipeline(O_GROUPS, stage=2):
-                p_col0 = act_g * D
-                p_g = pl.load(partials, [b_tb, p_col0], [1, D])
-                g_scale_scalar = pl.read(act_scale_dq, [act_g, b_tb])
-                p_g_f32 = pl.cast(p_g, target_type=pl.FP32, mode="none")
-                acc = pl.add(acc, pl.mul(p_g_f32, g_scale_scalar))
-            out_t = pl.col_expand_mul(acc, wb_scale_chunk)
+        # Native INT8 matmul先完成全K8192整数点积，再做一次FP32反量化。
+        # 8192*128*128 < 2**31；八组INT32先相加不会溢出。
+        integer = pl.load(partials, [b_tb, 0], [1, D])
+        for group in pl.range(1, O_GROUPS):
+            integer = pl.add(integer, pl.load(partials, [b_tb, group * D], [1, D]))
+        token_scale = pl.read(act_scale_dq, [0, b_tb])
+        joint_scale = pl.mul(wb_scale_chunk, token_scale)
+        out_t = pl.mul(pl.cast(integer, pl.FP32), joint_scale)
         # 声明仅供inline参数的Tensor元数据追踪，随后的cast覆盖它；不要求GM临时。
         # 这次BF16舍入是原HCpost输入的数值边界，不可与最后一次BF16合并。
         out_bf16 = pl.create_tensor([1, D], dtype=pl.BF16)

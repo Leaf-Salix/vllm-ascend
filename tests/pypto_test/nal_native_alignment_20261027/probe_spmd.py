@@ -2,6 +2,7 @@
 # ruff: noqa: E402 -- Bind Native control and the independent PTO namespace before imports.
 """8K/B4完整SPMD运行及前缀观测；从HC逐阶段比对Native，首差停止。"""
 
+import argparse
 import hashlib
 import importlib
 import json
@@ -32,13 +33,24 @@ nal_native = importlib.import_module("nal_alignment.deepseek_v4_flash_csa_spmd_t
 nal_binding = importlib.import_module("nal_alignment.deepseek_v4_flash_csa_spmd_tnd.binding")
 nal_entry = importlib.import_module("nal_alignment.deepseek_v4_flash_csa_spmd_tnd.entry")
 
-out = Path(sys.argv[1])
+parser = argparse.ArgumentParser()
+parser.add_argument("output", type=Path)
+parser.add_argument("--lengths", default="6,6,6,6")
+options = parser.parse_args()
+request_lengths = [int(value) for value in options.lengths.split(",")]
+assert 1 <= len(request_lengths) <= 40 and all(1 <= value <= 6 for value in request_lengths)
+tokens, batch = sum(request_lengths), len(request_lengths)
+assert tokens <= 256
+p8, p16, p64, p128 = ((tokens + unit - 1) // unit * unit for unit in (8, 16, 64, 128))
+out = options.output
 record = {
     "complete": False,
     "pass": False,
     "scope": "complete SPMD; Native eager prefix/cache/query/weights/TopK/output stages; not whole-model tokens",
     "history": 8192,
-    "lengths": [6, 6, 6, 6],
+    "lengths": request_lengths,
+    "tokens": tokens,
+    "request_padding_rows": 0,
     "precision": {},
 }
 payload = {}
@@ -61,7 +73,7 @@ def metric(actual, expected):
     return {
         "bit_equal": not bool(different.any()),
         "different_elements": int(different.sum()),
-        "max_abs": float(delta.abs().max()),
+        "max_abs": float(delta.abs().max()) if delta.numel() else 0.0,
         "first_coordinates": different.nonzero()[:6].tolist(),
     }
 
@@ -107,7 +119,7 @@ try:
         speculative_config={"method": "dspark", "num_speculative_tokens": 5, "enforce_eager": True},
         compilation_config={
             "cudagraph_mode": "FULL_DECODE_ONLY",
-            "cudagraph_capture_sizes": [24],
+            "cudagraph_capture_sizes": [tokens],
             "cache_dir": str(out / "vllm-cache"),
         },
         additional_config={
@@ -155,12 +167,14 @@ try:
             "attention_plan_stages.py",
             "output_projection_a_stages.py",
             "output_projection_b_stages.py",
+            "compressor_pool_stages.py",
+            "compressor_output_stages.py",
         )
     }
     with native_session(config, 0), torch.inference_mode():
         layer, details = make_layer(config, checkpoint, torch.device("npu:0"), 4)
         record["weights"] = details
-        f = make_ragged_fixture(config, layer.self_attn, 4, 8192, 1024, torch.device("npu:0"), [6] * 4)
+        f = make_ragged_fixture(config, layer.self_attn, batch, 8192, 1024, torch.device("npu:0"), request_lengths)
         groups = {name: (f["metadata"][g["prefix"]], g["views"]) for name, g in f["groups"].items()}
         weights = nal_adapter.prepare_weights(
             layer.self_attn, groups["indexer"][0].hadamard, layer, root_function=nal_entry.decode_csa_spmd
@@ -174,8 +188,8 @@ try:
             for name in ("wq_a", "wq_b", "wo_a", "wo_b", "wkv", "idx_wq_b", "weights_proj")
         }
         output = torch.empty_like(f["hidden"])
-        topk = torch.empty((24, 512), dtype=torch.int32, device="npu")
-        scores = torch.empty((24, 512), dtype=torch.float32, device="npu")
+        topk = torch.empty((tokens, 512), dtype=torch.int32, device="npu")
+        scores = torch.empty((tokens, 512), dtype=torch.float32, device="npu")
         native = nal_native.bind_native_inputs(
             weights,
             f["hidden"],
@@ -187,34 +201,42 @@ try:
             topk=topk,
             topk_scores=scores,
         )
-        prepared = nal_binding.PreparedDynamicCSA(native, max_query_tokens=6, max_seq_len=8198)
+        prepared = nal_binding.PreparedDynamicCSA(
+            native, max_query_tokens=max(request_lengths), max_seq_len=8192 + max(request_lengths)
+        )
         record["policy"] = prepared.policy.constexprs()
         shapes = {
-            "inv": (32, 1),
-            "post": (24, 4),
-            "comb": (24, 16),
-            "mixed": (24, 4096),
-            "normed": (24, 4096),
-            "qa": (32, 1024),
-            "qr": (24, 1024),
-            "qr_scale": (24, 1),
-            "kv_fp32": (32, 512),
-            "kv": (24, 512),
-            "q_proj": (128, 32768),
-            "q": (24, 32768),
-            "idx_pooled": (24, 128),
-            "idx_normed": (32, 128),
-            "idx_had": (32, 128),
-            "idx_scales": (32, 1),
-            "idx_debug": (24, 128),
-            "idx_query_i8": (1536, 128),
-            "idx_query_scale": (1536, 1),
-            "idx_query_acc": (64, 8192),
-            "idx_query_rope": (32, 8192),
-            "idx_query_had": (1536, 128),
-            "head_weights": (32, 64),
-            "packed": (1024, 4096),
-            "o_r": (128, 8192),
+            "inv": (p16, 1),
+            "post": (tokens, 4),
+            "comb": (tokens, 16),
+            "mixed": (p8, 4096),
+            "normed": (tokens, 4096),
+            "qa": (p16, 1024),
+            "qr": (tokens, 1024),
+            "qr_scale": (tokens, 1),
+            "kv_fp32": (p16, 512),
+            "kv": (tokens, 512),
+            "q_proj": (p128, 32768),
+            "q": (tokens, 32768),
+            "main_pooled": (tokens, 512),
+            "main_normed": (tokens, 512),
+            "main_debug": (tokens, 512),
+            "idx_pooled": (tokens, 128),
+            "idx_normed": (p16, 128),
+            "idx_had": (p16, 128),
+            "idx_scales": (p16, 1),
+            "idx_debug": (tokens, 128),
+            "idx_query_i8": (tokens * 64, 128),
+            "idx_query_scale": (tokens * 64, 1),
+            "idx_query_acc": (p64, 8192),
+            "idx_query_rope": (p16, 8192),
+            "idx_query_had": (tokens * 64, 128),
+            "head_weights": (p16, 64),
+            "packed": (8 * p128, 4096),
+            "o_r": (
+                max(p128, (tokens + prepared.policy.ob_rows - 1) // prepared.policy.ob_rows * prepared.policy.ob_rows),
+                8192,
+            ),
         }
         observed = {
             name: torch.full(
@@ -302,7 +324,7 @@ try:
         idx_slots_for_domain = f["compact"]["indexer"][2]
         valid_compact = (idx_slots_for_domain >= 0).all(dim=-1)
         closed_tokens = ((f["positions"] + 1) % 4) == 0
-        assert int(closed_tokens.sum()) == int(valid_compact.sum()) == 4
+        assert int(closed_tokens.sum()) == int(valid_compact.sum())
         record["indexer_observation_domain"] = {
             "compact_rows": valid_compact.nonzero().flatten().cpu().tolist(),
             "token_rows": closed_tokens.nonzero().flatten().cpu().tolist(),
@@ -310,12 +332,12 @@ try:
 
         def observed_domain(name, value):
             if name == "packed":
-                return value.reshape(8, value.shape[0] // 8, 8, 512)[:, :24]
-            if name in ("idx_query_acc", "idx_query_rope", "head_weights", "o_r"):
-                return value[:24]
+                return value.reshape(8, value.shape[0] // 8, 8, 512)[:, :tokens]
+            if name in ("mixed", "idx_query_acc", "idx_query_rope", "head_weights", "o_r"):
+                return value[:tokens]
             if name in ("idx_normed", "idx_had", "idx_scales"):
                 return value[: idx_slots_for_domain.shape[0]][valid_compact]
-            if name in ("idx_pooled", "idx_debug"):
+            if name in ("main_pooled", "main_normed", "main_debug", "idx_pooled", "idx_debug"):
                 return value[closed_tokens]
             return value
 
@@ -350,9 +372,9 @@ try:
         }
         assert record["native_determinism"] == {"torch": True, "npu_level": 1, "HCCL_DETERMINISTIC": "true"}
         mixed, post, comb = layer.hc_pre(f["hidden"], layer.hc_attn_fn, layer.hc_attn_scale, layer.hc_attn_base)
-        check("hc_mixed", observed["mixed"], mixed)
+        check("hc_mixed", observed["mixed"][:tokens], mixed)
         check("hc_post_gate", observed["post"], post)
-        check("hc_comb", observed["comb"], comb.reshape(24, 16))
+        check("hc_comb", observed["comb"], comb.reshape(tokens, 16))
         normed = layer.input_layernorm(mixed)
         if isinstance(normed, tuple):
             normed = normed[0]
@@ -363,33 +385,33 @@ try:
         qa = impl.cv_wq_a.matmul(q_quant, q_scale)
         if isinstance(qa, tuple):
             qa = qa[0]
-        check("q_a_projection_bf16", observed["qa"][:24].to(torch.bfloat16), qa)
+        check("q_a_projection_bf16", observed["qa"][:tokens].to(torch.bfloat16), qa)
         qr, scale = torch.ops._C_ascend.npu_rms_norm_dynamic_quant(qa, impl.q_norm.weight, epsilon=impl.eps)
         payload["qr_gamma"] = impl.q_norm.weight.cpu()
-        payload["qr_native_scale"] = scale.reshape(24, 1).cpu()
+        payload["qr_native_scale"] = scale.reshape(tokens, 1).cpu()
         payload["qa_accumulator"] = observed["qa"].cpu()
         check("q_r_quantized", observed["qr"], qr)
-        check("q_r_scale", observed["qr_scale"], scale.reshape(24, 1))
+        check("q_r_scale", observed["qr_scale"], scale.reshape(tokens, 1))
         kv_quant, kv_scale = impl.cv_wkv.quantize(normed)
         kv = impl.cv_wkv.matmul(kv_quant, kv_scale)
         if isinstance(kv, tuple):
             kv = kv[0]
         payload["kv_gamma"] = impl.kv_norm.weight.cpu()
         payload["kv_accumulator"] = observed["kv_fp32"].cpu()
-        check("wkv_projection_bf16", observed["kv_fp32"][:24].bfloat16(), kv)
+        check("wkv_projection_bf16", observed["kv_fp32"][:tokens].bfloat16(), kv)
         kv = impl.kv_norm(kv)
         if isinstance(kv, tuple):
             kv = kv[0]
         # Save before the in-place RoPE mutates this Native RMSNorm boundary.
         payload["kv_normalized_native"] = kv.cpu()
-        kv = kv.reshape(24, 1, 512)
+        kv = kv.reshape(tokens, 1, 512)
         cos, sin = (f["readonly"]["rope." + name][0] for name in ("cos", "sin"))
         payload["kv_rope_cos"] = cos.cpu()
         payload["kv_rope_sin"] = sin.cpu()
         torch.ops._C_ascend.inplace_partial_rotary_mul(
             kv.unsqueeze(1), cos, sin, rotary_mode="interleave", partial_slice=[impl.nope_head_dim, impl.head_dim]
         )
-        check("original_kv_norm_rope", observed["kv"], kv.reshape(24, 512))
+        check("original_kv_norm_rope", observed["kv"], kv.reshape(tokens, 512))
         # Same W8A8 decode branch as Native _forward_qkv_multistream.
         q = torch_npu.npu_quant_matmul(
             qr,
@@ -411,7 +433,7 @@ try:
         torch.ops._C_ascend.inplace_partial_rotary_mul(
             q.unsqueeze(1), cos, sin, rotary_mode="interleave", partial_slice=[impl.nope_head_dim, impl.head_dim]
         )
-        check("q_norm_rope", observed["q"], q.reshape(24, 32768))
+        check("q_norm_rope", observed["q"], q.reshape(tokens, 32768))
         # Only advance once every preceding Native module boundary is bit-exact.
         # This calls the frozen Native compressor, not a reconstructed Python golden.
         main_metadata = f["metadata"][f["groups"]["compressed"]["prefix"]].decode
@@ -492,6 +514,15 @@ try:
         record["main_compressor_contract"]["output_shape"] = list(compressed_b.shape)
         save()
         assert all(row["bit_equal"] for row in record["main_native_repeat"].values())
+        payload["main_observed_pooled"] = observed["main_pooled"].cpu()
+        payload["main_observed_normed"] = observed["main_normed"].cpu()
+        payload["main_observed_debug"] = observed["main_debug"].cpu()
+        payload["main_compact_cos"] = main_cos.cpu()
+        payload["main_compact_sin"] = main_sin.cpu()
+        payload["main_positions"] = f["positions"].cpu()
+        payload["main_closed_tokens"] = closed_tokens.cpu()
+        record["main_compressor_contract"]["epsilon"] = impl.compressor_norm_eps
+        save()
         check("main_compressor_state", replay["state.0"], state_b)
         # Match Native scatter unchanged. Its two full outputs differ in padding;
         # prove those rows do not affect the entire backing cache or its guards.
@@ -651,7 +682,7 @@ try:
         payload["native_indexer_query_stages"] = query_stages
         payload["native_indexer_weight_stages"] = weight_stages
         payload["native_output_stages"] = output_stages
-        payload["observed_o_r"] = observed["o_r"][:24].cpu()
+        payload["observed_o_r"] = observed["o_r"][:tokens].cpu()
         payload["indexer_query_weight_scale_native"] = impl.inderxer_wq_b.weight_scale.cpu()
         payload["indexer_query_weight_scale_prepared"] = prepared.buffers["idx_wq_b_scale"].cpu()
         for name in ("idx_query_acc", "idx_query_rope", "idx_query_had", "head_weights"):
@@ -666,7 +697,9 @@ try:
         for name in ("swa.0", "state.0", "compressed.0", "indexer_state.0", "indexer.0", "indexer.1"):
             check("native_forward_" + name, replay[name], native_states[1][name])
         check(
-            "indexer_query_rope", observed["idx_query_rope"][:24].reshape_as(query_stages["rope"]), query_stages["rope"]
+            "indexer_query_rope",
+            observed["idx_query_rope"][:tokens].reshape_as(query_stages["rope"]),
+            query_stages["rope"],
         )
         check("indexer_query_hadamard_bf16", observed["idx_query_had"].bfloat16(), query_stages["hadamard_linear"])
         qli_query, qli_scale = qli_inputs["query"], qli_inputs["query_dequant_scale"]
@@ -675,12 +708,12 @@ try:
         check("qli_query_scale_fp16", observed["idx_query_scale"].half().reshape_as(qli_scale), qli_scale)
         check("weights_projection_input", observed["normed"], weight_stages["input"])
         check("weights_prepare_repeat", weight_stages["consumer"], qli_inputs["weights"])
-        check("qli_weights_fp16", observed["head_weights"][:24].half(), qli_inputs["weights"])
+        check("qli_weights_fp16", observed["head_weights"][:tokens].half(), qli_inputs["weights"])
         check("qli_topk", replay["idx_topk"].reshape_as(native_states[1]["idx_topk"]), native_states[1]["idx_topk"])
-        packed = observed["packed"].reshape(8, 128, 8, 512)[:, :24]
-        heads = packed.permute(1, 0, 2, 3).reshape(24, 64, 512)
+        packed = observed["packed"].reshape(8, p128, 8, 512)[:, :tokens]
+        heads = packed.permute(1, 0, 2, 3).reshape(tokens, 64, 512)
         check("attention_heads_after_inverse_rope", heads.reshape_as(output_stages["heads"]), output_stages["heads"])
-        check("wo_a_bf16", observed["o_r"][:24].bfloat16(), output_stages["wo_a"].reshape(24, 8192))
+        check("wo_a_bf16", observed["o_r"][:tokens].bfloat16(), output_stages["wo_a"].reshape(tokens, 8192))
         check("native_full_output", replay["x_out"].reshape_as(native_states[1]["x_out"]), native_states[1]["x_out"])
         record["pass"] = True
         record["complete"] = True
