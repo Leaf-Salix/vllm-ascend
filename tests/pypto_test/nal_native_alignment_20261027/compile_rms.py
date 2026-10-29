@@ -26,10 +26,18 @@ if kind == "compressor-norm":
     from compressor_norm_kernels import compressor_norm_pair
 
     program = compressor_norm_pair.specialize(EPS=1e-6)
+elif kind.startswith("indexpool-"):
+    from indexpool_kernels import indexpool_arm
+
+    program = indexpool_arm.specialize(MODE=int(kind.removeprefix("indexpool-")))
 elif kind in ("oproj-quant", "oproj-b"):
     from oproj_suffix_kernels import output_b_arm, output_quant_arm
 
     program = (output_quant_arm if kind == "oproj-quant" else output_b_arm).specialize()
+elif kind.startswith("woatnd-"):
+    from woatnd_kernels import woa_tnd_arm
+
+    program = woa_tnd_arm.specialize(MODE=int(kind.removeprefix("woatnd-")))
 elif kind.startswith("woa-"):
     from woa_kernels import woa_arm
 
@@ -122,6 +130,10 @@ else:
 abi = kernel_abi_for_program(program, platform="a2a3", runtime="tensormap_and_ringbuffer")
 if kind == "compressor-norm":
     assert len(abi.parameters) == 4, "wrong compressor Norm diagnostic root"
+if kind.startswith("indexpool-"):
+    assert len(abi.parameters) == 7, "wrong Indexer pool diagnostic root"
+if kind.startswith("woatnd-"):
+    assert len(abi.parameters) == 3, "wrong TND WO-A diagnostic root"
 if kind in ("oproj-quant", "oproj-b"):
     assert len(abi.parameters) == (3 if kind == "oproj-quant" else 6), "wrong O-proj diagnostic root"
 _compile_impl(program, output_dir=str(out / "kernel"), platform="a2a3", skip_ptoas=False, _kernel_abi=abi)

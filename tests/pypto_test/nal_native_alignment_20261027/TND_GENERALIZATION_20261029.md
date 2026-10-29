@@ -3,14 +3,16 @@
 ## 基准与验收原则
 
 - 分支：`dev/pypto-dsv4-csa-nal-tnd-native-align-20261027-codex`。
-- 保留基准：`646acb28`；原验收只覆盖8K/B4/T24，不把它推成整模型逐token结论。
+- 保留基准：`646acb28`；原验收只覆盖8K/B4/T24。七组通过的检查点为`6a2d1a60`，
+  也完整保留，不把它们推成整模型逐token结论。
 - 使用真实第4层权重、8K合成history/hidden，TP1。Native确定性、共用validated工具链、
   CANN和权重加载条件沿用[主记录](README.md)。不修改原SDK、runtime或生成C++，全部新算子用DSL。
 - 新增case通过`--lengths`传每请求真实1～6行；`T=sum(lengths)`，不对请求填充S6。
   P8/P16/P64/P128仅为内部tile容量，观察只对已发布有效域比较。
 - 先生产FULL/eager八状态及guards，再检查同输入、源码身份、观察/生产等价，随后逐项
   对拍Native；第一个不同元素立即停止后续模块和配置，不放宽逐bit判定。
-- 全部NPU任务显式物理8，外层780秒、内层750秒及15秒清理。仅允许227物理8–15；
+- 设备显式限定在227物理8–15；首轮七组用物理8，WO-A微任务及后续修正/回归改用物理15。
+  外层780秒、内层750秒及15秒清理；
   需要16卡整模型时另申请批准。单层门禁通过前不做8K整模型192-token测试。
 
 ## 探针推广
@@ -121,11 +123,84 @@ T18设备结果：生产203.38秒，观察206.08秒；8项FULL/eager输出/状�
 
 表中用时包含首次编译和诊断，不是CSA性能计时。每请求padding均为0。
 七组使用完全相同的27项正式源码SHA，生产与观察输入、源码均成对核验；
-本地待提交的四个正式修改文件也与这组已验SHA一致。
-T33切换OB_ROWS=96策略，尚未完成其编译/设备资格；不把上述七个点推成T1～256全域验收。
+检查点`6a2d1a60`的四个正式修改文件与这组已验SHA一致；后续T33修正单独验收。
+T33切换OB_ROWS=96策略，后续已发现WO-A首差，见下节；不把上述七个点推成T1～256全域验收。
 T4没有新闭合的compact输出，其相关中间量比较为空域；完整state/cache、TopK和最终
 输出仍实际逐bit比对。
 8K整模型尚未开始。
+
+## T33边界首差与修复
+
+输入`[3,6,6,6,6,6]`，实际T33。CPU57/85编译/load和双AIV通过。
+生产201.97秒，八状态FULL/eager及guards通过；观察209.20秒，前33个Native边界
+全部0（包括TopK、attention heads），首差为WO-A BF16：56个元素、
+`max_abs=6.103515625e-5`。未跑更大T或整模型。
+
+当前独立微根保留已推送的`6a2d1a60`正式源码：原臂必须复现同次实际FP32 o_r；
+候选只把K256起点改为`5*((column128//3-group)%4)`，四种起点0/5/10/15。
+M128、N128、64个逻辑任务和输入权重均不变。物理8微任务排队未运行时取消，
+改投允许的物理15，仍只有一项单卡任务。先要求Native BMM复现捕获的WO-B
+输入BF16，再比较候选，保留三次NaN FULL回放、保护区与只读检查。
+这是旧精度分支标定提出的假设；实际使用Torch-NPU算子，不能把checkout中另一个
+自定义BMM的shuffle源码当作当前二进制行为的证明。微根在物理15用时32.98秒，已通过：Native重放0、原算法复现实际FP32为0且
+保留同样56个BF16差异；仅改起点后BF16差异为0。两臂三次NaN FULL/eager、
+guards及只读均通过，证据将此次首差定位到WO-A的K累加顺序。
+
+完整CSA候选随后只接入该起点族；17～32旧算术不变，33～48选择四种静态起点，
+其它T/tiling保留原路径。T33完整根的CPU55/57/85和独立生成物检查均通过。生产203.44秒，观察215.39秒；
+**35个Native边界全部逐bit一致**，最终CSA输出一致，8生产状态/guards和观察门禁通过。
+这不是33～48全域验收。四起点修正后已完成以下回归：
+
+| 配置 | 实际query长度 | Native逐bit门禁 | 生产 / 观察任务用时 |
+| --- | --- | --- | --- |
+| T33，修复点 | 3,6,6,6,6,6 | 35/35全部一致 | 203.44 / 215.39秒 |
+| T32，原边界 | 2,6,6,6,6,6 | 35/35全部一致 | 206.17 / 216.07秒 |
+| T18，原首差点 | 1,5,6,6 | 35/35全部一致 | 32.95 / 41.84秒 |
+| T21，混合1～6行 | 1,2,3,4,5,6 | 35/35全部一致 | 33.88 / 39.35秒 |
+
+生产和观察的27项正式源码SHA均匹配当前四起点实现；没有用旧生产快照替代回归。
+T21混合1～6行已回归通过。T48端点发现新首差，已停止T47及其它配置。T48的全部constexpr与
+已编译的T33相同，可复用55/57/85动态根；这不省略设备数值验收。
+之后补全局bucket padding/dummy资格，再准备8K整模型。
+原基准646acb28及七组检查点6a2d1a60均保留。
+
+WO-A微测试的原臂要复现修正前的实际FP32输出，因此应在`6a2d1a60`的独立checkout
+加入本次`woatnd_kernels.py`、`probe_woatnd.py`及对应selector，再使用原T33观察快照。
+当前修正后的正式helper不再是原臂；不能直接在新源码上重跑并称作同一个单因素实验。
+
+### T48端点的Indexer首差（停止扩大）
+
+`[6,6,6,6,6,6,6,6]`、真实T48、不做请求padding。生产37.42秒，八状态FULL/eager及
+guards通过；观察38.07秒，前13个Native边界逐bit0，包括主cache和Indexer state。
+第14项`indexer_norm_rope`只有一个BF16元素不同：有效compact行7、维82，
+`max_abs=9.5367431640625e-7`。维82属于RoPE，不能直接排除Norm或旋转舍入。
+观察/生产八状态、28阶段FULL/eager、39同输入及保护区均通过；没有解释或验收首差之后的模块。
+门禁阻止了T47提交，未扩大到其它T或整模型。
+
+新增独立Indexer pool微根：用同次Native/PTO已逐bit相同的post-state恢复本轮投影，
+历史部分取initial-state；保留真实state stride/offset并验证本轮48个写槽唯一。
+state里的score已经含APE，不再重复添加。原online臂必须先复现实际FP32 pooled和BF16
+首差，再解释仅改为Native八行交错、概率优先归约的候选；Norm/RoPE暂保持原算术。
+先无设备编译/load及生成物审查，再做三次NaN FULL、guards及只读检查。正式Indexer pool
+在这项单因素资格前保持不变。
+
+微任务随后在物理15用时16.91秒通过：原online臂逐bit复现实际FP32 pooled与实际BF16
+输出，并保留相对Native的同一`[7,82]`首差；仅改pool树后相对实际融合Native的BF16
+不同元素数变成0。两臂各三次NaN FULL/eager、guards及只读全部通过。
+因此此次T48首差有pool单因素因果证据；尚不能把微根通过等同于完整CSA修正通过。
+接回正式pool前先保留当前WO-A修正检查点；随后须重新配对生产/观察，回归旧点。
+微根必须使用当前T48观察时的27项源码，修改正式pool后旧快照会被身份门禁拒绝。
+无设备v1/v2仅诊断临时变量shape重名失败，变量分名后v3两臂ABI7/load通过，未修改SDK。
+
+### 整模型前的未验收项
+
+上述逐阶段fixture均为`sum(query_lengths)=physical T`，未覆盖真实服务的global bucket
+padding。Native runner可能插入L=0的dummy请求；活跃B4对应的metadata请求容量可能5，
+不能把max_num_seqs=4导致的Native fallback当成PTO token通过。
+后续须覆盖物理T24/活跃T18的真实Native builder与图合同，不手改Native decode数量或
+compact容量以凑形状。按实际有效token/slot比较数值，全cache/state和guards仍全量检查，
+并观察正式55入口、FULL replay及fallback。旧8K/B40每卡40对应满档T240，本分支更大T的
+多条数值路线仍未验收，因此目前不宣称8K/B40可用；16卡仍须另获批准。
 
 ## 复现方法
 
@@ -176,4 +251,16 @@ RMS微测试无设备selector为`compressor-norm`、ABI4；显式传
 [T21生产](evidence/generalized-t21-production-v1/result.json)、
 [T21全部35门禁通过](evidence/generalized-t21-observe-v1/result.json)、
 [T32生产](evidence/generalized-t32-production-v1/result.json)、
-[T32全部35门禁通过](evidence/generalized-t32-observe-v1/result.json)。
+[T32全部35门禁通过](evidence/generalized-t32-observe-v1/result.json)、
+[T33原首差](evidence/generalized-t33-observe-v1/result.json)、
+[T33四起点单因素](evidence/woatnd-t33-d15-v1/result.json)、
+[T33修正生产](evidence/four-start-t33-production-v1/result.json)、
+[T33修正全部35门禁](evidence/four-start-t33-observe-v1/result.json)、
+[T32修正后回归](evidence/four-start-t32-observe-v1/result.json)、
+[T18修正后回归](evidence/four-start-t18-observe-v1/result.json)、
+[T21修正后回归](evidence/four-start-t21-observe-v1/result.json)、
+[T48生产](evidence/four-start-t48-production-v1/result.json)、
+[T48首差](evidence/four-start-t48-observe-v1/result.json)、
+[Indexer pool CPU原臂](evidence/cpu-indexpool-t48-v3-0/receipt.json)、
+[Indexer pool CPU树形臂](evidence/cpu-indexpool-t48-v3-1/receipt.json)、
+[Indexer pool单因素通过](evidence/indexpool-t48-v1/result.json)。

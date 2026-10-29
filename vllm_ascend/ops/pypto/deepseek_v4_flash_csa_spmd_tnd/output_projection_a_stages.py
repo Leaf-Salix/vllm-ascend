@@ -30,7 +30,7 @@
 分工、数学与尾行
     NZ O_A以(group,ceil(T/A_ROW_TILE)行块,ceil(1024/A_COL_TILE)列块)展平，
     logical%WORKERS为AIC owner；AIC发布和量化获取使用同一组内任务数。
-    每块先K256 matmul，再原顺序追加15个K256，pipeline只重叠本核搬运。
+    每块按所选起点循环累加16个K256；原流水只重叠本核搬运。
     仅迁移当前实际启用的 PIPELINE_OA=False，不搬未启用的显式L0流水候选。
     量化以(group,32行块)展平轮转AIV，块内以8行valid shape计算；有效行数贯穿load、
     row_max、常数、div、cast和store，绝不读取 O_A 未写的 FP32 padding。
@@ -54,10 +54,10 @@
     当前是源级阶段迁移；CPU编译不等于整层设备精度、同步或性能已通过。
 
 Native数值资格
-    17≤T≤32、M128/N128路径按group/N128半程起点累加16个K256块，
-    已验收T24，推广资格由各T实测给出。
+    M128/N128路径在17≤T≤32按group/N128选择两种半程起点；
+    33≤T≤48选择四种K256起点。每族资格均由具体T实测给出，不外推整段。
     保留原64个logical任务及owner、原动态packed步长和全部完成信号；
-    其它T的WO-A继续原路径；后续量化统一恢复BF16边界及全8192列amax。
+    其它T或tiling的WO-A继续原路径；后续量化统一恢复BF16边界及全8192列amax。
 """
 
 import pypto.language as pl
@@ -267,7 +267,7 @@ def _native_small_o_projection_a_groups_stage_nz(
     group_begin: pl.Scalar[pl.INDEX],
     group_end: pl.Scalar[pl.INDEX],
 ):
-    """M32范围的N128半程起点候选；保留原owner及真实tokens有效行。"""
+    """M48范围的N128累加起点；保留原owner及真实tokens有效行。"""
     column_blocks = O_LORA // 128
     group_first = group_begin * column_blocks
     group_limit = group_end * column_blocks
@@ -280,15 +280,27 @@ def _native_small_o_projection_a_groups_stage_nz(
                 g = logical // (O_LORA // 128)
                 column = logical % (O_LORA // 128)
                 n0 = column * 128
-                band = 0
-                if column >= 3:
-                    if column < 6:
-                        band = 1
-                # 两个静态起点确保完整内联后NZ偏移仍可证明非负；不改旋转顺序。
-                if (g % 2 + band) % 2 == 1:
-                    o_r_pad = _native_small_o_projection_a_tile_nz(o_packed, wo_a, o_r_pad, tokens, g, n0, 8)
+                if tokens <= 32:
+                    band = 0
+                    if column >= 3:
+                        if column < 6:
+                            band = 1
+                    # 静态起点确保完整内联后NZ偏移仍可证明非负。
+                    if (g % 2 + band) % 2 == 1:
+                        o_r_pad = _native_small_o_projection_a_tile_nz(o_packed, wo_a, o_r_pad, tokens, g, n0, 8)
+                    else:
+                        o_r_pad = _native_small_o_projection_a_tile_nz(o_packed, wo_a, o_r_pad, tokens, g, n0, 0)
                 else:
-                    o_r_pad = _native_small_o_projection_a_tile_nz(o_packed, wo_a, o_r_pad, tokens, g, n0, 0)
+                    # 三个M16的Native起点族；保持非负模与四种常量NZ偏移。
+                    kind = (column // 3 + 8 - g) % 4
+                    if kind == 0:
+                        o_r_pad = _native_small_o_projection_a_tile_nz(o_packed, wo_a, o_r_pad, tokens, g, n0, 0)
+                    elif kind == 1:
+                        o_r_pad = _native_small_o_projection_a_tile_nz(o_packed, wo_a, o_r_pad, tokens, g, n0, 5)
+                    elif kind == 2:
+                        o_r_pad = _native_small_o_projection_a_tile_nz(o_packed, wo_a, o_r_pad, tokens, g, n0, 10)
+                    else:
+                        o_r_pad = _native_small_o_projection_a_tile_nz(o_packed, wo_a, o_r_pad, tokens, g, n0, 15)
     return o_r_pad
 
 
@@ -306,7 +318,7 @@ def o_projection_a_groups_stage_nz(
     group_end: pl.Scalar[pl.INDEX],
 ):
     if A_COL_TILE == 128 and A_ROW_TILE == 128:
-        if tokens > 16 and tokens <= 32:
+        if tokens > 16 and tokens <= 48:
             o_r_pad = _native_small_o_projection_a_groups_stage_nz(
                 o_packed, wo_a, o_r_pad, tokens, worker_id, WORKERS, group_begin, group_end
             )

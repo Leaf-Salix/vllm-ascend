@@ -11,7 +11,7 @@ export ASCEND_RT_VISIBLE_DEVICES="$TASK_DEVICE"
 label=${1:?}
 probe=${2:?}
 shift 2
-[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|qr|wkv|kvnorm|qoutput|mainproj|indexproj|idxquery|idxquant|weightproj|attention|woa|oproj|compnorm)$ ]]
+[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|qr|wkv|kvnorm|qoutput|mainproj|indexproj|indexpool|idxquery|idxquant|weightproj|attention|woa|woatnd|oproj|compnorm)$ ]]
 probe_args=()
 while (( $# )); do
   case "$1" in
