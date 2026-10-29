@@ -21,7 +21,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--tokens", type=int, choices=(6, 240), required=True)
+    parser.add_argument("--tokens", type=int, choices=(6, 40, 240), required=True)
     args = parser.parse_args()
     source = args.source.resolve()
     manifest = json.loads((source.parent / "manifest.json").read_text())
