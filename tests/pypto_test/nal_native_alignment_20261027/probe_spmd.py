@@ -163,6 +163,9 @@ try:
             "indexer_native_projection_stages.py",
             "indexer_cache_stages.py",
             "indexer_native_query_stages.py",
+            "indexer_score_stages.py",
+            "indexer_topk_stages.py",
+            "indexer_publish_stages.py",
             "attention_native_stream_stages.py",
             "attention_plan_stages.py",
             "output_projection_a_stages.py",
@@ -276,6 +279,7 @@ try:
             nal_entry.decode_csa_spmd_debug(**prepared.buffers, **prepared.policy.constexprs())
             torch.npu.synchronize()
             eager_production = collect_state(f, output, topk)
+            eager_topk_scores = scores.cpu().clone()
             production_graph = torch.npu.NPUGraph()
             production_stream = torch.npu.Stream()
             production_stream.wait_stream(torch.npu.current_stream())
@@ -284,9 +288,13 @@ try:
             restore(f)
             output.fill_(float("nan"))
             topk.fill_(-12345)
+            scores.fill_(float("nan"))
             production_graph.replay()
             torch.npu.synchronize()
             production = collect_state(f, output, topk)
+            production_topk_scores = scores.cpu().clone()
+            record["production_topk_score_replay_eager"] = metric(production_topk_scores, eager_topk_scores)
+            assert record["production_topk_score_replay_eager"]["bit_equal"]
             record["production_replay_eager"] = {
                 name: metric(value, eager_production[name]) for name, value in production.items()
             }
@@ -294,7 +302,12 @@ try:
             record["guards"] = guard_checks(f)
             assert all(row["status"] == "PASS" for row in record["guards"].values())
             torch.save(
-                {"initial": initial, "state": production, "source_sha256": record["stage_source_sha256"]},
+                {
+                    "initial": initial,
+                    "state": production,
+                    "source_sha256": record["stage_source_sha256"],
+                    "topk_scores": production_topk_scores,
+                },
                 out / "production.pt",
             )
             record.update(
@@ -316,6 +329,9 @@ try:
         torch.npu.synchronize()
         diagnostic = collect_state(f, output, topk)
         record["observation_gate"] = {name: metric(value, production[name]) for name, value in diagnostic.items()}
+        if reference_path and "topk_scores" in reference:
+            record["observation_gate"]["topk_scores"] = metric(scores, reference["topk_scores"])
+            record["topk_score_controlled"] = record["observation_gate"]["topk_scores"]["bit_equal"]
         save()
         assert all(row["bit_equal"] for row in record["observation_gate"].values()), (
             "observed root changes production external outputs"
@@ -692,6 +708,7 @@ try:
             payload["observed_" + name] = observed[name].cpu()
         payload["native_full_output"] = native_states[1]["x_out"]
         payload["native_full_topk"] = native_states[1]["idx_topk"]
+        payload["observed_topk_scores"] = scores.cpu().clone()
         payload["observed_idx_query_i8"] = observed["idx_query_i8"].cpu()
         payload["observed_idx_query_scale"] = observed["idx_query_scale"].cpu()
         save()

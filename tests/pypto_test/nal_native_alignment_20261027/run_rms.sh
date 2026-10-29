@@ -11,7 +11,7 @@ export ASCEND_RT_VISIBLE_DEVICES="$TASK_DEVICE"
 label=${1:?}
 probe=${2:?}
 shift 2
-[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|padding|qr|qa240|wkv|kvnorm|qoutput|mainproj|indexproj|indexpool|idxquery|idxquant|weightproj|attention|woa|woatnd|oproj|compnorm)$ ]]
+[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|padding|qr|qa240|wkv|kvnorm|qoutput|mainproj|indexproj|indexpool|idxquery|idxquant|weightproj|attention|woa|woatnd|oproj|compnorm|topktie|woa240)$ ]]
 probe_args=()
 while (( $# )); do
   case "$1" in
@@ -41,7 +41,7 @@ test ! -e "$out"
 mkdir -p "$out"
 export ASCEND_CACHE_PATH="$out/ascend-cache" ASCEND_PROCESS_LOG_PATH="$out/ascend-log"
 mkdir -p "$ASCEND_CACHE_PATH" "$ASCEND_PROCESS_LOG_PATH"
-if [[ "$probe" == spmd || "$probe" == padding ]]; then
+if [[ "$probe" == spmd || "$probe" == padding || "$probe" == topktie ]]; then
   export ASCEND_OPP_PATH
   ASCEND_OPP_PATH=$(python "$SOURCE_ROOT/tests/pypto_test/dsv4_hca_prepare_opp.py" --destination "$out/opp-env")
 fi

@@ -57,6 +57,10 @@ def main():
     for arm in ("native", "ours", "nalinaly"):
         source = args.output / arm / "source"
         export(repo, NAL, sorted(set(paths)), source)
+        # Our validated test bootstrap adds explicit Native-source selection;
+        # the public Nal bootstrap lacks --native-plugin-root. Share this test
+        # helper across all arms without changing the common model framework.
+        export(repo, ours, ["tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py"], source)
         if arm == "ours":
             shutil.rmtree(source / PACKAGE)
             export(repo, ours, [PACKAGE], source)
@@ -118,6 +122,7 @@ def main():
         manifest = {
             "arm": arm,
             "common_framework": NAL,
+            "test_bootstrap_source": ours,
             "csa_source": ours if arm == "ours" else NAL,
             "math_overlay": PACKAGE if arm == "ours" else None,
             "backend": "native" if arm == "native" else "pto",

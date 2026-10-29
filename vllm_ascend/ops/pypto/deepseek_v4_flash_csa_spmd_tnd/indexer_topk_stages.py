@@ -231,9 +231,7 @@ def indexer_topk_half_leaf_resident(
         # 即使只有一项，也按512候选的固定tile排序；尾列由valid_shape和fillpad
         # 写成最小score。index先按全局位置生成，再只按位解释为UINT32给sort32。
         short_indices = pl.add(pl.tile.arange(0, [1, 512], dtype=pl.INT32), logical_begin_i32)
-        short_raw = pl.tile.extract(
-            half_scores, 0, 0, [1, 512], target_memory=pl.MemorySpace.Vec
-        )
+        short_raw = pl.tile.extract(half_scores, 0, 0, [1, 512], target_memory=pl.MemorySpace.Vec)
         short_raw = pl.set_validshape(short_raw, 1, valid_count)
         short_scores = pl.tile.fillpad(short_raw, pad_value=pl.PadValue.min)
         short_scores = pl.maximum(short_scores, FP32_NEG_INF)
@@ -246,9 +244,7 @@ def indexer_topk_half_leaf_resident(
         # 两个512根分开取出后按原left/right顺序合并；不能套用其它分支的
         # “后段优先”，因为1024分支的原输入顺序与2560/4096分支不同。
         small_indices = pl.add(pl.tile.arange(0, [1, 1024], dtype=pl.INT32), logical_begin_i32)
-        small_raw = pl.tile.extract(
-            half_scores, 0, 0, [1, 1024], target_memory=pl.MemorySpace.Vec
-        )
+        small_raw = pl.tile.extract(half_scores, 0, 0, [1, 1024], target_memory=pl.MemorySpace.Vec)
         small_raw = pl.set_validshape(small_raw, 1, valid_count)
         small_scores = pl.tile.fillpad(small_raw, pad_value=pl.PadValue.min)
         small_scores = pl.maximum(small_scores, FP32_NEG_INF)
@@ -264,9 +260,7 @@ def indexer_topk_half_leaf_resident(
     elif valid_count <= 2048:
         # 三轮归并完成2048候选排序，仅前512对写GM；其余排序结果不外传。
         leaf_indices = pl.add(pl.tile.arange(0, [1, 2048], dtype=pl.INT32), logical_begin_i32)
-        leaf_scores_raw = pl.tile.extract(
-            half_scores, 0, 0, [1, 2048], target_memory=pl.MemorySpace.Vec
-        )
+        leaf_scores_raw = pl.tile.extract(half_scores, 0, 0, [1, 2048], target_memory=pl.MemorySpace.Vec)
         leaf_scores_raw = pl.set_validshape(leaf_scores_raw, 1, valid_count)
         leaf_scores = pl.tile.fillpad(leaf_scores_raw, pad_value=pl.PadValue.min)
         leaf_scores = pl.maximum(leaf_scores, FP32_NEG_INF)
@@ -279,9 +273,7 @@ def indexer_topk_half_leaf_resident(
         # 2560恰好五个512候选run：前四组先组成2048，再让最后一组优先于前缀。
         # 不补到4096，既保持原tile容量，也保持同分时后2048段的优先关系。
         partial_indices = pl.add(pl.tile.arange(0, [1, 2560], dtype=pl.INT32), logical_begin_i32)
-        partial_raw = pl.tile.extract(
-            half_scores, 0, 0, [1, 2560], target_memory=pl.MemorySpace.Vec
-        )
+        partial_raw = pl.tile.extract(half_scores, 0, 0, [1, 2560], target_memory=pl.MemorySpace.Vec)
         partial_raw = pl.set_validshape(partial_raw, 1, valid_count)
         partial_scores = pl.tile.fillpad(partial_raw, pad_value=pl.PadValue.min)
         partial_scores = pl.maximum(partial_scores, FP32_NEG_INF)
@@ -299,9 +291,7 @@ def indexer_topk_half_leaf_resident(
     elif valid_count <= 3072:
         # 六个512候选run：前四组归并，两份右根按原顺序一起置于前缀之前。
         triple_indices = pl.add(pl.tile.arange(0, [1, 3072], dtype=pl.INT32), logical_begin_i32)
-        triple_raw = pl.tile.extract(
-            half_scores, 0, 0, [1, 3072], target_memory=pl.MemorySpace.Vec
-        )
+        triple_raw = pl.tile.extract(half_scores, 0, 0, [1, 3072], target_memory=pl.MemorySpace.Vec)
         triple_raw = pl.set_validshape(triple_raw, 1, valid_count)
         triple_scores = pl.tile.fillpad(triple_raw, pad_value=pl.PadValue.min)
         triple_scores = pl.maximum(triple_scores, FP32_NEG_INF)
@@ -321,9 +311,7 @@ def indexer_topk_half_leaf_resident(
         # 八个512 run先各合成2048半段，再合成Top512；完整scratch允许容纳
         # 两份1024元素根，但GM只保存截取后的一个根。
         medium_indices = pl.add(pl.tile.arange(0, [1, 4096], dtype=pl.INT32), logical_begin_i32)
-        medium_scores_raw = pl.tile.extract(
-            half_scores, 0, 0, [1, 4096], target_memory=pl.MemorySpace.Vec
-        )
+        medium_scores_raw = pl.tile.extract(half_scores, 0, 0, [1, 4096], target_memory=pl.MemorySpace.Vec)
         medium_scores_raw = pl.set_validshape(medium_scores_raw, 1, valid_count)
         medium_scores = pl.tile.fillpad(medium_scores_raw, pad_value=pl.PadValue.min)
         medium_scores = pl.maximum(medium_scores, FP32_NEG_INF)
@@ -381,4 +369,36 @@ def indexer_topk_segment_pairs(
         large_pairs = pl.mrgsort(large_pairs, block_len=256)
         large_pairs = pl.mrgsort(large_pairs, block_len=1024)
         root = pl.tile.extract(large_pairs, 0, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
+    return root
+
+
+@pl.jit.inline(auto_scope=False)
+def indexer_topk_native_short_pairs(
+    score_arena: pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32],
+    query: pl.Scalar[pl.INDEX],
+    valid_count: pl.Scalar[pl.INDEX],
+) -> pl.Tile:
+    """短历史G6：Native按连续2048块排序，后块在旧根之前归并。
+
+    仅消费本轮已由两个AIV发布的真实前缀；不按1152/384传输边界分树。
+    使用已存在的段内Sort32/四路归并，保留score原位值，不引入epsilon。
+    调用者保证1<=valid_count<=8192且原始分数已完成业务cache获取。
+    """
+    root = indexer_topk_segment_pairs(score_arena, query, 0, pl.min(valid_count, 2048), 0)
+    # 当前DSL在解析inline调用时不把unroll索引表达式视为constexpr；偏移写成字面量。
+    if valid_count > 2048:
+        second = indexer_topk_segment_pairs(score_arena, query, 2048, pl.min(valid_count - 2048, 2048), 2048)
+        second_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+        second_merged = pl.tile.mrgsort(second, root, tmp=second_tmp)
+        root = pl.tile.extract(second_merged, 0, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
+    if valid_count > 4096:
+        third = indexer_topk_segment_pairs(score_arena, query, 4096, pl.min(valid_count - 4096, 2048), 4096)
+        third_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+        third_merged = pl.tile.mrgsort(third, root, tmp=third_tmp)
+        root = pl.tile.extract(third_merged, 0, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
+    if valid_count > 6144:
+        fourth = indexer_topk_segment_pairs(score_arena, query, 6144, valid_count - 6144, 6144)
+        fourth_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+        fourth_merged = pl.tile.mrgsort(fourth, root, tmp=fourth_tmp)
+        root = pl.tile.extract(fourth_merged, 0, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
     return root

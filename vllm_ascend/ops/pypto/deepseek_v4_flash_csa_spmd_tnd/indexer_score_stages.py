@@ -1769,7 +1769,7 @@ def indexer_score_vector_lane_stage(
                                                 )
                                                 tiny_pairs = pl.mrgsort(tiny_pairs, block_len=64)
                                                 tiny_pairs = pl.mrgsort(tiny_pairs, block_len=256)
-                            # 提取512对并限制root存储寿命，保留原sort32→merge顺序。
+                                                # 提取512对并限制root存储寿命，保留原sort32→merge顺序。
                                                 single_new_root = pl.tile.extract(
                                                     tiny_pairs,
                                                     0,
@@ -1990,14 +1990,27 @@ def indexer_score_vector_lane_stage(
                                 buf_score_sum = pl.tile.slice(buf_score_sums, [1, score_tile // 2], [buf_query_lane, 0])
                                 buf_score_row = pl.mul(buf_score_sum, buf_kv_scale)
                                 if buf_lane_valid_rows > 0:
-                                    pl.store(
-                                        pl.set_validshape(buf_score_row, 1, buf_lane_valid_rows),
-                                        [
-                                            buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
-                                            buf_score_begin,
-                                        ],
-                                        score_arena,
-                                    )
+                                    if query_group_size == 6:
+                                        # 短历史G6保留全部原始FP32分数，等待两个AIV发布后，
+                                        # 按Native2048候选边界排序；1152半叶会改变同分规则。
+                                        # G6现有288行覆盖T<=256，单叶<=8192，不增加分配。
+                                        pl.store(
+                                            pl.set_validshape(buf_score_row, 1, buf_lane_valid_rows),
+                                            [
+                                                buf_query + buf_query_lane,
+                                                buf_logical_begin + buf_lane_begin + buf_score_begin,
+                                            ],
+                                            score_arena,
+                                        )
+                                    else:
+                                        pl.store(
+                                            pl.set_validshape(buf_score_row, 1, buf_lane_valid_rows),
+                                            [
+                                                buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
+                                                buf_score_begin,
+                                            ],
+                                            score_arena,
+                                        )
                     # 每query单独causal/visible；不能把组内最大历史当成所有query的有效候选数。
                     for buf_query_lane in pl.unroll(query_group_size):
                         if buf_query_lane < buf_live:
@@ -2009,7 +2022,7 @@ def indexer_score_vector_lane_stage(
                             buf_half_slot = (
                                 (buf_query + buf_query_lane) * TOPK_ROWS_PER_QUERY + buf_leaf * 2 + buf_score_lane
                             )
-                            if buf_half_valid > 0:
+                            if buf_half_valid > 0 and query_group_size != 6:
                                 indexer_topk_half_leaf(
                                     score_arena,
                                     pair_arena,
@@ -2018,7 +2031,7 @@ def indexer_score_vector_lane_stage(
                                     buf_half_valid,
                                     buf_half_slot,
                                 )
-                            else:
+                            elif query_group_size != 6:
                                 pl.store(
                                     pl.tile.full([1, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF),
                                     [buf_half_slot, 0],

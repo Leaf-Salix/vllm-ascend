@@ -87,6 +87,7 @@ from .indexer_topk_stages import (
     PAIR_ROWS_DYN,
     SCORE_ROWS_DYN,
     TOPK_PAIR_WIDTH,
+    indexer_topk_native_short_pairs,
     merge2_top512_pairs,
     merge_top512_roots,
 )
@@ -153,6 +154,7 @@ def indexer_pair_publish_stage(
     attention_metadata: pl.Tensor[[PLAN_CAP_DYN, IDX_TOPK], pl.INT32],
     signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
     pair_arena: pl.InOut[pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]],
+    score_arena: pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32],
     topk_scores: pl.InOut[pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.FP32]],
     topk_indices: pl.InOut[pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.INT32]],
     worker: pl.Scalar[pl.INDEX],
@@ -207,35 +209,40 @@ def indexer_pair_publish_stage(
                 BALANCED,
                 SCORE_GROUP_ORDER=SCORE_GROUP_ORDER,
             )
-            if BALANCED and QUERY_GROUP != 2:
-                # G2独立半叶仍走下方原顺序左折叠，保持同分规则。
-                # 多路归并helper保持incoming3/2/1/root顺序及最后不足四路分支。
-                root_pairs = merge_top512_roots(pair_arena, arena_base, root_count)
-            elif BALANCED and QUERY_GROUP == 2:
-                # 单请求4K叶仍按child递增左折叠，incoming始终放在旧根之前。
-                # 累积根在UB跨轮复用，不能换成另一棵归并树或交换同分优先级。
-                root_pairs = pl.load(pair_arena, [arena_base, 0], [1, TOPK_PAIR_WIDTH])
-                for child in pl.range(1, root_count):
-                    next_pairs = pl.load(pair_arena, [arena_base + child, 0], [1, TOPK_PAIR_WIDTH])
-                    resident_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
-                    resident_merged = pl.tile.mrgsort(next_pairs, root_pairs, tmp=resident_tmp)
-                    # 实取1024元素，避免把整个2048结果的生命周期带进下一轮。
-                    root_pairs = pl.tile.extract(
-                        resident_merged,
-                        0,
-                        0,
-                        [1, TOPK_PAIR_WIDTH],
-                        target_memory=pl.MemorySpace.Vec,
-                    )
-                # 保留原根0最终内容；只消除无人消费的中间写回。
-                pl.store(root_pairs, [arena_base, 0], pair_arena)
+            if not BALANCED and QUERY_GROUP == 6:
+                # 两个半叶的原始分数均由上方实际owner完成信号保护。
+                # 只改变排序分段，不改变QK/WS/FIX/FP32 scale计算或FIFO。
+                root_pairs = indexer_topk_native_short_pairs(score_arena, query, visible_count)
             else:
-                # 原始短路径逐child向根0左折叠，且每次incoming先于旧root。
-                # 保留原位写入及顺序；不能为了“统一接口”替换成另一棵merge树。
-                for child in pl.range(1, root_count):
-                    merge2_top512_pairs(pair_arena, arena_base, arena_base + child, arena_base)
-                root_slot = arena_base
-                root_pairs = pl.load(pair_arena, [root_slot, 0], [1, TOPK_PAIR_WIDTH])
+                if BALANCED and QUERY_GROUP != 2:
+                    # G2独立半叶仍走下方原顺序左折叠，保持同分规则。
+                    # 多路归并helper保持incoming3/2/1/root顺序及最后不足四路分支。
+                    root_pairs = merge_top512_roots(pair_arena, arena_base, root_count)
+                elif BALANCED and QUERY_GROUP == 2:
+                    # 单请求4K叶仍按child递增左折叠，incoming始终放在旧根之前。
+                    # 累积根在UB跨轮复用，不能换成另一棵归并树或交换同分优先级。
+                    root_pairs = pl.load(pair_arena, [arena_base, 0], [1, TOPK_PAIR_WIDTH])
+                    for child in pl.range(1, root_count):
+                        next_pairs = pl.load(pair_arena, [arena_base + child, 0], [1, TOPK_PAIR_WIDTH])
+                        resident_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+                        resident_merged = pl.tile.mrgsort(next_pairs, root_pairs, tmp=resident_tmp)
+                        # 实取1024元素，避免把整个2048结果的生命周期带进下一轮。
+                        root_pairs = pl.tile.extract(
+                            resident_merged,
+                            0,
+                            0,
+                            [1, TOPK_PAIR_WIDTH],
+                            target_memory=pl.MemorySpace.Vec,
+                        )
+                    # 保留原根0最终内容；只消除无人消费的中间写回。
+                    pl.store(root_pairs, [arena_base, 0], pair_arena)
+                else:
+                    # 原始短路径逐child向根0左折叠，且每次incoming先于旧root。
+                    # 保留原位写入及顺序；不能为了“统一接口”替换成另一棵merge树。
+                    for child in pl.range(1, root_count):
+                        merge2_top512_pairs(pair_arena, arena_base, arena_base + child, arena_base)
+                    root_slot = arena_base
+                    root_pairs = pl.load(pair_arena, [root_slot, 0], [1, TOPK_PAIR_WIDTH])
             root_scores = pl.tile.gather_mask(root_pairs, mask_pattern=pl.tile.MaskPattern.P0101, output_dtype=pl.FP32)
             pl.store(root_scores, [query, 0], topk_scores)
             root_indices = pl.tile.gather_mask(

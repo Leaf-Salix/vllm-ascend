@@ -943,6 +943,7 @@ def vector_schedule(
         attention_indices,
         signal,
         pair_arena,
+        score_arena,
         topk_scores,
         topk_indices,
         worker,
