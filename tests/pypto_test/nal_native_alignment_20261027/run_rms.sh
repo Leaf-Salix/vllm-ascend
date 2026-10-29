@@ -20,6 +20,11 @@ while (( $# )); do
       [[ "$2" == 1 || "$2" == 40 ]]
       probe_args=(--full-batch "$2")
       ;;
+    --query-rows)
+      [[ "$probe" == padding && $# -ge 2 && ${#probe_args[@]} -eq 2 && ${probe_args[0]} == --full-batch ]]
+      [[ "$2" =~ ^[1-6]$ ]]
+      probe_args+=(--query-rows "$2")
+      ;;
     --mixed|--projection)
       [[ "$probe" == padding && ${#probe_args[@]} -eq 0 ]]
       probe_args=("$1")

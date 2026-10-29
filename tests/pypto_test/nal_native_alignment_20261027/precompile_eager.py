@@ -18,6 +18,7 @@ from bind_package import bind
 bind()
 from nal_alignment.deepseek_v4_flash_csa_spmd_tnd.entry import decode_csa_spmd, decode_csa_spmd_debug
 from nal_alignment.deepseek_v4_flash_csa_spmd_tnd.policy import select_policy
+from nal_alignment.deepseek_v4_flash_csa_spmd_tnd.service_config import MAX_QUERY_TOKENS
 from pypto.runtime.kernel.abi import KernelConfig
 from pypto.runtime.kernel.context import get_process_kernel_state
 from spmd_probe_entry import spmd_stage_probe
@@ -62,7 +63,10 @@ elif args.kind.startswith("qa240-"):
 
     root, bindings, expected = qa240_arm, {"MODE": int(args.kind[-1])}, 3
 else:
-    policy = select_policy(tokens=sum(lengths), requests=len(lengths), max_query_tokens=max(lengths), max_seq_len=8198)
+    # Match CSAServiceRuntime; real per-request Q still comes from metadata.
+    policy = select_policy(
+        tokens=sum(lengths), requests=len(lengths), max_query_tokens=MAX_QUERY_TOKENS, max_seq_len=8198
+    )
     root, expected = {
         "spmd": (decode_csa_spmd, 55),
         "spmd-debug": (decode_csa_spmd_debug, 57),

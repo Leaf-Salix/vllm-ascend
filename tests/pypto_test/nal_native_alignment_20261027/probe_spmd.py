@@ -32,6 +32,7 @@ nal_adapter = importlib.import_module("nal_alignment.deepseek_v4_flash_csa.nativ
 nal_native = importlib.import_module("nal_alignment.deepseek_v4_flash_csa_spmd_tnd.native_adapter")
 nal_binding = importlib.import_module("nal_alignment.deepseek_v4_flash_csa_spmd_tnd.binding")
 nal_entry = importlib.import_module("nal_alignment.deepseek_v4_flash_csa_spmd_tnd.entry")
+nal_config = importlib.import_module("nal_alignment.deepseek_v4_flash_csa_spmd_tnd.service_config")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("output", type=Path)
@@ -49,6 +50,7 @@ record = {
     "scope": "complete SPMD; Native eager prefix/cache/query/weights/TopK/output stages; not whole-model tokens",
     "history": 8192,
     "lengths": request_lengths,
+    "service_query_bound": nal_config.MAX_QUERY_TOKENS,
     "tokens": tokens,
     "request_padding_rows": 0,
     "precision": {},
@@ -205,7 +207,7 @@ try:
             topk_scores=scores,
         )
         prepared = nal_binding.PreparedDynamicCSA(
-            native, max_query_tokens=max(request_lengths), max_seq_len=8192 + max(request_lengths)
+            native, max_query_tokens=nal_config.MAX_QUERY_TOKENS, max_seq_len=8192 + max(request_lengths)
         )
         record["policy"] = prepared.policy.constexprs()
         shapes = {

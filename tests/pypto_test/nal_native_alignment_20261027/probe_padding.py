@@ -38,7 +38,10 @@ mode = parser.add_mutually_exclusive_group()
 mode.add_argument("--mixed", action="store_true")
 mode.add_argument("--projection", action="store_true")
 mode.add_argument("--full-batch", type=int, choices=(1, 40))
+parser.add_argument("--query-rows", type=int, choices=range(1, 7), default=6)
 options = parser.parse_args()
+if options.query_rows != 6 and options.full_batch is None:
+    parser.error("--query-rows requires --full-batch")
 out = options.output
 mixed_requested, projection_requested = options.mixed, options.projection
 record = {
@@ -52,9 +55,11 @@ payload = {}
 start = time.monotonic()
 HISTORY = 8192
 ACTIVE_REQUESTS = options.full_batch or 4
-TOKEN_CAPACITY = ACTIVE_REQUESTS * 6
+INITIAL_QUERY_ROWS = options.query_rows
+TOKEN_CAPACITY = ACTIVE_REQUESTS * INITIAL_QUERY_ROWS
 REQUEST_CAPACITY = options.full_batch or 5
 record["full_batch"] = options.full_batch
+record["initial_query_rows"] = INITIAL_QUERY_ROWS
 EXTERNAL_ORDER = ("swa.0", "state.0", "compressed.0", "indexer_state.0", "indexer.0", "indexer.1", "x_out")
 
 
@@ -209,7 +214,7 @@ try:
             HISTORY,
             1024,
             torch.device("npu:0"),
-            query_lengths=[6] * ACTIVE_REQUESTS,
+            query_lengths=[INITIAL_QUERY_ROWS] * ACTIVE_REQUESTS,
             token_capacity=TOKEN_CAPACITY,
             request_capacity=REQUEST_CAPACITY,
         )
@@ -239,12 +244,13 @@ try:
             }
             for name, group in f["groups"].items()
         }
-        expected_bounds = [i * 6 for i in range(ACTIVE_REQUESTS + 1)] + [TOKEN_CAPACITY] * (
+        expected_bounds = [i * INITIAL_QUERY_ROWS for i in range(ACTIVE_REQUESTS + 1)] + [TOKEN_CAPACITY] * (
             REQUEST_CAPACITY - ACTIVE_REQUESTS
         )
         assert all(
             row["bounds"] == expected_bounds
-            and row["lengths"] == [8198] * ACTIVE_REQUESTS + [0] * (REQUEST_CAPACITY - ACTIVE_REQUESTS)
+            and row["lengths"]
+            == [HISTORY + INITIAL_QUERY_ROWS] * ACTIVE_REQUESTS + [0] * (REQUEST_CAPACITY - ACTIVE_REQUESTS)
             and row["num_reqs_actual"] == ACTIVE_REQUESTS
             and row["num_decode_tokens"] == TOKEN_CAPACITY
             and row["num_decodes"] == REQUEST_CAPACITY
