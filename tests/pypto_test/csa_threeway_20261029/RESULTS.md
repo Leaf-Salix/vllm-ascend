@@ -385,3 +385,30 @@ profile T400 超过服务 T≤256 范围，不进入 PTO；若实际发生其他
 计时是整模型 FULL240 target forward 与相邻 target 周期，不是截图中的单层 L1 耗时；
 周期包含草稿、采样、metadata 和 CPU 参考检查，解释性能时需保留此限制。
 门禁和清理回归共 22 项在 227 CPU 通过；最终增量 10 项也通过。本机只运行静态检查。
+
+### 调度提交参数校验
+
+本机安装的 `task-submit` 只读取一个完整命令字符串，不能按普通 argv 形式传递
+`bash script args`。首次 Native 提交错误地只保存了 `bash`；该任务始终 pending，
+在获得设备前已取消，没有执行模型或占卡。无设备参数探针随后以单一字符串提交，
+成功输出 `Native|40|192`，也证明 CPU 派发正常。
+
+修正后的 Native 任务已逐字段核对自身队列元数据：完整脚本和参数、物理 0–15、
+设备池、白名单以及 `MAX_TIME=780` 均正确。当前仍在等待调度，不能当作整模型结果。
+两份替换实现也必须在对应 Native 的 `postflight.json` 通过后，按同一方法顺序提交。
+
+本轮已获明确 16 卡授权，提交形式如下；其他测试仍遵循物理 8–15 的默认范围。
+`arm` 依次为 `native`、`ours`、`nalinaly`，替换实现的 `reference` 指向已验收的 Native
+结果目录，Native 使用 `none`；每次使用新的 `label` 保留历史。
+
+```bash
+source "$align_root/src/tests/pypto_test/nal_native_alignment_20261027/env.sh"
+cohort="$align_root/cohorts/threeway-source-v4"
+job_command="bash $align_root/src/tests/pypto_test/csa_threeway_20261029/run_case.sh $cohort $arm $label $reference"
+TASKQUEUE_DEVICE_CONF="$align_root/csa-approved-threeway16-20261029.conf" \
+TASKQUEUE_DEVICE_POOL=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 \
+TASKQUEUE_IGNORE_WHITELIST=0 TASKQUEUE_IGNORE_GROUP_AFFINITY=0 \
+task-submit --device 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 --max-time 780 \
+  --env PYTHONNOUSERSITE=1 --env HCCL_DETERMINISTIC=true \
+  --env PTOAS_ROOT --env ASCEND_HOME_PATH "$job_command"
+```
