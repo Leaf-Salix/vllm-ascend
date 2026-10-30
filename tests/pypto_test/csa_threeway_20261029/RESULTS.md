@@ -806,3 +806,8 @@ v2复现的prepare参数增加`--gpu-blocks 4000 --precision-only`；不再执�
 完整预检凭证和OOM原始rank日志无损归档于`evidence/eightcard/*.json.gz`及
 `evidence/eightcard/eightcard-native-startup-v1/*.log.gz`，可用`gzip -cd`读取；
 未改写CANN原始错误文本。入口测试、容量估算及首轮编译凭证亦保留在同一证据目录。
+
+v2 public T6/T40/T240根也已在227 CPU全部通过，分别191.83/195.20/220.92秒，
+`npu_initialized=false`、`worker_created=false`；对应`evidence/eightcard/eightcard-ours-t*-cache-v2.json`。
+新冻结路径的artifact identity与v1不同，不能写成同一binary命中；SDK和vLLM仍未重装/重编。
+测试入口、首轮容量失败与复现方案已在`3e1d3124`正常推送到本分支，原数学与精度基准保留。
