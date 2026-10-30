@@ -8,6 +8,7 @@
 补测第 2 层发现主压缩 Norm 及 Indexer 权重投影首差；两处修正接回后，
 **第 2、42 层 T240/B40 的 35 个 Native 边界均全部逐 bit 一致**；
 第 4 层正式 55 参数服务 FULL 入口回归也通过，未回退 Native。
+18 时继续补测：T40 单行及 C4 闭合、混合18＋dummy6的同图回放、物理T21的六种query长度，均逐 bit 通过。
 用户新增 14 卡禁用后，已终止 16 卡 Native，本轮整模型仍未完成。
 单卡只使用 8–13、15，原精度基准保留。
 
@@ -649,3 +650,74 @@ MODE3 参考旧精度基准对 T240 的标定，但以上结论来自本次 CANN
 
 单卡池和私有白名单统一改为 **8,9,10,11,12,13,15**，启动脚本再次检查实际卡号，
 即使调度参数错误也拒绝 14 卡；没有修改全局或其他用户策略。
+
+## 10 月 30 日 18 时：短 query、混合与闭合边界补测
+
+用户要求继续检查精度。正式算术固定在 `05989cfb06cd4e3fc7597a3971b0903d5c12faf9`，
+本轮没有更改算子或工具链；仅测试预检增加实际 Python/SDK 导入路径断言和记录，
+服务对拍脚本增加 `--history 8191/8192`，默认仍为 8192。
+每项均在 227 物理 8–13、15 白名单内单卡运行，Native 开启确定性，首差停止后续配置。
+
+无设备预检通过，精确 PyPTO/Simpler 路径与公共 manifest 一致，PTOAS 和 CANN 存在；
+见 `evidence/precision-recheck-1818-preflight-v2.json`。
+T40、T24 正式 55 参数入口先在登录端 CPU 预编译，分别耗时 192.430、190.133 秒，
+明确未初始化 NPU 或创建 Worker。测试没有重新安装依赖，也没有在本机运行 UT/JIT/模型。
+
+| 配置 | 物理输入 / bucket | Native 对拍 | 脚本时间 |
+| --- | --- | --- | --- |
+| 第 4 层 B40，query 全 1，history=8192 | T40，无每请求 S6 padding | 正式 55 参数 FULL；输出及六份 cache/state 逐 bit 通过 | 48.102 秒 |
+| 第 4 层 B4，满 S6→`[1,5,6,6]`→满 S6 | 同一 FULL 图；24→18 有效＋6 dummy→24 | 三阶段全部逐 bit 通过，metadata 地址不变，未重新提交 | 54.608 秒 |
+| 第 4 层 B40，query 全 1，history=8191 | T40，单行恰好 C4 闭合 | 正式 FULL；压缩写回及其余外部结果逐 bit 通过 | 47.823 秒 |
+| 第 4 层 B6，query=`[1,2,3,4,5,6]`，history=8192 | **物理 T21**，无每请求或全局输入 padding | 生产57控制＋观测85 FULL，对 Native **35/35 边界逐 bit 通过** | 控制33.022秒；观测39.282秒 |
+
+三项任务分别为 `task_20261030_182456_362124329534`、
+`task_20261030_182817_367228816585`、`task_20261030_183233_373650321465`，均使用物理 8。
+每项 `complete/pass=True`，无 first_difference/error；实际调用 55 参数入口，
+检查 eligible、提交计数和 replay contract，未回退 Native。
+Native 自重复、初始 FULL/eager、PTO FULL/eager 与两次回放、只读输入和保护区均通过。
+
+单行 history=8192 未触发压缩 KV/Indexer 写回，不能单凭它验证新 Norm。
+所以额外用 history=8191 覆盖闭合：两边主压缩 cache 均修改 **37,414 字节**，
+Indexer cache 均修改 **5,166 字节**，状态也实际更新；所有 `outside_slot_bytes=0`。
+这项是实际闭合写回对拍，不能混同未触发该分支的空通过。
+
+混合 case 明确记录 `actual_tokens=18`、`physical_tokens=24`、
+`queries=[1,5,6,6]`、`mixed_replay_validated=True`；6 行是全局 bucket 的 dummy，
+没有把每个请求分别补成 S6。回到原配置后，Native 与我方均恢复原结果。
+比较范围是全部有效输出行及完整 cache/state；dummy 输出本身不作为数值合同，但不得污染有效结果或合法写槽之外的存储。
+
+T21 任务 `task_20261030_183422_376564718483` 先保存生产控制，
+`task_20261030_183657_38111779715` 随后完成同输入 Native 对拍，均使用物理 8。
+实际记录 `tokens=21`、`lengths=[1,2,3,4,5,6]`、`request_padding_rows=0`，
+fixture 直接分配21行输入，Native 请求累计边界为 `[0,1,3,6,10,15,21]`。
+内部计算工作区仍可按 Cube tile 对齐，这不等于给每请求补 S6 或扩大外部输入。
+`complete/pass=True`，35项全部逐 bit 一致，无首差/error，输入等价、观测/生产控制和保护区也通过。
+57/85根分别先在227 CPU预编译185.868、190.835秒，均无设备/Worker。
+这项检查的是生产调试根及分阶段 FULL 观测，不写成“T21正式55服务入口已独立验收”。
+
+原始结果分别见 `evidence/precision-recheck-t40-service-v1.json`、
+`precision-recheck-mixed18-bucket24-v1.json`、`precision-recheck-t40-close8191-v1.json`；
+预编译凭证为 `precision-recheck-t40-spmd-cache-v1.json`、`precision-recheck-t24-spmd-cache-v1.json`。
+复现仍通过公共 bootstrap、同一 env 和排除 14 卡的私有池，以单个完整命令字符串提交：
+
+```bash
+run_rms.sh <新label> padding --full-batch 40 --query-rows 1
+run_rms.sh <新label> padding --mixed
+run_rms.sh <新label> padding --full-batch 40 --query-rows 1 --history 8191
+```
+
+三个命令均显式设置
+`PADDING_STAGE_REFERENCE=<实验根>/results/t240-layer2-weight-order-native-v1/result.json`，
+严格核对相同正式源码 hash；实际金标仍由本次第 4 层 Native 独立计算。
+任务 max780 秒、内部750秒加15秒清理，每次仅提交一项。
+
+T21复现先用 `precompile_eager.py <新JSON> spmd-debug/spmd-probe --lengths 1,2,3,4,5,6` 预编译；
+再执行 `run_rms.sh <生产label> spmd --lengths 1,2,3,4,5,6 --layer 4` 保存控制，
+以新 label、相同参数和 `SPMD_PRODUCTION_REFERENCE=<生产目录>/production.pt` 完成 Native 观测。
+证据为 `evidence/precision-recheck-t21-production-v1.json`、`precision-recheck-t21-native-v1.json` 及两份编译receipt。
+
+本轮新增四类精度配置均通过，没有发现新的数值首差；正式数学仍保持05989cfb。
+五个设备任务均已退出释放物理8卡，实际占卡50～71秒，没有超15分钟或遗留排队任务；
+起止与锁释放见 `evidence/precision-recheck-task-lifecycle.log`。未使用14卡。
+以上仍是单层真实权重/合成输入精度结论，不代表新版本整模型192-token或128K已验收；
+本轮没有新增性能测量。

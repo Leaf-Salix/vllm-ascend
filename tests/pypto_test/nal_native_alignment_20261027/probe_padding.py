@@ -39,6 +39,7 @@ mode.add_argument("--mixed", action="store_true")
 mode.add_argument("--projection", action="store_true")
 mode.add_argument("--full-batch", type=int, choices=(1, 40))
 parser.add_argument("--query-rows", type=int, choices=range(1, 7), default=6)
+parser.add_argument("--history", type=int, choices=(8191, 8192), default=8192)
 options = parser.parse_args()
 if options.query_rows != 6 and options.full_batch is None:
     parser.error("--query-rows requires --full-batch")
@@ -53,13 +54,14 @@ record = {
 }
 payload = {}
 start = time.monotonic()
-HISTORY = 8192
+HISTORY = options.history
 ACTIVE_REQUESTS = options.full_batch or 4
 INITIAL_QUERY_ROWS = options.query_rows
 TOKEN_CAPACITY = ACTIVE_REQUESTS * INITIAL_QUERY_ROWS
 REQUEST_CAPACITY = options.full_batch or 5
 record["full_batch"] = options.full_batch
 record["initial_query_rows"] = INITIAL_QUERY_ROWS
+record["history"] = HISTORY
 EXTERNAL_ORDER = ("swa.0", "state.0", "compressed.0", "indexer_state.0", "indexer.0", "indexer.1", "x_out")
 
 

@@ -25,6 +25,11 @@ while (( $# )); do
       [[ "$2" =~ ^[1-6]$ ]]
       probe_args+=(--query-rows "$2")
       ;;
+    --history)
+      [[ "$probe" == padding && $# -ge 2 && ${#probe_args[@]} -gt 0 ]]
+      [[ "$2" == 8191 || "$2" == 8192 ]]
+      probe_args+=(--history "$2")
+      ;;
     --mixed|--projection)
       [[ "$probe" == padding && ${#probe_args[@]} -eq 0 ]]
       probe_args=("$1")
