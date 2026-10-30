@@ -1,6 +1,6 @@
 # 8K/B40 三方整模型测试：前置检查与首差记录
 
-日期：2026-10-29～30。本记录尚未完成整模型验收，不能作为新分支的 token 一致性或性能结论。
+日期：2026-10-29～31。本记录尚未完成整模型验收，不能作为新分支的 token 一致性或性能结论。
 
 最新状态：WO-A 修正接回后，T240 完整入口 35 个边界（至最终输出）均逐 bit 一致；
 实际生产 55 参数 FULL 入口及 T6 回归也通过。新增 T40/B40、每请求 1 行的诊断入口
@@ -15,14 +15,18 @@
 本日后续另获本轮八卡`0,8,9,10,11,12,13,15`授权：Native v4已生成全部61,440个token，
 但有480次抢占，未通过且不能作gold。v5改为40题分8题×5波，保留零抢占门禁，
 21:45用户要求后续避开前8卡，已取消新的Native排队任务并撤销0卡临时白名单；
-其后用户临时批准本轮14卡；当前只用8–15重新提交五波Native，不使用前8卡。
-PTO尚未提交，仍无当前整模型token一致性结论。
+其后用户临时批准本轮14卡；仅用8–15的五波Native已通过零抢占及完整生成验收。
+同配置PTO首次在KV预算检查处退出，未进入token生成；仅减小PTO任务窗口后，
+T6/T8/T240正式FULL回归均逐bit通过。整模型重试已在第36次草稿接受事件首差处停止：
+`h8192_q04`的PTO接受5、Native接受4；尚不能判定该步输出token是否分叉，整模型验收未通过。
+全程不使用前8卡。
 
 ## 目标与已授权范围
 
 参考 nalinaly 的
 [低接受率测试方案](https://github.com/nalinaly/vllm-ascend/blob/dsv4-flash-pto-v0.25.1rc1/tests/pypto_test/low_acceptance_20261001/RESULTS.md)，
 比较 Native、我方精度 TND 与 nalinaly 最新 TND SPMD。
+下表保留原16卡三方计划；10月30日后续八卡验证的配置和状态见文末，不混计两种结果。
 
 | 项目 | 本轮设置 |
 | --- | --- |
@@ -41,9 +45,9 @@ PTO尚未提交，仍无当前整模型token一致性结论。
 
 `prepare.py` 的共同框架方案用于隔离 CSA 算术差异，因此今后的整模型结果应写成
 “我方数学包在共同框架上的结果”，不能写成未经修改的 `da6b14f0` 完整软件栈结果。
-当前 v4 快照已冻结；三方 preflight 及四项公共模块缓存预热通过，
+原16卡阶段的 v4 快照已冻结；三方 preflight 及四项公共模块缓存预热通过，
 本轮 Native 16 卡基线因后述共享临时目录故障，在获得设备前撤下；环境恢复后重新提交，
-后因 14 卡禁用而终止，未完成有效整模型结果。两份整模型 CSA 尚未提交。
+后因 14 卡禁用而终止，未完成有效整模型结果；该16卡阶段两份整模型 CSA 未提交。
 
 ## 固定输入与工具链
 
@@ -904,3 +908,176 @@ label为`last8-native-8k-waves8-v5`：仍为40题分8×5波、每题192token、
 继续前台每45秒只读观察，不创建scheduler。Native零抢占及所有门禁通过后，
 才按同一物理卡序与同配置比较当前完整PTO CSA。
 14卡授权仅限本轮临时验证，不改变其他工作的默认禁用约定。
+
+### 23 时 51 分：零抢占 Native 基准通过，提交 PTO 对拍
+
+Native `task_20261030_221539_154150020473` 于23:40:45实际获得设备，
+进程运行368.11秒，正常exit0、postflight通过，设备已释放。
+实际设备顺序为`8,9,10,11,12,13,14,15`，TP1、DP=EP8；
+40个不同问题分8题×5波，各rank均完整输出每题192token，合计61,440token。
+本轮没有Native2或128K任务，不以DP8分波结果代替原DP16/B40满并发结果。
+
+| 验收项 | Native v5 结果 |
+| --- | --- |
+| 8 rank × 40题 × 192 token | 全部完整、finished=true |
+| CSA/HCA覆盖 | Native控制组无PTO runtime，coverage无错误 |
+| 累计抢占 / 发生抢占请求数 | 0 / 0 |
+| 接受长度0～5直方图 | 848 / 1224 / 1624 / 1048 / 1080 / 7344 |
+| 平均接受步长 | 3.695018226 |
+| 接受事件与Prometheus | 一致，acceptance qualified=true |
+| 精度基准资格 | 通过，可作为同八卡、同分波PTO的gold |
+| 满B40连续计时 | 未形成；performance_qualified=false，不提供性能结论 |
+
+Native完整8rank输出、接受事件、实验配置、postflight、exit和rank0日志保存在
+`evidence/eightcard/last8-native-v5-evidence.tar.gz`，不包含模型权重或KV tensor文件。
+该有效gold与之前480次抢占的v4失败历史分开保留。
+
+将全部8rank的实际`policy_descriptors`按我方当前`select_policy().constexprs()`去重，
+只排除明确`is_dummy_batch=true`的708步及无有效token步骤，得到两组策略：
+普通/小FULL入口（代表T8、请求容量8、history8467、table68，累计136步），
+以及FULL240入口（请求容量40、history8473、table68，累计1896步）。
+两组均有相同v5公共模块与共享SDK的CPU编译凭证，缺失数0；未再编译或重装。
+策略规划凭证保留于227自有results的`last8-policy-cache-plan-v5.json/.py`。
+
+PTO任务`task_20261030_235118_6532871582`于23:51:18提交，
+label为`last8-ours-8k-waves8-v5`，引用上述Native gold。
+数学仍为05989cfb/65bebf7f，冻结源仍`eightcard-source-v5/ours/source`，
+共同框架41ba392f、共享SDK和bank均未改变。
+私有白名单、pool与wrapper继续严格8–15，max780/内部720秒；
+逐请求token或接受事件发现首差即STOP，21CSA必须实际执行/FULL完整回放，20HCA保持Native。
+随后PTO获得设备，但在下述KV预算检查处退出，尚不能宣布整模型精度通过或恢复nalinaly性能。
+
+本轮复现创建新cohort时完整参数为：
+
+```bash
+python tests/pypto_test/csa_threeway_20261029/prepare.py <新cohort目录> \
+  --ours 65bebf7f6b2e4f3f6492fd6463f73106506f3496 \
+  --decode-dp 8 --arms native ours --gpu-blocks 4000 \
+  --precision-only --request-wave-size 8
+```
+
+公共bootstrap及四份CPU预热方法与前述相同，必须使用新cohort的public模块名；
+复制旧路径的编译凭证不能证明新路径缓存可用。本轮没有新建cohort，直接复用v5。
+实际提交方式如下，只有本轮14卡临时授权有效时使用该集合；label每次必须唯一：
+
+```bash
+align_root=/data/pyptouser/yejia/vllm-nal-tnd-native-align-20261027-codex
+repo="$align_root/src"
+source "$repo/tests/pypto_test/nal_native_alignment_20261027/env.sh"
+cohort="$align_root/cohorts/eightcard-source-v5"
+# 先arm=native、reference=none取得合格gold；通过后再按下列PTO配置提交。
+arm=ours
+label=last8-ours-8k-waves8-v5
+reference="$align_root/results/last8-native-8k-waves8-v5"
+command="bash $repo/tests/pypto_test/csa_threeway_20261029/run_eight_card.sh $cohort $arm $label $reference"
+TASKQUEUE_DEVICE_CONF="$align_root/csa-approved-last8-20261030.conf" \
+TASKQUEUE_DEVICE_POOL=8,9,10,11,12,13,14,15 \
+TASKQUEUE_IGNORE_WHITELIST=0 TASKQUEUE_IGNORE_GROUP_AFFINITY=0 \
+task-submit --device auto --device-num 8 --max-time 780 \
+  --env PYTHONNOUSERSITE=1 --env HCCL_DETERMINISTIC=true \
+  --env PTOAS_ROOT --env ASCEND_HOME_PATH "$command"
+```
+
+### 10 月 31 日：PTO 启动被显存预算门禁拦截
+
+PTO `task_20261030_235118_6532871582` 实际23:56:19开始，
+进程运行278.57秒，00:01左右已退出并释放全部设备，未进入token生成。
+加载后21层CSA的SPMD服务已准备，但KV原始分配前的预算检查拒绝：
+
+| 指标 | Native | PTO |
+| --- | --- | --- |
+| KV4000块及backing计划 | 3,741,446,144B，约3.484GiB | 相同 |
+| profile可用KV预算（rank0） | 6,022,865,408B，约5.609GiB | 2,409,795,584B，约2.244GiB |
+| 完整生成 | 61,440token、零抢占 | 未进入 |
+| 对Native token结论 | 有效gold | 尚无结果，不能记为数值失败或精度通过 |
+
+8个PTO rank均被同一门禁拒绝；预算范围2,409,795,584～2,424,899,993B。
+没有绕过`EIGHT_CARD_KV_BUDGET_EXCEEDED`或放宽抢占要求。
+原始8rank日志、命令、exit、实验配置、CPU策略规划及实际环境凭证在
+`evidence/eightcard/last8-ours-v5-budget-failure.tar.gz`。
+
+预算差包含torch peak及non-torch项，不能直接称为权重副本或永久占用。
+初步怀疑WO-A的ND/NZ副本，但41ba的adapter已有recast告警，本次完整日志没有该告警，
+因此没有改WO-A布局，更没有切换会丢失Native累加顺序的旧ND helper。
+
+新增`runtime_memory.py`及`run_runtime_memory.sh`仅测公开运行时初始化，
+不加载模型、不提交CSA kernel；单卡严格限定8–13、15，14仍排除。
+227无设备preflight与CLI导入通过，共享工具链和原数学包均未改。
+原配置空载任务`task_20261031_002114_156500132378`在物理8完成exit0：
+heap仍为256/512/256/256MiB，task window及dep pool用默认值，
+仅`pypto.torch.init`即使设备free减少**3,588,612,096B，约3.342GiB**，
+Torch allocated增量0，init本身0.281秒。
+这解释了约3.37GiB预算差的主要部分；仓库旧注释的1.343GiB不适用于当前共享SDK。
+随后单因素任务`task_20261031_002341_160663718099`只改变公开`ring_task_window=2048`，
+物理8、exit0，heap不变，dep pool仍未显式覆盖：
+空载设备增量降为**1,657,851,904B，约1.544GiB**，
+回收1,930,760,192B，约1.798GiB；init本身0.234秒。
+这两项init耗时不代表完整任务占卡时长，任务均受240秒上限并已退出。
+
+不改WO-A或其他数学，继续保持KV4000块、40题分8×5波、原Native gold及原heap。
+公共T6/T8策略与T240策略在2048窗口配置下的CPU artifact identity均与v5原值相同：
+`ed64ac914b804089baa81ccb78e7e6eb8eb5722a9c3e5bc2b2e5373e026e9d27`及
+`f9568db9086a412422c72e5cd93af733676caa655b4e428e8d3f543d25d3c33c`。
+仅加载已有artifact约20秒，没有重编算子或SDK。
+
+| 正式55入口窗口回归 | 任务 | 结果 | 脚本耗时 |
+| --- | --- | --- | --- |
+| T240/B40，物理10 | `task_20261031_004805_216277131273` | 七外界对Native逐bit；FULL/eager、重复回放、保护区通过 | 50.23秒 |
+| T6/B1，物理8 | `task_20261031_005452_234929419789` | 七外界对Native逐bit；FULL/eager、重复回放、保护区通过 | 45.68秒 |
+| T8/B8，各请求1行，无S6 padding，物理8 | `task_20261031_010250_257785617652` | 七外界对Native逐bit；FULL/eager、重复回放、保护区通过 | 54.57秒 |
+
+三项实际`KernelConfig.ring_task_window`均为`[2048,2048,2048,2048]`，
+未发生窗口allocator failure或精度首差。全部单卡任务只从8–13、15选择，14不参与。
+T240首次小任务`task_20261031_003818_194938016445`在历史来源校验处退出，尚未运行kernel：
+新wrapper漏传当前`PADDING_STAGE_REFERENCE`，误用了旧默认检查点。
+修正为显式绑定已通过的`t240-layer2-weight-order-native-v1/result.json`，
+227 CPU确认30个数学源码hash全部匹配，再重提上述v2；没有放宽来源门禁。
+
+为整模型保留现有v5及编译缓存路径，测试launch只新增带内容hash的runner/observer副本，
+原runner和observer先对照原manifest校验、保持字节不变，数学包及SDK不改。
+副本只更换Worker观测扩展并增加模型就绪后的CPU配置RPC，
+直接读取Worker已绑定的`KernelConfig`，记录实际window、原heap和dep未显式覆盖状态。
+不修改forward、五波入场、token、接受事件、dummy判定或清理逻辑。
+postflight增加逐rank实际配置校验，其余容量/精度/路由/零抢占门禁不变。
+Native无PTO runtime，窗口仅作为PTO配置记录，无须仅因此重跑Native或改写gold。
+
+227 CPU共36项回归通过5.14秒；加强冻结manifest保护后三项相关回归通过4.32秒。
+实际派生入口AST、原manifest及导入检查通过，均无NPU初始化。
+独立只读review没有阻断。首次CPU收集缺冻结测试helper路径，补齐`PYTHONPATH`后通过，
+原失败日志同样保留。轻量原始证据为`evidence/eightcard/window2048-qualification-v1.tar.gz`，
+不含大型tensor快照；后续短T及整模型结果另行追加。
+
+复现窗口回归使用`run_window_check.sh <新label> 40/1/8`：分别为T240、T6、T8，
+仍经公共bootstrap、指定v5 Native插件及当前数学包运行，单任务max780秒。
+整模型PTO复用上节原命令，仅另加`--env PTO_CSA_RING_TASK_WINDOW=2048`；
+outer wrapper自动启用`--pto-task-window 2048`及实际Worker审计，
+完整模型21CSA覆盖、逐token/接受事件一致、零抢占均通过后才可验收。
+
+### 01 时 10 分：窗口资格通过后重试八卡 PTO
+
+三项正式FULL资格通过后，提交`task_20261031_011000_28035386797`，
+label为`last8-ours-8k-waves8-window2048-v1`。
+复用原`last8-native-8k-waves8-v5`有效gold，不跑Native2；
+模型、SDK、数学65bebf7f、KV4000、8题×5波、192token、FULL6/240和所有数值配置不变，
+唯一候选变化是公开`PTO_CSA_RING_TASK_WINDOW=2048`，heap仍为256/512/256/256MiB，
+dep未显式覆盖。Native没有该运行时，原gold不受这项PTO容量配置影响。
+新实际配置RPC及postflight必须验证所有rank读取到2048，不能只凭环境变量判生效。
+
+仍仅使用本轮临时批准的物理8–15，严格whitelist/pool、max780/内部720秒。
+01:12:28获得设备，执行349.68秒后因首差停止，全部设备已释放。
+本次KV预算门禁通过：rank0可用4,343,304,192B，约4.05GiB，
+大于原4000块计划3,741,446,144B。实际权重48.2791GB，与Native一致；
+FULL图捕获及生成前实际窗口配置RPC均已通过，未修改数学包或原gold。
+
+八个rank均记录同一首差：请求`h8192_q04`，接受事件zero-based index35，
+我方`[5,5]`，Native`[5,4]`；任务以`reason=first_difference`退出。
+这里的两个数分别为本次草稿数与接受数，不是token ID。
+接受事件回调早于该步`_update_request_with_output`，因此当前步token尚未核验，
+不能把“尚未记录token首差”解释为完整192token一致。
+本次没有完成mixed输出或最终postflight，也不构成性能结论。
+
+原始首差、八rank日志、已完成请求统计、实验命令和退出记录存于
+`evidence/eightcard/last8-ours-window2048-first-difference.tar.gz`。
+当前先做真实模型首步同输入逐层CSA诊断，不继续后续大配置。
+T6、T8及原文件manifest/审计导入证据补存于
+`evidence/eightcard/window2048-qualification-v2.tar.gz`；此前原始失败和T240资格仍保留v1归档。

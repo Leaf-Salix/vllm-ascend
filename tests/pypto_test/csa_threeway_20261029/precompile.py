@@ -25,6 +25,7 @@ def main():
     parser.add_argument("--requests", type=int)
     parser.add_argument("--max-seq-len", type=int, default=9000)
     parser.add_argument("--table-columns", type=int)
+    parser.add_argument("--task-window", type=int)
     args = parser.parse_args()
     source = args.source.resolve()
     manifest = json.loads((source.parent / "manifest.json").read_text())
@@ -51,7 +52,7 @@ def main():
         policy.constexprs(),
         allow_signature_mode=True,
         _kernel=True,
-        _kernel_config=KernelConfig("a2a3", "tensormap_and_ringbuffer", 0),
+        _kernel_config=KernelConfig("a2a3", "tensormap_and_ringbuffer", 0, ring_task_window=args.task_window),
     )
     artifact.load()
     assert len(artifact.kernel_abi.parameters) == 55
@@ -70,6 +71,7 @@ def main():
         "artifact_identity": artifact.identity().hex(),
         "cache": os.environ["PYPTO_CACHE_DIR"],
         "sdk_release": os.environ["CSA_SHARED_TOOLCHAIN_RELEASE"],
+        "ring_task_window": args.task_window,
         "bindings": policy.constexprs(),
         "scope": "CPU compile only; no model/NPU or token qualification",
     }

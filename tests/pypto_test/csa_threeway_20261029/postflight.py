@@ -44,6 +44,20 @@ def timing_inputs(value):
     ]
 
 
+def runtime_window_errors(data, window, heap):
+    if window is None:
+        return []  # Native无PTO runtime；原控制组记录保持不改写。
+    rows = data.get("worker_runtime_config", [])
+    if len(rows) != 1:
+        return ["missing TP1 Worker runtime audit"]
+    config = rows[0].get("pto_kernel_config", {})
+    if config.get("ring_task_window") != [window] * 4 or config.get("ring_heap") != heap:
+        return ["actual PTO task-window/heap configuration differs"]
+    if "ring_dep_pool" not in config or config["ring_dep_pool"] is not None:
+        return ["task-window experiment must retain the default dependency pool"]
+    return []
+
+
 def check_rank(data, arm, precision_only=False):
     errors = {"coverage": [], "timing": [], "precision": []}
     implementations = data.get("attention_implementations", [])
@@ -115,6 +129,12 @@ def validate(source, root, bank, arm, reference=None):
     for rank in range(dp):
         try:
             data = json.loads((root / f"rank{rank}.mixed.json").read_text())
+            report["coverage_errors"].extend(
+                f"rank{rank}: {error}"
+                for error in runtime_window_errors(
+                    data, experiment.get("pto_ring_task_window"), experiment["runtime_ring_heap_bytes"]
+                )
+            )
             for kind, errors in check_rank(data, arm, precision_only).items():
                 report[f"{kind}_errors"].extend(f"rank{rank}: {error}" for error in errors)
             if reference is not None:

@@ -28,6 +28,7 @@ from vllm.platforms import current_platform
 
 from vllm_ascend.ascend_forward_context import set_ascend_forward_context
 from vllm_ascend.ops.dsv4_csa import _native_attention_half
+from vllm_ascend.ops.pypto.variant import ring_sizing_kwargs
 from vllm_ascend.utils import enable_custom_op
 
 fixture_module = load_fixture_module()
@@ -37,7 +38,7 @@ parser.add_argument("output", type=Path)
 mode = parser.add_mutually_exclusive_group()
 mode.add_argument("--mixed", action="store_true")
 mode.add_argument("--projection", action="store_true")
-mode.add_argument("--full-batch", type=int, choices=(1, 40))
+mode.add_argument("--full-batch", type=int, choices=(1, 8, 40))
 parser.add_argument("--query-rows", type=int, choices=range(1, 7), default=6)
 parser.add_argument("--history", type=int, choices=(8191, 8192), default=8192)
 options = parser.parse_args()
@@ -358,8 +359,14 @@ try:
         # Use the public runtime capacity option; leave all other rings unchanged.
         ring_heap = (256 << 20, 512 << 20, 256 << 20, 256 << 20)
         record["runtime_ring_heap_bytes"] = ring_heap
+        runtime_options = ring_sizing_kwargs()
+        assert runtime_options.pop("ring_heap", ring_heap) == ring_heap
+        record["runtime_ring_task_window"] = runtime_options.get("ring_task_window")
         save()
-        pypto.torch.init(ring_heap=ring_heap)
+        pypto.torch.init(ring_heap=ring_heap, **runtime_options)
+        from pypto.runtime.kernel.context import get_process_kernel_state
+
+        record["effective_ring_task_window"] = get_process_kernel_state().config.ring_task_window
         runtime = service_module.CSAServiceRuntime(layer.self_attn, None, REQUEST_CAPACITY, layer=layer)
         wrapper._pto_csa_runtime = runtime
         record["runtime_source"] = service_module.__file__

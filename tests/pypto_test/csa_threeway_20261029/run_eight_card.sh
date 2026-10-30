@@ -46,6 +46,10 @@ ASCEND_OPP_PATH=$(python "$snapshot/tests/pypto_test/dsv4_hca_prepare_opp.py" --
 bank=/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/low-acceptance-20261010/banks/fixed8192
 args=()
 if [[ "$reference" != none ]]; then args=(--reference "$reference"); fi
+if [[ -n ${PTO_CSA_RING_TASK_WINDOW:-} ]]; then
+  [[ "$arm" == ours && "$PTO_CSA_RING_TASK_WINDOW" == 2048 ]]
+  args+=(--pto-task-window "$PTO_CSA_RING_TASK_WINDOW")
+fi
 printf 'TASK_RUN_START %s\n' "$(date -Iseconds)"
 printf 'TASK_DEVICE=%s SDK=%s PTOAS_ROOT=%s ASCEND_HOME_PATH=%s\n' \
   "$TASK_DEVICE" "$CSA_SHARED_TOOLCHAIN_RELEASE" "$PTOAS_ROOT" "$ASCEND_HOME_PATH"

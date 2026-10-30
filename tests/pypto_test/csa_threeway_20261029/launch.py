@@ -26,6 +26,53 @@ def stop_group(process, grace=5):
     return process.wait()
 
 
+def prepare_runtime_audit_runner(source):
+    """只新增有内容hash的测试文件；冻结原runner、observer和数学包均不改写。"""
+    original = source / "tests/pypto_test/offline_pd/run.py"
+    original_observer = source / "tests/pypto_test/csa_threeway_20261029/observer.py"
+    frozen = json.loads((source.parent / "manifest.json").read_text())["files"]
+    for path in (original, original_observer):
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == frozen[str(path.relative_to(source))], (
+            f"frozen test source changed: {path}"
+        )
+    audit = Path(__file__).with_name("runtime_audit.py").read_bytes()
+    digest = hashlib.sha256(audit).hexdigest()
+    module = "runtime_audit_" + digest[:12]
+    text = original.read_text()
+    replacements = (
+        (
+            '"worker_extension_cls": "csa_threeway_20261029.observer.TimedObserver"',
+            f'"worker_extension_cls": "csa_threeway_20261029.{module}.RuntimeAuditObserver"',
+        ),
+        (
+            '    args.worker_runtime_config = llm.collective_rpc("offline_runtime_config")',
+            '    args.worker_runtime_config = llm.collective_rpc("offline_runtime_config")\n'
+            '    actual_pto = llm.collective_rpc("offline_pto_window_config")\n'
+            "    for row, pto in zip(args.worker_runtime_config, actual_pto, strict=True):\n"
+            '        row["pto_kernel_config"] = pto',
+        ),
+    )
+    for old, new in replacements:
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    runner = original.with_name(f"run_{module}.py")
+    helper = source / f"tests/pypto_test/csa_threeway_20261029/{module}.py"
+    for path, data in ((helper, audit), (runner, text.encode())):
+        if path.exists():
+            assert path.read_bytes() == data, f"refusing to overwrite frozen test artifact: {path}"
+        else:
+            with path.open("xb") as handle:
+                handle.write(data)
+    return runner, {
+        "observer_sha256": digest,
+        "original_runner_sha256": hashlib.sha256(original.read_bytes()).hexdigest(),
+        "original_observer_sha256": hashlib.sha256(original_observer.read_bytes()).hexdigest(),
+        "audit_runner_sha256": hashlib.sha256(runner.read_bytes()).hexdigest(),
+        "runner": str(runner),
+        "observer": str(helper),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
@@ -33,6 +80,7 @@ def main():
     parser.add_argument("output", type=Path)
     parser.add_argument("--reference", type=Path)
     parser.add_argument("--startup-only", action="store_true")
+    parser.add_argument("--pto-task-window", type=int, choices=(2048,))
     args = parser.parse_args()
 
     def interrupted(signum, _frame):
@@ -55,6 +103,11 @@ def main():
             assert len(row["requests"]) == 40 and all(len(r["output_token_ids"]) == 192 for r in row["requests"])
     else:
         assert args.reference is None
+    runner = source / "tests/pypto_test/offline_pd/run.py"
+    runtime_audit = None
+    if args.pto_task_window is not None:
+        assert manifest["arm"] == "ours" and os.environ["PTO_CSA_RING_TASK_WINDOW"] == str(args.pto_task_window)
+        runner, runtime_audit = prepare_runtime_audit_runner(source)
     experiment = {
         "native_reference": str(args.reference) if args.reference else None,
         "arm": manifest["arm"],
@@ -73,6 +126,8 @@ def main():
         "precision_only": manifest.get("precision_only", False),
         "request_wave_size": manifest.get("request_wave_size", 40),
         "runtime_ring_heap_bytes": [256 << 20, 512 << 20, 256 << 20, 256 << 20],
+        "pto_ring_task_window": args.pto_task_window,
+        "runtime_audit": runtime_audit,
         "event_mode": 1,
         "eplb": False,
         "atomic_add": False,
@@ -92,7 +147,7 @@ def main():
         "--shared-toolchain",
         "--native-plugin-root",
         str(source),
-        str(source / "tests/pypto_test/offline_pd/run.py"),
+        str(runner),
         "decode",
         "--bank",
         str(args.bank),
