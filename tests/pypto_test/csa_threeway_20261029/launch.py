@@ -108,6 +108,7 @@ def first_step_passed(output):
     return (
         payload["kind"] == result["status"] == "first_step_complete"
         and payload["layers"] == [row["layer"] for row in result["layers"]] == expected
+        and payload["forward_id"] == result["first_forward"]["forward_id"]
         and result["first_forward"]["graph_mode"] == "NONE"
         and not runtime_window_errors(
             {"worker_runtime_config": [{"pto_kernel_config": result["actual_pto_config"]}]},
@@ -116,6 +117,9 @@ def first_step_passed(output):
         )
         and all(
             row["restored_exact"]
+            and row["forward_id"] == payload["forward_id"]
+            and row["actual_context"]["graph_mode"] == "NONE"
+            and not row["actual_context"]["capturing"]
             and row["metadata_restored_exact"]
             and row["input_unchanged"]
             and row["output_unchanged"]

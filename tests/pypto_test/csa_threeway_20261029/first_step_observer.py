@@ -7,6 +7,7 @@
 
 import json
 import os
+import threading
 from pathlib import Path
 
 import torch
@@ -50,6 +51,8 @@ def check_complete(report, expected_layers):
     return (
         report["first_forward"] is not None
         and report["first_forward"]["graph_mode"] == "NONE"
+        and all(r["forward_id"] == report["first_forward"]["forward_id"] for r in rows)
+        and all(r["actual_context"]["graph_mode"] == "NONE" and not r["actual_context"]["capturing"] for r in rows)
         and [r["layer"] for r in rows] == expected_layers
         and all(
             r["restored_exact"]
@@ -70,24 +73,61 @@ def check_complete(report, expected_layers):
 
 
 class FirstStepObserver(RuntimeAuditObserver):
+    def _first_step_guard(self):
+        with self._first_step_lock:
+            if self._first_step_claimed or self._first_step_terminal:
+                raise RuntimeError("CSA_SAME_INPUT_DIAGNOSTIC_ALREADY_CLAIMED")
+
+    def _first_step_claim(self, descriptor):
+        with self._first_step_lock:
+            if self._first_step_claimed or self._first_step_terminal:
+                raise RuntimeError("CSA_SAME_INPUT_DIAGNOSTIC_ALREADY_CLAIMED")
+            self._first_step_claimed = True
+            self._first_step_forward_id = 1
+            self._first_step_report["first_forward"] = {**descriptor, "forward_id": self._first_step_forward_id}
+            self._first_step_save()
+
     def _first_step_save(self):
         path = self._first_step_root / "same_input_first_step.json"
         path.write_text(json.dumps(self._first_step_report, ensure_ascii=False, indent=2) + "\n")
 
     def _first_step_stop(self, reason, **details):
-        self._first_step_report.update(status=reason, stop_details=details)
-        self._first_step_save()
-        name = "FIRST_STEP_DIAGNOSTIC.json" if reason == "first_step_complete" else "FIRST_DIFFERENCE.json"
-        (self._first_step_root / name).write_text(
-            json.dumps({"kind": reason, "rank": 0, **details}, ensure_ascii=False, indent=2) + "\n"
-        )
-        (self._first_step_root / "STOP").touch()
+        with self._first_step_lock:
+            if self._first_step_terminal:
+                raise RuntimeError("CSA_SAME_INPUT_DIAGNOSTIC_ALREADY_STOPPED")
+            self._first_step_terminal = True
+            self._first_step_report.update(status=reason, stop_details=details)
+            self._first_step_save()
+            name = "FIRST_STEP_DIAGNOSTIC.json" if reason == "first_step_complete" else "FIRST_DIFFERENCE.json"
+            payload = {"kind": reason, "rank": 0, "forward_id": self._first_step_forward_id, **details}
+            try:
+                with (self._first_step_root / name).open("x") as stream:
+                    json.dump(payload, stream, ensure_ascii=False, indent=2)
+            except FileExistsError:
+                pass
+            (self._first_step_root / "STOP").touch()
         raise RuntimeError(f"CSA_SAME_INPUT_DIAGNOSTIC_STOP {reason} {details}")
 
     def _first_step_pair(self, runtime, context, hidden, positions, output, kv_cache, original):
         from vllm_ascend.ops.dsv4_csa import _native_attention_half
 
         index = self._first_step_indices[id(runtime)]
+        actual_context = {
+            "graph_mode": context.cudagraph_runtime_mode.name,
+            "capturing": bool(context.capturing),
+            "hidden_shape": list(hidden.shape),
+            "groups": {
+                name: {
+                    "actual_tokens": context.attn_metadata[prefix].num_actual_tokens,
+                    "requests": context.attn_metadata[prefix].decode.num_reqs_actual,
+                    "query_start_loc": context.attn_metadata[prefix].decode.query_start_loc.cpu().tolist(),
+                    "seq_lens": context.attn_metadata[prefix].decode.seq_lens.cpu().tolist(),
+                }
+                for name, prefix in runtime.prefixes.items()
+            },
+        }
+        if actual_context["graph_mode"] != "NONE" or actual_context["capturing"]:
+            self._first_step_stop("actual_layer_context_not_ordinary", layer=index, context=actual_context)
         before_hidden = cpu(hidden)
         self._first_step_pending = None
         result = original(runtime, context, hidden, positions, output, kv_cache)
@@ -151,8 +191,10 @@ class FirstStepObserver(RuntimeAuditObserver):
             if not (restored and input_intact and output_intact and metadata_restored) or changed_readonly:
                 self._first_step_stop("shadow_restore_failure", layer=index)
         row = {
+            "forward_id": self._first_step_forward_id,
             "layer": index,
             "tokens": hidden.shape[0],
+            "actual_context": actual_context,
             "policy": call.policy.constexprs(),
             "use_index_cache": bool(impl.use_index_cache),
             "skip_topk": bool(impl.skip_topk),
@@ -218,6 +260,9 @@ class FirstStepObserver(RuntimeAuditObserver):
             "cache_scope": "five physical-page views; excludes allocation alignment prefix/suffix",
             "metadata_scope": "request fields and direct tensors; nested objects/factory closure caches not covered",
         }
+        self._first_step_lock = threading.Lock()
+        self._first_step_claimed = self._first_step_terminal = False
+        self._first_step_forward_id = 0
         self._first_step_active = False
         self._first_step_runtime = None
         original_call = CSAServiceRuntime.__call__
@@ -268,6 +313,9 @@ class FirstStepObserver(RuntimeAuditObserver):
         prefix = self._offline_csa_layer_names[0]
 
         def forward(tokens, *args, **kwargs):
+            # Worker error handling may consume another queued execution before
+            # the launcher kills the group. Never rerun or overwrite a claimed probe.
+            self._first_step_guard()
             context = get_forward_context()
             metadata = (context.attn_metadata or {}).get(prefix)
             selected = (
@@ -277,12 +325,13 @@ class FirstStepObserver(RuntimeAuditObserver):
                 and metadata is not None
                 and not metadata.num_prefills
                 and metadata.decode is not None
+                and metadata.num_actual_tokens > 0
             )
             if not selected:
                 return origin(tokens, *args, **kwargs)
             if context.cudagraph_runtime_mode.name != "NONE":
                 self._first_step_stop("first_forward_not_ordinary", mode=context.cudagraph_runtime_mode.name)
-            self._first_step_report["first_forward"] = {
+            descriptor = {
                 "graph_mode": context.cudagraph_runtime_mode.name,
                 "tokens": tokens,
                 "actual_tokens": metadata.num_actual_tokens,
@@ -291,7 +340,7 @@ class FirstStepObserver(RuntimeAuditObserver):
                 "seq_lens": metadata.decode.seq_lens.cpu().tolist(),
                 "request_ids": list(self.model_runner.input_batch.req_ids),
             }
-            self._first_step_save()
+            self._first_step_claim(descriptor)
             self._first_step_active = True
             try:
                 value = origin(tokens, *args, **kwargs)

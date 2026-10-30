@@ -1121,3 +1121,31 @@ outer780秒、内部720秒。Native gold仍是`last8-native-8k-waves8-v5`。
 02:44八卡诊断仍pending，尚未占卡；只读核对本任务候选集为8–15，14未被策略排除；
 按本实验精确cache路径及设备任务环境筛选，也未发现本实验遗留的设备进程。
 这些CPU/只读检查不能代替尚未执行的真实首步或192token精度验收。
+
+### 首步 v1 原始结果与观测终态修正
+
+`task_20261031_021130_16373599506`运行381.24秒后已退出；原harness记录
+`reason=first_step_diagnostic_complete`、`diagnostic_passed=true`，设备释放。
+21个实际CSA行均记录`tokens=8`、输出`[8,4,4096]`，输出、五carrier、共享TopK及恢复均逐bit通过；
+所有层的IndexCache/skip_topk为false，实际PTO窗口2048、原heap和默认dep审计通过。
+但报告外层`first_forward`变成`NONE/tokens240/actual48/requests8`，与逐层记录不相符。
+**这份raw只保留为21层T8同输入阳性证据，不作为唯一首步完整验收，更不是192token通过。**
+原始JSON、命令、退出和八rank日志保持不改，归档为
+`evidence/eightcard/first-step-model-v1-evidence.tar.gz`。
+
+独立review发现确定的状态闭包漏洞：成功时只写STOP并抛异常，未永久claim/冻结。
+若引擎在launcher清理前再次进入forward，会覆盖外层标签，却保留旧21行及成功receipt，
+使旧结果与新标签混合；该漏洞足以解释现象，但不能仅凭原raw证明实际的再入时序。
+因此不从外层240推断实际层T，也不把这个观测问题称为CSA数值首差。
+
+修正仅在测试代码：Lock保护单次`armed→running→terminal`状态；
+第一次selected执行先claim，重入或后续调用在origin前拒绝，终态后报告/receipt不能改写。
+外层、每层行和receipt携带同一个`forward_id`并闭合验收；
+每层另记实际Service context的模式、hidden形状及五组metadata的Q/L，硬验NONE且非capture。
+CPU回归专门模拟成功后下一次240进入，要求拒绝执行并保持所有报告文件逐字节不变。
+227共9项CPU回归通过6.37秒，新hash入口实际生成/导入通过、无NPU初始化，独立复核无阻断。
+冻结原runner/observer/数学包及SDK保持不变。
+
+随后同配置重提`task_20261031_031035_2107052519`，label为`last8-ours-first-step-v2`。
+仅8–15、max780/内部720，原Native gold及数学不变，不跑Native2/128K或后续192生成。
+新helper为`first_step_bad9a51d655c.py`，完整SHA与派生runner凭证保存在prepare-v3记录。

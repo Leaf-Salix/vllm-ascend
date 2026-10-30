@@ -4,6 +4,7 @@
 import importlib.util
 import json
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -42,7 +43,7 @@ def test_diagnostic_cannot_pass_with_missing_layers_or_full_replay(tmp_path):
     layers = list(range(2, 43, 2))
     report = {
         "status": "first_step_complete",
-        "first_forward": {"graph_mode": "NONE"},
+        "first_forward": {"graph_mode": "NONE", "forward_id": 1},
         "actual_pto_config": {
             "ring_task_window": [2048] * 4,
             "ring_dep_pool": None,
@@ -51,6 +52,8 @@ def test_diagnostic_cannot_pass_with_missing_layers_or_full_replay(tmp_path):
         "layers": [
             {
                 "layer": i,
+                "forward_id": 1,
+                "actual_context": {"graph_mode": "NONE", "capturing": False},
                 "restored_exact": True,
                 "input_unchanged": True,
                 "output_unchanged": True,
@@ -69,13 +72,18 @@ def test_diagnostic_cannot_pass_with_missing_layers_or_full_replay(tmp_path):
         ],
     }
     assert check_complete(report, layers)
-    (tmp_path / "FIRST_STEP_DIAGNOSTIC.json").write_text(json.dumps({"kind": "first_step_complete", "layers": layers}))
+    (tmp_path / "FIRST_STEP_DIAGNOSTIC.json").write_text(
+        json.dumps({"kind": "first_step_complete", "layers": layers, "forward_id": 1})
+    )
 
     def passed():
         (tmp_path / "same_input_first_step.json").write_text(json.dumps(report))
         return launch.first_step_passed(tmp_path)
 
     assert passed()
+    report["layers"][0]["forward_id"] = 2
+    assert not check_complete(report, layers) and not passed()
+    report["layers"][0]["forward_id"] = 1
     report["first_forward"]["graph_mode"] = "FULL"
     assert not check_complete(report, layers) and not passed()
     report["first_forward"]["graph_mode"] = "NONE"
@@ -101,6 +109,7 @@ def test_native_shadow_restores_pto_state_even_after_exception(tmp_path, monkeyp
     observer = object.__new__(FirstStepObserver)
     observer._first_step_root = tmp_path
     observer._first_step_report = {"layers": []}
+    observer._first_step_forward_id = 1
     hidden, positions = torch.arange(4.0).reshape(2, 2), torch.tensor([3, 4])
     output = torch.empty_like(hidden)
     caches = {name: torch.full((2, 4), float(i)) for i, name in enumerate(CACHE_NAMES)}
@@ -112,7 +121,13 @@ def test_native_shadow_restores_pto_state_even_after_exception(tmp_path, monkeyp
     req = SimpleNamespace(
         sas_metadata=None, qli_metadata=None, native_metadata_factory=factory, query_start_loc=torch.tensor([0, 1, 2])
     )
-    context = SimpleNamespace(attn_metadata={"p": SimpleNamespace(decode=req)})
+    context = SimpleNamespace(
+        attn_metadata={"p": SimpleNamespace(decode=req, num_actual_tokens=2)},
+        cudagraph_runtime_mode=SimpleNamespace(name="NONE"),
+        capturing=False,
+    )
+    req.num_reqs_actual = 2
+    req.seq_lens = torch.tensor([4, 5])
     native_inputs = {"x_hc": hidden, "position_ids": positions}
     call = SimpleNamespace(buffers=caches, native=native_inputs, policy=SimpleNamespace(constexprs=lambda: {}))
 
@@ -148,3 +163,26 @@ def test_native_shadow_restores_pto_state_even_after_exception(tmp_path, monkeyp
     assert torch.equal(topk, torch.full_like(topk, 7))
     assert req.sas_metadata is None and req.native_metadata_factory is factory
     assert req.query_start_loc.tolist() == [0, 1, 2]
+
+
+def test_completed_probe_rejects_next_queued_forward_without_rewriting_report(tmp_path):
+    observer = object.__new__(FirstStepObserver)
+    observer._first_step_root = tmp_path
+    observer._first_step_report = {"status": "armed", "layers": [], "first_forward": None}
+    observer._first_step_lock = threading.Lock()
+    observer._first_step_claimed = observer._first_step_terminal = False
+    observer._first_step_forward_id = 0
+    observer._first_step_claim({"tokens": 8, "graph_mode": "NONE"})
+    with pytest.raises(RuntimeError, match="ALREADY_CLAIMED"):
+        observer._first_step_guard()  # A nested forward cannot execute origin either.
+    with pytest.raises(RuntimeError, match="DIAGNOSTIC_STOP first_step_complete"):
+        observer._first_step_stop("first_step_complete", layers=[])
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+    with pytest.raises(RuntimeError, match="ALREADY_CLAIMED"):
+        observer._first_step_guard()
+    with pytest.raises(RuntimeError, match="ALREADY_CLAIMED"):
+        observer._first_step_claim({"tokens": 240, "graph_mode": "NONE"})
+    with pytest.raises(RuntimeError, match="ALREADY_STOPPED"):
+        observer._first_step_stop("same_input_csa", layer=2)
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
+    assert observer._first_step_report["first_forward"]["tokens"] == 8
