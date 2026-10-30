@@ -40,10 +40,18 @@ mode.add_argument("--mixed", action="store_true")
 mode.add_argument("--projection", action="store_true")
 mode.add_argument("--full-batch", type=int, choices=(1, 8, 40))
 parser.add_argument("--query-rows", type=int, choices=range(1, 7), default=6)
+parser.add_argument(
+    "--active-requests",
+    type=int,
+    choices=range(1, 40),
+    help="满B40捕获后，同一FULL图改为此数量的有效S6请求，再恢复满档",
+)
 parser.add_argument("--history", type=int, choices=(8191, 8192), default=8192)
 options = parser.parse_args()
 if options.query_rows != 6 and options.full_batch is None:
     parser.error("--query-rows requires --full-batch")
+if options.active_requests is not None and (options.full_batch != 40 or options.query_rows != 6):
+    parser.error("--active-requests requires --full-batch 40 and --query-rows 6")
 out = options.output
 mixed_requested, projection_requested = options.mixed, options.projection
 record = {
@@ -61,6 +69,7 @@ INITIAL_QUERY_ROWS = options.query_rows
 TOKEN_CAPACITY = ACTIVE_REQUESTS * INITIAL_QUERY_ROWS
 REQUEST_CAPACITY = options.full_batch or 5
 record["full_batch"] = options.full_batch
+record["bucket_active_requests"] = options.active_requests
 record["initial_query_rows"] = INITIAL_QUERY_ROWS
 record["history"] = HISTORY
 EXTERNAL_ORDER = ("swa.0", "state.0", "compressed.0", "indexer_state.0", "indexer.0", "indexer.1", "x_out")
@@ -223,6 +232,14 @@ try:
         )
         wrapper = layer.self_attn.dsa_attn
         wrapper._pto_csa_runtime = None
+
+        def ensure_native_metadata():
+            # Match ACLGraphWrapper's Native pre-replay producer, including
+            # frameworks that defer SAS/QLI generation for the PTO model shell.
+            for prefix in (wrapper.dsa_attn.layer_name, wrapper.indexer.k_cache.prefix):
+                f["metadata"][prefix].decode.ensure_native_metadata()
+
+        ensure_native_metadata()
         output_owner = torch.full(
             (TOKEN_CAPACITY + 2, *f["hidden"].shape[1:]),
             17.0,
@@ -406,7 +423,13 @@ try:
         with torch.npu.graph(pto_graph, stream=pto_stream):
             contract = pto_call(capturing=True)
         submitted = runtime.submissions
-        step = {"state": f"A_full{TOKEN_CAPACITY}_capacity{REQUEST_CAPACITY}", "comparisons": {}, "full_eager": {}}
+        step = {
+            "state": f"A_full{TOKEN_CAPACITY}_capacity{REQUEST_CAPACITY}",
+            "comparisons": {},
+            "full_eager": {},
+            "active_requests": ACTIVE_REQUESTS,
+            "actual_tokens": f["actual_tokens"],
+        }
         record["steps"].append(step)
         for repeat in range(2):
             reset()
@@ -431,15 +454,24 @@ try:
                     record["first_difference"] = name
                     raise FirstDifference(name)
         step["pass"] = True
-        if mixed_requested:
+        if mixed_requested or options.active_requests is not None:
             initial_hidden = f["hidden"].clone()
             tables = {name: group["common"].block_table_tensor.clone() for name, group in f["groups"].items()}
-            for label, queries, hidden in (
-                ("B_mixed18_bucket24_dummy6", [1, 5, 6, 6], -initial_hidden),
-                ("A_return24_capacity5", [6] * 4, initial_hidden),
-            ):
+            cases = (
+                (
+                    ("B_mixed18_bucket24_dummy6", [1, 5, 6, 6], -initial_hidden),
+                    ("A_return24_capacity5", [6] * 4, initial_hidden),
+                )
+                if options.active_requests is None
+                else (
+                    (f"B_active{options.active_requests}_bucket240", [6] * options.active_requests, -initial_hidden),
+                    ("A_return240_capacity40", [6] * 40, initial_hidden),
+                )
+            )
+            for label, queries, hidden in cases:
                 f["hidden"].copy_(hidden)
                 refresh_fixture(f, layer.self_attn, queries, tables, fixture_module)
+                ensure_native_metadata()
                 current_inputs = tensor_inputs(f)
                 step = {
                     "state": label,
@@ -519,8 +551,9 @@ try:
         record.update(
             complete=True,
             **{"pass": True},
-            capacity_control_only=not mixed_requested,
+            capacity_control_only=not (mixed_requested or options.active_requests is not None),
             mixed_replay_validated=mixed_requested,
+            bucket_active_replay_validated=options.active_requests is not None,
         )
 except FirstDifference:
     record["complete"] = True

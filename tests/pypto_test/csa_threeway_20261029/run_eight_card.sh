@@ -14,6 +14,7 @@ shift 4
 [[ "$arm" =~ ^(native|ours)$ && "$label" =~ ^[a-z0-9-]+$ ]]
 startup=()
 probe=()
+tokens=()
 while (( $# )); do
   case "$1" in
     --startup-only)
@@ -30,9 +31,15 @@ while (( $# )); do
       probe=(--first-step-probe)
       shift
       ;;
+    --inspect-token-sequence)
+      [[ "$arm" == ours && ${#tokens[@]} == 0 ]]
+      tokens=(--inspect-token-sequence)
+      shift
+      ;;
     *) exit 2 ;;
   esac
 done
+(( ${#startup[@]} + ${#probe[@]} + ${#tokens[@]} <= 1 ))
 snapshot="$cohort/$arm/source"
 python - "$snapshot/../manifest.json" <<'PY'
 import json
@@ -60,4 +67,4 @@ printf 'TASK_RUN_START %s\n' "$(date -Iseconds)"
 printf 'TASK_DEVICE=%s SDK=%s PTOAS_ROOT=%s ASCEND_HOME_PATH=%s\n' \
   "$TASK_DEVICE" "$CSA_SHARED_TOOLCHAIN_RELEASE" "$PTOAS_ROOT" "$ASCEND_HOME_PATH"
 trap 'printf "TASK_RUN_END %s\n" "$(date -Iseconds)"' EXIT
-python "$here/launch.py" "$snapshot" "$bank" "$out" "${args[@]}" "${startup[@]}" "${probe[@]}"
+python "$here/launch.py" "$snapshot" "$bank" "$out" "${args[@]}" "${startup[@]}" "${probe[@]}" "${tokens[@]}"

@@ -12,7 +12,7 @@ import time
 from contextlib import suppress
 from pathlib import Path
 
-from postflight import check_reference_configuration, runtime_window_errors, validate
+from postflight import check_reference_configuration, runtime_window_errors, summarize_tokens, validate
 
 
 def stop_group(process, grace=5):
@@ -98,6 +98,35 @@ def prepare_first_step_runner(source):
     return runner, audit
 
 
+def prepare_token_runner(source):
+    original, audit = prepare_runtime_audit_runner(source)
+    scheduler = source / "tests/pypto_test/csa_threeway_20261029/scheduler.py"
+    frozen = json.loads((source.parent / "manifest.json").read_text())["files"]
+    scheduler_digest = hashlib.sha256(scheduler.read_bytes()).hexdigest()
+    assert scheduler_digest == frozen[str(scheduler.relative_to(source))], "frozen strict scheduler changed"
+    data = Path(__file__).with_name("token_diagnostic.py").read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    module = "token_diagnostic_" + digest[:12]
+    text = original.read_text()
+    old = '"scheduler_cls": "csa_threeway_20261029.scheduler.CheckedScheduler"'
+    assert text.count(old) == 1
+    text = text.replace(old, f'"scheduler_cls": "csa_threeway_20261029.{module}.TokenDiagnosticScheduler"')
+    runner = original.with_name(f"run_{module}.py")
+    helper = source / f"tests/pypto_test/csa_threeway_20261029/{module}.py"
+    for path, content in ((helper, data), (runner, text.encode())):
+        if path.exists():
+            assert path.read_bytes() == content, f"refusing to overwrite frozen test artifact: {path}"
+        else:
+            with path.open("xb") as handle:
+                handle.write(content)
+    audit.update(
+        token_scheduler_sha256=digest,
+        token_runner_sha256=hashlib.sha256(text.encode()).hexdigest(),
+        original_scheduler_sha256=scheduler_digest,
+    )
+    return runner, audit
+
+
 def first_step_passed(output):
     receipt = output / "FIRST_STEP_DIAGNOSTIC.json"
     report = output / "same_input_first_step.json"
@@ -144,6 +173,7 @@ def main():
     parser.add_argument("--startup-only", action="store_true")
     parser.add_argument("--pto-task-window", type=int, choices=(2048,))
     parser.add_argument("--first-step-probe", action="store_true")
+    parser.add_argument("--inspect-token-sequence", action="store_true")
     args = parser.parse_args()
 
     def interrupted(signum, _frame):
@@ -175,6 +205,10 @@ def main():
         assert manifest["arm"] == "ours" and dp == 8 and args.pto_task_window == 2048
         runner, runtime_audit = prepare_first_step_runner(source)
         os.environ["CSA_FIRST_STEP_OUTPUT"] = str(output)
+    if args.inspect_token_sequence:
+        assert not args.first_step_probe and not args.startup_only
+        assert manifest["arm"] == "ours" and dp == 8 and args.pto_task_window == 2048
+        runner, runtime_audit = prepare_token_runner(source)
     experiment = {
         "native_reference": str(args.reference) if args.reference else None,
         "arm": manifest["arm"],
@@ -196,6 +230,7 @@ def main():
         "pto_ring_task_window": args.pto_task_window,
         "runtime_audit": runtime_audit,
         "first_step_diagnostic": args.first_step_probe,
+        "inspect_token_sequence": args.inspect_token_sequence,
         "event_mode": 1,
         "eplb": False,
         "atomic_add": False,
@@ -285,6 +320,8 @@ def main():
             (output / "startup.json").write_text(json.dumps(result, indent=2) + "\n")
         else:
             result = validate(source, output, args.bank, manifest["arm"], args.reference)
+            if args.inspect_token_sequence:
+                status["token_diagnostic"] = summarize_tokens(output, args.reference, dp)
         status["postflight_passed"] = result["passed"]
         (output / "exit.json").write_text(json.dumps(status, indent=2) + "\n")
     print(json.dumps(status), flush=True)

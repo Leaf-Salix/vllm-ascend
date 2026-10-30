@@ -47,8 +47,11 @@ def test_audit_runner_preserves_original_frozen_source(tmp_path):
     observer = root / "tests/pypto_test/csa_threeway_20261029/observer.py"
     observer.parent.mkdir()
     observer.write_text("# frozen observer\n")
+    scheduler = observer.with_name("scheduler.py")
+    scheduler.write_text("# frozen strict scheduler\n")
     source = (
         b'config = {"worker_extension_cls": "csa_threeway_20261029.observer.TimedObserver"}\n'
+        b'scheduler = {"scheduler_cls": "csa_threeway_20261029.scheduler.CheckedScheduler"}\n'
         b"def run():\n"
         b'    args.worker_runtime_config = llm.collective_rpc("offline_runtime_config")\n'
     )
@@ -57,7 +60,8 @@ def test_audit_runner_preserves_original_frozen_source(tmp_path):
         json.dumps(
             {
                 "files": {
-                    str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in (original, observer)
+                    str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
+                    for p in (original, observer, scheduler)
                 }
             }
         )
@@ -71,6 +75,10 @@ def test_audit_runner_preserves_original_frozen_source(tmp_path):
     assert "FirstStepObserver" in diagnostic.read_text() and diagnostic != runner
     assert original.read_bytes() == source
     assert launch.prepare_first_step_runner(root) == (diagnostic, receipt)
+    token_runner, token_receipt = launch.prepare_token_runner(root)
+    ast.parse(token_runner.read_text())
+    assert "TokenDiagnosticScheduler" in token_runner.read_text() and original.read_bytes() == source
+    assert launch.prepare_token_runner(root) == (token_runner, token_receipt)
     runner.write_text("unexpected modification")
     with pytest.raises(AssertionError, match="refusing to overwrite"):
         launch.prepare_runtime_audit_runner(root)

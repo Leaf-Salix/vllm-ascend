@@ -9,7 +9,21 @@ label=${1:?}
 batch=${2:?}
 shift 2
 [[ "$label" =~ ^[a-z0-9-]+$ && ( "$batch" == 1 || "$batch" == 8 || "$batch" == 40 ) ]]
-if (( $# )); then [[ $# == 2 && "$1" == --device && "$2" == "$TASK_DEVICE" ]]; fi
+active=()
+while (( $# )); do
+  case "$1" in
+    --active-requests)
+      [[ "$batch" == 40 && $# -ge 2 && "$2" =~ ^([1-9]|[1-3][0-9])$ && ${#active[@]} == 0 ]]
+      active=(--active-requests "$2")
+      shift 2
+      ;;
+    --device)
+      [[ $# -ge 2 && "$2" == "$TASK_DEVICE" ]]
+      shift 2
+      ;;
+    *) exit 2 ;;
+  esac
+done
 out="$align_root/results/$label"
 test ! -e "$out"
 mkdir -p "$out"
@@ -26,4 +40,4 @@ timeout --signal=TERM --kill-after=15s 750s python \
   "$align_root/src/tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py" \
   --shared-toolchain --native-plugin-root "$SOURCE_ROOT" \
   "$align_root/src/tests/pypto_test/nal_native_alignment_20261027/probe_padding.py" \
-  "$out" --full-batch "$batch" "${args[@]}" > "$out/run.log" 2>&1
+  "$out" --full-batch "$batch" "${args[@]}" "${active[@]}" > "$out/run.log" 2>&1

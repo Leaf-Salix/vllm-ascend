@@ -1,8 +1,15 @@
 # 8K/B40 三方整模型测试：前置检查与首差记录
 
-日期：2026-10-29～31。本记录尚未完成整模型验收，不能作为新分支的 token 一致性或性能结论。
+日期：2026-10-29～31。本轮8K整模型输出token检查通过；接受事件严格一致性尚未通过，性能未形成新结论。
 
-最新状态：WO-A 修正接回后，T240 完整入口 35 个边界（至最终输出）均逐 bit 一致；
+最终token结果：固定共同框架`41ba392f`、我方数学包`65bebf7f`，
+TP1、DP=EP8，40个不同问题在每个rank重复，分8请求×5波、每请求192token；
+**8rank共320个请求副本、61,440个输出token全部与原Native v5逐个一致**。
+21CSA替换及实际FULL回放覆盖检查通过，HCA均Native，零抢占。
+接受事件轨迹不同，原严格postflight仍失败；不能据token结果宣称全程逐bit一致或公平性能可比。
+这是共同框架上当前数学包的限定结果，不是未测试软件栈或128K的结论。
+
+此前诊断摘要：WO-A 修正接回后，T240 完整入口 35 个边界（至最终输出）均逐 bit 一致；
 实际生产 55 参数 FULL 入口及 T6 回归也通过。新增 T40/B40、每请求 1 行的诊断入口
 35 边界逐 bit 通过；10 月 30 日下午环境恢复后，正式 T40 服务55入口也已通过。
 补测第 2 层发现主压缩 Norm 及 Indexer 权重投影首差；两处修正接回后，
@@ -20,6 +27,9 @@
 T6/T8/T240正式FULL回归均逐bit通过。整模型重试已在第36次草稿接受事件首差处停止：
 `h8192_q04`的PTO接受5、Native接受4；尚不能判定该步输出token是否分叉，整模型验收未通过。
 全程不使用前8卡。
+
+最新补充：修复观测终态后，真实模型首步NONE/T8、8请求各1行的21CSA同输入Native逐bit通过。
+后续独立token诊断已完成192token检查；接受事件首差仍保留，未改数学包。
 
 ## 目标与已授权范围
 
@@ -1149,3 +1159,88 @@ CPU回归专门模拟成功后下一次240进入，要求拒绝执行并保持�
 随后同配置重提`task_20261031_031035_2107052519`，label为`last8-ours-first-step-v2`。
 仅8–15、max780/内部720，原Native gold及数学不变，不跑Native2/128K或后续192生成。
 新helper为`first_step_bad9a51d655c.py`，完整SHA与派生runner凭证保存在prepare-v3记录。
+
+### 单次归属修复后的真实首步通过
+
+`task_20261031_031035_2107052519`已completed0，程序374.22秒，物理8–15，设备释放。
+header、21行、receipt均为`forward_id=1`，外层和每层实际均`NONE/T8/B8`，
+Q前缀`[0,1,2,3,4,5,6,7,8]`，实际seq lens为
+`[8394,8411,8394,8467,8411,8225,8394,8411]`。
+21个输出及105个物理cache carrier比较无不同byte；
+共享TopK、输入、输出及metadata恢复全部通过，实际生产55参数PTO入口未回退Native。
+这次首步标签一致、终态不再覆盖；原始证据为
+`evidence/eightcard/first-step-model-v2-evidence.tar.gz`。
+仍不等于FULL后续或192token通过；数学及原gold未改。
+
+### FULL240桶实际8请求：Native参考资格未过
+
+新增`run_window_check.sh <label> 40 --active-requests 8`，先满40捕获，
+再同图改8个真实S6请求、48有效行、192dummy行，最终拟返回满40。
+沿用全部guard，初始及fresh builder后显式确保Native SAS/QLI生产，旧mixed分支保留。
+CPU首次帮助入口包装漏目标helper目录而失败；补齐导入路径后CLI及7项policy检查通过0.07秒，未初始化NPU。
+
+独立review事先指出：Native图内compressor metadata固定捕获`num_reqs_actual=40`，
+B阶段fresh builder的8及SAS/QLI刷新不会改变这个标量。dummy的Q跨度仍为6，
+start=0、table=0，可能生成额外压缩slot；因此先把此case视为Native合同资格诊断。
+不以缩短dummy Q跨度或放宽写域规避，不把失败归为PTO数学差异。
+
+`task_20261031_034706_158045324099`在物理8运行49.86秒后退出1：
+满40控制七外界逐bit通过；B阶段Native第一次回放即guard失败：
+
+| Native B写域 | 超出fresh合法slot的byte | 首个allocation偏移 | 其余状态 |
+| --- | ---: | ---: | --- |
+| compressed cache | 936 | 128 | Native写域资格失败 |
+| Indexer key/scale页 | 129 | 128 | Native写域资格失败 |
+| SWA、主state、Indexer state | 0 | — | 通过 |
+
+该状态的PTO回放和返回A均未执行。不能将其当作可靠Native金值，
+也不能仅据原始NPUGraph的捕获标量合同认定真实整模型Native有bug。
+小原始证据为`evidence/eightcard/bucket240-active8-native-contract-v1-evidence.tar.gz`；
+大型tensor快照仅留227，未下载。
+
+### 将接受事件与输出token分开诊断
+
+原严格event35失败仍保留。新增独立`--inspect-token-sequence`：
+只把接受事件首差写`first_acceptance_difference_rankN.json`，不发STOP；
+token及输出长度依旧调用原Checker，首差立即停止。
+完整生成后仍执行原postflight，接受事件不同仍是`passed=false`及task exit1；
+另外`token_diagnostic.json`逐请求复核全部61440token，单列coverage、抢占和事件结果。
+因此token相同也不能冒充严格验收或性能同口径通过。
+原冻结scheduler/runner先验manifest，只新增hash helper；不修改数学、SDK或gold。
+
+227 CPU共25项回归通过5.37秒；实际派生runner导入通过、未初始化NPU，独立review无阻断。
+凭证为`evidence/eightcard/token-diagnostic-cpu-v1-evidence.tar.gz`。
+新runner为`run_token_diagnostic_b50e1e4a4382.py`，helper完整SHA及原scheduler SHA在prepare记录。
+`task_20261031_040432_255043622088`已提交，label为`last8-ours-8k-token-diagnostic-v1`；
+仍只本轮临时8–15、max780/内720，原40题分8×5波、192token、原Native v5不变，
+不跑Native2和128K；发现token首差即停。本项不用于性能比较。
+
+### 最终8K逐token结果：61440/61440一致
+
+`task_20261031_040432_255043622088`已结束；生成子进程exit0，执行418.63秒，约6分59秒，
+物理8–15。调度任务exit1来自保留的严格postflight失败，不是模型生成崩溃。
+本实验设备进程的精确路径/任务环境审计为空，没有遗留占卡。
+
+| 项目 | 本轮结果 |
+| --- | --- |
+| 真实模型 | DeepSeek-V4-Flash-0731-w8a8，75个正式分片 |
+| 共同框架 / 我方数学包 | `41ba392f` / `65bebf7f`，无新数学改动 |
+| 请求口径 | 每rank40题；8请求×5波，非40条同时活跃 |
+| 输出 | 8rank×40×192＝61,440token，逐个与原Native一致，错误0 |
+| 替换覆盖 | 21CSA均PTO；真实FULL回放、窗口/heap审计及HCA Native检查通过 |
+| 抢占 | 0 |
+| DSpark接受均值 | 3.6950182260，与Native均值相同；0..5长度均覆盖 |
+| 接受事件逐条一致 | 否，8rank均有差异；首差仍为q04 event35的`[5,5]`对`[5,4]` |
+| 原严格postflight | 失败，precision errors仅为上述8条接受事件差异，coverage errors为空 |
+| 本轮性能结论 | 无；418.63秒含加载、profile、图捕获和生成，不能算CSA延迟或相对性能 |
+
+因此，先前“接受事件首差”并未在这40题的192token输出中形成token首差。
+不能将接受率均值相同推成接受轨迹相同，也不能将token一致推成所有中间浮点值逐bit一致。
+本轮达到了用户要求的最低逐token口径；原更严格门禁继续保留为未通过。
+单层原始FULL桶子集的Native金值合同问题也继续保留，不与整模型token结论混计。
+
+原始8rank输出token、逐请求接受事件、全部覆盖/运行时凭证、首事件差异及日志在
+`evidence/eightcard/last8-token-diagnostic-v1-evidence.tar.gz`。
+复现沿用上述`run_eight_card.sh`，额外传`--inspect-token-sequence`，
+显式窗口2048、同一Native gold及相同模型/bank/参数；需重新取得当轮八卡授权。
+默认单卡任务仍仅使用8–13、15；本轮14卡临时许可不能作为后续默认。

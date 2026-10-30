@@ -37,6 +37,46 @@ def acceptance_events(path):
     return {row["key"]: row["events"] for row in map(json.loads, path.read_text().splitlines())}
 
 
+def summarize_tokens(root, reference, dp):
+    """独立逐请求核对192token；原严格postflight及接受首差均保留。"""
+    token_errors, event_errors, compared = [], [], 0
+    for rank in range(dp):
+        try:
+            actual = json.loads((root / f"rank{rank}.mixed.json").read_text())["requests"]
+            native = json.loads((reference / f"rank{rank}.mixed.json").read_text())["requests"]
+            a = {row["key"]: row["output_token_ids"] for row in actual}
+            n = {row["key"]: row["output_token_ids"] for row in native}
+            if len(actual) != len(a) or len(native) != len(n) or len(a) != 40 or a.keys() != n.keys():
+                token_errors.append(f"rank{rank}: request identity/count differs")
+            if not all(row["finished"] for row in actual):
+                token_errors.append(f"rank{rank}: unfinished requests")
+            for key, value in a.items():
+                if len(value) != 192 or value != n.get(key):
+                    token_errors.append(f"rank{rank}: {key} tokens differ or incomplete")
+                compared += len(value)
+            if acceptance_events(root / f"request_stats_rank{rank}.jsonl") != acceptance_events(
+                reference / f"request_stats_rank{rank}.jsonl"
+            ):
+                event_errors.append(f"rank{rank}: acceptance events differ")
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            token_errors.append(f"rank{rank}: {error}")
+            event_errors.append(f"rank{rank}: missing or invalid evidence")
+    strict = json.loads((root / "postflight.json").read_text())
+    result = {
+        "scope": "token diagnostic only; original strict postflight unchanged; not a performance comparison",
+        "tokens_equal": not token_errors and compared == dp * 40 * 192,
+        "compared_tokens": compared,
+        "acceptance_events_equal": not event_errors,
+        "token_errors": token_errors,
+        "event_errors": event_errors,
+        "strict_postflight_passed": strict["passed"],
+        "csa_coverage_errors": strict["coverage_errors"],
+        "zero_preemptions": strict.get("acceptance", {}).get("total_preemptions") == 0,
+    }
+    (root / "token_diagnostic.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    return result
+
+
 def timing_inputs(value):
     return [
         (row["actual_requests"], row["actual_tokens"], row["padded_tokens"], row["positions"])
