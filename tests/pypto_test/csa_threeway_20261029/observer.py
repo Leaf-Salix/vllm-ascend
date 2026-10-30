@@ -4,6 +4,7 @@
 import math
 import time
 from collections import Counter
+from functools import wraps
 
 import torch
 from csa_threeway_20261029.runtime import configure_runtime
@@ -24,6 +25,20 @@ class TimedObserver(TNDObserver):
         self._threeway_samples = []
         self._threeway_seen = 0
         self._threeway_descriptors = Counter()
+        self._threeway_in_dummy_batch = False
+        self._threeway_dummy_run = getattr(self.model_runner, "_dummy_run", None)
+        if self._threeway_dummy_run is not None:
+
+            @wraps(self._threeway_dummy_run)
+            def dummy_run(*args, **kwargs):
+                previous = self._threeway_in_dummy_batch
+                self._threeway_in_dummy_batch = True
+                try:
+                    return self._threeway_dummy_run(*args, **kwargs)
+                finally:
+                    self._threeway_in_dummy_batch = previous
+
+            self.model_runner._dummy_run = dummy_run
         self._threeway_original = self.model_runner._model_forward
         prefix = self._offline_csa_layer_names[0]
 
@@ -49,10 +64,12 @@ class TimedObserver(TNDObserver):
                         getattr(request, "max_seq_lens", None),
                         table.shape[1] if table is not None else None,
                         context.cudagraph_runtime_mode.name,
+                        self._threeway_in_dummy_batch,
                     )
                 ] += 1
             selected = (
                 not context.capturing
+                and not self._threeway_in_dummy_batch
                 and not getattr(context, "is_draft_model", False)
                 and metadata is not None
                 and not metadata.num_prefills
@@ -90,6 +107,8 @@ class TimedObserver(TNDObserver):
 
     def offline_end_observation(self):
         self.model_runner._model_forward = self._threeway_original
+        if self._threeway_dummy_run is not None:
+            self.model_runner._dummy_run = self._threeway_dummy_run
         # All requests have completed before this RPC. No step-level waits.
         torch.npu.synchronize()
         samples = []
@@ -109,9 +128,10 @@ class TimedObserver(TNDObserver):
                 max_seq_len=length,
                 compressed_table_columns=columns,
                 requested_mode=mode,
+                is_dummy_batch=dummy,
                 steps=steps,
             )
-            for (t, b, actual_b, actual_t, length, columns, mode), steps in self._threeway_descriptors.items()
+            for (t, b, actual_b, actual_t, length, columns, mode, dummy), steps in self._threeway_descriptors.items()
         ]
         result["threeway_timing"] = {
             "scope": (

@@ -119,6 +119,7 @@ def test_different_native_topology_or_input_rejected(field):
             "atomic_add",
             "capture_sizes",
             "precision_only",
+            "request_wave_size",
         )
     }
     native = copy.deepcopy(actual)

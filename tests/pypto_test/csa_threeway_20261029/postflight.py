@@ -24,6 +24,7 @@ def check_reference_configuration(actual, native):
         "atomic_add",
         "capture_sizes",
         "precision_only",
+        "request_wave_size",
     )
     if native["arm"] != "native" or native.get("startup_only", False):
         raise ValueError("Reference must be a complete Native generation, not startup-only")

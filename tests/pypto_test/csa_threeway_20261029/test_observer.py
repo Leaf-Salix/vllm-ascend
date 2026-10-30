@@ -62,7 +62,18 @@ def test_native_timing_is_prewarmed_and_only_resolved_at_end(monkeypatch):
             return list(range(184))
 
     observer.model_runner = SimpleNamespace(_model_forward=original, _dsa_positions_cpu_buf=Positions())
+
+    def dummy_run():
+        observer.model_runner._model_forward(6)
+        raise RuntimeError("dummy-control")
+
+    observer.model_runner._dummy_run = dummy_run
     observer.offline_begin_observation()
+    try:
+        observer.model_runner._dummy_run()
+    except RuntimeError as error:
+        assert str(error) == "dummy-control"
+    assert not observer._threeway_in_dummy_batch
     for _ in range(28):
         observer.model_runner._model_forward(240)
     # No PTO runtime is needed for the Native arm to be timed.
@@ -82,3 +93,5 @@ def test_native_timing_is_prewarmed_and_only_resolved_at_end(monkeypatch):
     assert len(result["threeway_timing"]["samples"]) == 20
     assert calls.count("synchronize") == 1 and calls.count("elapsed") == 39
     assert observer.model_runner._model_forward is original
+    assert observer.model_runner._dummy_run is dummy_run
+    assert any(row["is_dummy_batch"] and row["steps"] == 1 for row in result["policy_descriptors"])

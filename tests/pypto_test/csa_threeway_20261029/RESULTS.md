@@ -12,6 +12,10 @@
 用户新增 14 卡禁用后，已终止 16 卡 Native，本轮整模型仍未完成。
 单卡只使用 8–13、15，原精度基准保留。
 
+本日后续另获本轮八卡`0,8,9,10,11,12,13,15`授权：Native v4已生成全部61,440个token，
+但有480次抢占，未通过且不能作gold。v5改为40题分8题×5波，保留零抢占门禁，
+当前新的Native基准等待资源；PTO尚未提交，仍无当前整模型token一致性结论。
+
 ## 目标与已授权范围
 
 参考 nalinaly 的
@@ -752,7 +756,7 @@ PTO运行前及最终汇总都核验Native基准的TP/DP/EP、卡序、bank、�
 | 阶段 | 结果 |
 | --- | --- |
 | 八卡Native启动/容量预检 | `task_20261030_191040_59142222382`，500.63秒退出；权重载入48.2755GB，KV分配OOM，未生成token |
-| 同拓扑Native 192 token基准 | 修正共同KV预算后，`task_20261030_193423_12749609191`排队中 |
+| 同拓扑Native 192 token基准 | v4生成完成但有抢占，不能作gold；五波方案v5 `task_20261030_211344_38317151314`排队中 |
 | 当前完整PTO CSA 192 token | 待Native基准通过 |
 
 复现先运行`prepare.py <新cohort> --ours 65bebf7f --decode-dp 8 --arms native ours`，
@@ -786,7 +790,8 @@ task-submit --device auto --device-num 8 --max-time 780 \
 这不是同时活跃B40的性能测试。PTO额外公开ring容量共1.25GiB，
 不能仅按Native预算选择6000块并假定PTO也能放下，因此选更保守的4000。
 测试进程内包装现有`get_kv_cache_configs`及engine引用：
-原函数完成CPU分配计划后，将每个物理缓存tensor按512字节对齐计总量，
+原函数完成CPU分配计划后，遍历`kv_cache_tensors`；本实验connector开启，
+每个实际raw分配计入`size + 2MiB` backing，再按512字节对齐计总量，`shared_by`别名不重复计，
 逐配置对照**原profile可用字节数**；超过预算在实际KV分配前直接报错。
 不修改共享vLLM文件或容量算法；此门禁也不保证后续graph/workspace峰值必然可容纳。
 Native与我方两臂均完成无设备实际导入，确认两个函数引用相同且门禁生效。
@@ -811,3 +816,60 @@ v2 public T6/T40/T240根也已在227 CPU全部通过，分别191.83/195.20/220.9
 `npu_initialized=false`、`worker_created=false`；对应`evidence/eightcard/eightcard-ours-t*-cache-v2.json`。
 新冻结路径的artifact identity与v1不同，不能写成同一binary命中；SDK和vLLM仍未重装/重编。
 测试入口、首轮容量失败与复现方案已在`3e1d3124`正常推送到本分支，原数学与精度基准保留。
+
+### 20 时 48 分：修正测试门禁 API，尚无 token 结果
+
+v2任务实际20:09:31开始、20:13:54结束，运行263.56秒，设备已释放。
+自然KV预算仍约5.61GiB，统一4000块的CPU配置生成成功，报告94,456-token缓存容量；
+但测试门禁错误读取`KVCacheConfig.tensors`，当前版本字段是`kv_cache_tensors`，
+随后抛`AttributeError`。未进入生成，不计为CSA数值失败，也不能当作Native基准。
+先前CPU测试用模拟对象重复了错误字段，因而没有发现这个API问题。
+
+修正后CPU回归直接构造227实际vLLM的`KVCacheConfig`、`KVCacheTensor`，
+覆盖真实字段、size字节单位、512对齐、超预算拒绝、配置数量不一致、connector每分配额外2MiB。
+独立复核确认backing开销必须计入，未通过放宽门禁让任务继续。
+最终v4快照的24项CPU检查通过，耗时8.83秒；两臂实际导入/别名检查也通过，均无NPU。
+v3只做无设备预检，没有NPU任务；v4保留原数学与4000块预算，旧v1/v2/v3均保留。
+
+重新提交的Native为`task_20261030_204818_311256912632`，20:48:18提交，仍使用批准的八卡，
+max780/内部720秒；PTO仍未提交。公共T6/T40/T240的三个独立constexpr根在227 CPU并行预热，
+每进程仍配置四路编译，不占NPU，不重建共享SDK或vLLM。
+观察到19:59至20:40有一次长间隔，不能声称该区间满足每5分钟观察；
+实际设备任务仍受硬时限且已在4分24秒退出。
+后续在本回合前台SSH会话每45秒只读检查唯一任务，完成即退出，不创建scheduler/自动化。
+目前尚无当前版本真实整模型192-token通过结论。
+
+### 21 时 13 分：Native 完成生成，但拒绝使用有抢占的结果
+
+v4进程正常退出，运行378.59秒；8个rank均输出40条完整请求，每条192token，
+合计61,440个输出token。Native覆盖检查无错误，接受长度0～5全部覆盖，
+加权平均接受数3.67236，Prometheus与逐请求计数一致。
+但累计抢占480次，224份副本请求发生过抢占，因此postflight拒绝。
+该结果不作为Native gold，未据此提交PTO，也未放宽零抢占要求。
+满B40计时窗口未形成，不提供满并发性能结论。设备已在约6分19秒后释放。
+
+v5仍从相同40题bank取全部不同请求，改为每波8题、共5波：
+偏移0/8/16/24/32，每波完成后在客户端等齐8rank，再提交下一波。
+5波共用一次begin/end observation，累计保存全部请求token、接受事件和路由；
+模型`max_num_seqs=40`及capture6/240不变，只限制本轮测试实际入场数量。
+Native与PTO采用同一分波，基准配置门禁同时比较`request_wave_size=8`，
+不能复用v4的40题同时提交结果。
+
+另确认观察中的FULL6、L6、正请求数1可能来自
+`execute_dummy_batch → model_runner._dummy_run(6, uniform_decode=True)`，
+这条idle EP路径本来就构造正token数，不能按attention metadata正数判为用户请求。
+v5测试观察层只读包装真实`_dummy_run`入口，try/finally记录并恢复调用来源标记，
+结束观察时恢复原方法；完整descriptor保留`is_dummy_batch`。
+仅明确来自该调用路径的synthetic步骤不计用户CSA路由，
+**不按history阈值或输出误差豁免**，真实用户步骤的21CSA全提交/FULL全回放要求不变。
+
+227 CPU共25项检查通过，耗时6.59秒，包括40题5波、单观察窗口、dummy异常恢复，
+两个冻结副本的相关文件AST及实际导入检查通过。新v5 T6/T8/T40/T240 public根均在227 CPU通过，
+T8显式requests8，用于每波首步；均无NPU或Worker，不重建SDK/vLLM。
+新基准`task_20261030_211344_38317151314`于21:13:44提交，继续使用精确批准八卡、
+max780/内部720秒；当前等待资源，PTO尚未提交。
+复现prepare参数在v4基础上增加`--request-wave-size 8`；数学仍05989cfb/65bebf7f。
+Native v4的完整8rank结果、逐请求统计、配置和一份日志保存在
+`evidence/eightcard/eightcard-native-v4-generated-with-preemptions.tar.gz`，仅作失败历史。
+v5四个CPU根T6/T8/T40/T240分别191.41/194.30/196.69/212.68秒通过；
+`evidence/eightcard/eightcard-ours-t*-cache-v5.json`与25项入口回归日志保留于同一目录。

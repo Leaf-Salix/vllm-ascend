@@ -7,11 +7,19 @@ from functools import wraps
 RING_HEAP = (256 << 20, 512 << 20, 256 << 20, 256 << 20)
 
 
-def check_kv_budget(configs, budgets):
+def check_kv_budget(configs, budgets, backing_extra_bytes=0):
     rows = []
     for rank, (config, budget) in enumerate(zip(configs, budgets, strict=True)):
-        planned = sum(((tensor.size + 511) // 512) * 512 for tensor in config.tensors)
-        rows.append({"rank": rank, "planned_bytes": planned, "profiled_available_bytes": budget})
+        planned = sum(((tensor.size + backing_extra_bytes + 511) // 512) * 512 for tensor in config.kv_cache_tensors)
+        rows.append(
+            {
+                "rank": rank,
+                "planned_bytes": planned,
+                "profiled_available_bytes": budget,
+                "raw_allocations": len(config.kv_cache_tensors),
+                "backing_extra_bytes_per_tensor": backing_extra_bytes,
+            }
+        )
         if planned > budget:
             raise RuntimeError(f"EIGHT_CARD_KV_BUDGET_EXCEEDED {rows[-1]}")
     return rows
@@ -30,7 +38,9 @@ def install_capacity_guard():
     def guarded(config, specs, available_memory):
         budgets = list(available_memory)
         result = original(config, specs, available_memory)
-        print("EIGHT_CARD_KV_BUDGET " + json.dumps(check_kv_budget(result, budgets)), flush=True)
+        # KV connector requests size+2MiB backing before taking an aligned view.
+        extra = (2 << 20) if config.kv_transfer_config is not None else 0
+        print("EIGHT_CARD_KV_BUDGET " + json.dumps(check_kv_budget(result, budgets, extra)), flush=True)
         return result
 
     guarded._eight_card_guard = True

@@ -48,6 +48,13 @@ def adapt_precision_observer(source):
                 self._tnd_execution_routes[(*route, replayed, resubmitted, all_submitted)] += 1"""
     assert text.count(original) == 1
     text = text.replace(original, replacement)
+    original = 'if not context.capturing and not getattr(context, "is_draft_model", False):'
+    assert text.count(original) == 1
+    text = text.replace(
+        original,
+        'if (not context.capturing and not getattr(context, "is_draft_model", False)\n'
+        '                    and not getattr(self, "_threeway_in_dummy_batch", False)):',
+    )
     original = "python_resubmitted=resubmitted,"
     assert text.count(original) == 1
     text = text.replace(original, original + "\n                all_csa_submitted=all_submitted,")
@@ -68,6 +75,29 @@ def adapt_precision_observer(source):
     )
 
 
+def adapt_request_waves(source, wave_size):
+    mixed = source / "tests/pypto_test/low_acceptance_20261001/mixed.py"
+    text = mixed.read_text()
+    end_observation = "llm.collective_rpc('offline_end_observation')"
+    begin_observation = "    llm.collective_rpc('offline_begin_observation')\n"
+    replacements = [
+        ("        llm.collective_rpc('offline_begin_observation')\n", ""),
+        (
+            "    for offset in range(0, len(chosen), args.batch):",
+            begin_observation + f"    for offset in range(0, len(chosen), {wave_size}):",
+        ),
+        ("chunk = chosen[offset:offset + args.batch]", f"chunk = chosen[offset:offset + {wave_size}]"),
+        (
+            "        observation = llm.collective_rpc('offline_end_observation')",
+            f"        observation = {end_observation} if offset + {wave_size} >= len(chosen) else []",
+        ),
+    ]
+    for original, replacement in replacements:
+        assert text.count(original) == 1, original
+        text = text.replace(original, replacement)
+    mixed.write_text(text)
+
+
 def export(repo, revision, paths, target):
     archive = subprocess.check_output(["git", "-C", str(repo), "archive", revision, "--", *paths])
     with tarfile.open(fileobj=io.BytesIO(archive)) as stream:
@@ -85,6 +115,7 @@ def main():
     parser.add_argument("--decode-dp", type=int, choices=(8, 16), default=16)
     parser.add_argument("--gpu-blocks", type=int, default=22000)
     parser.add_argument("--precision-only", action="store_true")
+    parser.add_argument("--request-wave-size", type=int, choices=(8, 40), default=40)
     parser.add_argument(
         "--arms", nargs="+", choices=("native", "ours", "nalinaly"), default=("native", "ours", "nalinaly")
     )
@@ -184,6 +215,9 @@ def main():
             adapt_eight_card_tests(source)
         if args.precision_only:
             adapt_precision_observer(source)
+        if args.request_wave_size != 40:
+            assert args.precision_only
+            adapt_request_waves(source, args.request_wave_size)
         files = {
             str(path.relative_to(source)): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in sorted(source.rglob("*"))
@@ -202,6 +236,7 @@ def main():
             "HCA": "native",
             "decode_dp": args.decode_dp,
             "precision_only": args.precision_only,
+            "request_wave_size": args.request_wave_size,
             "test_adaptations": ["CSA decode DP8 CLI gate", "eight-rank mixed barrier and analysis"]
             if args.decode_dp == 8
             else [],

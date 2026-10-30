@@ -71,6 +71,7 @@ def main():
         "HCA": "native",
         "gpu_blocks_override": manifest["gpu_blocks_override"],
         "precision_only": manifest.get("precision_only", False),
+        "request_wave_size": manifest.get("request_wave_size", 40),
         "runtime_ring_heap_bytes": [256 << 20, 512 << 20, 256 << 20, 256 << 20],
         "event_mode": 1,
         "eplb": False,
