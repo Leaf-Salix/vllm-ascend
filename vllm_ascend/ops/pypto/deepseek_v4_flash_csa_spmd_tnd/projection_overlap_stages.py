@@ -42,7 +42,7 @@
 import pypto.language as pl
 
 from .indexer_compressor_output_stages import indexer_compressor_hadamard_stage
-from .indexer_query_stages import indexer_weights_project_stage
+from .indexer_native_query_stages import native_indexer_weights_project_stage as indexer_weights_project_stage
 from .kv_precision_dispatch import kv_precision_project_stage as kv_project_stage
 from .main_native_projection_stages import main_native_projection_stage
 from .phase_sync import publish_phase, wait_producer, wait_row_owners

@@ -5,7 +5,11 @@
 最新状态：WO-A 修正接回后，T240 完整入口 35 个边界（至最终输出）均逐 bit 一致；
 实际生产 55 参数 FULL 入口及 T6 回归也通过。新增 T40/B40、每请求 1 行的诊断入口
 35 边界逐 bit 通过；10 月 30 日下午环境恢复后，正式 T40 服务55入口也已通过。
-16 卡 Native 已按原授权重新提交，本轮真实整模型仍待完成，原精度基准保留。
+补测第 2 层发现主压缩 Norm 及 Indexer 权重投影首差；两处修正接回后，
+**第 2、42 层 T240/B40 的 35 个 Native 边界均全部逐 bit 一致**；
+第 4 层正式 55 参数服务 FULL 入口回归也通过，未回退 Native。
+用户新增 14 卡禁用后，已终止 16 卡 Native，本轮整模型仍未完成。
+单卡只使用 8–13、15，原精度基准保留。
 
 ## 目标与已授权范围
 
@@ -15,7 +19,8 @@
 
 | 项目 | 本轮设置 |
 | --- | --- |
-| 我方基准 | `da6b14f0ac158b2b9675dfb79b605a3c46bd90fd` |
+| 原小 T 基准 | `da6b14f0ac158b2b9675dfb79b605a3c46bd90fd` |
+| 修正前正式 T240 基准 | `a3498431af3a9d8c9125a44c2a6cd8fcbea829e2`，模型 v4 快照保留 |
 | nalinaly 初始 / 更新后的 CSA 提交 | `41ba392f` / `79ea6d3c8460338a172cb5570d14999d5a544262` |
 | 当前分支 | `dev/pypto-dsv4-csa-nal-tnd-native-align-20261027-codex` |
 | 共同框架计划 | 三方采用 `41ba392f`；我方和 nalinaly 分别覆盖完整 TND SPMD 包 |
@@ -24,14 +29,14 @@
 | 替换范围 | CSA；HCA 均保留 Native |
 | 配置 | 确定性 level=1、HCCL=true、NZ2、atomic=0、EPLB 关闭 |
 | FULL 档位 | 6、240；草稿 5 token；temperature=0 |
-| 资源 | 用户已明确批准本轮三方 16 卡 8K 测试；前置单卡显式使用物理 15 |
+| 资源 | 本轮原获 16 卡批准；后新增 14 卡禁用，16 卡任务已终止，单卡限定 8–13、15 |
 | 限时 | 单卡任务 780 秒，进程 750 秒加最多 15 秒清理；整模型计划 720 秒执行上限 |
 
 `prepare.py` 的共同框架方案用于隔离 CSA 算术差异，因此今后的整模型结果应写成
 “我方数学包在共同框架上的结果”，不能写成未经修改的 `da6b14f0` 完整软件栈结果。
 当前 v4 快照已冻结；三方 preflight 及四项公共模块缓存预热通过，
-本轮 Native 16 卡基线因后述共享临时目录故障，在获得设备前撤下；环境恢复后已重新提交，
-此前没有执行过本轮 Native 模型。两份整模型 CSA 尚未提交。
+本轮 Native 16 卡基线因后述共享临时目录故障，在获得设备前撤下；环境恢复后重新提交，
+后因 14 卡禁用而终止，未完成有效整模型结果。两份整模型 CSA 尚未提交。
 
 ## 固定输入与工具链
 
@@ -493,3 +498,154 @@ T40/B40/query1 下，两者会选择不同的半叶 UB 路径。因此本次诊�
 自身提交元数据已确认完整命令、显式物理0–15、设备池及780秒上限；内部仍720秒。
 此任务尚在等待调度，将作为本轮首次实际执行的 Native 基线，不是 Native2。
 GitHub 再次查询的 nalinaly 分支 tip 仍为 `79ea6d3c`，本轮继续沿用既有冻结版本。
+
+## 10 月 30 日：第 2 层补测与压缩 Norm 首差定位
+
+用户要求优先补单卡精度。诊断新增 `--layer`，默认第 4 层不变；生产控制快照记录层号，
+后续 Native 观测显式验证同层。先用真实第 2 层权重、8K 历史、B40/T240、各请求 6 行，
+不把单层合成 hidden/history 对拍当成整模型 token 验收。
+
+| 验证 | 任务 | 结果 / 脚本时间 |
+| --- | --- | --- |
+| 第 2 层生产 FULL/eager 控制 | `task_20261030_161802_413690422912` | 完成，35.677 秒；仅保存生产参考，尚未对拍 Native |
+| 同输入 Native 分模块观测 | `task_20261030_162039_122281819` | 前 11 边界逐 bit 一致；主压缩 KV 首差，39.422 秒 |
+| 同 pooled 的 Norm 单因素验证 | `task_20261030_165913_122872215557` | 物理 8，12.148 秒；直接除法臂通过，三次 FULL 回放与保护区通过 |
+
+首差为 `main_compressed_cache` 的 `[2114,0,0,501]`，仅一个 BF16 元素：
+我方为 1.8125，Native 为 1.8046875，差 0.0078125。第 42 层及混合请求补测随即停止。
+同次观测/生产等价、Native 重复、压缩 state、此前 Q/KV/RoPE 边界均通过；
+不能仅因任务 exit=0 就认为精度通过，本项 `complete=True, pass=False`。
+
+227 离线定位把该点映射到 compact 第 32 行、闭合 token 195、RoPE 第 53 列。
+我方 RoPE 后 FP32 为 1.8085938692092896，仅比相邻 BF16 中点 1.80859375 高一个 FP32 ULP。
+Native `arch32/rms_norm.h` 的 `RowDivs` 是先直接除以 sqrt，再乘 gamma；
+原 PTO 实现为先 recip，再乘 pooled。Native 没有在 Norm 与 RoPE 之间额外舍入 BF16。
+
+### 单因素方案与结果
+
+使用本次保存的全部 40 行有效 pooled、BF16 gamma、compact cos/sin，完整计算 512 列，
+只改变 Norm 除法，保持平方和树、eps、gamma、RoPE 两次乘法再加法及末端 BF16 不变：
+
+| 检查 | 不同元素数 |
+| --- | --- |
+| 原 recip-mul 微根对保存的生产 FP32，全部 512 列 | **0**，先确认观测有效 |
+| 原微根 BF16 对 Native 融合 compressor | **1**，精确复现 `[32,501]` |
+| 直接除法臂 BF16 对 Native 融合 compressor | **0** |
+| 两臂各三次 FULL graph 对自身 eager | **0** |
+
+微根先在 227 登录端 CPU 编译，明确没有 NPU 初始化或 Worker；设备任务只执行缓存产物。
+诊断文件是本目录相邻的 `nal_native_alignment_20261027/compressor_rope_kernels.py`、
+`precompile_compressor_rope.py`、`probe_comprope.py`。后者通过
+`COMPRESSOR_ROPE_REFERENCE=<原观察目录>/observation.pt` 固定输入；命令为
+`run_rms.sh <新label> comprope`。任务使用一个完整 shell 命令字符串提交，
+外层 780 秒、内层 750 秒加 15 秒退出清理上限。
+
+轻量证据见 `evidence/t240-layer2-native-v1.json`、`layer2-compressor-cpu-focus.json`、
+`layer2-compressor-rope-cache-v2.json`、`layer2-compressor-rope-native-v1.json`。
+独立复核确认正式补丁只改 Norm 的 NoPE/RoPE 两处为直接除法；原 `a3498431` 数学基准与
+三方 v4 冻结快照保留。微根通过不能推广为整层或整模型通过。
+
+修正后的完整 debug57/probe85 根无设备编译分别耗时 208.147/211.424 秒，无 NPU/Worker。
+第 2 层生产控制 `task_20261030_170512_140116317675` 耗时 34.168 秒；
+Native 观测 `task_20261030_170843_149141030816` 耗时 63.958 秒，均使用物理 8。
+**主压缩 KV 首差消失，前 30 个精度边界逐 bit 一致；新的首差是 `qli_weights_fp16`，2 个元素。**
+因此完整第 2 层仍为 `complete=True, pass=False`；未测第 42 层或恢复整模型。
+修正后证据见 `evidence/t240-layer2-direct-native-v1.json`。
+
+新的差异坐标为 `[73,55]`、`[188,48]`，我方/Native 分别为
+`-1.8715858459472656e-5 / -1.8596649169921875e-5` 和
+`-0.00015354156494140625 / -0.0001544952392578125`。
+正式权重投影目前按四份 K1024 部分和（每份两段 K512）再左折叠；
+已保留 Native 的投影 BF16、乘系数 BF16、consumer FP16 边界。
+下一微测试固定保存的输入、真实第 2 层权重与舍入，只隔离 K 累加，不能先认定自然升序就是 Native 顺序。
+
+### Indexer 权重投影单因素结果
+
+`probe_weight240.py` 固定同次保存的 Native 输入与第 2 层正式 BF16 权重，
+先用 Native `F.linear → scale → half` 重放三份实际 hook，全部逐 bit 通过。
+MODE0 必须完整复现我方已保存的 FP32 系数；随后仅改投影累加，保持两处 BF16 边界。
+
+| 臂 | 投影 BF16 不同元素 | scale 后 BF16 | consumer FP16 |
+| --- | --- | --- | --- |
+| 0：原四份 K1024 partial，各含两段 K512，再左折叠 | 5 | 5 | 2 |
+| 1：M16/N64 不变，连续 K512 自然序 | 6 | 6 | 4 |
+| 2：连续 K256 自然序 | 6 | 6 | 4 |
+| 3：M16/N64/K256 不变，按行块调整 K 起点与方向 | **0** | **0** | **0** |
+
+三臂负控任务 `task_20261030_172241_186394630064`（20.685 秒）排除“只要连续累加就会对齐”；
+四臂任务 `task_20261030_172649_19539362045`（20.346 秒）确认 MODE3。
+均使用物理 8，每臂三次 FULL graph 对自身 eager 逐 bit 一致，保护区及只读输入检查通过。
+负结果没有用放宽阈值改成通过，也没有采用误差更大的自然序。
+
+MODE3 参考旧精度基准对 T240 的标定，但以上结论来自本次 CANN 9.2 与真实第 2 层输入的验证：
+`rb = row // 16`，`direction = 15-step`（rb 为奇数）否则为 step，
+`block = (((rb % 14) // 2) * 2 + direction) % 16`，实际 K 偏移为 block×256。
+规则不依赖 N 组号，故本次继续保留 N64；没有把旧环境的精度结论直接挪用。
+
+四臂无设备编译凭证为 `evidence/layer2-weight240-*-cache-v3.json`，
+结果见 `evidence/layer2-weight240-native-v1.json`、`layer2-weight240-native-v2.json`。
+复现使用 `precompile_eager.py <新JSON> weight240-0/1/2/3`，再通过单卡启动器执行
+`run_rms.sh <新label> weight240`，显式传
+`WEIGHT240_PROBE_REFERENCE=<t240-layer2-direct-native-v1目录>/observation.pt`。
+
+接回版本在 `indexer_native_query_stages.py` 中增加仅 T240 生效的 dispatcher，
+完整投影写入原 partial 缓冲第一段，消费者在 T240 跳过其余三段；
+其他 T 保持原实现。两个 Cube 调用点均切到 dispatcher，保留全部 24 核发布和保守等待，
+不改公共 ABI、请求 metadata、舍入或量化边界。
+接回完整根仍需无设备编译及 Native 对拍，尚不能称为整层或整模型已通过。
+
+接回时的无设备编译曾被 NZ 非负偏移检查拒绝，未因此提交设备任务。
+使用现有 `CompileOptions` 的 pass dump 发现：Simplify 移除 `max` 后，
+方向是分支合并的 phi，后续 NZ 检查无法追踪其非负性。只增加 worker clamp 或改变 max
+左右顺序均未解决，没有修改 SDK。最终 DSL 写为
+`parity=rb%2; direction=step*(1+14*parity)+15*parity`，再计算原 block 模 16：
+奇数行块的该式与 `15-step` 相差 `16*step`，故 K 顺序完全相同，且全部项非负。
+诊断入口的 `--dump-passes` 强制新 CPU 编译并保留 IR，其收据不能充当 eager 缓存命中证明。
+
+### 两处修正接回后的完整验证
+
+等价正项索引版本的 57/85/55 根 CPU 预编译分别耗时 227.931/214.592/214.751 秒，
+均确认未初始化 NPU、未创建 Worker。此前 NZ 失败的编译不计入设备精度结论。
+
+| 验证 | 任务 | 物理卡 | 脚本时间 | 结论 |
+| --- | --- | --- | --- | --- |
+| 第 2 层 T240/B40 生产 FULL/eager 控制 | `task_20261030_174658_2571453129` | 10 | 34.902 秒 | 控制通过，不单独计 Native 精度 |
+| 第 2 层同输入完整 Native 观测 | `task_20261030_175033_266102215806` | 10 | 75.978 秒 | **35/35 边界逐 bit 一致，complete/pass=True，无首差** |
+| 第 42 层 T240/B40 生产 FULL/eager 控制 | `task_20261030_175333_279974929237` | 10 | 33.970 秒 | 控制通过，不单独计 Native 精度 |
+| 第 42 层同输入完整 Native 观测 | `task_20261030_175530_28868617284` | 8 | 74.121 秒 | **35/35 边界逐 bit 一致，complete/pass=True，无首差** |
+| 第 4 层 T240/B40 正式 55 参数服务 FULL 入口 | `task_20261030_175750_292702622155` | 8 | 50.808 秒 | **七组外部结果与 Native 逐 bit 一致，无回退** |
+
+输入、观测与生产等价控制、Native hook 控制、保护区均通过；结论包括最终输出，
+没有通过注入 Native 中间值替换我方计算来获得验收结果。
+这证明本次第 2、42 层真实权重/合成输入配置通过，仍不能扩展为整模型 192-token 已通过。
+轻量证据见 `evidence/t240-layer2-weight-order-native-v1.json` 与
+`evidence/t240-layer42-weight-order-native-v1.json`、`evidence/t240-weight-order-*-cache-v4.json`；
+原 `a3498431` 与模型 v4 冻结包未覆盖。本轮没有新增性能测量，任务脚本时间不是算子延迟。
+
+服务入口固定 `PADDING_STAGE_REFERENCE=<第2层通过目录>/result.json`，严格核对全部数学源码 hash；
+服务实际仍加载第 4 层，独立生成本层 Native 金标，不借用第 2 层的输出或中间值。
+检查实际 55 tensor ABI、eligible/提交计数及 graph contract，禁止静默回退；
+七组外部结果、两次 FULL 回放、FULL/eager、Native 自重复和保护区全部通过。
+证据见 `evidence/t240-weight-order-production55-v1.json`。
+
+本次接回的新版本只新增上述 T240 回归；小 T、混合 query、dummy 的此前通过记录属于各自历史版本，
+不能无条件继承为本次修正后的新结果。下一步先补这些小配置，再考虑重新准备整模型快照。
+完整任务起止与设备锁释放日志见 `evidence/layer2-layer42-task-lifecycle.log`；
+本轮所有任务均已结束，单卡设备占用低于 2 分钟，没有遗留排队或运行任务。
+
+完整链路复现：先 source 本实验 `env.sh`，由公共 bootstrap 的 `--shared-toolchain`
+与 `--native-plugin-root "$SOURCE_ROOT"` 启动 `precompile_eager.py <新JSON> spmd-debug`、
+`spmd-probe`，默认 `--lengths` 为 40 个 6，确认 57/85 参数 receipt 无设备编译通过。
+随后在单卡任务执行 `run_rms.sh <生产label> spmd --lengths <40个6逗号分隔> --layer 2`，
+控制通过后，用相同参数、新 label 和
+`SPMD_PRODUCTION_REFERENCE=<生产结果目录>/production.pt` 执行 Native 观测。
+必须验证 `complete/pass=True`、35 个精度边界无首差及输入/观测等价性，不能只检查退出码。
+
+### 14 卡禁用后的任务处理
+
+用户新增明确要求 **14 卡不能用**。此前本轮批准的 16 卡 Native 任务在 16:55 左右获得设备，
+收到限制后立即请求终止，16:58:29 确认 `completed (exit=130)`；本次未完成整模型基准，
+不记录 token 或性能通过。后续不重提包含 14 卡的任务。
+
+单卡池和私有白名单统一改为 **8,9,10,11,12,13,15**，启动脚本再次检查实际卡号，
+即使调度参数错误也拒绝 14 卡；没有修改全局或其他用户策略。

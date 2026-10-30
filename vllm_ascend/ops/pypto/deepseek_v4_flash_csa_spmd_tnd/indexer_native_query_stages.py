@@ -15,6 +15,7 @@
 import pypto.language as pl
 
 from .indexer_query_stages import (
+    BF16_WEIGHT_LAYOUT,
     DEQUANT_T_TILE,
     DQ_ROPE_H_TILE,
     HADAMARD_ROWS_DYN,
@@ -37,6 +38,7 @@ from .indexer_query_stages import (
     WEIGHTS_PARTIAL_ROWS_DYN,
     WEIGHTS_ROWS_DYN,
     WEIGHTS_SCALE,
+    indexer_weights_project_stage,
 )
 
 
@@ -247,6 +249,42 @@ def native_indexer_query_quant_stage(
 
 
 @pl.jit.inline(auto_scope=False)
+def native_indexer_weights_project_stage(
+    x: pl.Tensor[[T_DYN, 4096], pl.BF16],
+    weight: pl.Tensor[[IDX_N_HEADS, 4096], pl.BF16, BF16_WEIGHT_LAYOUT],
+    partials: pl.InOut[pl.Tensor[[WEIGHTS_PARTIAL_ROWS_DYN, IDX_N_HEADS], pl.FP32]],
+    worker: pl.Scalar[pl.INDEX],
+    WORKERS: pl.constexpr,
+):
+    """T240按本轮Native实测行块K顺序连续累加；其他T保留四partial路径。
+
+    T240只写原缓冲第一段，消费者必须跳过另外三段；原producer集合与发布协议不变。
+    此分档仅取决于真实T，与请求是否均匀或是否为S6无关。
+    """
+    tokens = pl.tensor.dim(x, 0)
+    if tokens == 240:
+        for row_block in pl.range(pl.max(0, worker), (tokens + MM_ROW_TILE - 1) // MM_ROW_TILE, WORKERS):
+            row = row_block * MM_ROW_TILE
+            rows = pl.min(MM_ROW_TILE, tokens - row)
+            acc = pl.create_tensor([MM_ROW_TILE, IDX_N_HEADS], dtype=pl.FP32)
+            for step in pl.range(16):
+                # Modulo 16 this is step for even rows, 15-step for odd
+                # rows. Positive terms avoid an untracked scalar branch phi
+                # in the existing NZ offset proof after Simplify removes max.
+                parity = row_block % 2
+                direction = step * (1 + 14 * parity) + 15 * parity
+                block = ((row_block % 14) // 2 * 2 + direction) % 16
+                k = pl.max(0, block) * 256
+                a = pl.slice(x, [MM_ROW_TILE, 256], [row, k], valid_shape=[rows, 256])
+                b = weight[:, k : k + 256]
+                acc = pl.matmul_acc(acc, a, b, b_trans=True, init_cond=step == 0)
+            partials = pl.assemble(partials, acc, [row, 0])
+    else:
+        partials = indexer_weights_project_stage(x, weight, partials, worker, WORKERS)
+    return partials
+
+
+@pl.jit.inline(auto_scope=False)
 def native_indexer_weights_reduce_stage(
     weights_partial: pl.Tensor[[WEIGHTS_PARTIAL_ROWS_DYN, IDX_N_HEADS], pl.FP32],
     weights: pl.Tensor[[WEIGHTS_ROWS_DYN, IDX_N_HEADS], pl.FP32],
@@ -254,16 +292,17 @@ def native_indexer_weights_reduce_stage(
     worker_id: pl.Scalar[pl.INDEX],
     WORKERS: pl.constexpr,
 ):
-    """AIV：等当前M16的四个投影split，原左折叠后乘模型scale，保持FP32给score消费。"""
+    """AIV：T240读取完整acc，其余T保持四partial左折叠；保留两次BF16边界。"""
     row_blocks = (tokens + MM_ROW_TILE - 1) // MM_ROW_TILE
     t_pad = row_blocks * MM_ROW_TILE
     for w_rb in pl.range(worker_id, row_blocks, WORKERS):
         w_r0 = w_rb * MM_ROW_TILE
         w_sum = weights_partial[w_r0 : w_r0 + MM_ROW_TILE, :]
         # 与原核相同的((p0+p1)+p2)+p3；不把四项改成树形归约。
-        for kb in pl.unroll(1, WEIGHTS_OK):
-            partial_r0 = kb * t_pad + w_r0
-            w_sum = pl.add(w_sum, weights_partial[partial_r0 : partial_r0 + MM_ROW_TILE, :])
+        if tokens != 240:
+            for kb in pl.unroll(1, WEIGHTS_OK):
+                partial_r0 = kb * t_pad + w_r0
+                w_sum = pl.add(w_sum, weights_partial[partial_r0 : partial_r0 + MM_ROW_TILE, :])
         # Native线性层与随后乘系数各自输出BF16；保留原四split左折叠。
         linear = pl.cast(pl.cast(w_sum, pl.BF16, mode="rint"), pl.FP32)
         scaled = pl.cast(pl.mul(linear, WEIGHTS_SCALE), pl.BF16, mode="rint")

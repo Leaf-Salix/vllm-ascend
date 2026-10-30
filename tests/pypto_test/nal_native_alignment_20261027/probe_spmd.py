@@ -37,6 +37,7 @@ nal_config = importlib.import_module("nal_alignment.deepseek_v4_flash_csa_spmd_t
 parser = argparse.ArgumentParser()
 parser.add_argument("output", type=Path)
 parser.add_argument("--lengths", default="6,6,6,6")
+parser.add_argument("--layer", type=int, choices=range(2, 43, 2), default=4)
 options = parser.parse_args()
 request_lengths = [int(value) for value in options.lengths.split(",")]
 assert 1 <= len(request_lengths) <= 40 and all(1 <= value <= 6 for value in request_lengths)
@@ -49,6 +50,8 @@ record = {
     "pass": False,
     "scope": "complete SPMD; Native eager prefix/cache/query/weights/TopK/output stages; not whole-model tokens",
     "history": 8192,
+    "layer_index": options.layer,
+    "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     "lengths": request_lengths,
     "service_query_bound": nal_config.MAX_QUERY_TOKENS,
     "tokens": tokens,
@@ -177,7 +180,7 @@ try:
         )
     }
     with native_session(config, 0), torch.inference_mode():
-        layer, details = make_layer(config, checkpoint, torch.device("npu:0"), 4)
+        layer, details = make_layer(config, checkpoint, torch.device("npu:0"), options.layer)
         record["weights"] = details
         f = make_ragged_fixture(config, layer.self_attn, batch, 8192, 1024, torch.device("npu:0"), request_lengths)
         groups = {name: (f["metadata"][g["prefix"]], g["views"]) for name, g in f["groups"].items()}
@@ -270,6 +273,7 @@ try:
         reference_path = os.environ.get("SPMD_PRODUCTION_REFERENCE")
         if reference_path:
             reference = torch.load(reference_path, map_location="cpu", weights_only=True)
+            assert reference.get("layer_index", 4) == options.layer, "cross-task model layers differ"
             record["input_equivalence"] = {
                 name: metric(value, reference["initial"][name]) for name, value in initial.items()
             }
@@ -306,6 +310,7 @@ try:
             torch.save(
                 {
                     "initial": initial,
+                    "layer_index": options.layer,
                     "state": production,
                     "source_sha256": record["stage_source_sha256"],
                     "topk_scores": production_topk_scores,

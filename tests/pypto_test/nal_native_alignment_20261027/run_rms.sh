@@ -2,8 +2,8 @@
 set -euo pipefail
 : "${TASK_DEVICE:?task-submit required}"
 case "$TASK_DEVICE" in
-  8|9|10|11|12|13|14|15) ;;
-  *) printf 'This single-card probe requires physical device 8-15.\n' >&2; exit 2 ;;
+  8|9|10|11|12|13|15) ;;
+  *) printf 'This single-card probe requires physical device 8-13 or 15; device 14 is forbidden.\n' >&2; exit 2 ;;
 esac
 job_here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$job_here/env.sh"
@@ -11,7 +11,7 @@ export ASCEND_RT_VISIBLE_DEVICES="$TASK_DEVICE"
 label=${1:?}
 probe=${2:?}
 shift 2
-[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|padding|qr|qa240|wkv|kvnorm|qoutput|mainproj|indexproj|indexpool|idxquery|idxquant|weightproj|attention|woa|woatnd|oproj|compnorm|topktie|woa240)$ ]]
+[[ "$label" =~ ^[a-z0-9-]+$ && "$probe" =~ ^(rms|hc|spmd|padding|qr|qa240|wkv|kvnorm|qoutput|mainproj|indexproj|indexpool|idxquery|idxquant|weightproj|weight240|attention|woa|woatnd|oproj|compnorm|comprope|topktie|woa240)$ ]]
 probe_args=()
 while (( $# )); do
   case "$1" in
@@ -35,6 +35,12 @@ while (( $# )); do
       [[ "$probe" == spmd && $# -ge 2 && ${#probe_args[@]} -eq 0 ]]
       [[ "$2" =~ ^[1-6](,[1-6]){0,39}$ ]]
       probe_args=(--lengths "$2")
+      ;;
+    --layer)
+      [[ "$probe" == spmd && $# -ge 2 && ${#probe_args[@]} -eq 2 && ${probe_args[0]} == --lengths ]]
+      [[ "$2" =~ ^[0-9]+$ ]]
+      (( 2 <= 10#$2 && 10#$2 <= 42 && 10#$2 % 2 == 0 ))
+      probe_args+=(--layer "$2")
       ;;
     --device) [[ $# -ge 2 && "$2" == "$TASK_DEVICE" ]] ;;
     *) exit 2 ;;

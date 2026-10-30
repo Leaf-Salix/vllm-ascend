@@ -27,7 +27,7 @@
     整张GM。normed/debug/cache标InOut保留未写区，调用者仍须保证有效写槽唯一。
 
 数学与边界
-    平方和保持256→128→64折叠再row_sum，随后eps和recip(sqrt)，不改变归约。
+    平方和保持256→128→64折叠再row_sum，随后eps和sqrt，按Native直接除法归一化。
     gamma在UB由BF16无损转FP32；NOPE及RoPE沿原乘法次序，RoPE的sin符号在
     消费端按偶负奇正折入。cache最后FP32→BF16(rint)，debug保留FP32。
     cache副作用先检查active、position的causal一致性和C4关闭条件，再检查
@@ -106,14 +106,15 @@ def compressor_norm_rope_cache_stage(
                 # 显式load返回Tile，row_sum API需同形临时Tile；这不改变归约算法。
                 square_sum = pl.row_sum(folded1, pl.tile.create([RMS_PAD_TILE, HEAD_TILE], dtype=pl.FP32))
                 variance = pl.add(pl.mul(square_sum, HEAD_DIM_INV), EPS)
-                inv_rms = pl.recip(pl.sqrt(variance))
+                rms = pl.sqrt(variance)
                 for k0 in pl.range(0, NOPE_HEAD_DIM, HEAD_TILE):
                     kv_norm_chunk = pl.load(
                         pooled_kv, [first, k0], [RMS_PAD_TILE, HEAD_TILE], valid_shape=[rows, HEAD_TILE]
                     )
                     # 只对已load的64元素UB tile reshape；不把整个GM norm或pooled变为Tile。
                     gamma = pl.cast(pl.reshape(pl.load(norm_w, [k0], [HEAD_TILE]), [1, HEAD_TILE]), pl.FP32)
-                    normed_chunk = pl.col_expand_mul(pl.row_expand_mul(kv_norm_chunk, inv_rms), gamma)
+                    # Native RowDivs performs division before applying gamma.
+                    normed_chunk = pl.col_expand_mul(pl.row_expand_div(kv_norm_chunk, rms), gamma)
                     pl.store(pl.set_validshape(normed_chunk, rows, HEAD_TILE), [first, k0], normed_kv)
 
                 kv_rope_norm = pl.load(
@@ -125,7 +126,7 @@ def compressor_norm_rope_cache_stage(
                 gamma_rope = pl.cast(
                     pl.reshape(pl.load(norm_w, [NOPE_HEAD_DIM], [ROPE_HEAD_DIM]), [1, ROPE_HEAD_DIM]), pl.FP32
                 )
-                rope_normed = pl.col_expand_mul(pl.row_expand_mul(kv_rope_norm, inv_rms), gamma_rope)
+                rope_normed = pl.col_expand_mul(pl.row_expand_div(kv_rope_norm, rms), gamma_rope)
                 # 索引运算也用Tile层，避免把Tensor索引与显式load的Tile混用。
                 rope_ones = pl.tile.full([RMS_PAD_TILE, ROPE_HEAD_DIM], dtype=pl.FP32, value=1.0)
                 rope_index = pl.tile.arange(0, [1, ROPE_HEAD_DIM], dtype=pl.INT32)

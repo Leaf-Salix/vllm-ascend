@@ -40,10 +40,10 @@ from .hc_input_rms_stages import SQUARE_ROWS, hc_input_square_range
 from .hc_native_projection_stages import hc_linear
 from .indexer_compressor_output_stages import indexer_compressor_hadamard_stage
 from .indexer_native_projection_stages import indexer_native_projection_stage
+from .indexer_native_query_stages import native_indexer_weights_project_stage as indexer_weights_project_stage
 from .indexer_query_stages import (
     indexer_query_hadamard_stage,
     indexer_query_project_stage,
-    indexer_weights_project_stage,
 )
 from .indexer_score_stages import indexer_score_cube_stage
 from .joint_prefix_stages import joint_bf16_prefix_stage

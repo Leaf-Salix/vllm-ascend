@@ -19,6 +19,7 @@ bind()
 from nal_alignment.deepseek_v4_flash_csa_spmd_tnd.entry import decode_csa_spmd, decode_csa_spmd_debug
 from nal_alignment.deepseek_v4_flash_csa_spmd_tnd.policy import select_policy
 from nal_alignment.deepseek_v4_flash_csa_spmd_tnd.service_config import MAX_QUERY_TOKENS
+from pypto.runtime import CompileOptions
 from pypto.runtime.kernel.abi import KernelConfig
 from pypto.runtime.kernel.context import get_process_kernel_state
 from spmd_probe_entry import spmd_stage_probe
@@ -40,9 +41,16 @@ parser.add_argument(
         "woa240-0",
         "woa240-1",
         "woa240-2",
+        "weight240-0",
+        "weight240-1",
+        "weight240-2",
+        "weight240-3",
     ),
 )
 parser.add_argument("--lengths", default=",".join(["6"] * 40))
+parser.add_argument(
+    "--dump-passes", action="store_true", help="Fresh CPU diagnostic; do not treat it as an eager-cache receipt"
+)
 args = parser.parse_args()
 assert not args.output.exists()
 assert os.environ["PYPTO_CACHE"] == "1"
@@ -50,7 +58,11 @@ state = get_process_kernel_state()
 assert not torch_npu.npu.is_initialized() and state.config is None
 lengths = [int(value) for value in args.lengths.split(",")]
 assert 1 <= len(lengths) <= 40 and all(1 <= value <= 6 for value in lengths)
-if args.kind.startswith("woa240-"):
+if args.kind.startswith("weight240-"):
+    from weight240_kernels import weight240_arm
+
+    root, bindings, expected = weight240_arm, {"MODE": int(args.kind[-1])}, 5
+elif args.kind.startswith("woa240-"):
     from woa240_kernels import woa240_arm
 
     root, bindings, expected = woa240_arm, {"MODE": int(args.kind[-1])}, 3
@@ -74,9 +86,14 @@ else:
     }[args.kind]
     bindings = policy.constexprs()
 start = time.monotonic()
+request_bindings = dict(bindings)
+if args.dump_passes:
+    request_bindings["config"] = CompileOptions(
+        platform="a2a3", dump_passes=True, output_dir=str(args.output.with_suffix(".ir"))
+    )
 artifact, _, _ = root._resolve_compiled(
     (),
-    bindings,
+    request_bindings,
     allow_signature_mode=True,
     _kernel=True,
     _kernel_config=KernelConfig("a2a3", "tensormap_and_ringbuffer", 0),
@@ -95,7 +112,11 @@ record = {
     "cache": os.environ["PYPTO_CACHE_DIR"],
     "sdk_release": os.environ["CSA_SHARED_TOOLCHAIN_RELEASE"],
     "bindings": bindings,
-    "scope": "eager artifact cache build only; device reuse and precision require separate runs",
+    "scope": (
+        "fresh CPU IR diagnostic; not an eager-cache receipt"
+        if args.dump_passes
+        else "eager artifact cache build only; device reuse and precision require separate runs"
+    ),
 }
 args.output.write_text(json.dumps(record, indent=2) + "\n")
 print(json.dumps(record), flush=True)
