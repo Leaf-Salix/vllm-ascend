@@ -3,6 +3,7 @@
 
 import math
 import time
+from collections import Counter
 
 import torch
 from csa_threeway_20261029.runtime import configure_runtime
@@ -22,12 +23,34 @@ class TimedObserver(TNDObserver):
         self._threeway_events = prewarm_timing_events(TIMING_STEPS)
         self._threeway_samples = []
         self._threeway_seen = 0
+        self._threeway_descriptors = Counter()
         self._threeway_original = self.model_runner._model_forward
         prefix = self._offline_csa_layer_names[0]
 
         def forward(num_tokens_padded, *args, **kwargs):
             context = get_forward_context()
             metadata = (context.attn_metadata or {}).get(prefix)
+            if (
+                not context.capturing
+                and not getattr(context, "is_draft_model", False)
+                and metadata is not None
+                and not metadata.num_prefills
+                and metadata.decode is not None
+            ):
+                request = metadata.decode
+                lengths = getattr(request, "seq_lens", None)
+                table = getattr(request, "block_table", None)
+                self._threeway_descriptors[
+                    (
+                        num_tokens_padded,
+                        lengths.numel() if lengths is not None else request.num_reqs_actual,
+                        request.num_reqs_actual,
+                        metadata.num_actual_tokens,
+                        getattr(request, "max_seq_lens", None),
+                        table.shape[1] if table is not None else None,
+                        context.cudagraph_runtime_mode.name,
+                    )
+                ] += 1
             selected = (
                 not context.capturing
                 and not getattr(context, "is_draft_model", False)
@@ -77,6 +100,19 @@ class TimedObserver(TNDObserver):
                 next_begin = self._threeway_samples[index + 1]["begin"]
                 samples[-1]["cycle_us"] = row["begin"].elapsed_time(next_begin) * 1000
         result = super().offline_end_observation()
+        result["policy_descriptors"] = [
+            dict(
+                tokens=t,
+                requests=b,
+                actual_requests=actual_b,
+                actual_tokens=actual_t,
+                max_seq_len=length,
+                compressed_table_columns=columns,
+                requested_mode=mode,
+                steps=steps,
+            )
+            for (t, b, actual_b, actual_t, length, columns, mode), steps in self._threeway_descriptors.items()
+        ]
         result["threeway_timing"] = {
             "scope": (
                 "physical FULL240 bucket, actual T recorded; "

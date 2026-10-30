@@ -21,7 +21,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--tokens", type=int, choices=(6, 40, 240), required=True)
+    parser.add_argument("--tokens", type=int, choices=range(1, 257), required=True)
+    parser.add_argument("--requests", type=int)
+    parser.add_argument("--max-seq-len", type=int, default=9000)
+    parser.add_argument("--table-columns", type=int)
     args = parser.parse_args()
     source = args.source.resolve()
     manifest = json.loads((source.parent / "manifest.json").read_text())
@@ -37,9 +40,10 @@ def main():
     assert source in Path(policy_module.__file__).resolve().parents
     policy = policy_module.select_policy(
         tokens=args.tokens,
-        requests=1 if args.tokens == 6 else 40,
+        requests=args.requests if args.requests is not None else (1 if args.tokens == 6 else 40),
         max_query_tokens=6,
-        max_seq_len=9000,
+        max_seq_len=args.max_seq_len,
+        compressed_table_columns=args.table_columns,
     )
     start = time.monotonic()
     artifact, _, _ = entry.decode_csa_spmd._resolve_compiled(

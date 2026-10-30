@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """在227的CPU测试，防止漏替换、回退或计时不足被判为验收通过。"""
 
+import copy
 import importlib.util
 from pathlib import Path
 
@@ -94,3 +95,56 @@ def test_partial_coverage_rejected(failure):
         observed["threeway_timing"]["complete"] = False
     errors = MODULE.check_rank(data, "ours")
     assert errors["timing" if failure == "short_timing" else "coverage"]
+
+
+@pytest.mark.parametrize("field", ["DP", "EP", "task_device", "bank", "common_framework", "capture_sizes"])
+def test_different_native_topology_or_input_rejected(field):
+    actual = {
+        key: 1
+        for key in (
+            "TP",
+            "DP",
+            "EP",
+            "task_device",
+            "common_framework",
+            "bank",
+            "batch_per_rank",
+            "prefix",
+            "output_tokens",
+            "HCA",
+            "gpu_blocks_override",
+            "runtime_ring_heap_bytes",
+            "event_mode",
+            "eplb",
+            "atomic_add",
+            "capture_sizes",
+            "precision_only",
+        )
+    }
+    native = copy.deepcopy(actual)
+    native["arm"] = "native"
+    MODULE.check_reference_configuration(actual, native)
+    native[field] = "different"
+    with pytest.raises(ValueError, match=field):
+        MODULE.check_reference_configuration(actual, native)
+
+
+def test_admission_limited_precision_keeps_full_layer_coverage():
+    data = record()
+    observed = data["observation"][0]
+    observed["threeway_timing"]["complete"] = False
+    observed["tnd_execution_routes"][0]["actual_requests"] = 10
+    observed["tnd_execution_routes"].append(
+        {
+            "actual_requests": 10,
+            "padded_tokens": 10,
+            "requested_mode": "NONE",
+            "all_csa_graph_replayed": False,
+            "python_resubmitted": True,
+            "all_csa_submitted": True,
+        }
+    )
+    errors = MODULE.check_rank(data, "ours", precision_only=True)
+    assert not errors["coverage"] and not errors["precision"] and errors["timing"]
+    observed["tnd_execution_routes"][-1]["all_csa_submitted"] = False
+    assert MODULE.check_rank(data, "ours", precision_only=True)["coverage"]

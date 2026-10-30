@@ -16,6 +16,8 @@ def main():
     binaries = list(native.glob("*.so"))
     assert len(binaries) == 2 and any(p.name.startswith("vllm_ascend_C") for p in binaries)
     for arm in ("native", "ours", "nalinaly"):
+        if not (args.cohort / arm).is_dir():
+            continue
         root = args.cohort / arm / "source/vllm_ascend"
         rows = []
         for item in binaries:

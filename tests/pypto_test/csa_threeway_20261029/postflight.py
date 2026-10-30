@@ -5,6 +5,33 @@ import importlib.util
 import json
 
 
+def check_reference_configuration(actual, native):
+    keys = (
+        "TP",
+        "DP",
+        "EP",
+        "task_device",
+        "common_framework",
+        "bank",
+        "batch_per_rank",
+        "prefix",
+        "output_tokens",
+        "HCA",
+        "gpu_blocks_override",
+        "runtime_ring_heap_bytes",
+        "event_mode",
+        "eplb",
+        "atomic_add",
+        "capture_sizes",
+        "precision_only",
+    )
+    if native["arm"] != "native" or native.get("startup_only", False):
+        raise ValueError("Reference must be a complete Native generation, not startup-only")
+    for key in keys:
+        if actual[key] != native[key]:
+            raise ValueError(f"Native reference configuration differs: {key}")
+
+
 def acceptance_events(path):
     return {row["key"]: row["events"] for row in map(json.loads, path.read_text().splitlines())}
 
@@ -16,7 +43,7 @@ def timing_inputs(value):
     ]
 
 
-def check_rank(data, arm):
+def check_rank(data, arm, precision_only=False):
     errors = {"coverage": [], "timing": [], "precision": []}
     implementations = data.get("attention_implementations", [])
     observations = data.get("observation", [])
@@ -53,10 +80,16 @@ def check_rank(data, arm):
         full = [
             row
             for row in routes
-            if row["actual_requests"] == 40 and row["padded_tokens"] == 240 and row["requested_mode"] == "FULL"
+            if (0 < row["actual_requests"] <= 40 if precision_only else row["actual_requests"] == 40)
+            and row["padded_tokens"] in ((6, 240) if precision_only else (240,))
+            and row["requested_mode"] == "FULL"
         ]
         if not full or any(not row["all_csa_graph_replayed"] or row["python_resubmitted"] for row in full):
-            errors["coverage"].append("FULL240 did not replay all CSA graphs without resubmission")
+            errors["coverage"].append("FULL graph did not replay all CSA layers without resubmission")
+        if precision_only:
+            ordinary = [row for row in routes if row["actual_requests"] > 0 and row["requested_mode"] != "FULL"]
+            if any(not row.get("all_csa_submitted", False) for row in ordinary):
+                errors["coverage"].append("ordinary decode did not submit all CSA layers")
     if not observed.get("threeway_timing", {}).get("complete"):
         errors["timing"].append("missing complete consecutive FULL240 timing window")
     requests = data.get("requests", [])
@@ -71,10 +104,17 @@ def check_rank(data, arm):
 
 def validate(source, root, bank, arm, reference=None):
     report = {"arm": arm, "coverage_errors": [], "timing_errors": [], "precision_errors": []}
-    for rank in range(16):
+    experiment = json.loads((root / "experiment.json").read_text())
+    dp = experiment["DP"]
+    precision_only = experiment.get("precision_only", False)
+    assert dp in (8, 16) and experiment["EP"] == dp
+    if reference is not None:
+        check_reference_configuration(experiment, json.loads((reference / "experiment.json").read_text()))
+    report["DP"] = report["EP"] = dp
+    for rank in range(dp):
         try:
             data = json.loads((root / f"rank{rank}.mixed.json").read_text())
-            for kind, errors in check_rank(data, arm).items():
+            for kind, errors in check_rank(data, arm, precision_only).items():
                 report[f"{kind}_errors"].extend(f"rank{rank}: {error}" for error in errors)
             if reference is not None:
                 native = json.loads((reference / f"rank{rank}.mixed.json").read_text())
@@ -101,6 +141,9 @@ def validate(source, root, bank, arm, reference=None):
             report["precision_errors"].append("acceptance protocol failed or preemption was not zero")
     except (OSError, ValueError, KeyError, TypeError, ZeroDivisionError) as error:
         report["precision_errors"].append(f"acceptance analysis: {error}")
-    report["passed"] = not any(report[f"{kind}_errors"] for kind in ("coverage", "timing", "precision"))
+    report["performance_qualified"] = not report["timing_errors"]
+    report["precision_only"] = precision_only
+    criteria = ("coverage", "precision") if precision_only else ("coverage", "timing", "precision")
+    report["passed"] = not any(report[f"{kind}_errors"] for kind in criteria)
     (root / "postflight.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     return report

@@ -5,6 +5,7 @@ import argparse
 import importlib
 import json
 import os
+import runpy
 import sys
 from pathlib import Path
 
@@ -16,6 +17,7 @@ def main():
     parser.add_argument("source", type=Path)
     parser.add_argument("bank", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--check-capacity-guard", action="store_true")
     args = parser.parse_args()
     assert not torch_npu.npu.is_initialized()
     plan = json.loads((args.bank / "plan.json").read_text())
@@ -36,9 +38,16 @@ def main():
     assert modules["vllm"]["version"] == "0.25.1"
     assert os.environ["PTOAS_ROOT"] == os.environ["CSA_SHARED_PTOAS_ROOT"]
     assert os.environ["PYTHONNOUSERSITE"] == "1" and os.environ["HCCL_DETERMINISTIC"] == "true"
+    if args.check_capacity_guard:
+        runpy.run_path(str(args.source / "tests/pypto_test/offline_pd/run.py"), run_name="eight_card_import_check")
+        utils = importlib.import_module("vllm.v1.core.kv_cache_utils")
+        core = importlib.import_module("vllm.v1.engine.core")
+        assert utils.get_kv_cache_configs is core.get_kv_cache_configs
+        assert utils.get_kv_cache_configs._eight_card_guard
     assert not torch_npu.npu.is_initialized()
     receipt = {
         "pass": True,
+        "capacity_guard_checked": args.check_capacity_guard,
         "npu_initialized": False,
         "python": sys.version,
         "modules": modules,

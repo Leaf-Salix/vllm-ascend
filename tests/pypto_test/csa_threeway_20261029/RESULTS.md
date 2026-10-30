@@ -721,3 +721,88 @@ T21复现先用 `precompile_eager.py <新JSON> spmd-debug/spmd-probe --lengths 1
 起止与锁释放见 `evidence/precision-recheck-task-lifecycle.log`。未使用14卡。
 以上仍是单层真实权重/合成输入精度结论，不代表新版本整模型192-token或128K已验收；
 本轮没有新增性能测量。
+
+## 10 月 30 日 19 时：八卡 8K 整模型逐 token 验证
+
+用户明确批准本轮临时使用物理 `0,8,9,10,11,12,13,15`，14继续禁用。
+原先DP=EP16 Native已终止，不能用其未完成目录作为token基准；本轮另建同八卡Native，
+不跑Native2、128K或nalinaly性能组。下列状态为本次八卡实验，不能混入原16卡报告。
+
+| 项目 | 本轮设置 |
+| --- | --- |
+| 我方数学源码 | `05989cfb`；冻结自`65bebf7f6b2e4f3f6492fd6463f73106506f3496`，后者仅补测试记录 |
+| 共同模型框架 | `41ba392f482bf88f7b6a797e2542443c81497338` |
+| Decode拓扑 | TP1、DP=EP8，每rank32/256个专家 |
+| 模型与输入 | 完整DSV4 Flash w8a8、原固定8K bank、40条不同请求、192输出token |
+| 图与数值配置 | FULL_DECODE_ONLY、capture6/240、NZ2、atomic0、确定性level1/HCCLtrue、event1、EPLB关 |
+| 替换范围 | 21个CSA的HC-pre至HC-post完整PTO TND；20个HCA保持Native |
+| 硬件边界 | 精确八卡白名单和pool；task780秒、内部720秒及清理，首差停止 |
+
+八卡适配仅发生在新冻结测试副本：放开CSA混合请求DP8的两处CLI限制，
+完成屏障和结果汇总改为8个rank。生产CSA数学、模型专家数、SDK与旧快照不改。
+新启动器在加载环境前检查实际物理设备集合，并兼容task包装器追加的device参数。
+PTO运行前及最终汇总都核验Native基准的TP/DP/EP、卡序、bank、共同框架、图/容量等配置，
+拒绝DP16或startup-only结果充当八卡gold。
+
+227 CPU入口测试22项通过，耗时0.26秒；Native和我方冻结源码的bootstrap预检均通过，未初始化NPU。
+只读75个safetensors头估算：每卡checkpoint权重49.7009GiB，单卡HBM64GiB；
+这不是运行峰值，尚不包含权重转换、KV、图和工作区，必须实际验证容量。
+复用已有vLLM二进制和公共SDK，无重装；当前PTO public T6/T40/T240根在227 CPU预热。
+
+| 阶段 | 结果 |
+| --- | --- |
+| 八卡Native启动/容量预检 | `task_20261030_191040_59142222382`，500.63秒退出；权重载入48.2755GB，KV分配OOM，未生成token |
+| 同拓扑Native 192 token基准 | 修正共同KV预算后，`task_20261030_193423_12749609191`排队中 |
+| 当前完整PTO CSA 192 token | 待Native基准通过 |
+
+复现先运行`prepare.py <新cohort> --ours 65bebf7f --decode-dp 8 --arms native ours`，
+在227自有目录用`link_runtime.py`绑定已验收二进制，分别执行preflight；
+再用public-module的`precompile.py --tokens 6/40/240`预热。八卡设备任务以完整命令字符串提交：
+
+```bash
+TASKQUEUE_DEVICE_CONF=<本轮私有白名单> \
+TASKQUEUE_DEVICE_POOL=0,8,9,10,11,12,13,15 \
+TASKQUEUE_IGNORE_WHITELIST=0 TASKQUEUE_IGNORE_GROUP_AFFINITY=0 \
+task-submit --device auto --device-num 8 --max-time 780 \
+  --env PYTHONNOUSERSITE=1 --env HCCL_DETERMINISTIC=true \
+  --env PTOAS_ROOT --env ASCEND_HOME_PATH \
+  'bash <测试目录>/run_eight_card.sh <cohort> native <新label> none --startup-only'
+```
+
+启动通过后去掉`--startup-only`生成Native基准，再以`ours`和Native结果目录作reference运行PTO。
+目标验收8×40×192=61,440个输出token、逐请求接受事件和实际CSA图替换覆盖；
+首差即停。当前尚无新增整模型token一致性结论。
+
+### 八卡容量问题与受限入场方案
+
+首个启动任务实际组网DP=EP8、每rank32个专家，模型载入成功。
+各rank profile可用KV为5.61～5.62GiB，对应自然块数约7160；
+旧16卡实验却显式覆盖为22000块，配置阶段将这个override当作有效容量，
+最终在`_allocate_kv_cache_tensors → torch.zeros`申请690MiB时OOM。
+该任务已退出并释放卡，不是数值首差，也没有token结果。
+
+新`eightcard-source-v2`保持同一模型和数学包，只把双方共同块数改为4000，
+并标记`precision_only=true`：40条不同请求仍各生成192token，但允许等待入场。
+这不是同时活跃B40的性能测试。PTO额外公开ring容量共1.25GiB，
+不能仅按Native预算选择6000块并假定PTO也能放下，因此选更保守的4000。
+测试进程内包装现有`get_kv_cache_configs`及engine引用：
+原函数完成CPU分配计划后，将每个物理缓存tensor按512字节对齐计总量，
+逐配置对照**原profile可用字节数**；超过预算在实际KV分配前直接报错。
+不修改共享vLLM文件或容量算法；此门禁也不保证后续graph/workspace峰值必然可容纳。
+Native与我方两臂均完成无设备实际导入，确认两个函数引用相同且门禁生效。
+
+precision-only验收仍要求全部8rank的40条请求、192token、接受事件、零抢占，
+21CSA/20Native HCA正确。所有正请求FULL6/FULL240步骤都必须21CSA全部回放且无Python重提交；
+普通步骤必须21CSA全部实际提交，不以“任一层提交”代替完整覆盖。
+真实入场人数、有效T、物理bucket、metadata请求容量与最大历史按Host描述符记录，
+不读NPU tensor。若没有满B40的连续计时窗口，保留timing不足记录，
+仅可通过精度验收，`performance_qualified=false`，不填满并发性能结论。
+
+新增预算与受限入场负向测试后，227 CPU共24项通过，耗时0.28秒。
+两臂三次public T6/T40/T240的首轮CPU预热均通过（187.23/194.86/217.74秒），无设备或Worker；
+v2新快照继续检查缓存复用，不重装工具链。
+v2复现的prepare参数增加`--gpu-blocks 4000 --precision-only`；不再执行旧22000块配置。
+初始化检查并入新Native基准任务：只有预算门禁与模型初始化通过才开始生成，避免额外重复加载一次模型。
+完整预检凭证和OOM原始rank日志无损归档于`evidence/eightcard/*.json.gz`及
+`evidence/eightcard/eightcard-native-startup-v1/*.log.gz`，可用`gzip -cd`读取；
+未改写CANN原始错误文本。入口测试、容量估算及首轮编译凭证亦保留在同一证据目录。

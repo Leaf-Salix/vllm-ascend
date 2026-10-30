@@ -15,6 +15,59 @@ NAL = "79ea6d3c8460338a172cb5570d14999d5a544262"
 PACKAGE = "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd"
 
 
+def adapt_eight_card_tests(source):
+    """只在新冻结测试副本中允许CSA八卡；模型与生产算子保持原样。"""
+    runner = source / "tests/pypto_test/offline_pd/run.py"
+    text = runner.read_text()
+    replacements = [
+        (
+            'if args.mixed_requests and (args.command != "decode" or args.decode_dp != 16',
+            'if args.mixed_requests and (args.command != "decode" or args.decode_dp not in (8, 16)',
+        ),
+        (
+            'args.pto_attention not in ("hca", "both")):\n        parser.error("DP/EP8',
+            'args.pto_attention not in ("csa", "hca", "both")):\n        parser.error("DP/EP8',
+        ),
+    ]
+    for original, replacement in replacements:
+        assert text.count(original) == 1, original
+        text = text.replace(original, replacement)
+    runner.write_text(text)
+    mixed = source / "tests/pypto_test/low_acceptance_20261001/mixed.py"
+    text = mixed.read_text()
+    assert text.count("range(16)") == 2
+    mixed.write_text(text.replace("range(16)", "range(8)"))
+
+
+def adapt_precision_observer(source):
+    observer = source / "tests/pypto_test/csa_tnd_model_validation_20261023/observer.py"
+    text = observer.read_text()
+    original = "self._tnd_execution_routes[(*route, replayed, resubmitted)] += 1"
+    replacement = """all_submitted = all(runtime.submissions > old[0]
+                                    for runtime, old in zip(self._tnd_runtimes, before))
+                self._tnd_execution_routes[(*route, replayed, resubmitted, all_submitted)] += 1"""
+    assert text.count(original) == 1
+    text = text.replace(original, replacement)
+    original = "python_resubmitted=resubmitted,"
+    assert text.count(original) == 1
+    text = text.replace(original, original + "\n                all_csa_submitted=all_submitted,")
+    original = "for (b, t, capacity, length, mode, replayed, resubmitted), steps"
+    assert text.count(original) == 1
+    observer.write_text(
+        text.replace(original, "for (b, t, capacity, length, mode, replayed, resubmitted, all_submitted), steps")
+    )
+    runner = source / "tests/pypto_test/offline_pd/run.py"
+    text = runner.read_text()
+    original = 'if __name__ == "__main__":'
+    assert text.count(original) == 1
+    runner.write_text(
+        text.replace(
+            original,
+            "from csa_threeway_20261029.runtime import install_capacity_guard\ninstall_capacity_guard()\n\n" + original,
+        )
+    )
+
+
 def export(repo, revision, paths, target):
     archive = subprocess.check_output(["git", "-C", str(repo), "archive", revision, "--", *paths])
     with tarfile.open(fileobj=io.BytesIO(archive)) as stream:
@@ -29,7 +82,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
     parser.add_argument("--ours", required=True, help="明确指定我方已提交数学包版本，不能沿用旧基准标签")
+    parser.add_argument("--decode-dp", type=int, choices=(8, 16), default=16)
+    parser.add_argument("--gpu-blocks", type=int, default=22000)
+    parser.add_argument("--precision-only", action="store_true")
+    parser.add_argument(
+        "--arms", nargs="+", choices=("native", "ours", "nalinaly"), default=("native", "ours", "nalinaly")
+    )
     args = parser.parse_args()
+    assert args.gpu_blocks > 0
     here = Path(__file__).resolve().parent
     repo = here.parents[2]
     ours = subprocess.check_output(
@@ -57,7 +117,7 @@ def main():
         "tests/pypto_test/csa_toolchain_repro_20261019/bootstrap.py",
         "tests/pypto_test/csa_tnd_model_validation_20261023/observer.py",
     ]
-    for arm in ("native", "ours", "nalinaly"):
+    for arm in args.arms:
         source = args.output / arm / "source"
         export(repo, COMMON_FRAMEWORK, sorted(set(paths)), source)
         # Our validated test bootstrap adds explicit Native-source selection;
@@ -117,9 +177,13 @@ def main():
         assert text.count(scheduler) == text.count(memory) == 1
         runner.write_text(
             text.replace(scheduler, '"scheduler_cls": "csa_threeway_20261029.scheduler.CheckedScheduler"').replace(
-                memory, memory + "\n        num_gpu_blocks_override=22000,"
+                memory, memory + f"\n        num_gpu_blocks_override={args.gpu_blocks},"
             )
         )
+        if args.decode_dp == 8:
+            adapt_eight_card_tests(source)
+        if args.precision_only:
+            adapt_precision_observer(source)
         files = {
             str(path.relative_to(source)): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in sorted(source.rglob("*"))
@@ -136,7 +200,12 @@ def main():
             "pto_variant": "spmd_tnd",
             "pto_backend": "python",
             "HCA": "native",
-            "gpu_blocks_override": 22000,
+            "decode_dp": args.decode_dp,
+            "precision_only": args.precision_only,
+            "test_adaptations": ["CSA decode DP8 CLI gate", "eight-rank mixed barrier and analysis"]
+            if args.decode_dp == 8
+            else [],
+            "gpu_blocks_override": args.gpu_blocks,
             "files": files,
         }
         (source.parent / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
