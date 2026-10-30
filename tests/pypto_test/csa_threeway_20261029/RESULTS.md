@@ -1110,3 +1110,14 @@ Worker实际window/heap/dep审计随首步报告持久化并再次验收；
 outer780秒、内部720秒。Native gold仍是`last8-native-8k-waves8-v5`。
 227 CPU最初10项检查通过5.36秒；补强审计及首差门禁后6项回归通过4.43秒，
 实际冻结入口派生和导入通过且未初始化NPU，独立只读review无剩余阻断。
+
+等待期间仅用CPU复核已有Native gold：八个rank的40题输出token及接受事件均完全一致，
+每rank为7,680token；q04 event35均为`[5,4]`。
+这是同一轮Native的跨rank检查，不是额外Native2运行，也不证明全部内部Tensor逐bit一致。
+
+补充227 CPU异常恢复回归：两项通过4.39秒，含Native已写cache/TopK/metadata后抛异常的路径；
+确认finally恢复实际PTO状态，不初始化NPU。CPU资格、派生入口来源及Native跨rank审计凭证存于
+`evidence/eightcard/first-step-cpu-qualification-v1.tar.gz`。
+02:44八卡诊断仍pending，尚未占卡；只读核对本任务候选集为8–15，14未被策略排除；
+按本实验精确cache路径及设备任务环境筛选，也未发现本实验遗留的设备进程。
+这些CPU/只读检查不能代替尚未执行的真实首步或192token精度验收。

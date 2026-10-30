@@ -3,10 +3,19 @@
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 import torch
-from csa_threeway_20261029.first_step_observer import bit_metrics, check_complete, snapshot
+from csa_threeway_20261029.first_step_observer import (
+    CACHE_NAMES,
+    FirstStepObserver,
+    bit_metrics,
+    check_complete,
+    snapshot,
+)
 
 
 def test_bit_comparison_preserves_signed_zero_and_nan():
@@ -85,3 +94,57 @@ def test_diagnostic_cannot_pass_with_missing_layers_or_full_replay(tmp_path):
     assert passed()
     (tmp_path / "FIRST_DIFFERENCE.json").write_text("{}")
     assert not passed()  # Another rank's earlier difference must never be hidden by diagnostic completion.
+
+
+@pytest.mark.parametrize("native_raises", [False, True])
+def test_native_shadow_restores_pto_state_even_after_exception(tmp_path, monkeypatch, native_raises):
+    observer = object.__new__(FirstStepObserver)
+    observer._first_step_root = tmp_path
+    observer._first_step_report = {"layers": []}
+    hidden, positions = torch.arange(4.0).reshape(2, 2), torch.tensor([3, 4])
+    output = torch.empty_like(hidden)
+    caches = {name: torch.full((2, 4), float(i)) for i, name in enumerate(CACHE_NAMES)}
+    topk = torch.full((2, 2), 7, dtype=torch.int32)
+    impl = SimpleNamespace(topk_indices_buffer=topk, use_index_cache=False, skip_topk=False)
+    runtime = SimpleNamespace(wrapper=SimpleNamespace(dsa_attn=SimpleNamespace(impl=impl)), prefixes={"swa": "p"})
+    observer._first_step_indices = {id(runtime): 2}
+    factory = lambda: None
+    req = SimpleNamespace(
+        sas_metadata=None, qli_metadata=None, native_metadata_factory=factory, query_start_loc=torch.tensor([0, 1, 2])
+    )
+    context = SimpleNamespace(attn_metadata={"p": SimpleNamespace(decode=req)})
+    native_inputs = {"x_hc": hidden, "position_ids": positions}
+    call = SimpleNamespace(buffers=caches, native=native_inputs, policy=SimpleNamespace(constexprs=lambda: {}))
+
+    def pto(_runtime, _context, actual_hidden, _positions, actual_output, _cache):
+        initial = snapshot({**caches, "shared_topk": topk})
+        observer._first_step_pending = (call, initial, snapshot(native_inputs))
+        for cache in caches.values():
+            cache.add_(1)
+        actual_output.copy_(actual_hidden + 2)
+        return "original PTO return"
+
+    def native(_wrapper, actual_hidden, _positions, actual_output):
+        for cache in caches.values():
+            cache.add_(1)
+        req.sas_metadata = torch.tensor([99])
+        req.native_metadata_factory = None
+        req.query_start_loc.add_(20)
+        if native_raises:
+            topk.zero_()
+            raise RuntimeError("injected Native failure")
+        actual_output.copy_(actual_hidden + 2)
+
+    monkeypatch.setattr(torch.npu, "synchronize", lambda: None)
+    monkeypatch.setitem(sys.modules, "vllm_ascend.ops.dsv4_csa", SimpleNamespace(_native_attention_half=native))
+    if native_raises:
+        with pytest.raises(RuntimeError, match="injected Native failure"):
+            observer._first_step_pair(runtime, context, hidden, positions, output, (), pto)
+    else:
+        assert observer._first_step_pair(runtime, context, hidden, positions, output, (), pto) == "original PTO return"
+        assert observer._first_step_report["layers"][0]["metadata_restored_exact"]
+    assert torch.equal(output, hidden + 2)
+    assert all(torch.equal(cache, torch.full_like(cache, float(i + 1))) for i, cache in enumerate(caches.values()))
+    assert torch.equal(topk, torch.full_like(topk, 7))
+    assert req.sas_metadata is None and req.native_metadata_factory is factory
+    assert req.query_start_loc.tolist() == [0, 1, 2]
