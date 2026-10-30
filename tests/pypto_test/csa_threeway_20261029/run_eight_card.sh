@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 : "${TASK_DEVICE:?task-submit required}"
-# 用户仅批准本轮临时使用0卡；14卡仍禁止，不接受任何其他设备集合。
-[[ "$TASK_DEVICE" == 0,8,9,10,11,12,13,15 ]]
+# 用户本轮临时批准14卡，仅接受最后八卡，禁止使用物理0–7。
+[[ "$TASK_DEVICE" == 8,9,10,11,12,13,14,15 ]]
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 align_root=$(cd -- "$here/../../../.." && pwd)
 source "$align_root/src/tests/pypto_test/nal_native_alignment_20261027/env.sh"

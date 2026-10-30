@@ -65,9 +65,9 @@ def test_capacity_guard_rejects_override_before_allocation():
 
 def test_eight_card_script_rejects_unapproved_devices():
     script = Path(__file__).with_name("run_eight_card.sh").read_text()
-    assert '[[ "$TASK_DEVICE" == 0,8,9,10,11,12,13,15 ]]' in script
+    assert '[[ "$TASK_DEVICE" == 8,9,10,11,12,13,14,15 ]]' in script
     assert script.index('[[ "$TASK_DEVICE" ==') < script.index('source "$align_root/')
-    assert "14,15" not in script
+    assert "0,8,9" not in script
 
 
 def test_forty_inputs_use_five_eight_request_waves(tmp_path, monkeypatch):
