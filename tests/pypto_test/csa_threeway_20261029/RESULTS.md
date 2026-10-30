@@ -1081,3 +1081,32 @@ FULL图捕获及生成前实际窗口配置RPC均已通过，未修改数学包�
 当前先做真实模型首步同输入逐层CSA诊断，不继续后续大配置。
 T6、T8及原文件manifest/审计导入证据补存于
 `evidence/eightcard/window2048-qualification-v2.tar.gz`；此前原始失败和T240资格仍保留v1归档。
+
+### 02 时 11 分：真实首步同输入逐层诊断
+
+提交`task_20261031_021130_16373599506`，label为`last8-ours-first-step-v1`。
+仍为原v5模型、bank、KV4000、窗口2048及原Native gold，仅新增测试观测。
+只在rank0首个真实、非dummy、非draft、非capture的普通`NONE` forward，
+逐个CSA执行生产55参数PTO，再恢复同一初态执行Native的HC-pre至HC-post半层。
+首差保存该层输入及前后状态再停；21个CSA首步全部一致也立即诊断完成退出。
+这不是新的Native整模型基线，也不是192token、FULL replay或性能验收。
+
+观测保留五个完整physical-page view：SWA、压缩KV、主压缩state、Indexer state、
+Indexer key与scale合并页；该范围不包含底层allocation对齐前后的存储。
+快照在CPU，完全重合的view去重；Native使用独立输出，影子执行前后及恢复后同步。
+还保存/恢复共享TopK、request顶层字段及其直接Tensor内容，
+检查实际PTO输入、输出和cache保持原结果；嵌套对象及factory闭包缓存未做全面快照。
+硬拒IndexCache/skip_topk、TP>1、CP、OTP、olora，避免影子调用产生额外集体通信。
+已有offline connector的逐层load/save为空实现，本诊断不会改写只读bank。
+
+Worker实际window/heap/dep审计随首步报告持久化并再次验收；
+缺少任意CSA层、任意五carrier、状态恢复失败、共享TopK差异都不能通过。
+`FIRST_STEP_DIAGNOSTIC.json`与真正的`FIRST_DIFFERENCE.json`分开，已有首差优先，
+不以诊断主动终止的非零子进程退出码冒充完整生成成功。
+原冻结runner/observer/数学包保持字节不变，只新增内容hash命名的测试helper和runner。
+
+复现沿用前述八卡命令，PTO额外传`--first-step-probe`给`run_eight_card.sh`，
+同时显式`--env PTO_CSA_RING_TASK_WINDOW=2048`；只能使用本轮临时批准的8–15，
+outer780秒、内部720秒。Native gold仍是`last8-native-8k-waves8-v5`。
+227 CPU最初10项检查通过5.36秒；补强审计及首差门禁后6项回归通过4.43秒，
+实际冻结入口派生和导入通过且未初始化NPU，独立只读review无剩余阻断。

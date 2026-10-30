@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """只在227 CPU检查真实SDK配置字段及审计入口，不能冒充NPU验收。"""
 
+import ast
 import hashlib
 import importlib.util
 import json
@@ -65,6 +66,11 @@ def test_audit_runner_preserves_original_frozen_source(tmp_path):
     assert original.read_bytes() == source
     assert runner != original and "offline_pto_window_config" in runner.read_text()
     assert launch.prepare_runtime_audit_runner(root) == (runner, audit)
+    diagnostic, receipt = launch.prepare_first_step_runner(root)
+    ast.parse(diagnostic.read_text())
+    assert "FirstStepObserver" in diagnostic.read_text() and diagnostic != runner
+    assert original.read_bytes() == source
+    assert launch.prepare_first_step_runner(root) == (diagnostic, receipt)
     runner.write_text("unexpected modification")
     with pytest.raises(AssertionError, match="refusing to overwrite"):
         launch.prepare_runtime_audit_runner(root)

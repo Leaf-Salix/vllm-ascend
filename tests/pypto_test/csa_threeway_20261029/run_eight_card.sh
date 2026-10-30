@@ -13,6 +13,7 @@ reference=${4:?use none for Native}
 shift 4
 [[ "$arm" =~ ^(native|ours)$ && "$label" =~ ^[a-z0-9-]+$ ]]
 startup=()
+probe=()
 while (( $# )); do
   case "$1" in
     --startup-only)
@@ -23,6 +24,11 @@ while (( $# )); do
     --device)
       [[ $# -ge 2 && "$2" == "$TASK_DEVICE" ]]
       shift 2
+      ;;
+    --first-step-probe)
+      [[ "$arm" == ours && ${#probe[@]} == 0 ]]
+      probe=(--first-step-probe)
+      shift
       ;;
     *) exit 2 ;;
   esac
@@ -54,4 +60,4 @@ printf 'TASK_RUN_START %s\n' "$(date -Iseconds)"
 printf 'TASK_DEVICE=%s SDK=%s PTOAS_ROOT=%s ASCEND_HOME_PATH=%s\n' \
   "$TASK_DEVICE" "$CSA_SHARED_TOOLCHAIN_RELEASE" "$PTOAS_ROOT" "$ASCEND_HOME_PATH"
 trap 'printf "TASK_RUN_END %s\n" "$(date -Iseconds)"' EXIT
-python "$here/launch.py" "$snapshot" "$bank" "$out" "${args[@]}" "${startup[@]}"
+python "$here/launch.py" "$snapshot" "$bank" "$out" "${args[@]}" "${startup[@]}" "${probe[@]}"

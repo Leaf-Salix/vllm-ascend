@@ -12,7 +12,7 @@ import time
 from contextlib import suppress
 from pathlib import Path
 
-from postflight import check_reference_configuration, validate
+from postflight import check_reference_configuration, runtime_window_errors, validate
 
 
 def stop_group(process, grace=5):
@@ -73,6 +73,64 @@ def prepare_runtime_audit_runner(source):
     }
 
 
+def prepare_first_step_runner(source):
+    original, audit = prepare_runtime_audit_runner(source)
+    data = Path(__file__).with_name("first_step_observer.py").read_text()
+    base = "runtime_audit_" + audit["observer_sha256"][:12]
+    old = "from .runtime_audit import RuntimeAuditObserver"
+    assert data.count(old) == 1
+    data = data.replace(old, f"from .{base} import RuntimeAuditObserver")
+    digest = hashlib.sha256(data.encode()).hexdigest()
+    module = "first_step_" + digest[:12]
+    text = original.read_text()
+    old = f"csa_threeway_20261029.{base}.RuntimeAuditObserver"
+    assert text.count(old) == 1
+    text = text.replace(old, f"csa_threeway_20261029.{module}.FirstStepObserver")
+    runner = original.with_name(f"run_{module}.py")
+    helper = source / f"tests/pypto_test/csa_threeway_20261029/{module}.py"
+    for path, content in ((helper, data), (runner, text)):
+        if path.exists():
+            assert path.read_text() == content, f"refusing to overwrite frozen test artifact: {path}"
+        else:
+            with path.open("x") as handle:
+                handle.write(content)
+    audit.update(first_step_observer_sha256=digest, first_step_runner_sha256=hashlib.sha256(text.encode()).hexdigest())
+    return runner, audit
+
+
+def first_step_passed(output):
+    receipt = output / "FIRST_STEP_DIAGNOSTIC.json"
+    report = output / "same_input_first_step.json"
+    if not receipt.is_file() or not report.is_file() or (output / "FIRST_DIFFERENCE.json").exists():
+        return False
+    payload, result = json.loads(receipt.read_text()), json.loads(report.read_text())
+    expected = list(range(2, 43, 2))
+    return (
+        payload["kind"] == result["status"] == "first_step_complete"
+        and payload["layers"] == [row["layer"] for row in result["layers"]] == expected
+        and result["first_forward"]["graph_mode"] == "NONE"
+        and not runtime_window_errors(
+            {"worker_runtime_config": [{"pto_kernel_config": result["actual_pto_config"]}]},
+            2048,
+            [256 << 20, 512 << 20, 256 << 20, 256 << 20],
+        )
+        and all(
+            row["restored_exact"]
+            and row["metadata_restored_exact"]
+            and row["input_unchanged"]
+            and row["output_unchanged"]
+            and not row["use_index_cache"]
+            and not row["skip_topk"]
+            and not row["changed_readonly_inputs"]
+            and row["output"]["bit_equal"]
+            and set(row["caches"]) == {"cache_rows", "main_cache", "main_state", "idx_state", "idx_cache"}
+            and all(m["bit_equal"] for m in row["caches"].values())
+            and (row["shared_topk"] is None or row["shared_topk"]["bit_equal"])
+            for row in result["layers"]
+        )
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
@@ -81,6 +139,7 @@ def main():
     parser.add_argument("--reference", type=Path)
     parser.add_argument("--startup-only", action="store_true")
     parser.add_argument("--pto-task-window", type=int, choices=(2048,))
+    parser.add_argument("--first-step-probe", action="store_true")
     args = parser.parse_args()
 
     def interrupted(signum, _frame):
@@ -108,6 +167,10 @@ def main():
     if args.pto_task_window is not None:
         assert manifest["arm"] == "ours" and os.environ["PTO_CSA_RING_TASK_WINDOW"] == str(args.pto_task_window)
         runner, runtime_audit = prepare_runtime_audit_runner(source)
+    if args.first_step_probe:
+        assert manifest["arm"] == "ours" and dp == 8 and args.pto_task_window == 2048
+        runner, runtime_audit = prepare_first_step_runner(source)
+        os.environ["CSA_FIRST_STEP_OUTPUT"] = str(output)
     experiment = {
         "native_reference": str(args.reference) if args.reference else None,
         "arm": manifest["arm"],
@@ -128,6 +191,7 @@ def main():
         "runtime_ring_heap_bytes": [256 << 20, 512 << 20, 256 << 20, 256 << 20],
         "pto_ring_task_window": args.pto_task_window,
         "runtime_audit": runtime_audit,
+        "first_step_diagnostic": args.first_step_probe,
         "event_mode": 1,
         "eplb": False,
         "atomic_add": False,
@@ -190,12 +254,24 @@ def main():
             while process.poll() is None:
                 if (output / "STOP").exists() or time.monotonic() - start >= 720:
                     reason = "first_difference" if (output / "STOP").exists() else "720s_limit"
+                    if args.first_step_probe and first_step_passed(output):
+                        reason = "first_step_diagnostic_complete"
                     break
                 time.sleep(0.5)
         finally:
             code = stop_group(process)
+    if args.first_step_probe and reason != "720s_limit" and first_step_passed(output):
+        reason = "first_step_diagnostic_complete"
     status = {"exit_code": code, "reason": reason, "elapsed_s": time.monotonic() - start}
     (output / "exit.json").write_text(json.dumps(status, indent=2) + "\n")
+    if args.first_step_probe:
+        status.update(
+            diagnostic_passed=first_step_passed(output),
+            scope="first real NONE forward only; not 192-token or FULL replay acceptance",
+        )
+        (output / "exit.json").write_text(json.dumps(status, indent=2) + "\n")
+        print(json.dumps(status), flush=True)
+        raise SystemExit(0 if reason == "first_step_diagnostic_complete" and status["diagnostic_passed"] else 1)
     if not reason and code == 0:
         if args.startup_only:
             result = {
