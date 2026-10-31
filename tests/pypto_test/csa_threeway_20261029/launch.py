@@ -206,7 +206,7 @@ def main():
         )
         runner, runtime_audit = prepare_runtime_audit_runner(source)
     if args.first_step_probe:
-        assert manifest["arm"] == "ours" and dp == 8 and args.pto_task_window == 2048
+        assert manifest["arm"] in ("ours", "nalinaly") and dp == 8 and args.pto_task_window == 2048
         runner, runtime_audit = prepare_first_step_runner(source)
         os.environ["CSA_FIRST_STEP_OUTPUT"] = str(output)
     if args.inspect_token_sequence:

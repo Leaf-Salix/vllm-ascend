@@ -200,9 +200,91 @@ SHA256：`9e32a172eb43f195b0a2da913e7eaaa2fe440228e6a5bdabf436fd3664c0ecfa`。
 仍搭配共同框架`41ba392f`及现有共享SDK，未改我方精度包、旧快照、bank或运行环境。
 46份包文件已入来源清单，Python语法检查通过，确认无`backend.py`及ACLNN绑定分支。
 来源凭证为`evidence/eightcard/nal-pre-aclnn-1574-rollback.json`。
-状态仅为源码冻结，尚未做该副本的导入、设备或整模型验证；本次未新增NPU任务。
+这是冻结时的历史状态：当时仅完成源码冻结，尚未做该副本的导入、设备或整模型验证，
+没有新增NPU任务。随后用户批准的实际补测见下一节。
 
 前轮`79ea6d3c`虽已含可选ACLNN代码，但实际显式走Python，不需要wheel。
 两版核心计算核没有差异；变更涉及后端选择、绑定、短于8K的支持范围及服务检查。
 因此旧版是可用的无wheel对照方向，但不能推定回退会修复已观测token首差，
 也不能将79版本的结果改标为1574版本。旧结果及失败现场继续保留，不重复编译相同核。
+
+### 1574版真实模型补测
+
+用户另行批准本轮物理8–15（含14），要求只补nalinaly1574，不重复Native和我方。
+无设备preflight已通过，模型75分片、40题bank、公共工具链、vLLM0.25.1和
+Native插件导入路径均核对，NPU未初始化。原Native计时结果作为本轮reference，
+我方结果仍直接引用上一节；不改金标、数学或已验收环境。
+
+补测任务`task_20261031_183419_15358237012`，结果标签`last8-nal1574-8k-wave-perf-v1`。
+沿用同一`run_eight_card.sh`、`--inspect-token-sequence --measure-waves`，
+仅cohort改为`eightcard-nal-pre-aclnn-1574-v1`，reference改为
+`last8-native-8k-wave-perf-v1`。仍为每rank40题、5波×8、192输出token，
+FULL6/240、window2048、内部720秒/外部780秒、首token或长度差异即停。
+首次补测在第一个图捕获阶段触发`720s_limit`，子进程运行725.30秒（含终止宽限），
+调度任务exit1并释放设备。未进入生成、没有首差或有效性能结果，不能记为精度失败。
+日志出现新PyPTO源码生成记录，因此先将缓存准备移到不占卡任务，避免继续占八卡冷编译。
+
+必要形状T6/B1、T240/B40、T8/B8分别通过现有`precompile.py`公共模块入口预热，
+`--max-seq-len 9000 --task-window 2048`，各自780秒上限，不改SDK或数学。
+对应无设备任务依次为`task_20261031_184958_20436819231`、
+`task_20261031_184958_204372518229`、`task_20261031_184958_204379325810`。
+预热通过后才补跑生成；CPU编译通过不作为设备精度或性能验收。
+
+三项无设备预热均通过，T6/T240/T8用时141.07/15.08/140.62秒，NPU均未初始化。
+补跑`task_20261031_185325_216936325056`，标签`last8-nal1574-8k-wave-perf-v2`，
+只使用8–15；生成子进程422.71秒，在首个token差异时结束，设备释放。
+`FIRST_DIFFERENCE.json`记录rank3、`h8192_q02`、零基输出位置0：
+1574为3648，Native为9854，与前轮79版同问题同位置的差异相同。
+rank是竞争写首差记录的捕获方，不据此断言只有rank3出错。
+没有完整rank结果或有效计时，不补填性能数字，不继续后续生成。
+
+为首差定位，仅放开测试launcher与八卡wrapper的`--first-step-probe`到nalinaly臂，
+保留既有首个NONE forward、单次归属、首个不一致层停止、cache/metadata恢复及快照上限。
+冻结生产包和`first_step_observer.py`均不修改，独立静态审阅确认1574的55参数/五carrier接口兼容。
+227离线汇总17项通过；首步/审计回归首次误导入旧快照的postflight（缺少新审计函数），
+修正CPU driver的测试导入优先级后9项通过11.34秒，冻结源码未改。
+
+首差后单独提交`task_20261031_190352_26812776499`，标签`last8-nal1574-first-step-v1`，
+同一1574快照、同一bank/Native参考，物理8–15及原时间上限；只传`--first-step-probe`。
+该诊断只在真实首个普通目标forward按层做同输入Native半层shadow，
+恢复PTO的cache/metadata/输出，首层不一致即停，不继续192token生成，也不作性能验收。
+
+该诊断在345.20秒后停止于**首个CSA层layer2**，`forward_id=1`、NONE/T8/B8、
+每请求真实query长度1，query边界`[0,1,2,3,4,5,6,7,8]`。
+seq lens为`[8394,8411,8394,8467,8411,8225,8394,8411]`。
+这证明在同输入普通forward中已出现CSA层差异，不能把误差全部归因于后续FULL replay。
+
+| layer2同输入边界 | 结果 |
+|---|---|
+| BF16输出 | 131,072元素中26,756个不同，27,487个byte不同 |
+| 输出relative L2 | 0.0025701371，即约0.257% |
+| 输出max abs | 0.0029296875 |
+| raw/SWA cache carrier | 1,263 byte不同 |
+| main cache / main state carrier | 分别32,331 byte不同 |
+| Indexer state / cache carrier | 分别8,110 byte不同 |
+| 输入、PTO输出、cache、metadata恢复 | 均逐byte通过，只读输入无改写 |
+| 共享TopK buffer | 逐byte相同；不能据此认定所有实际TopK中间结果一致 |
+
+carrier可能包含共享allocation的不同view，差异数量不能相加当作独立错误总量。
+指标比较整个物理carrier，不将其自动解释成有效slot错误数。
+保存的首差tensor约1.28GB，仅留227，不下载或提交；小JSON保留差异指标和恢复证明。
+目前已定位到第一个CSA层；尚未在该真实首步中逐子模块证明最早的内部误差来源，
+不能将HC-pre、量化或attention中的某一项直接定为唯一根因。没有修改1574数学。
+
+本轮最终关系如下，Native与我方两行完全复用已有结果，没有重跑：
+
+| 实现 | 8K真实模型token | 有效目标forward计时 |
+|---|---|---:|
+| Native `41ba392f` | 与原金标61,440/61,440一致 | 73.494ms |
+| 我方 `65bebf7f` | 与Native61,440/61,440一致；接受事件不同 | 77.079ms（+4.88%） |
+| nalinaly `1574ed59` | q02第一个token不同，首差停止 | 无；未完成有效采样 |
+
+因此本轮未取得可用于三方速度比的nalinaly计时；未放宽首差规则来继续生成或补性能数字。
+两个完成的生成/诊断任务均已退出，物理8–15释放；首次冷编译超时记录也保留。
+
+本轮完整小型证据：`evidence/eightcard/nal1574-real-model-20261031-evidence.tar.gz`，
+374,931 byte，54份日志/JSON/清单，SHA256：
+`572edfdd49d24e4a54331cbee07e8339a3c8e454824a5da996593632d2f7302a`。
+复现使用新的未占用结果标签；补测沿用前述生成命令，首步诊断将两个生成观测开关
+`--inspect-token-sequence --measure-waves`替换为单独的`--first-step-probe`。
+仍需取得当轮14卡授权；不要直接覆盖本轮结果或修改旧金标。

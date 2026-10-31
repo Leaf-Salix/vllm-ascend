@@ -28,7 +28,7 @@ while (( $# )); do
       shift 2
       ;;
     --first-step-probe)
-      [[ "$arm" == ours && ${#probe[@]} == 0 ]]
+      [[ "$arm" != native && ${#probe[@]} == 0 ]]
       probe=(--first-step-probe)
       shift
       ;;
