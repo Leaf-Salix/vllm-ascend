@@ -13,6 +13,7 @@ from contextlib import suppress
 from pathlib import Path
 
 from postflight import check_reference_configuration, runtime_window_errors, summarize_tokens, validate
+from wave_measurement import prepare_wave_runner
 
 
 def stop_group(process, grace=5):
@@ -174,6 +175,7 @@ def main():
     parser.add_argument("--pto-task-window", type=int, choices=(2048,))
     parser.add_argument("--first-step-probe", action="store_true")
     parser.add_argument("--inspect-token-sequence", action="store_true")
+    parser.add_argument("--measure-waves", action="store_true")
     args = parser.parse_args()
 
     def interrupted(signum, _frame):
@@ -199,7 +201,9 @@ def main():
     runner = source / "tests/pypto_test/offline_pd/run.py"
     runtime_audit = None
     if args.pto_task_window is not None:
-        assert manifest["arm"] == "ours" and os.environ["PTO_CSA_RING_TASK_WINDOW"] == str(args.pto_task_window)
+        assert manifest["arm"] in ("ours", "nalinaly") and os.environ["PTO_CSA_RING_TASK_WINDOW"] == str(
+            args.pto_task_window
+        )
         runner, runtime_audit = prepare_runtime_audit_runner(source)
     if args.first_step_probe:
         assert manifest["arm"] == "ours" and dp == 8 and args.pto_task_window == 2048
@@ -207,8 +211,13 @@ def main():
         os.environ["CSA_FIRST_STEP_OUTPUT"] = str(output)
     if args.inspect_token_sequence:
         assert not args.first_step_probe and not args.startup_only
-        assert manifest["arm"] == "ours" and dp == 8 and args.pto_task_window == 2048
+        assert manifest["arm"] in ("ours", "nalinaly") and dp == 8 and args.pto_task_window == 2048
         runner, runtime_audit = prepare_token_runner(source)
+    wave_receipt = None
+    if args.measure_waves:
+        assert dp == 8 and manifest["request_wave_size"] == 8 and not args.first_step_probe and not args.startup_only
+        assert manifest["arm"] == "native" or args.inspect_token_sequence
+        runner, wave_receipt = prepare_wave_runner(source, runner, runtime_audit)
     experiment = {
         "native_reference": str(args.reference) if args.reference else None,
         "arm": manifest["arm"],
@@ -231,6 +240,7 @@ def main():
         "runtime_audit": runtime_audit,
         "first_step_diagnostic": args.first_step_probe,
         "inspect_token_sequence": args.inspect_token_sequence,
+        "wave_measurement": wave_receipt,
         "event_mode": 1,
         "eplb": False,
         "atomic_add": False,

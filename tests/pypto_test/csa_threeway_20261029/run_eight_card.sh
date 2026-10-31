@@ -11,10 +11,11 @@ arm=${2:?}
 label=${3:?}
 reference=${4:?use none for Native}
 shift 4
-[[ "$arm" =~ ^(native|ours)$ && "$label" =~ ^[a-z0-9-]+$ ]]
+[[ "$arm" =~ ^(native|ours|nalinaly)$ && "$label" =~ ^[a-z0-9-]+$ ]]
 startup=()
 probe=()
 tokens=()
+measurement=()
 while (( $# )); do
   case "$1" in
     --startup-only)
@@ -32,8 +33,13 @@ while (( $# )); do
       shift
       ;;
     --inspect-token-sequence)
-      [[ "$arm" == ours && ${#tokens[@]} == 0 ]]
+      [[ "$arm" != native && ${#tokens[@]} == 0 ]]
       tokens=(--inspect-token-sequence)
+      shift
+      ;;
+    --measure-waves)
+      [[ ${#measurement[@]} == 0 ]]
+      measurement=(--measure-waves)
       shift
       ;;
     *) exit 2 ;;
@@ -60,11 +66,11 @@ bank=/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/low-acceptance-20261
 args=()
 if [[ "$reference" != none ]]; then args=(--reference "$reference"); fi
 if [[ -n ${PTO_CSA_RING_TASK_WINDOW:-} ]]; then
-  [[ "$arm" == ours && "$PTO_CSA_RING_TASK_WINDOW" == 2048 ]]
+  [[ "$arm" != native && "$PTO_CSA_RING_TASK_WINDOW" == 2048 ]]
   args+=(--pto-task-window "$PTO_CSA_RING_TASK_WINDOW")
 fi
 printf 'TASK_RUN_START %s\n' "$(date -Iseconds)"
 printf 'TASK_DEVICE=%s SDK=%s PTOAS_ROOT=%s ASCEND_HOME_PATH=%s\n' \
   "$TASK_DEVICE" "$CSA_SHARED_TOOLCHAIN_RELEASE" "$PTOAS_ROOT" "$ASCEND_HOME_PATH"
 trap 'printf "TASK_RUN_END %s\n" "$(date -Iseconds)"' EXIT
-python "$here/launch.py" "$snapshot" "$bank" "$out" "${args[@]}" "${startup[@]}" "${probe[@]}" "${tokens[@]}"
+python "$here/launch.py" "$snapshot" "$bank" "$out" "${args[@]}" "${startup[@]}" "${probe[@]}" "${tokens[@]}" "${measurement[@]}"
