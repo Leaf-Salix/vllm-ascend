@@ -188,3 +188,21 @@ SHA256：`9e32a172eb43f195b0a2da913e7eaaa2fe440228e6a5bdabf436fd3664c0ecfa`。
 不直接修改清单来绕过版本检查。已询问yejia可读的现成包位置，尚未重编译94档设备核。
 旧Native金标、我方数学包、三项任务及结果均保留；是否切换新后端以实际包兼容检查为前提，
 不把未运行的最新后端并入结果。
+
+## 后续对照回退到无wheel版本
+
+用户选择不追ACLNN wheel，改用引入它之前的版本。已核对Git历史：
+`f589dc84854d48ad067905cdb5fae00e34e32cce`首次增加可选ACLNN后端，
+其直接父提交`1574ed593af8b0f3aa6077cf13d599df281ac242`（2026-10-28）
+是最近一个完全没有该后端的提交，选作后续nalinaly对照。
+
+已在独立`cohorts/eightcard-nal-pre-aclnn-1574-v1/nalinaly/source`冻结完整CSA包，
+仍搭配共同框架`41ba392f`及现有共享SDK，未改我方精度包、旧快照、bank或运行环境。
+46份包文件已入来源清单，Python语法检查通过，确认无`backend.py`及ACLNN绑定分支。
+来源凭证为`evidence/eightcard/nal-pre-aclnn-1574-rollback.json`。
+状态仅为源码冻结，尚未做该副本的导入、设备或整模型验证；本次未新增NPU任务。
+
+前轮`79ea6d3c`虽已含可选ACLNN代码，但实际显式走Python，不需要wheel。
+两版核心计算核没有差异；变更涉及后端选择、绑定、短于8K的支持范围及服务检查。
+因此旧版是可用的无wheel对照方向，但不能推定回退会修复已观测token首差，
+也不能将79版本的结果改标为1574版本。旧结果及失败现场继续保留，不重复编译相同核。
