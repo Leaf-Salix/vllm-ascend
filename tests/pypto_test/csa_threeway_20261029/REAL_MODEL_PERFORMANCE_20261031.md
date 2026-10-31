@@ -21,10 +21,16 @@
 | 替换范围 | 完整21个CSA层HC-pre至HC-post；20个HCA层全部Native |
 | 公共框架 | `41ba392f482bf88f7b6a797e2542443c81497338` |
 | 我方CSA数学包 | `65bebf7f6b2e4f3f6492fd6463f73106506f3496` |
-| nalinaly性能CSA包 | `79ea6d3c8460338a172cb5570d14999d5a544262`，本轮GitHub确认仍为最新 |
+| nalinaly性能CSA包 | 准备阶段冻结`79ea6d3c8460338a172cb5570d14999d5a544262`，Python路径 |
 | SDK | 共享已验收`csa-shared-20261024-group-dims`，不更换编译器或运行库 |
+| Python栈 | vLLM 0.25.1、Torch 2.10.0+cpu、torch_npu 2.10.0.post2 |
+| CANN | 9.2.0-beta.2 |
+| 后端 | 两份PTO实现均使用Python提交路径（含AICPU），不是ACLNN后端对比 |
 | PTO容量 | 双方同样window2048，heap=(256,512,256,256)MiB，默认dependency pool |
 | 时间上限 | 每任务内部720秒、调度780秒；首个输出token差异停止 |
+
+复用已生成的Native prefill bank，本轮测decode。三方共享同一fixed8192输入与缓存，
+没有重新下载权重或生成新bank，也不声称与原作者原始bank逐字节相同。
 
 ## 计时与精度口径
 
@@ -42,6 +48,11 @@
 6. **冻结**：只在快照旁新增内容hash的runner、observer、mixed副本；不改原冻结数学包、
    runner、scheduler或Native金标，不重装SDK。严格原postflight的事件失败仍保留。
 
+`performance_qualified`只表示性能样本满足其门禁，不意味着token或事件验收通过；必须分列。
+按各rank选中样本序号取max的辅助统计，没有独立公共forward步号证明，不能称为同一步EP8关键路径。
+launcher逐token检查以既有v5金标为准；离线三方汇总的token比较以本轮Native计时目录为准，
+两条证据分别记录，本轮Native还需离线核验与v5金标一致。
+
 ## 任务和复现
 
 | 实现 | 任务 | 输出标签 |
@@ -56,6 +67,35 @@ Native使用`eightcard-source-v5/native`；我方使用同cohort的`ours`；
 nalinaly使用`eightcard-nal-perf-v1/nalinaly`，由同Native框架副本只替换完整CSA包创建。
 三方均传`--measure-waves`；两份PTO实现另传`--inspect-token-sequence`，
 并显式设置`PTO_CSA_RING_TASK_WINDOW=2048`，reference指向`last8-native-8k-waves8-v5`。
+
+以下在227的bash中执行；**未来复现仍须重新取得14卡授权**，本轮许可不构成默认权限。
+`run_tag`必须选未使用的新值，启动器拒绝覆盖旧结果。Native金标和bank须已按主报告准备并验收。
+
+```bash
+r=/data/pyptouser/yejia/vllm-nal-tnd-native-align-20261027-codex
+source "$r/src/tests/pypto_test/nal_native_alignment_20261027/env.sh"
+unset PTO_CSA_RING_TASK_WINDOW
+gold="$r/results/last8-native-8k-waves8-v5"
+run_tag=repro-new-tag
+run_arm() {
+  local task_arm=$1 task_cohort=$2 task_label=$3 task_reference=$4
+  local flags='--measure-waves'
+  local options=(--env PYTHONNOUSERSITE=1 --env HCCL_DETERMINISTIC=true
+                 --env PTOAS_ROOT --env ASCEND_HOME_PATH)
+  if [[ "$task_arm" != native ]]; then
+    options+=(--env PTO_CSA_RING_TASK_WINDOW=2048)
+    flags='--inspect-token-sequence --measure-waves'
+  fi
+  TASKQUEUE_DEVICE_CONF="$r/csa-approved-last8-20261030.conf" \
+  TASKQUEUE_DEVICE_POOL=8,9,10,11,12,13,14,15 \
+  TASKQUEUE_IGNORE_WHITELIST=0 TASKQUEUE_IGNORE_GROUP_AFFINITY=0 \
+    task-submit --device auto --device-num 8 --max-time 780 "${options[@]}" \
+      "bash $r/src/tests/pypto_test/csa_threeway_20261029/run_eight_card.sh $task_cohort $task_arm $task_label $task_reference $flags"
+}
+run_arm native "$r/cohorts/eightcard-source-v5" "native-$run_tag" none
+run_arm ours "$r/cohorts/eightcard-source-v5" "ours-$run_tag" "$gold"
+run_arm nalinaly "$r/cohorts/eightcard-nal-perf-v1" "nalinaly-$run_tag" "$gold"
+```
 
 ```bash
 # 在共享环境下、无设备运行CPU门禁，bootstrap参数同主报告。
@@ -77,3 +117,16 @@ CPU门禁已在227通过：观测/审计/token诊断7项，汇总及postflight17
 ## 结果
 
 任务排队中，尚未产生本轮真实性能结果。
+
+## 排队期间的上游更新
+
+11:00左右复核时，nalinaly公开分支已推进到`4d5b11821a11da28f16a0e075608c8c316a22fe9`。
+新提交包含94档设备选档ACLNN 0.4.0、静态/SK接入及Host/metadata优化；
+`entry.py`及主要数学核没有变更，但执行和接入方式已有明显变化。
+因此，当前冻结的79版本Python任务不能冒称最新ACLNN端到端性能。
+
+当前共同环境未安装`csa_device_pto_ops`，源码归档没有wheel或.run；公开GitHub Releases为空。
+新包原构建为Python3.10/aarch64，本轮共同环境为Python3.12，复用时仍须检查ABI；
+不直接修改清单来绕过版本检查。已询问yejia可读的现成包位置，尚未重编译94档设备核。
+旧Native金标、我方数学包、三项排队任务均保留；是否切换新后端以实际包兼容检查为前提，
+不把未运行的最新后端并入结果。

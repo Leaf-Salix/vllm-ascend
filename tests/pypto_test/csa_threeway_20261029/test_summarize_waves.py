@@ -50,6 +50,11 @@ def test_performance_requires_matched_actual_inputs(tmp_path):
     path.write_text(json.dumps(data))
     actual = summarize(ours, native)
     assert actual["tokens"]["tokens_equal"] and not actual["performance_qualified"]
+    strict = ours / "postflight.json"
+    saved = strict.read_bytes()
+    strict.unlink()
+    assert not summarize(ours, native)["complete"]
+    strict.write_bytes(saved)
     path.unlink()
     actual = summarize(ours, native)
     assert not actual["complete"] and not actual["performance_qualified"]

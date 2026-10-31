@@ -36,7 +36,7 @@ def summarize(root, native):
             "median": statistics.median(values),
             "min": min(values),
             "max": max(values),
-            "ep8_slowest_rank_median": statistics.median(slowest),
+            "selected_ordinal_rank_max_median": statistics.median(slowest),
             "scope": "20 selected B8 FULL240 target-model forwards/rank, excludes draft; not single CSA",
         }
     waves = [row.get("generation_waves", []) for row in ranks]
