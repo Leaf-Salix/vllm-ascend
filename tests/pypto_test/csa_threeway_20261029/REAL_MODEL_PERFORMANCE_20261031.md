@@ -17,6 +17,7 @@
 | 上下文/输出 | 固定前缀8192，加真实问题；每请求192输出token |
 | 生成 | 温度0，DSpark出5验6；确定性level1和HCCL确定性开启 |
 | 图/缓存 | FULL_DECODE_ONLY，capture sizes 6/240，KV blocks=4000 |
+| 静态/SK | Static默认开启；未显式启用、验收新版SuperKernel，不标作SK=1 |
 | 权重/并行优化 | NZ2、atomic add关闭、EPLB关闭 |
 | 替换范围 | 完整21个CSA层HC-pre至HC-post；20个HCA层全部Native |
 | 公共框架 | `41ba392f482bf88f7b6a797e2542443c81497338` |
@@ -113,10 +114,67 @@ python tests/pypto_test/csa_threeway_20261029/summarize_waves.py \
 
 CPU门禁已在227通过：观测/审计/token诊断7项，汇总及postflight17项。
 独立审阅确认冻结与首差机制保留；上述客户端墙钟和非连续cycle限制已纳入口径。
+最终rank统计更新后，在227复跑汇总/postflight共17项通过（0.15秒），
+日志为`evidence/eightcard/threeway-summary-final-cpu-20261031.log`。
 
 ## 结果
 
-任务排队中，尚未产生本轮真实性能结果。
+三项均已结束并释放设备，未使用前八张卡。只有Native和我方完成了全部生成及有效计时。
+主性能统计为各rank的20个目标forward样本先取均值，再取八rank中的最大均值；
+这是保守的rank级统计，不是逐步EP关键路径或完整生成平均步长。
+
+| 实现 | 与Native输出token | 目标forward，最慢rank均值 | 相对Native耗时 | 接受事件逐条一致 |
+|---|---|---:|---:|---|
+| Native `41ba392f` | 61,440/61,440与旧v5金标一致 | 73.494 ms | 基线 | 是，与旧v5一致 |
+| 我方精度TND `65bebf7f` | 61,440/61,440与旧金标及本轮Native一致 | 77.079 ms | +4.88% | 否 |
+| nalinaly性能TND `79ea6d3c`，Python | 首个输出token差异，停止 | 无有效完整采样 | 不计算 | 未完成 |
+
+Native与我方各160个样本（20/rank），请求数、有效T、物理padding和positions逐样本一致，
+各自八rank的上述输入签名也一致；coverage错误为空、零抢占。仅这些选中步骤通过性能门禁，
+不表示整个192token期间的接受轨迹一致，也不表示hidden/cache逐bit一致。
+均值、P95为合并160个rank样本的描述统计，不将相关rank样本当作独立重复实验。
+
+| 计时细节 | Native | 我方精度TND |
+|---|---:|---:|
+| 合并样本均值 | 73.418 ms | 77.058 ms |
+| 合并样本中位数 | 73.425 ms | 77.023 ms |
+| 合并样本P95 | 74.112 ms | 77.997 ms |
+| 分波客户端墙钟合计 | 40.990 s | 60.257 s |
+| 对应客户端墙钟输出速率，仅辅助 | 1498.91 token/s | 1019.64 token/s |
+| DSpark平均接受长度 | 3.695018226 | 3.695018226 |
+| 生成子进程总运行时间，含加载及捕获 | 403.11 s | 393.60 s |
+
+客户端墙钟含内部入场协调、CPU逐token检查、draft及采样，不将其约32%的速率差归因于CSA；
+加载/编译/捕获总时间同样不作为性能。只运行一次/实现，未证明跨任务重复收益或退化的稳定性。
+
+### 我方接受事件差异仍保留
+
+全部输出token一致，但`h8192_q04`的第36个接受事件（零基35）为我方`[5,5]`、Native`[5,4]`。
+接受长度0..5的全rank直方图分别为Native`[848,1224,1624,1048,1080,7344]`，
+我方`[848,1224,1624,1056,1064,7352]`；均值相同不能替代逐事件验收。
+因此我方模型生成exit0，原严格postflight仍因接受事件不同为false、调度exit1。
+原postflight的timing错误来自比较旧v5无有效计时的记录；新版离线性能门禁改与本轮Native对照，
+结果通过，未删除或改写旧postflight失败。
+
+### nalinaly首差与结论边界
+
+`FIRST_DIFFERENCE.json`记录rank0、`h8192_q02`、输出零基位置0：
+nalinaly为token **3648**，Native为 **9854**。任务在679.86秒（约11分20秒）停止，
+未产生完整rank结果或有效计时样本；不使用该679.86秒反推生成性能。
+启动日志确认选择`spmd_tnd/python`、NZ2并准备21个CSA目标层，但首差停止前未完成全部覆盖后检，
+不能补写为coverage通过。尚未通过同输入内部hook定位到具体误差模块。
+本结果证明本次公共框架、bank和配置下的冻结Python组合未对齐Native，
+不等于已证明最新ACLNN后端同样失败，也不能据此把全部速度差归因于精度。
+
+按首差规则，本轮没有取消校验后继续跑nalinaly，也没有为补速度重跑大配置。
+因此三方token关系已得到区分，但本轮**尚无nalinaly有效性能值**，
+不能声称我方已达到或落后其最新ACLNN版本多少。
+
+完整JSON、8rank输出/事件/观测、首差、命令、源码清单和日志归档：
+`evidence/eightcard/threeway-real-model-wave-20261031-evidence.tar.gz`，
+SHA256：`9e32a172eb43f195b0a2da913e7eaaa2fe440228e6a5bdabf436fd3664c0ecfa`。
+其中`native_matches_frozen_gold.json`保留本轮Native与旧v5的独立验证；
+`threeway-wave-summary-20261031.json`使用本轮Native作离线对照。
 
 ## 排队期间的上游更新
 
@@ -128,5 +186,5 @@ CPU门禁已在227通过：观测/审计/token诊断7项，汇总及postflight17
 当前共同环境未安装`csa_device_pto_ops`，源码归档没有wheel或.run；公开GitHub Releases为空。
 新包原构建为Python3.10/aarch64，本轮共同环境为Python3.12，复用时仍须检查ABI；
 不直接修改清单来绕过版本检查。已询问yejia可读的现成包位置，尚未重编译94档设备核。
-旧Native金标、我方数学包、三项排队任务均保留；是否切换新后端以实际包兼容检查为前提，
+旧Native金标、我方数学包、三项任务及结果均保留；是否切换新后端以实际包兼容检查为前提，
 不把未运行的最新后端并入结果。

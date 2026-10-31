@@ -25,17 +25,23 @@ def summarize(root, native):
     observations = [row["observation"][0]["threeway_timing"] for row in ranks]
     samples = [row["samples"] for row in observations]
     matching = [timing_inputs(a) == timing_inputs(n) for a, n in zip(ranks, reference, strict=True)]
+    aligned = all(timing_inputs(row) == timing_inputs(ranks[0]) for row in ranks)
     complete = all(row["complete"] and len(row["samples"]) == 20 for row in observations)
     report.update(complete=True, timing_complete=complete, timing_inputs_equal_by_rank=matching)
+    report["timing_inputs_aligned_across_ranks"] = aligned
     if complete:
         values = [row["forward_us"] for rows in samples for row in rows]
         slowest = [max(samples[rank][i]["forward_us"] for rank in range(8)) for i in range(20)]
+        rank_means = [statistics.mean(row["forward_us"] for row in rows) for rows in samples]
         report["target_forward_us"] = {
             "samples": len(values),
             "mean": statistics.mean(values),
             "median": statistics.median(values),
             "min": min(values),
             "max": max(values),
+            "p95": statistics.quantiles(values, n=100, method="inclusive")[94],
+            "rank_means": rank_means,
+            "slowest_rank_mean": max(rank_means),
             "selected_ordinal_rank_max_median": statistics.median(slowest),
             "scope": "20 selected B8 FULL240 target-model forwards/rank, excludes draft; not single CSA",
         }
@@ -59,6 +65,7 @@ def summarize(root, native):
     report["performance_qualified"] = (
         complete
         and all(matching)
+        and aligned
         and not strict["coverage_errors"]
         and tokens["zero_preemptions"]
         and bool(experiment.get("wave_measurement"))

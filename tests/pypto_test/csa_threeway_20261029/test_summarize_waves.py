@@ -43,6 +43,8 @@ def test_performance_requires_matched_actual_inputs(tmp_path):
     actual = summarize(ours, native)
     assert actual["performance_qualified"] and actual["tokens"]["tokens_equal"]
     assert actual["target_forward_us"]["mean"] == 109.5
+    assert actual["target_forward_us"]["slowest_rank_mean"] == 109.5
+    assert actual["timing_inputs_aligned_across_ranks"]
     assert actual["client_waves"]["tokens_per_s"] == 6144
     path = ours / "rank0.mixed.json"
     data = json.loads(path.read_text())
