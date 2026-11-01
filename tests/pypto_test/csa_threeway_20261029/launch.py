@@ -99,19 +99,21 @@ def prepare_first_step_runner(source):
     return runner, audit
 
 
-def prepare_token_runner(source):
+def prepare_token_runner(source, nal_performance=False):
     original, audit = prepare_runtime_audit_runner(source)
     scheduler = source / "tests/pypto_test/csa_threeway_20261029/scheduler.py"
     frozen = json.loads((source.parent / "manifest.json").read_text())["files"]
     scheduler_digest = hashlib.sha256(scheduler.read_bytes()).hexdigest()
     assert scheduler_digest == frozen[str(scheduler.relative_to(source))], "frozen strict scheduler changed"
-    data = Path(__file__).with_name("token_diagnostic.py").read_bytes()
+    filename = "nal_performance.py" if nal_performance else "token_diagnostic.py"
+    scheduler_class = "NalPerformanceScheduler" if nal_performance else "TokenDiagnosticScheduler"
+    data = Path(__file__).with_name(filename).read_bytes()
     digest = hashlib.sha256(data).hexdigest()
     module = "token_diagnostic_" + digest[:12]
     text = original.read_text()
     old = '"scheduler_cls": "csa_threeway_20261029.scheduler.CheckedScheduler"'
     assert text.count(old) == 1
-    text = text.replace(old, f'"scheduler_cls": "csa_threeway_20261029.{module}.TokenDiagnosticScheduler"')
+    text = text.replace(old, f'"scheduler_cls": "csa_threeway_20261029.{module}.{scheduler_class}"')
     runner = original.with_name(f"run_{module}.py")
     helper = source / f"tests/pypto_test/csa_threeway_20261029/{module}.py"
     for path, content in ((helper, data), (runner, text.encode())):
@@ -176,6 +178,7 @@ def main():
     parser.add_argument("--first-step-probe", action="store_true")
     parser.add_argument("--inspect-token-sequence", action="store_true")
     parser.add_argument("--measure-waves", action="store_true")
+    parser.add_argument("--nal-performance-only", action="store_true")
     args = parser.parse_args()
 
     def interrupted(signum, _frame):
@@ -184,6 +187,8 @@ def main():
     signal.signal(signal.SIGTERM, interrupted)
     source, output = args.source, args.output
     manifest = json.loads((source.parent / "manifest.json").read_text())
+    if args.nal_performance_only:
+        assert manifest["arm"] == "nalinaly" and args.inspect_token_sequence and args.measure_waves
     dp = manifest.get("decode_dp", 16)
     assert dp in (8, 16)
     devices = os.environ["TASK_DEVICE"].split(",")
@@ -212,7 +217,7 @@ def main():
     if args.inspect_token_sequence:
         assert not args.first_step_probe and not args.startup_only
         assert manifest["arm"] in ("ours", "nalinaly") and dp == 8 and args.pto_task_window == 2048
-        runner, runtime_audit = prepare_token_runner(source)
+        runner, runtime_audit = prepare_token_runner(source, args.nal_performance_only)
     wave_receipt = None
     if args.measure_waves:
         assert dp == 8 and manifest["request_wave_size"] == 8 and not args.first_step_probe and not args.startup_only
@@ -240,6 +245,7 @@ def main():
         "runtime_audit": runtime_audit,
         "first_step_diagnostic": args.first_step_probe,
         "inspect_token_sequence": args.inspect_token_sequence,
+        "nal_performance_only": args.nal_performance_only,
         "wave_measurement": wave_receipt,
         "event_mode": 1,
         "eplb": False,

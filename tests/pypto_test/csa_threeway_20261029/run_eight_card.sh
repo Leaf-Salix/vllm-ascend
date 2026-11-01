@@ -16,6 +16,7 @@ startup=()
 probe=()
 tokens=()
 measurement=()
+performance=()
 while (( $# )); do
   case "$1" in
     --startup-only)
@@ -40,6 +41,11 @@ while (( $# )); do
     --measure-waves)
       [[ ${#measurement[@]} == 0 ]]
       measurement=(--measure-waves)
+      shift
+      ;;
+    --nal-performance-only)
+      [[ "$arm" == nalinaly && ${#performance[@]} == 0 ]]
+      performance=(--nal-performance-only)
       shift
       ;;
     *) exit 2 ;;
@@ -73,4 +79,4 @@ printf 'TASK_RUN_START %s\n' "$(date -Iseconds)"
 printf 'TASK_DEVICE=%s SDK=%s PTOAS_ROOT=%s ASCEND_HOME_PATH=%s\n' \
   "$TASK_DEVICE" "$CSA_SHARED_TOOLCHAIN_RELEASE" "$PTOAS_ROOT" "$ASCEND_HOME_PATH"
 trap 'printf "TASK_RUN_END %s\n" "$(date -Iseconds)"' EXIT
-python "$here/launch.py" "$snapshot" "$bank" "$out" "${args[@]}" "${startup[@]}" "${probe[@]}" "${tokens[@]}" "${measurement[@]}"
+python "$here/launch.py" "$snapshot" "$bank" "$out" "${args[@]}" "${startup[@]}" "${probe[@]}" "${tokens[@]}" "${measurement[@]}" "${performance[@]}"
