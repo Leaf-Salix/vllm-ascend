@@ -35,6 +35,9 @@ parser.add_argument(
         "qa240-0",
         "qa240-1",
         "qa240-2",
+        "qa192-0",
+        "qa192-1",
+        "qa192-2",
         "topktie-0",
         "topktie-1",
         "topktie-2",
@@ -70,6 +73,10 @@ elif args.kind.startswith("topktie-"):
     from topktie_kernels import topktie_arm
 
     root, bindings, expected = topktie_arm, {"VISIBLE": 2049, "MODE": int(args.kind[-1])}, 4
+elif args.kind.startswith("qa192-"):
+    from qa192_kernels import qa192_arm
+
+    root, bindings, expected = qa192_arm, {"MODE": int(args.kind[-1])}, 3
 elif args.kind.startswith("qa240-"):
     from qa240_kernels import qa240_arm
 

@@ -273,6 +273,9 @@ try:
         reference_path = os.environ.get("SPMD_PRODUCTION_REFERENCE")
         if reference_path:
             reference = torch.load(reference_path, map_location="cpu", weights_only=True)
+            assert all(row["bit_equal"] for row in reference["production55_debug57_full"].values()), (
+                "production reference lacks the full physical 55/FULL vs 57/FULL control"
+            )
             assert reference.get("layer_index", 4) == options.layer, "cross-task model layers differ"
             record["input_equivalence"] = {
                 name: metric(value, reference["initial"][name]) for name, value in initial.items()
@@ -281,9 +284,47 @@ try:
             assert record["stage_source_sha256"] == reference["source_sha256"], "cross-task sources differ"
             production = reference["state"]
         else:
+            # First qualify the 57-tensor debug root against the actual
+            # 55-tensor production root, before trusting stage observations.
+            restore(f)
+            production_buffers = {
+                name: value for name, value in prepared.buffers.items() if name not in ("topk_indices", "topk_scores")
+            }
+            nal_entry.decode_csa_spmd(**production_buffers, **prepared.policy.constexprs())
+            torch.npu.synchronize()
+            production_external = {
+                "output": output.cpu().clone(),
+                **{name: group["allocation"].cpu().clone() for name, group in f["groups"].items()},
+            }
+            production_graph55 = torch.npu.NPUGraph()
+            with torch.npu.graph(production_graph55):
+                nal_entry.decode_csa_spmd(**production_buffers, **prepared.policy.constexprs())
+            restore(f)
+            production_graph55.replay()
+            torch.npu.synchronize()
+            full55_external = {
+                "output": output.cpu().clone(),
+                **{name: group["allocation"].cpu().clone() for name, group in f["groups"].items()},
+            }
+            record["production55_eager_full"] = {
+                name: metric(value, production_external[name]) for name, value in full55_external.items()
+            }
+            save()
+            assert all(row["bit_equal"] for row in record["production55_eager_full"].values())
             restore(f)
             nal_entry.decode_csa_spmd_debug(**prepared.buffers, **prepared.policy.constexprs())
             torch.npu.synchronize()
+            debug_external = {
+                "output": output.cpu().clone(),
+                **{name: group["allocation"].cpu().clone() for name, group in f["groups"].items()},
+            }
+            record["production55_debug57"] = {
+                name: metric(value, full55_external[name]) for name, value in debug_external.items()
+            }
+            save()
+            assert all(row["bit_equal"] for row in record["production55_debug57"].values()), (
+                "debug root changed production output/cache"
+            )
             eager_production = collect_state(f, output, topk)
             eager_topk_scores = scores.cpu().clone()
             production_graph = torch.npu.NPUGraph()
@@ -297,6 +338,15 @@ try:
             scores.fill_(float("nan"))
             production_graph.replay()
             torch.npu.synchronize()
+            full57_external = {
+                "output": output.cpu().clone(),
+                **{name: group["allocation"].cpu().clone() for name, group in f["groups"].items()},
+            }
+            record["production55_debug57_full"] = {
+                name: metric(value, full55_external[name]) for name, value in full57_external.items()
+            }
+            save()
+            assert all(row["bit_equal"] for row in record["production55_debug57_full"].values())
             production = collect_state(f, output, topk)
             production_topk_scores = scores.cpu().clone()
             record["production_topk_score_replay_eager"] = metric(production_topk_scores, eager_topk_scores)
@@ -314,6 +364,7 @@ try:
                     "state": production,
                     "source_sha256": record["stage_source_sha256"],
                     "topk_scores": production_topk_scores,
+                    "production55_debug57_full": record["production55_debug57_full"],
                 },
                 out / "production.pt",
             )
