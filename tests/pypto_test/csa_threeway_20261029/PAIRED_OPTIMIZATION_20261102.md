@@ -492,3 +492,31 @@ v1/v2准备快照保留，改用v3，显式复制该文件并记录SHA。
 预检新增actual public CSA entry导入及其source路径检查，仍要求未初始化NPU。
 此前仅轮询结果文件缺失，误称任务仍编译；已改为同时核对任务状态和首个错误。
 本次准备失败未占NPU，不影响已取得的单层性能/数值结果。
+
+## 整模型复测准备及当前任务
+
+v3实际public入口无设备预检通过。public预热v2任务
+`task_20261102_180940_34748553715`（T6，188.59秒）和
+`task_20261102_180940_34748939579`（T240，220.13秒）均exit0、未初始化NPU。
+精确使用服务模块名、相同SDK及task window2048；不以诊断namespace缓存代替。
+
+唯一真实8K任务为`task_20261102_181620_35937654977`。
+提交首次SSH中断后，先用`task-submit --find`确认唯一命令无任务，才重试；没有重复作业。
+截至18:40仍pending、未占卡；有效私有候选池为8–15，8/9被其它任务占用。
+本轮用户单独批准14，0–7仍禁用；未来复现需重新确认14许可。
+
+沿用既有`run_eight_card.sh`与v5 Native金标；唯一新增为CSA数学候选包。
+候选cohort=`eightcard-attention-pair-precision-20261102-v3`，arm=`ours`，
+输出标签=`attention-pairs-real8k-20261102-v1`，reference=`last8-native-8k-waves8-v5`；
+参数为`--inspect-token-sequence --measure-waves`、PTO window2048。
+仅一次模型运行，192token首差停止，内层720秒/调度780秒；不重跑Native2。
+验收后还需将本轮性能样本与`last8-native-8k-wave-perf-v1`对齐后再报告速度比。
+当前没有新增整模型token或速度结果，不以单层字节对拍代替整模型验收。
+
+后续128K原bank已确认可复用：原10月14日128K/B24目录的fixed131072，24题，
+但历史Native参考是DP=EP16，不能直接充当新DP=EP8的同配置性能/精度基准。
+本轮尚未运行128K；必须8K通过后再确定八卡容量、入场及基线方案。
+
+整模型准备证据：`evidence/real8k-setup-20261102-evidence.tar.gz`，86,524 byte，
+SHA256 `06f1bb162896a6669e6dce627d02f66a0c3c9d77de2f2164666d99f68b9cd329`。
+包含原失败导入、修复后的public预检/预热、v3全文件SHA及本轮卡号约束；不含模型运行结果。
