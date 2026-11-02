@@ -11,10 +11,15 @@ from pathlib import Path
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("root", type=Path)
+parser.add_argument("--source", type=Path)
+parser.add_argument("--label", default="attention-pair-mgather-20261102-v1")
 args = parser.parse_args()
+assert Path(args.label).name == args.label
 package = "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd"
-source = args.root / "cohorts/eightcard-source-v5/ours/source" / package
-target = args.root / "candidates/attention-pair-mgather-20261102-v1/source" / package
+source_root = args.source or args.root / "cohorts/eightcard-source-v5/ours/source"
+source = source_root / package
+target = args.root / "candidates" / args.label / "source" / package
+baseline_identity = json.loads((source_root.parent / "manifest.json").read_text())["csa_source"]
 assert not target.exists()
 shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 s = (source / "attention_native_stream_stages.py").read_text()
@@ -147,7 +152,7 @@ files = [v, target / "attention_physical_stream_stages.py", target / "native_pai
 (target.parents[4] / "manifest.json").write_text(
     json.dumps(
         dict(
-            csa_source="65bebf7f6b2e4f3f6492fd6463f73106506f3496 + physical plan / Native pair MGather only",
+            csa_source=baseline_identity + " + physical plan / Native pair MGather only",
             changed_files={p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in files},
         ),
         indent=2,

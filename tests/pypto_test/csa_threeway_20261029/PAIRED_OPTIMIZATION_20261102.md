@@ -3,6 +3,15 @@
 执行顺序：先同输入分模块定位差距，再做单因素性能试验；有稳定收益后验精度，
 最后才复测8K/128K整模型。当前未修改生产kernel、未合入新优化。
 
+当前结论：B32的最大新增差距位于TopK→Attention，约326μs。复用物理plan并保留
+Native邻对的MGather候选完整入口初筛快2.79%（30/30更快），对冻结版输出/cache逐bit一致。
+但新增T192 Native覆盖发现冻结版此前未验收的精度缺口，因此暂不推广或合入。
+已在独立候选修正Q-A/WKV；完整CSA前缀、cache及attention heads均已对齐，
+Q-A/WKV/WO-A修正后的T192数值尾部已经对齐Native，MGather候选在同修正基准上
+降低延迟3.15%，最终输出及完整物理cache已通过Native逐bit验收。
+raw TopK有两个等分位置顺序不同，不能声称全部内部边界逐bit一致。
+本轮没有新增整模型token或吞吐结论，原8K实测记录保持原验收范围。
+
 ## 完整CSA单卡配对基线
 
 冻结我方65bebf7f和nalinaly1574，公共Native框架41ba392f及共享SDK不变。
@@ -295,3 +304,191 @@ SHA256 `7342150cbc921b947ddec73c1be9c26b0b7e792a6bc73428cdd314c79d719674`。
 逆AST核验其余原实现不变。common和测试harness随副本冻结，避免SOURCE_ROOT误绑定算子。
 候选没有叠加Attention优化；先完成生产55/57/85预热及同组从HC开始的FULL阶段验收，
 再考虑修正后基线与Attention候选的组合。当前正式算子仍为冻结65，未合入任何新性能改动。
+
+独立Q-A候选55/57/85 CPU预热全部成功，分别212.76/214.35/204.92秒，未初始化NPU。
+候选生产控制`task_20261102_140551_129288929961`完成，40.48秒，55 eager/FULL、
+55 FULL对57 FULL的output和五allocation均逐字节一致；57 FULL/eager及guards通过。
+实际common与测试harness来源另封存SHA收据，执行候选目录下的probe，不通过改Native路径选包。
+
+候选阶段`task_20261102_140809_134549520173`完成，40.29秒，观测门禁与自控通过；
+HC/Input Norm/Q-A BF16/Q-R量化值及scale全部对Native逐bit一致，确认Q-A修正进入完整链路。
+首差推进至WKV投影BF16：35元素不同，max_abs=0.00048828125。此处停止，不继续检查后续模块。
+下一步只复用该次保存Norm输入、WKV accumulator与CV金值，隔离WKV的原N128/K512、
+N32/K256自然顺序和已存在T240列累加顺序；原臂需FP32/BF16均重现，候选不改正式算子。
+
+WKV微型`task_20261102_141504_151969631448`20.33秒后失败退出，设备释放。
+原N128/K512精确复现整层FP32和BF16边界，Native规范linear复现实际CV金值；
+N32/K256自然顺序仍35差，已有T240列顺序仍32差，max_abs均0.00048828125。
+三臂FULL/eager、只读和guards均通过，但不能认为任何候选解决WKV精度；不接入该假设。
+按32列统计，原臂差异数为[0,0,3,3,2,5,1,2,2,4,2,1,2,3,2,3]。
+下一步只局部观察实际Native WKV kernel/tiling信息，不把带profiler结果当普通性能。
+
+局部Native采集`task_20261102_142219_166635614331`和独立进程tiling日志
+`task_20261102_142940_183590122015`均已退出，前/中/后金值及只读检查全部逐bit一致。
+实际路径`aclnnMatmulWeightNz_MatMulCommon_MatMulV2`，BF16 ND×FRACTAL_NZ，
+确定性level1、high_precision、24核；不是从其它版本MatMul源码推测。
+日志最终选择best_idx7、TilingKey230097、152B：L0 M64/N64/K128，
+L1 M64/N64/K256，核网格M3×N8；三次launch有效tiling字段一致，split_k_flag=0。
+这些字段确认本次N64布局，**没有直接证明K起点或顺逆**。
+因此另建MODE3假设：每N64两N32共用K256顺序，起点0/15/4/3/8/7/12/11交替正反，
+原失败MODE2保持不变。先原输入原臂FP32/BF16复现，再验MODE3；若通过再测4个独立
+CPU随机BF16输入（seed2048/4096/8191/65536，幅度0.05/0.5/2/16），首差即停，
+每组保存实际输入及Native/eager/FULL数据。仅为T192、layer4权重的有限资格。
+
+N64顺序假设微型`task_20261102_144407_218298116308`通过，22.45秒：
+原路径FP32/BF16重现35差；MODE3原输入及4组独立输入的BF16输出全部对Native逐bit一致，
+各组FULL/eager、只读及guard检查通过。不能推广为其它T或其它工具链通用结论。
+独立Q-A+WKV组合只新增T192路径，其余分派逆AST保持，原基准和Attention候选均保留。
+组合55/57/85 CPU编译通过，用时211.81/208.23/208.12秒，均未初始化NPU，
+随后再执行组合完整CSA验收，不直接依据微型结果合入。
+
+组合55/57 FULL控制`task_20261102_145534_247258523167`通过，52.26秒。
+完整阶段`task_20261102_145942_26054679187`60.17秒后在raw TopK首差停止：
+Q-A/WKV/QK Norm/RoPE、主/Indexer压缩器、全部Native cache、Indexer query、量化及权重
+共31个已检查边界全部逐bit一致。TopK只有row183/rank60、61两个位置交换820/1967，
+分数均为完全相同的FP32值2.7790469175670296e-05。
+当前G2按1152半叶排序，已有G6路径按Native2048分段；不能直接等同为选错Key。
+
+CPU传播分析：该对Key的物理行为63535/64692，两种raw排列经Native邻对规则后
+有效顺序相同。正式输出却在另外8行（7/42/69/100/103/137/139/164）有639个BF16元素差，
+不在row183。O-proj A中间结果有525个BF16差异，分布在多行。
+因此不把最终误差直接归因于此raw TopK排列，也不先改变G2/G6策略。
+只补存已经计算的attention heads，保留原raw TopK首差断言，再用CPU区分heads与O-proj A。
+
+WKV修正/Native tiling/候选来源证据包：
+`evidence/t192-qa-wkv-diagnostics-20261102-evidence.tar.gz`，89,575 byte，
+SHA256 `226e6af990b070f578c89253eb1045a638cbeb607df8f02c0a63f83add3d1ab6`。
+
+补存heads任务`task_20261102_152333_323143631460`63.26秒退出，仍保留raw TopK首差：
+全192×64×512个BF16 attention heads对实际Native heads逐bit一致。
+因此本组正式误差已收敛到O-proj A，而不是attention或该对TopK排列。
+只复用保存的、已对齐Native的真实heads及正式WO-A权重，隔离T192的N子块/K起点；
+原臂必须先重现525个BF16差异及完整FP32 accumulator，原T240测试保持不变。
+
+WO-A首次CPU预热因上传未确认完成而读到旧CLI：
+`task_20261102_153140_34909278515`、`...349097432047`、`...3491056216`均exit2，
+报woa192模式不在choices。没有占卡、没有数值结果。保留v1日志，完成有界rsync并
+验证远端三文件及新choices后，以v2新标签重试；不将准备失败计为算子失败。
+
+v2三个CPU编译均通过，各约14秒，未初始化NPU。WO-A微型
+`task_20261102_154902_402508732366`32.82秒完成，**JSON pass=false**（任务exit0不等于精度通过）：
+相同实际heads逐bit一致，Native transpose-batchmatmul先复现已存Native金值；
+原臂完整FP32重现，BF16对Native仍525差；仅N128仍525差，借T240核归属/起点仍517差。
+三臂各3次FULL/eager、只读和guard通过，但没有候选解决精度，不接入。
+只继续观察当前Native BMM实际tiling，不再直接推广T240映射。
+
+Native WO-A局部采集`task_20261102_155743_3287513423`完成，物理9卡，
+Native前/中/后输出与实际保存金值逐bit一致，输入及权重只读。
+实际为`aclnnTransposeBatchMatMulWeightNz`，TilingKey32，最终数据376B，24核。
+日志明确beforeTune baseM/N/K=64/128/128，afterTune=192/128/80；
+不得把beforeTune打印的stepKa8/stepKb4无条件当作最终迭代参数。
+下一步先按本实验固定CANN的TCubeTiling定义解码最终数据，再构造单因素候选。
+带profiler和debug日志的时间不作为正常性能结果。
+
+### WO-A：按实际Native tiling隔离K分块和累加起点
+
+固定CANN的TCubeTiling字段解码最终376B数据：baseM/N/K=192/128/80，
+stepKa=stepKb=4；因此L1窗口为320，4096列共13窗，末窗为256。
+Native前/中/后输出与保存金值相同；采集时间不列入普通性能。
+公开CANN源码仅用于解释设计，不代表其commit就是本机二进制来源：
+
+- [TransposeBatchMatMul NZ选择K_SHIFT](https://github.com/XtangEver/cann-ops-nn/blob/01a4acd66abcbc1661b92df37e2d0dbda1dbc117/matmul/transpose_batch_mat_mul/op_kernel/transpose_batch_mat_mul.cpp)。
+- [KLoop按物理核编号轮转窗口](https://github.com/hicann/asc-devkit/blob/f16994e64df8936ea1e6cbcc47c7944f62fc2264/impl/adv_api/detail/matmul/scheduler/iterator/k_loop/k_loop_mdl_reorder.h)。
+
+64个Native逻辑块按24核分配，前48块owner=logical//3，后16块owner=16+(logical-48)//2。
+候选保留原PTO父任务M128/N256归属，只以Native逻辑块计算K起点，不使用PTO worker号代替。
+K80自然顺序是独立控制；轮转候选first_panel=(owner%13)*4，然后按52个80列面板环转。
+末面板有效K16；不对4096直接取模，以免破坏最后256列窗口。
+MODE0/3/4无设备编译通过，约14/14/12秒，未创建Worker或初始化NPU。
+独立源码审查未见阻断，硬件资格仍以随后FULL对拍为准。
+
+heads、旧WO-A三臂失败、Native实际tiling及源码解释的证据包：
+`evidence/t192-heads-woa-diagnostics-20261102-evidence.tar.gz`，73,292 byte，
+SHA256 `fbc4e88f0b123d907defe09ed76be51957fd03e877ccfd23c2d0d8e91da6a184`。
+
+WO-A K80单因素硬件对拍`task_20261102_172339_26563467010`通过：
+原臂完整FP32重现、BF16仍525差；K80自然仍525差；K80+Native owner窗口轮转为0差。
+三次FULL回放与eager逐bit一致，guard及只读检查通过，任务已退出。
+补验`task_20261102_172652_271567314957`25.62秒通过：
+同一实际输入及四组独立BF16随机heads（seed2048/4096/8191/65536，
+幅度0.05/0.5/2/16）全部Native BF16零差、FULL/eager零差、只读与guard通过。
+这说明本组WO-A的实际差异来自K窗口累加顺序，而不是仅改变baseK即可消除。
+仍仅覆盖T192、layer4真实权重，不代表整模型或所有T。
+
+生成器`qa192_precision_candidate.py --with-wkv-group64 --with-woa-k80`创建新副本；
+原65bebf7f、Q-A/WKV副本和原Attention候选均保留。
+完整入口按group_begin/end过滤原64父任务，不重复计算其它组；
+仅tokens192、M128/N256分派走新helper，逆AST核验其它分派未变。
+
+组合55/57/85无设备编译分别215.26/222.14/210.59秒通过。
+生产FULL控制`task_20261102_173235_282827730967`39.66秒完成并退出；
+55→57 FULL输出和五组完整allocation逐bit相同。
+Native阶段任务`task_20261102_173417_286302828264`已提交；
+修正基准+MGather的无设备预热`task_20261102_173235_282803521269`已提交。
+随后SSH连续三次被服务端主动关闭，尚未读取两项最终结果；没有重提或假定通过。
+任务均有720秒内层、780秒外层上限；本轮仍只允许物理8–13、15。
+
+下一次性能命令必须同时设置：
+`--baseline <qa-wkv-woa192-precision.../source>`、
+`--candidate <attention-pair-qa-wkv-woa192.../source>`。
+其`candidate_precision_vs_frozen`旧字段在此表示对所选修正baseline，而非原65；
+结果`sources`记录实际身份。只有两边共享修正后，才可将收益归于MGather。
+目前尚无这次修正基准上的新收益比例、Native整层验收或整模型token结论。
+
+SSH正常重试恢复，未改变登录方式。原阶段任务60.61秒完成并退出：
+原raw TopK首差保持（2个等分位置交换），已计算的attention heads、WO-A BF16和最终输出
+三项均与Native逐bit一致。该诊断的`pass=false`仍保留；不能声称所有内部边界都逐bit一致。
+31项前缀/cache/query等边界保持通过；Native外部完整allocation验收还需独立性能候选门禁。
+修正基准及搬运候选的配对命名空间CPU预热均通过，未占NPU。
+只针对这两份共同修正的源码执行新的同卡配对，不沿用旧2.79%作为本组收益。
+
+## 修正基准上的单因素验收结果
+
+`task_20261102_174412_305704125153`正常exit0，设备已释放。
+仍为真实layer4权重、共用合成输入/history、8K/B32/S6、T192；单卡完整HC-pre至HC-post，
+没有整模型token统计。相同数值修正共同放在A/B两边，只改变compressed KV的物理plan邻对MGather。
+5次预热后30次交替采样；恢复cache及同步不计入Event，普通性能未加时钟插桩。
+
+| 指标 | 修正基准 | 修正基准+MGather |
+|---|---:|---:|
+| FULL入口中位数（μs） | 1753.70 | 1698.46 |
+| FULL入口均值（μs） | 1753.15 | 1697.75 |
+| 中位耗时降低 | — | 3.15% |
+| 配对更快样本 | — | 30/30 |
+| 相同完整输出/cache | 参考 | 逐bit一致 |
+| 候选对Native最终输出+五组完整物理cache | — | 全部逐bit一致 |
+
+Native自身eager/FULL也逐bit一致；只读与合法写入域检查全部通过，outside_slot_bytes均为0。
+候选外部Native门禁不观察raw TopK，不能替代上面保留的raw TopK失败记录。
+修正基准比原65更慢，包含新增的Native数值顺序修复；不可把1753.70与旧1638.27相减
+归因到MGather，也不可把nalinaly旧测值当成本组同卡新基线。
+当前尚未新增8K/128K整模型token/性能结论；临时交付基准不改。
+
+T240回归`task_20261102_175514_32341852953`exit0：8K/B40/S6单层FULL，
+相同5预热+30交替样本，中位1952.80→1903.26μs（降低2.54%）、均值1950.86→1901.77μs，
+30/30配对更快；候选对共同修正基准及Native完整output+五组allocation均逐bit一致。
+T192的前/后15对分窗中位收益分别2.90%/3.22%，未见只在一个窗口占优。
+
+用户另行明确批准本轮8–15含14进行八卡真实8K复测，仍禁止前八卡；该许可不是默认规则。
+`prepare_candidate_cohort.py`仅复制v5原manifest内文件，逐项核对旧SHA，再替换唯一TND包。
+独立审查指出应核对candidate manifest SHA，已补：复制前检查全部changed_files，
+复制后校验整个TND包字节清单；非math文件保持原SHA，原快照/金标均不写。
+准备v1只做无设备预检，实际整模型使用补齐证据绑定后的v2新快照。
+沿用原DP=EP8、每rank40题分5波×8、FULL6/240、4000blocks、192token和旧Native金标。
+8K成功前不运行128K；本轮尚未提交或获得新的整模型结果。
+
+已完成T192/WKV/WO-A修正、组合FULL及两档单因素MGather的证据归档：
+`evidence/t192-fixes-and-mgather-20261102-evidence.tar.gz`，538,542 byte，176个有限文件，
+SHA256 `8e7132d13a74d7f503d383c5e0cc639e440620894f84c48e3789935f32787aef`。
+包含原始30样本、完整Native外部cache门禁、失败/控制结果、脚本及隔离数学包；不含大张量。
+真实模型测试将复用原v5金标；尚未取得结果前，本报告单层结果不能当作token验收。
+
+### public预热准备失败及修复
+
+public T6/T240 v1预热分别`task_20261102_180058_33313906829`、`...333150611369`
+在导入阶段exit1：新副本缺少旧运行生成、但未列入原manifest的`vllm_ascend/_build_info.py`。
+旧v5的ours/Native该文件字节相同，仅声明设备类型A3；没有重装环境或探测其它设备。
+v1/v2准备快照保留，改用v3，显式复制该文件并记录SHA。
+预检新增actual public CSA entry导入及其source路径检查，仍要求未初始化NPU。
+此前仅轮询结果文件缺失，误称任务仍编译；已改为同时核对任务状态和首个错误。
+本次准备失败未占NPU，不影响已取得的单层性能/数值结果。

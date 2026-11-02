@@ -36,6 +36,8 @@ def main():
         assert Path(os.environ[variable]).resolve() in Path(modules[name]["file"]).resolve().parents
     assert args.source.resolve() in Path(modules["vllm_ascend"]["file"]).resolve().parents
     assert modules["vllm"]["version"] == "0.25.1"
+    entry = importlib.import_module("vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd_tnd.entry")
+    assert args.source.resolve() in Path(entry.__file__).resolve().parents
     assert os.environ["PTOAS_ROOT"] == os.environ["CSA_SHARED_PTOAS_ROOT"]
     assert os.environ["PYTHONNOUSERSITE"] == "1" and os.environ["HCCL_DETERMINISTIC"] == "true"
     if args.check_capacity_guard:
@@ -51,6 +53,7 @@ def main():
         "npu_initialized": False,
         "python": sys.version,
         "modules": modules,
+        "public_csa_entry": entry.__file__,
         "bank": str(args.bank),
         "cases": len(plan["cases"]),
         "shards": len(shards),

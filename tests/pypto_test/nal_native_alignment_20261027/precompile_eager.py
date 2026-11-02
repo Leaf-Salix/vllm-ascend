@@ -38,12 +38,21 @@ parser.add_argument(
         "qa192-0",
         "qa192-1",
         "qa192-2",
+        "wkv192-0",
+        "wkv192-1",
+        "wkv192-2",
+        "wkv192-3",
         "topktie-0",
         "topktie-1",
         "topktie-2",
         "woa240-0",
         "woa240-1",
         "woa240-2",
+        "woa192-0",
+        "woa192-1",
+        "woa192-2",
+        "woa192-3",
+        "woa192-4",
         "weight240-0",
         "weight240-1",
         "weight240-2",
@@ -65,6 +74,10 @@ if args.kind.startswith("weight240-"):
     from weight240_kernels import weight240_arm
 
     root, bindings, expected = weight240_arm, {"MODE": int(args.kind[-1])}, 5
+elif args.kind.startswith("woa192-"):
+    from woa192_kernels import woa192_arm
+
+    root, bindings, expected = woa192_arm, {"MODE": int(args.kind[-1])}, 3
 elif args.kind.startswith("woa240-"):
     from woa240_kernels import woa240_arm
 
@@ -73,6 +86,10 @@ elif args.kind.startswith("topktie-"):
     from topktie_kernels import topktie_arm
 
     root, bindings, expected = topktie_arm, {"VISIBLE": 2049, "MODE": int(args.kind[-1])}, 4
+elif args.kind.startswith("wkv192-"):
+    from wkv192_kernels import wkv192_arm
+
+    root, bindings, expected = wkv192_arm, {"MODE": int(args.kind[-1])}, 3
 elif args.kind.startswith("qa192-"):
     from qa192_kernels import qa192_arm
 

@@ -787,9 +787,19 @@ try:
         check("weights_projection_input", observed["normed"], weight_stages["input"])
         check("weights_prepare_repeat", weight_stages["consumer"], qli_inputs["weights"])
         check("qli_weights_fp16", observed["head_weights"][:tokens].half(), qli_inputs["weights"])
-        check("qli_topk", replay["idx_topk"].reshape_as(native_states[1]["idx_topk"]), native_states[1]["idx_topk"])
         packed = observed["packed"].reshape(8, p128, 8, 512)[:, :tokens]
         heads = packed.permute(1, 0, 2, 3).reshape(tokens, 64, 512)
+        # Keep the already-computed heads when a raw TopK tie trips the first-
+        # difference gate; this does not run or skip any later Native check.
+        payload["observed_attention_heads"] = heads.cpu().clone()
+        # Save tail metrics already available from the unchanged Native call.
+        # Keep the original raw-TopK assertion and first-difference behavior.
+        record["numeric_tail_before_topk"] = {
+            "attention_heads": metric(heads.reshape_as(output_stages["heads"]), output_stages["heads"]),
+            "wo_a_bf16": metric(observed["o_r"][:tokens].bfloat16(), output_stages["wo_a"].reshape(tokens, 8192)),
+            "output": metric(replay["x_out"].reshape_as(native_states[1]["x_out"]), native_states[1]["x_out"]),
+        }
+        check("qli_topk", replay["idx_topk"].reshape_as(native_states[1]["idx_topk"]), native_states[1]["idx_topk"])
         check("attention_heads_after_inverse_rope", heads.reshape_as(output_stages["heads"]), output_stages["heads"])
         check("wo_a_bf16", observed["o_r"][:tokens].bfloat16(), output_stages["wo_a"].reshape(tokens, 8192))
         check("native_full_output", replay["x_out"].reshape_as(native_states[1]["x_out"]), native_states[1]["x_out"])

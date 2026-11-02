@@ -43,6 +43,7 @@ def main():
     parser.add_argument("--cpu", choices=("ours", "nalinaly", "candidate"))
     parser.add_argument("--clock", action="store_true")
     parser.add_argument("--candidate", type=Path)
+    parser.add_argument("--baseline", type=Path)
     parser.add_argument("--native-check", action="store_true")
     parser.add_argument("--batch", type=int, choices=range(1, 41), default=8)
     parser.add_argument("--clock-cpu-label", default="20261102-v2")
@@ -53,6 +54,9 @@ def main():
         "ours": args.root / "cohorts/eightcard-source-v5/ours/source",
         "nalinaly": args.root / "cohorts/eightcard-nal-pre-aclnn-1574-v1/nalinaly/source",
     }
+    if args.baseline:
+        assert args.candidate and not args.clock
+        sources["ours"] = args.baseline
     if args.candidate:
         assert not args.clock
         sources = {"ours": sources["ours"], "candidate": args.candidate}
