@@ -121,6 +121,52 @@ def load_tools(root):
     return module
 
 
+def prepare_hc_detail(target, arm):
+    """仅诊断G6输出组流水：复用无消费者的40/41槽，按core区分HC内部取时。"""
+    assert arm in ("ours", "nalinaly")
+    edits = {}
+    cube = target / "cube_schedule.py"
+    line = (
+        "    partials = hc_linear(x_fp32, hc_packed_input, hc_packed_weight, partials, worker)\n"
+        if arm == "ours"
+        else "    partials = hc_project_range(x_fp32, hc_fn, partials, worker, GROUPS)\n"
+    )
+    edits[cube] = [
+        (
+            line,
+            "    signal = publish_phase(signal, PHASE_OA, worker, CORES, generation)\n"
+            + line
+            + "    signal = publish_phase(signal, PHASE_O_QUANT, worker, CORES, generation)\n",
+        )
+    ]
+    vector = target / "vector_schedule.py"
+    line = "    x_fp32, inv = hc_widen_rms_range(x, x_fp32, inv, widen_tail, worker, VECTORS)\n"
+    edits[vector] = [(line, line + "    signal = publish_phase(signal, PHASE_OA, core, CORES, generation)\n")]
+    if arm == "ours":
+        line = "    hc_packed_input = hc_pack_input_from_bf16(x, hc_packed_input, worker)\n"
+        edits[vector].append(
+            (line, line + "    signal = publish_phase(signal, PHASE_O_QUANT, core, CORES, generation)\n")
+        )
+    else:
+        before, after = edits[vector][0]
+        edits[vector][0] = (
+            before,
+            after + "    signal = publish_phase(signal, PHASE_O_QUANT, core, CORES, generation)\n",
+        )
+    for path, changes in edits.items():
+        original = path.read_text()
+        content = original
+        for before, after in changes:
+            assert content.count(before) == 1
+            content = content.replace(before, after)
+        reverted = content
+        for before, after in reversed(changes):
+            assert reverted.count(after) == 1
+            reverted = reverted.replace(after, before)
+        assert reverted == original, "non-clock HC source changed"
+        path.write_text(content)
+
+
 @contextlib.contextmanager
 def instrument(root, output, package=None):
     from pypto.backend import pto_backend

@@ -42,20 +42,27 @@ def main():
     parser.add_argument("output", type=Path)
     parser.add_argument("--cpu", choices=("ours", "nalinaly", "candidate"))
     parser.add_argument("--clock", action="store_true")
+    parser.add_argument("--hc-detail", action="store_true")
     parser.add_argument("--candidate", type=Path)
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--native-check", action="store_true")
     parser.add_argument("--batch", type=int, choices=range(1, 41), default=8)
+    parser.add_argument("--query-lengths", help="逗号分隔的真实1..6行请求，不按S6补齐")
+    parser.add_argument("--qualification-reference", type=Path, help="已通过性能和冻结字节门禁的结果JSON")
     parser.add_argument("--token-capacity", type=int)
     parser.add_argument("--request-capacity", type=int)
     parser.add_argument("--clock-cpu-label", default="20261102-v2")
     args = parser.parse_args()
-    tokens = args.batch * 6 if args.token_capacity is None else args.token_capacity
+    assert not args.hc_detail or args.clock
+    queries = [6] * args.batch if args.query_lengths is None else [int(q) for q in args.query_lengths.split(",")]
+    assert len(queries) == args.batch and all(1 <= q <= 6 for q in queries)
+    actual_tokens = sum(queries)
+    tokens = actual_tokens if args.token_capacity is None else args.token_capacity
     requests = args.batch if args.request_capacity is None else args.request_capacity
-    assert args.batch * 6 <= tokens <= 240 and args.batch <= requests <= 40
-    assert tokens - args.batch * 6 <= (requests - args.batch) * 6
+    assert actual_tokens <= tokens <= 240 and args.batch <= requests <= 40
+    assert tokens - actual_tokens <= (requests - args.batch) * 6
     if args.native_check:
-        assert tokens == args.batch * 6 and requests == args.batch, (
+        assert tokens == actual_tokens and requests == args.batch, (
             "padded Native oracle requires full-capacity capture then in-place metadata update; use probe_padding.py"
         )
     args.output.mkdir(exist_ok=False)
@@ -72,19 +79,46 @@ def main():
         sources = {"ours": sources["ours"], "candidate": args.candidate}
     modules = {}
     source_contracts = {}
-    report = {"scope": f"single real layer4, synthetic common hidden/history, B{args.batch}/S6/8K", "sources": {}}
+    report = {"scope": f"single real layer4, synthetic common hidden/history, B{args.batch}/8K", "sources": {}}
     report["runner_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     report["geometry"] = dict(
-        actual_requests=args.batch, actual_tokens=args.batch * 6, tokens=tokens, requests=requests
+        actual_requests=args.batch,
+        actual_tokens=actual_tokens,
+        tokens=tokens,
+        requests=requests,
+        query_lengths=queries,
     )
     for arm, source in sources.items():
         source_contracts[arm] = json.loads((source.parent / "manifest.json").read_text())
         if not args.cpu and source_contracts[arm].get("hardware_blocked_reason"):
             raise RuntimeError(source_contracts[arm]["hardware_blocked_reason"])
         report["sources"][arm] = source_contracts[arm]["csa_source"]
+        if arm == "candidate":
+            changed = source_contracts[arm].get("changed_files")
+            assert isinstance(changed, dict) and changed, "candidate must identify its changed sources"
+            for name, expected in changed.items():
+                assert hashlib.sha256((source / package / name).read_bytes()).hexdigest() == expected
+            report["candidate_changed_files"] = changed
         name = mount_package(source / package, "vllm_ascend.ops.pypto._paired_" + arm)
         modules[arm] = {
             n: importlib.import_module(name + "." + n) for n in ("entry", "policy", "binding", "native_adapter")
+        }
+    qualification = None
+    if args.qualification_reference:
+        assert args.candidate and not args.cpu and not args.clock
+        qualification = json.loads(args.qualification_reference.read_text())
+        gain = qualification["candidate_gain"]
+        assert gain["fraction"] >= 0.01 and gain["faster_pairs"] >= 24 and gain["pairs"] == 30
+        assert qualification["candidate_precision_vs_frozen"] is True
+        assert qualification["sources"] == report["sources"], "precision reference belongs to another candidate"
+        assert qualification["candidate_changed_files"] == report["candidate_changed_files"], (
+            "precision reference did not test these candidate files"
+        )
+        report["qualification_reference"] = {
+            "path": str(args.qualification_reference),
+            "sha256": hashlib.sha256(args.qualification_reference.read_bytes()).hexdigest(),
+            "geometry": qualification["geometry"],
+            "candidate_changed_files": report["candidate_changed_files"],
         }
     if args.cpu:
         arm = args.cpu
@@ -137,9 +171,9 @@ def main():
         with native_session(config, 0), torch.inference_mode():
             layer, details = make_layer(config, Path(checkpoint), torch.device("npu:0"), 4)
             report["weights"] = details
-            if tokens == args.batch * 6 and requests == args.batch:
+            if tokens == actual_tokens and requests == args.batch:
                 fixture = make_ragged_fixture(
-                    config, layer.self_attn, args.batch, 8192, 1024, torch.device("npu:0"), [6] * args.batch
+                    config, layer.self_attn, args.batch, 8192, 1024, torch.device("npu:0"), queries
                 )
             else:
                 fixture = make_fixture(
@@ -149,7 +183,7 @@ def main():
                     8192,
                     1024,
                     torch.device("npu:0"),
-                    query_lengths=[6] * args.batch,
+                    query_lengths=queries,
                     token_capacity=tokens,
                     request_capacity=requests,
                 )
@@ -189,7 +223,7 @@ def main():
 
             def snapshot(output):
                 return {
-                    "output": output[: args.batch * 6].cpu().clone(),
+                    "output": output[:actual_tokens].cpu().clone(),
                     **{n: g["allocation"].cpu().clone() for n, g in fixture["groups"].items()},
                 }
 
@@ -274,7 +308,8 @@ def main():
                 paired = [a < b for a, b in zip(samples["candidate"], samples["ours"], strict=True)]
                 gain = 1 - statistics.median(samples["candidate"]) / statistics.median(samples["ours"])
                 report["candidate_gain"] = dict(fraction=gain, faster_pairs=sum(paired), pairs=len(paired))
-                if gain >= 0.01 and sum(paired) >= 24:
+                report["performance_threshold_passed_current_case"] = gain >= 0.01 and sum(paired) >= 24
+                if report["performance_threshold_passed_current_case"] or qualification is not None:
                     report["candidate_precision_vs_frozen"] = all(
                         torch.equal(
                             v.contiguous().view(torch.uint8), controls["ours"][k].contiguous().view(torch.uint8)
@@ -317,10 +352,18 @@ def main():
                 report["phase_clock"] = {}
                 for arm, (entry, native, weights) in owners.items():
                     name = mount_package(
-                        args.root / "candidates/phase-clock-20261102-v2" / arm,
+                        args.root
+                        / (
+                            "candidates/hc-detail-clock-20261102-v1"
+                            if args.hc_detail
+                            else "candidates/phase-clock-20261102-v2"
+                        )
+                        / arm,
                         "vllm_ascend.ops.pypto._phase_" + arm,
                     )
                     module = importlib.import_module(name + ".entry")
+                    if args.hc_detail:
+                        assert entry.policy.constexprs()["OUTPUT_GROUP_PIPELINE"], "40/41 slots must have no consumer"
                     signal = torch.zeros(
                         module.PHASE_COUNT * module.CORES * module.SIGNAL_SLOT_WORDS,
                         dtype=torch.int32,
@@ -365,6 +408,8 @@ def main():
                     ), "clock FULL changed output/cache"
                     abi = importlib.import_module(name + ".runtime_abi")
                     phases = {v: k for k, v in vars(abi).items() if k.startswith("PHASE_") and isinstance(v, int)}
+                    if args.hc_detail:
+                        phases[40], phases[41] = "HC_DETAIL_1", "HC_DETAIL_2"
                     for prefix in ("PHASE_OA_GROUP_BASE", "PHASE_O_QUANT_GROUP_BASE"):
                         for group in range(8):
                             phases[getattr(abi, prefix) + group] = f"{prefix}_{group}"
