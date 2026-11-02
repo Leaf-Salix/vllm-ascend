@@ -31,7 +31,7 @@ def main():
     import torch
     import torch_npu
     from dsv4_csa_native_case import native_session
-    from dsv4_csa_single_layer import guard_checks, make_layer, restore
+    from dsv4_csa_single_layer import guard_checks, make_fixture, make_layer, restore
     from nal_native_alignment_20261027.ragged_fixture import make_ragged_fixture
     from pypto.runtime.kernel.abi import KernelConfig
     from vllm.engine.arg_utils import EngineArgs
@@ -46,8 +46,18 @@ def main():
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--native-check", action="store_true")
     parser.add_argument("--batch", type=int, choices=range(1, 41), default=8)
+    parser.add_argument("--token-capacity", type=int)
+    parser.add_argument("--request-capacity", type=int)
     parser.add_argument("--clock-cpu-label", default="20261102-v2")
     args = parser.parse_args()
+    tokens = args.batch * 6 if args.token_capacity is None else args.token_capacity
+    requests = args.batch if args.request_capacity is None else args.request_capacity
+    assert args.batch * 6 <= tokens <= 240 and args.batch <= requests <= 40
+    assert tokens - args.batch * 6 <= (requests - args.batch) * 6
+    if args.native_check:
+        assert tokens == args.batch * 6 and requests == args.batch, (
+            "padded Native oracle requires full-capacity capture then in-place metadata update; use probe_padding.py"
+        )
     args.output.mkdir(exist_ok=False)
     package = "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd_tnd"
     sources = {
@@ -61,18 +71,27 @@ def main():
         assert not args.clock
         sources = {"ours": sources["ours"], "candidate": args.candidate}
     modules = {}
+    source_contracts = {}
     report = {"scope": f"single real layer4, synthetic common hidden/history, B{args.batch}/S6/8K", "sources": {}}
     report["runner_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    report["geometry"] = dict(
+        actual_requests=args.batch, actual_tokens=args.batch * 6, tokens=tokens, requests=requests
+    )
     for arm, source in sources.items():
-        report["sources"][arm] = json.loads((source.parent / "manifest.json").read_text())["csa_source"]
+        source_contracts[arm] = json.loads((source.parent / "manifest.json").read_text())
+        if not args.cpu and source_contracts[arm].get("hardware_blocked_reason"):
+            raise RuntimeError(source_contracts[arm]["hardware_blocked_reason"])
+        report["sources"][arm] = source_contracts[arm]["csa_source"]
         name = mount_package(source / package, "vllm_ascend.ops.pypto._paired_" + arm)
         modules[arm] = {
             n: importlib.import_module(name + "." + n) for n in ("entry", "policy", "binding", "native_adapter")
         }
     if args.cpu:
         arm = args.cpu
+        if hasattr(modules[arm]["binding"], "precompile_static_weights"):
+            report["static_weight_artifact"] = modules[arm]["binding"].precompile_static_weights()
         policy = modules[arm]["policy"].select_policy(
-            tokens=args.batch * 6, requests=args.batch, max_query_tokens=6, max_seq_len=8198
+            tokens=tokens, requests=requests, max_query_tokens=6, max_seq_len=8198
         )
         artifact, _, _ = modules[arm]["entry"].decode_csa_spmd._resolve_compiled(
             (),
@@ -118,10 +137,44 @@ def main():
         with native_session(config, 0), torch.inference_mode():
             layer, details = make_layer(config, Path(checkpoint), torch.device("npu:0"), 4)
             report["weights"] = details
-            fixture = make_ragged_fixture(
-                config, layer.self_attn, args.batch, 8192, 1024, torch.device("npu:0"), [6] * args.batch
+            if tokens == args.batch * 6 and requests == args.batch:
+                fixture = make_ragged_fixture(
+                    config, layer.self_attn, args.batch, 8192, 1024, torch.device("npu:0"), [6] * args.batch
+                )
+            else:
+                fixture = make_fixture(
+                    config,
+                    layer.self_attn,
+                    args.batch,
+                    8192,
+                    1024,
+                    torch.device("npu:0"),
+                    query_lengths=[6] * args.batch,
+                    token_capacity=tokens,
+                    request_capacity=requests,
+                )
+            report["query_bounds"] = groups_bounds = (
+                fixture["metadata"][fixture["groups"]["indexer"]["prefix"]].decode.query_start_loc.cpu().tolist()
             )
+            assert groups_bounds[-1] == tokens
             groups = {n: (fixture["metadata"][g["prefix"]], g["views"]) for n, g in fixture["groups"].items()}
+            if any(m.get("same_activity_domains_only") for m in source_contracts.values()):
+                reference = groups["indexer"][0].decode
+                bounds_cpu, lengths_cpu = reference.query_start_loc.cpu(), reference.seq_lens.cpu()
+                report["same_activity_domains"] = {
+                    name: torch.equal(value[0].decode.query_start_loc.cpu(), bounds_cpu)
+                    and torch.equal(value[0].decode.seq_lens.cpu(), lengths_cpu)
+                    for name, value in groups.items()
+                }
+                assert all(report["same_activity_domains"].values()), "candidate activity domain proof failed"
+            for name, values in fixture["compact"].items():
+                for index, value in enumerate(values[:2]):
+                    fixture["readonly"][f"{name}.compact_rope.{index}"] = (value, value.cpu().clone())
+            main = groups["compressed"][0].decode
+            layer_name = fixture["groups"]["compressed"]["prefix"]
+            for name, table in (("cos", main.cos), ("sin", main.sin)):
+                value = table[layer_name]
+                fixture["readonly"][f"rope.{layer_name}.{name}"] = (value, value.cpu().clone())
             from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.native_adapter import prepare_weights
 
             pypto.torch.init(
@@ -136,11 +189,15 @@ def main():
 
             def snapshot(output):
                 return {
-                    "output": output.cpu().clone(),
+                    "output": output[: args.batch * 6].cpu().clone(),
                     **{n: g["allocation"].cpu().clone() for n, g in fixture["groups"].items()},
                 }
 
             def check_readonly():
+                for arm, (entry, _native, _weights) in owners.items():
+                    checker = getattr(modules[arm]["binding"], "check_static_weights", None)
+                    if checker is not None:
+                        checker(entry)
                 for value, initial in fixture["readonly"].values():
                     assert torch.equal(
                         value.cpu().contiguous().view(torch.uint8), initial.contiguous().view(torch.uint8)
@@ -156,6 +213,11 @@ def main():
                 weights = prepare_weights(
                     layer.self_attn, groups["indexer"][0].hadamard, layer, root_function=module["entry"].decode_csa_spmd
                 )
+                # 实验两臂统一使用可追踪版本的冻结权重；无数值转换，准备不计时。
+                with torch.inference_mode(False):
+                    weights["hc_attn_fn"] = weights["hc_attn_fn"].clone()
+                value = weights["hc_attn_fn"]
+                fixture["readonly"][f"{arm}.hc_fn"] = (value, value.cpu().clone())
                 native = module["native_adapter"].bind_native_inputs(
                     weights,
                     fixture["hidden"],
@@ -166,6 +228,9 @@ def main():
                     output=output,
                 )
                 entry = module["binding"].PreparedDynamicCSA(native, max_query_tokens=6, max_seq_len=8198)
+                if "hc_prepacked_weight" in entry.buffers:
+                    value = entry.buffers["hc_prepacked_weight"]
+                    fixture["readonly"][f"{arm}.hc_prepacked_weight"] = (value, value.cpu().clone())
                 owners[arm] = (entry, native, weights)  # 保活所有图外权重/scale/绑定，直到末次replay。
                 restore(fixture)
                 entry()

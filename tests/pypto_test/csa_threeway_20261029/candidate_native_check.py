@@ -11,6 +11,9 @@ def check_native(fixture, layer, config, expected, directory):
     from vllm_ascend.ascend_forward_context import set_ascend_forward_context
     from vllm_ascend.ops.dsv4_csa import _native_attention_half
 
+    assert fixture.get("actual_tokens", fixture["tokens"]) == fixture["tokens"], (
+        "padded Native oracle requires full-capacity capture then in-place update; use probe_padding.py"
+    )
     output = torch.empty_like(fixture["hidden"])
 
     def snapshot():
